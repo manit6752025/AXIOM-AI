@@ -907,7 +907,14 @@ class NativeLlamaRuntime:
                 raise NativeEngineError("Native KV cache tensor dimensions do not match the model configuration.")
             if key.dtype != value.dtype or key.device != value.device:
                 raise NativeEngineError("Native KV cache key/value tensor types or devices are inconsistent.")
+            if key.dtype != self.dtype:
+                raise NativeEngineError("Native KV cache dtype does not match the loaded model weights.")
+            expected_device = self.device if self.memory_mode == "full" else self.torch.device("cpu")
+            if key.device != expected_device:
+                raise NativeEngineError("Native KV cache device does not match the selected memory mode.")
             layer_length = int(key.shape[-2])
+            if layer_length < 1:
+                raise NativeEngineError("Native KV cache sequence length must be positive.")
             if sequence_length is None:
                 sequence_length = layer_length
             elif layer_length != sequence_length:

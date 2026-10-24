@@ -301,7 +301,6 @@ def _tiny_weights(torch, vocab_size=8, hidden=8, intermediate=12):
 
 
 @pytest.mark.parametrize("force_manual", [False, True])
-@pytest.mark.parametrize("force_manual", [False, True])
 def test_native_grouped_query_attention_matches_expanded_reference(force_manual: bool, monkeypatch) -> None:
     torch = pytest.importorskip("torch")
     from axiom.core.native_engine import NativeLlamaRuntime
@@ -385,6 +384,8 @@ def test_native_attention_sdpa_and_manual_paths_match_reference(force_manual: bo
         ("wrong_layer_count", "one key/value pair per transformer layer"),
         ("mismatched_key_value_shape", "key/value tensor shapes are inconsistent"),
         ("wrong_head_count", "tensor dimensions do not match the model configuration"),
+        ("wrong_dtype", "dtype does not match the loaded model weights"),
+        ("empty_sequence", "sequence length must be positive"),
         ("non_tensor", "entries must be tensors"),
     ],
 )
@@ -405,6 +406,10 @@ def test_native_forward_rejects_malformed_kv_cache(cache_kind: str, detail: str)
                 cache[0][0].repeat_interleave(2, dim=1),
                 cache[0][1].repeat_interleave(2, dim=1),
             ),)
+        elif cache_kind == "wrong_dtype":
+            malformed = ((cache[0][0].double(), cache[0][1].double()),)
+        elif cache_kind == "empty_sequence":
+            malformed = ((cache[0][0][..., :0, :], cache[0][1][..., :0, :]),)
         else:
             malformed = ((None, None),)
 
