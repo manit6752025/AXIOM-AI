@@ -89,7 +89,7 @@ def _write_gguf(model_dir: Path, torch, *, quantized=False, embedded_hf_json=Tru
         array = value.detach().cpu().numpy().astype(np.float32)
         if quantized and native_name == "model.layers.0.self_attn.q_proj.weight":
             encoded = quantize(array, GGMLQuantizationType.Q4_0)
-            writer.add_tensor(_name_map()[native_name], encoded, raw_shape=array.shape, raw_dtype=GGMLQuantizationType.Q4_0)
+            writer.add_tensor(_name_map()[native_name], encoded, raw_dtype=GGMLQuantizationType.Q4_0)
         else:
             writer.add_tensor(_name_map()[native_name], array)
     writer.write_header_to_file()
