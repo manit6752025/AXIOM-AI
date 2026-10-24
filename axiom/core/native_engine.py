@@ -88,6 +88,11 @@ class NativeLlamaConfig:
     tie_word_embeddings: bool
     sliding_window: int | None
     qk_norm: bool
+    rope_scaling_type: str = "default"
+    rope_scaling_factor: float = 1.0
+    rope_original_max_position_embeddings: int | None = None
+    rope_low_freq_factor: float | None = None
+    rope_high_freq_factor: float | None = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "NativeLlamaConfig":
@@ -100,25 +105,15 @@ class NativeLlamaConfig:
             "qwen2": "Qwen2ForCausalLM",
             "qwen3": "Qwen3ForCausalLM",
         }[model_type]
-        architectures = value.get("architectures", [])
-        if architectures and (
+        architectures = value.get("architectures")
+        if architectures is not None and (
             not isinstance(architectures, list)
-            or expected_architecture not in architectures
+            or any(not isinstance(name, str) for name in architectures)
+            or (architectures and expected_architecture not in architectures)
         ):
             raise NativeEngineError(
                 "Checkpoint architecture does not match the supported causal-LM class for its model_type."
             )
-        rope = value.get("rope_scaling")
-        if rope:
-            factor = rope.get("factor", 1.0) if isinstance(rope, dict) else None
-            if (
-                not isinstance(rope, dict)
-                or rope.get("rope_type", rope.get("type", "default")) != "default"
-                or isinstance(factor, bool)
-                or not isinstance(factor, (int, float))
-                or factor != 1.0
-            ):
-                raise NativeEngineError("This RoPE scaling configuration is not implemented by AXIOM Native Engine.")
         def config_integer(name: str, default: Any = None) -> int:
             raw = value[name] if name in value else default
             if isinstance(raw, bool) or not isinstance(raw, int):
@@ -162,15 +157,82 @@ class NativeLlamaConfig:
             raise NativeEngineError("Checkpoint vocabulary/context dimensions exceed native safety limits.")
         if not math.isfinite(rms_eps) or rms_eps <= 0 or not math.isfinite(theta) or theta <= 0:
             raise NativeEngineError("Checkpoint normalization/RoPE settings are invalid.")
+        rope = value.get("rope_scaling")
+        rope_type = "default"
+        rope_factor = 1.0
+        rope_original: int | None = None
+        rope_low: float | None = None
+        rope_high: float | None = None
+        if rope is not None:
+            if not isinstance(rope, dict):
+                raise NativeEngineError("This RoPE scaling configuration is not implemented by AXIOM Native Engine.")
+            rope_type = rope.get("rope_type", rope.get("type", "default"))
+            raw_factor = rope.get("factor", 1.0)
+            if (
+                isinstance(raw_factor, bool)
+                or not isinstance(raw_factor, (int, float))
+                or not math.isfinite(float(raw_factor))
+            ):
+                raise NativeEngineError("RoPE scaling factor must be a finite number.")
+            rope_factor = float(raw_factor)
+            if rope_type == "default":
+                if rope_factor != 1.0:
+                    raise NativeEngineError("Default RoPE scaling requires factor 1.")
+            elif rope_type == "linear":
+                if not 1.0 <= rope_factor <= 128.0:
+                    raise NativeEngineError("Linear RoPE scaling factor must be between 1 and 128.")
+            elif rope_type == "llama3":
+                if not 1.0 <= rope_factor <= 128.0:
+                    raise NativeEngineError("Llama 3 RoPE scaling factor must be between 1 and 128.")
+                raw_original = rope.get("original_max_position_embeddings")
+                raw_low, raw_high = rope.get("low_freq_factor"), rope.get("high_freq_factor")
+                if (
+                    isinstance(raw_original, bool)
+                    or not isinstance(raw_original, int)
+                    or not 1 <= raw_original <= max_positions
+                    or isinstance(raw_low, bool)
+                    or not isinstance(raw_low, (int, float))
+                    or not math.isfinite(float(raw_low))
+                    or isinstance(raw_high, bool)
+                    or not isinstance(raw_high, (int, float))
+                    or not math.isfinite(float(raw_high))
+                    or float(raw_low) <= 0
+                    or float(raw_high) <= float(raw_low)
+                ):
+                    raise NativeEngineError("Llama 3 RoPE scaling requires valid original context and low/high frequency factors.")
+                rope_original = raw_original
+                rope_low, rope_high = float(raw_low), float(raw_high)
+            else:
+                raise NativeEngineError("This RoPE scaling configuration is not implemented by AXIOM Native Engine.")
         sliding = value.get("sliding_window") if model_type == "mistral" else None
         if sliding is not None and (isinstance(sliding, bool) or not isinstance(sliding, int) or sliding < 1):
             raise NativeEngineError("Mistral sliding_window must be a positive integer.")
         bos0, eos0 = value.get("bos_token_id"), value.get("eos_token_id")
-        bos = bos0 if isinstance(bos0, int) and not isinstance(bos0, bool) else None
-        eos = (eos0,) if isinstance(eos0, int) and not isinstance(eos0, bool) else tuple(eos0) if isinstance(eos0, list) and all(isinstance(x, int) and not isinstance(x, bool) for x in eos0) else ()
+        if bos0 is not None and (isinstance(bos0, bool) or not isinstance(bos0, int)):
+            raise NativeEngineError("Configured BOS token ID must be an integer or null.")
+        if eos0 is None:
+            eos: tuple[int, ...] = ()
+        elif isinstance(eos0, int) and not isinstance(eos0, bool):
+            eos = (eos0,)
+        elif isinstance(eos0, list) and all(isinstance(x, int) and not isinstance(x, bool) for x in eos0):
+            eos = tuple(eos0)
+        else:
+            raise NativeEngineError("Configured EOS token IDs must be integers or a list of integers.")
+        bos = bos0
         if any(x < 0 or x >= vocab for x in (*eos, *((bos,) if bos is not None else ()))):
             raise NativeEngineError("Configured BOS/EOS token ID is outside vocab_size.")
-        return cls(model_type, hidden, intermediate, layers, heads, kv_heads, vocab, max_positions, rms_eps, theta, bos, eos, value.get("tie_word_embeddings") is True, sliding, model_type == "qwen3")
+        tied = value.get("tie_word_embeddings", False)
+        if not isinstance(tied, bool):
+            raise NativeEngineError("tie_word_embeddings must be a boolean.")
+        return cls(
+            model_type, hidden, intermediate, layers, heads, kv_heads, vocab,
+            max_positions, rms_eps, theta, bos, eos, tied, sliding, model_type == "qwen3",
+            rope_scaling_type=rope_type,
+            rope_scaling_factor=rope_factor,
+            rope_original_max_position_embeddings=rope_original,
+            rope_low_freq_factor=rope_low,
+            rope_high_freq_factor=rope_high,
+        )
 
 def _within_trusted_roots(path: Path, trusted_roots: tuple[Path, ...]) -> bool:
     for root in trusted_roots:
@@ -927,7 +989,28 @@ class NativeLlamaRuntime:
             self.config.rope_theta
             ** (torch.arange(0, dim, 2, device=self.device, dtype=torch.float32) / dim)
         )
-        frequencies = torch.einsum("i,j->ij", positions.to(dtype=torch.float32), inv_freq)
+        scaled_positions = positions.to(dtype=torch.float32)
+        if self.config.rope_scaling_type == "linear":
+            scaled_positions = scaled_positions / self.config.rope_scaling_factor
+        elif self.config.rope_scaling_type == "llama3":
+            # Match Llama 3's wavelength-dependent frequency interpolation:
+            # preserve high frequencies, scale low frequencies, and smooth the
+            # transition between them instead of bluntly stretching all positions.
+            wavelength = (2.0 * math.pi) / inv_freq
+            original = float(self.config.rope_original_max_position_embeddings)
+            low = float(self.config.rope_low_freq_factor)
+            high = float(self.config.rope_high_freq_factor)
+            low_wavelength = original / low
+            high_wavelength = original / high
+            scaled_inv_freq = inv_freq / self.config.rope_scaling_factor
+            smooth = (original / wavelength - low) / (high - low)
+            smooth_inv_freq = (1.0 - smooth) * scaled_inv_freq + smooth * inv_freq
+            inv_freq = torch.where(
+                wavelength < high_wavelength,
+                inv_freq,
+                torch.where(wavelength > low_wavelength, scaled_inv_freq, smooth_inv_freq),
+            )
+        frequencies = torch.einsum("i,j->ij", scaled_positions, inv_freq)
         embedding = torch.cat((frequencies, frequencies), dim=-1)
         cos = embedding.cos().to(dtype=dtype)[None, None, :, :]
         sin = embedding.sin().to(dtype=dtype)[None, None, :, :]

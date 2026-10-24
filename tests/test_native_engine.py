@@ -237,6 +237,79 @@ def test_native_config_accepts_llama_mistral_qwen2_and_qwen3() -> None:
         ({"rope_theta": True}, "missing valid native Llama model dimensions"),
     ],
 )
+def test_native_config_supports_linear_rope_scaling() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    default_config = NativeLlamaConfig.from_mapping(_config())
+    linear_config = NativeLlamaConfig.from_mapping(_config(
+        rope_scaling={"rope_type": "linear", "factor": 2.0}
+    ))
+    assert linear_config.rope_scaling_type == "linear"
+    assert linear_config.rope_scaling_factor == 2.0
+
+    weights = _tiny_weights(torch)
+    default_runtime = NativeLlamaRuntime(default_config, weights, torch, torch.device("cpu"))
+    linear_runtime = NativeLlamaRuntime(linear_config, weights, torch, torch.device("cpu"))
+    values = torch.randn((1, 2, 2, 4), dtype=torch.float32)
+    scaled = linear_runtime._apply_rope(values, torch.tensor([0, 2]))
+    reference = default_runtime._apply_rope(values, torch.tensor([0, 1]))
+    assert torch.allclose(scaled, reference, atol=1e-6, rtol=1e-5)
+
+
+def test_native_config_supports_llama3_rope_scaling_formula() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config(
+        rope_scaling={
+            "rope_type": "llama3",
+            "factor": 8.0,
+            "original_max_position_embeddings": 16,
+            "low_freq_factor": 1.0,
+            "high_freq_factor": 4.0,
+        }
+    ))
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    positions = torch.arange(4)
+    actual_cos, actual_sin = runtime._rope_embeddings(positions, torch.float32)
+
+    dim = config.hidden_size // config.num_attention_heads
+    inv_freq = 1.0 / (
+        config.rope_theta
+        ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim)
+    )
+    wavelength = (2.0 * torch.pi) / inv_freq
+    low_wavelength = 16.0 / 1.0
+    high_wavelength = 16.0 / 4.0
+    scaled_inv = inv_freq / 8.0
+    smooth = (16.0 / wavelength - 1.0) / (4.0 - 1.0)
+    smooth_inv = (1.0 - smooth) * scaled_inv + smooth * inv_freq
+    expected_inv = torch.where(
+        wavelength < high_wavelength,
+        inv_freq,
+        torch.where(wavelength > low_wavelength, scaled_inv, smooth_inv),
+    )
+    frequencies = torch.einsum("i,j->ij", positions.to(torch.float32), expected_inv)
+    embedding = torch.cat((frequencies, frequencies), dim=-1)
+    assert torch.allclose(actual_cos[0, 0], embedding.cos(), atol=1e-6, rtol=1e-5)
+    assert torch.allclose(actual_sin[0, 0], embedding.sin(), atol=1e-6, rtol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "overrides,detail",
+    [
+        ({"bos_token_id": True}, "BOS token ID"),
+        ({"eos_token_id": [2, True]}, "EOS token IDs"),
+        ({"tie_word_embeddings": "true"}, "tie_word_embeddings"),
+        ({"rope_scaling": 0}, "RoPE scaling"),
+    ],
+)
+def test_native_config_rejects_malformed_token_and_rope_metadata(overrides, detail) -> None:
+    with pytest.raises(NativeEngineError, match=detail):
+        NativeLlamaConfig.from_mapping(_config(**overrides))
+
+
 def test_native_config_rejects_unsupported_or_inconsistent_architecture(overrides, detail) -> None:
     with pytest.raises(NativeEngineError, match=detail):
         NativeLlamaConfig.from_mapping(_config(**overrides))
