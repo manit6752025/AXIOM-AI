@@ -925,8 +925,16 @@ class NativeLlamaRuntime:
         cancel_event: threading.Event | None = None,
     ) -> tuple[Any, tuple[Any, ...]]:
         torch, c = self.torch, self.config
+        if not torch.is_tensor(input_ids):
+            raise NativeEngineError("Native model input_ids must be a tensor.")
         if input_ids.ndim != 2 or input_ids.shape[0] != 1:
             raise NativeEngineError("AXIOM Native Engine currently accepts one prompt sequence per request.")
+        if input_ids.shape[1] < 1:
+            raise NativeEngineError("Native model input_ids must contain at least one token.")
+        if input_ids.dtype not in (torch.int32, torch.int64):
+            raise NativeEngineError("Native model input_ids must use an integer token-ID dtype.")
+        if input_ids.device != self.device or input_ids.dtype != torch.long:
+            input_ids = input_ids.to(device=self.device, dtype=torch.long)
         seq_len = input_ids.shape[1]
         stored_past_len = self._cached_sequence_length(past_key_values)
         past_len = stored_past_len if past_sequence_length is None else past_sequence_length
@@ -1015,6 +1023,14 @@ class NativeLlamaRuntime:
         """Yield decoded tokens and stop cooperatively when cancellation is requested."""
         if not prompt_token_ids:
             raise NativeEngineError("Tokenizer returned no IDs for the prompt.")
+        if any(
+            isinstance(token_id, bool)
+            or not isinstance(token_id, int)
+            or token_id < 0
+            or token_id >= self.config.vocab_size
+            for token_id in prompt_token_ids
+        ):
+            raise NativeEngineError("Prompt token IDs must be integers inside the checkpoint vocabulary.")
         if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens <= 2048:
             raise NativeEngineError("Native generation token limit must be between 1 and 2048.")
         if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or not math.isfinite(float(temperature)) or not 0 <= float(temperature) <= 2:
