@@ -851,6 +851,37 @@ class NativeLlamaRuntime:
         half = dim // 2
         return values * cos + torch.cat((-values[..., half:], values[..., :half]), dim=-1) * sin
 
+    def _cached_sequence_length(self, past_key_values: Any) -> int:
+        """Validate a KV cache before any tensor operations and return its stored length."""
+        if past_key_values is None:
+            return 0
+        if not isinstance(past_key_values, (tuple, list)) or len(past_key_values) != self.config.num_hidden_layers:
+            raise NativeEngineError("Native KV cache must contain one key/value pair per transformer layer.")
+
+        head_dim = self.config.hidden_size // self.config.num_attention_heads
+        expected_prefix = (1, self.config.num_key_value_heads)
+        sequence_length: int | None = None
+        for layer_index, pair in enumerate(past_key_values):
+            if not isinstance(pair, (tuple, list)) or len(pair) != 2:
+                raise NativeEngineError("Native KV cache layer entries must be key/value pairs.")
+            key, value = pair
+            if not self.torch.is_tensor(key) or not self.torch.is_tensor(value):
+                raise NativeEngineError("Native KV cache entries must be tensors.")
+            if key.ndim != 4 or value.ndim != 4 or tuple(key.shape) != tuple(value.shape):
+                raise NativeEngineError("Native KV cache key/value tensor shapes are inconsistent.")
+            if tuple(key.shape[:2]) != expected_prefix or key.shape[-1] != head_dim:
+                raise NativeEngineError("Native KV cache tensor dimensions do not match the model configuration.")
+            if key.dtype != value.dtype or key.device != value.device:
+                raise NativeEngineError("Native KV cache key/value tensor types or devices are inconsistent.")
+            layer_length = int(key.shape[-2])
+            if sequence_length is None:
+                sequence_length = layer_length
+            elif layer_length != sequence_length:
+                raise NativeEngineError(
+                    f"Native KV cache sequence length is inconsistent at layer {layer_index}."
+                )
+        return sequence_length or 0
+
     def forward(
         self,
         input_ids: Any,
@@ -863,7 +894,7 @@ class NativeLlamaRuntime:
         if input_ids.ndim != 2 or input_ids.shape[0] != 1:
             raise NativeEngineError("AXIOM Native Engine currently accepts one prompt sequence per request.")
         seq_len = input_ids.shape[1]
-        stored_past_len = 0 if past_key_values is None else int(past_key_values[0][0].shape[-2])
+        stored_past_len = self._cached_sequence_length(past_key_values)
         past_len = stored_past_len if past_sequence_length is None else past_sequence_length
         if (
             isinstance(past_len, bool)
