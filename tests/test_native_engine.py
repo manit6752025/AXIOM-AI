@@ -229,6 +229,8 @@ def test_native_config_accepts_llama_mistral_qwen2_and_qwen3() -> None:
         ({"model_type": "gemma3"}, "supports llama, mistral, qwen2, and qwen3"),
         ({"hidden_size": 7}, "even-sized attention heads"),
         ({"rope_scaling": {"rope_type": "yarn", "factor": 2.0}}, "RoPE scaling"),
+        ({"rope_scaling": {"rope_type": "default", "factor": True}}, "RoPE scaling"),
+        ({"model_type": "llama", "architectures": ["Qwen3ForCausalLM"]}, "does not match"),
         ({"num_attention_heads": 3, "hidden_size": 12, "num_key_value_heads": 2}, "num_key_value_heads"),
         ({"hidden_size": True}, "missing valid native Llama model dimensions"),
         ({"num_hidden_layers": 1.5}, "missing valid native Llama model dimensions"),
