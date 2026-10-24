@@ -600,11 +600,17 @@ def _trusted_directory_index(
 
             if depth > max_depth:
                 continue
-            model_config = "config.json" in filenames
+            has_config = "config.json" in filenames
             adapter_config = "adapter_config.json" in filenames
+            gguf_names = tuple(name for name in filenames if name.lower().endswith(".gguf"))
+            model_config = has_config or len(gguf_names) == 1
             if not model_config and not adapter_config:
                 continue
-            marker_names = (("config.json",) if model_config else ()) + (("adapter_config.json",) if adapter_config else ())
+            marker_names = (
+                (("config.json",) if has_config else ())
+                + (("adapter_config.json",) if adapter_config else ())
+                + (gguf_names if len(gguf_names) == 1 else ())
+            )
             # HF cache metadata may be symlinked to blobs. Only accept targets
             # whose canonical path remains below this root.
             if any(not _trusted_file_entry(os.path.join(directory, marker), root_text) for marker in marker_names):
@@ -879,12 +885,22 @@ def discover_local_engine_assets() -> dict[str, Any]:
                 from axiom.core.native_engine import NativeLlamaConfig
 
                 native_config = NativeLlamaConfig.from_mapping(inspected["config"])
+                if inspected.get("checkpoint_format") == "gguf":
+                    if not inspected.get("tokenizer_source"):
+                        continue
+                    models.append({
+                        "path": discovered,
+                        "name": directory.name,
+                        "model_type": native_config.model_type,
+                        "architecture": inspected["architecture"],
+                        "weight_format": "GGUF (AXIOM dequantizes to floating point)",
+                        "ready_for_native_attempt": True,
+                    })
+                    continue
                 tokenizer_ok = any(_trusted_file_entry(str(directory / "tokenizer.json"), str(root)) for root in roots)
                 single_weights = any(_trusted_file_entry(str(directory / "model.safetensors"), str(root)) for root in roots)
                 indexed_weights = any(_trusted_file_entry(str(directory / "model.safetensors.index.json"), str(root)) for root in roots)
-                if not tokenizer_ok:
-                    continue
-                if not (single_weights or indexed_weights):
+                if not tokenizer_ok or not (single_weights or indexed_weights):
                     continue
                 models.append({
                     "path": discovered,
@@ -929,6 +945,9 @@ def discover_local_engine_assets() -> dict[str, Any]:
 
 def _inspect_model_config(model_dir: Path) -> dict[str, Any]:
     config_path = model_dir / "config.json"
+    if not config_path.exists():
+        from axiom.core.native_gguf import inspect_gguf_checkpoint
+        return inspect_gguf_checkpoint(model_dir, trusted_roots=_allowed_model_roots())
     try:
         resolved_config = config_path.resolve(strict=True)
         if (
@@ -944,7 +963,12 @@ def _inspect_model_config(model_dir: Path) -> dict[str, Any]:
         raise ValueError("Local model config.json must contain a model_type string.")
     architectures = config.get("architectures", [])
     architecture = architectures[0] if isinstance(architectures, list) and architectures and isinstance(architectures[0], str) else config["model_type"]
-    return {"config": config, "model_type": config["model_type"], "architecture": architecture}
+    return {
+        "config": config,
+        "model_type": config["model_type"],
+        "architecture": architecture,
+        "checkpoint_format": "safetensors",
+    }
 
 
 def validate_generation(prompt: str, max_new_tokens: int, temperature: float) -> tuple[str, int, float]:

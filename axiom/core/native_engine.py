@@ -12,7 +12,7 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 import json, math, re, threading, time
 from pathlib import Path
-from typing import Any, Iterator, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 _MAX_CONFIG_BYTES = 1_048_576
 _MAX_TOKENIZER_BYTES = 64 * 1024 * 1024
@@ -551,6 +551,7 @@ class NativeLlamaRuntime:
         adapter_scaling: dict[str, float] | None = None,
         memory_mode: str = "full",
         layer_weight_sources: dict[str, Path] | None = None,
+        layer_weight_loaders: dict[str, Callable[[], Any]] | None = None,
         weight_shapes: dict[str, tuple[int, ...]] | None = None,
     ) -> None:
         if memory_mode not in {"full", "layer_streaming", "disk_streaming"}:
@@ -559,15 +560,20 @@ class NativeLlamaRuntime:
         self.adapter, self.adapter_scaling = adapter or {}, adapter_scaling or {}
         self.memory_mode = memory_mode
         self.layer_weight_sources = layer_weight_sources or {}
+        self.layer_weight_loaders = layer_weight_loaders or {}
         self.layer_weight_names_by_index: dict[int, list[str]] = {}
         self.layer_weight_sources_by_index: dict[int, dict[str, Path]] = {}
-        for tensor_name in set(weights) | set(self.layer_weight_sources):
+        self.layer_weight_loaders_by_index: dict[int, dict[str, Callable[[], Any]]] = {}
+        for tensor_name in set(weights) | set(self.layer_weight_sources) | set(self.layer_weight_loaders):
             match = re.match(r"^model\.layers\.(\d+)\.", tensor_name)
             if match:
                 self.layer_weight_names_by_index.setdefault(int(match.group(1)), []).append(tensor_name)
                 source = self.layer_weight_sources.get(tensor_name)
                 if source is not None:
                     self.layer_weight_sources_by_index.setdefault(int(match.group(1)), {})[tensor_name] = source
+                loader = self.layer_weight_loaders.get(tensor_name)
+                if loader is not None:
+                    self.layer_weight_loaders_by_index.setdefault(int(match.group(1)), {})[tensor_name] = loader
         for tensor_names in self.layer_weight_names_by_index.values():
             tensor_names.sort()
         self.weight_shapes = weight_shapes or {name: tuple(value.shape) for name, value in weights.items()}
@@ -589,10 +595,48 @@ class NativeLlamaRuntime:
 
     @contextmanager
     def _layer_weights(self, layer_index: int):
-        """Stage a CPU-resident or disk-resident transformer layer on the execution device."""
-        if self.memory_mode not in {"layer_streaming", "disk_streaming"}:
+        """Stage CPU, GGUF-mapped, or disk-resident weights for one transformer layer."""
+        if self.memory_mode not in {"full", "layer_streaming", "disk_streaming"}:
+            raise NativeEngineError("Native memory mode must be full, layer_streaming, or disk_streaming.")
+        if self.memory_mode == "full":
             yield
             return
+
+        # GGUF layers are dequantized on demand, so only the active layer's
+        # floating-point tensors are materialized instead of expanding the file.
+        loaders = self.layer_weight_loaders_by_index.get(layer_index, {})
+        if loaders:
+            loaded: list[str] = []
+            try:
+                for name, loader in loaders.items():
+                    tensor = loader()
+                    if not self.torch.is_tensor(tensor) or tensor.dtype not in (
+                        self.torch.float16, self.torch.bfloat16, self.torch.float32
+                    ):
+                        raise NativeEngineError(
+                            f"On-demand layer tensor {name!r} did not decode to a supported floating dtype."
+                        )
+                    byte_count = int(tensor.numel() * tensor.element_size())
+                    active = tensor.to(device=self.device, dtype=self.dtype)
+                    self.weights[name] = active
+                    loaded.append(name)
+                    if self.memory_mode == "disk_streaming":
+                        source_bytes = int(getattr(loader, "_axiom_source_bytes", 0) or byte_count)
+                        self.memory_stats["disk_layer_weight_loads"] += 1
+                        self.memory_stats["disk_layer_weight_bytes_read"] += source_bytes
+                    else:
+                        self.memory_stats["layer_weight_tensors_staged"] += 1
+                    self.memory_stats["layer_weight_bytes_staged"] += byte_count
+                yield
+            finally:
+                for name in loaded:
+                    active_weight = self.weights.pop(name, None)
+                    if active_weight is not None:
+                        self.memory_stats["layer_weight_bytes_released"] += int(
+                            active_weight.numel() * active_weight.element_size()
+                        )
+            return
+
         if self.memory_mode == "disk_streaming":
             loaded: list[str] = []
             try:
@@ -625,6 +669,7 @@ class NativeLlamaRuntime:
                             active_weight.numel() * active_weight.element_size()
                         )
             return
+
         staged: dict[str, Any] = {}
         try:
             for name in self.layer_weight_names_by_index.get(layer_index, []):
@@ -638,8 +683,7 @@ class NativeLlamaRuntime:
             yield
         finally:
             for name in staged:
-                active_weight = self.weights[name]
-                self.weights[name] = active_weight.to(device="cpu")
+                self.weights[name] = self.weights[name].to(device="cpu")
                 self.memory_stats["layer_weight_bytes_returned_to_cpu"] += int(
                     self.weights[name].numel() * self.weights[name].element_size()
                 )
@@ -1450,6 +1494,18 @@ def load_native_runtime(
     except (ImportError, OSError):
         raise NativeDependencyError("AXIOM Native Engine requires tokenizers. Install the native-inference extra.") from None
     roots = trusted_roots or (model_dir.resolve(),)
+    has_safetensors = (model_dir / "model.safetensors").is_file() or (model_dir / "model.safetensors.index.json").is_file()
+    if not has_safetensors:
+        try:
+            has_gguf = any(item.is_file() and item.suffix.lower() == ".gguf" for item in model_dir.iterdir())
+        except OSError:
+            has_gguf = False
+        if has_gguf:
+            from axiom.core.native_gguf import load_native_gguf_runtime
+            return load_native_gguf_runtime(
+                model_dir, torch_module, device, adapter_dir=adapter_dir,
+                trusted_roots=roots, memory_mode=memory_mode, precision=precision,
+            )
     model = NativeLlamaRuntime.from_directory(
         model_dir, torch_module, device, adapter_dir=adapter_dir,
         trusted_roots=roots, memory_mode=memory_mode, precision=precision,
