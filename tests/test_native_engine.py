@@ -296,6 +296,60 @@ def _tiny_weights(torch, vocab_size=8, hidden=8, intermediate=12):
 
 
 @pytest.mark.parametrize("force_manual", [False, True])
+@pytest.mark.parametrize("force_manual", [False, True])
+def test_native_grouped_query_attention_matches_expanded_reference(force_manual: bool, monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    query = torch.randn((1, 2, 3, 4), dtype=torch.float32)
+    key = torch.randn((1, 1, 3, 4), dtype=torch.float32)
+    value = torch.randn((1, 1, 3, 4), dtype=torch.float32)
+    blocked = torch.triu(torch.ones((3, 3), dtype=torch.bool), diagonal=1)
+    native_sdpa = torch.nn.functional.scaled_dot_product_attention
+    calls = []
+
+    if force_manual:
+        monkeypatch.setattr(torch.nn.functional, "scaled_dot_product_attention", None)
+    else:
+        def capture_sdpa(q, k, v, **kwargs):
+            calls.append({
+                "query_heads": q.shape[1],
+                "key_heads": k.shape[1],
+                "value_heads": v.shape[1],
+                "enable_gqa": kwargs.get("enable_gqa"),
+            })
+            return native_sdpa(q, k, v, **kwargs)
+
+        monkeypatch.setattr(torch.nn.functional, "scaled_dot_product_attention", capture_sdpa)
+
+    actual = runtime._attention(query, key, value, blocked)
+    expanded_key = key.repeat_interleave(2, dim=1)
+    expanded_value = value.repeat_interleave(2, dim=1)
+    scores = torch.matmul(query, expanded_key.transpose(-2, -1)) / (4 ** 0.5)
+    probabilities = torch.softmax(
+        scores.masked_fill(blocked[None, None, :, :], float("-inf")), dim=-1
+    )
+    expected = torch.matmul(probabilities, expanded_value)
+
+    assert torch.allclose(actual, expected, atol=2e-5, rtol=1e-4)
+    if force_manual:
+        assert runtime.last_attention_backend == "axiom-manual-matmul-attention-gqa"
+    else:
+        assert runtime.last_attention_backend in {
+            "pytorch-scaled-dot-product-attention-gqa",
+            "pytorch-scaled-dot-product-attention-expanded-gqa",
+        }
+        assert calls[0]["query_heads"] == 2
+        if runtime.last_attention_backend == "pytorch-scaled-dot-product-attention-gqa":
+            assert calls[0]["key_heads"] == calls[0]["value_heads"] == 1
+            assert calls[0]["enable_gqa"] is True
+        else:
+            # Older SDPA builds reject enable_gqa; the compatibility path expands K/V.
+            assert calls[-1]["key_heads"] == calls[-1]["value_heads"] == 2
+
+
 def test_native_attention_sdpa_and_manual_paths_match_reference(force_manual: bool, monkeypatch) -> None:
     torch = pytest.importorskip("torch")
     from axiom.core.native_engine import NativeLlamaRuntime
