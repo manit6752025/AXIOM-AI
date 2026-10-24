@@ -230,6 +230,9 @@ def test_native_config_accepts_llama_mistral_qwen2_and_qwen3() -> None:
         ({"hidden_size": 7}, "even-sized attention heads"),
         ({"rope_scaling": {"rope_type": "yarn", "factor": 2.0}}, "RoPE scaling"),
         ({"num_attention_heads": 3, "hidden_size": 12, "num_key_value_heads": 2}, "num_key_value_heads"),
+        ({"hidden_size": True}, "missing valid native Llama model dimensions"),
+        ({"num_hidden_layers": 1.5}, "missing valid native Llama model dimensions"),
+        ({"rope_theta": True}, "missing valid native Llama model dimensions"),
     ],
 )
 def test_native_config_rejects_unsupported_or_inconsistent_architecture(overrides, detail) -> None:
