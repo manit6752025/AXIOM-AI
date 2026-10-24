@@ -485,6 +485,57 @@ def test_native_forward_computes_rope_embeddings_once_for_all_layers(monkeypatch
     assert calls == [([0, 1, 2], torch.float32)]
 
 
+def test_native_forward_uses_implicit_causal_prefill_and_unmasked_decode(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    calls = []
+    original = runtime._attention
+
+    def capture(query, key, value, blocked_mask, *, is_causal=False):
+        calls.append((None if blocked_mask is None else tuple(blocked_mask.shape), is_causal))
+        return original(query, key, value, blocked_mask, is_causal=is_causal)
+
+    monkeypatch.setattr(runtime, "_attention", capture)
+    with torch.inference_mode():
+        _, cache = runtime.forward(torch.tensor([[1, 2, 3, 4]], dtype=torch.long))
+        runtime.forward(
+            torch.tensor([[5]], dtype=torch.long),
+            cache,
+            past_sequence_length=4,
+        )
+
+    assert calls == [(None, True), (None, False)]
+
+
+def test_native_attention_implicit_causal_mask_matches_explicit_reference() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    runtime = NativeLlamaRuntime(
+        NativeLlamaConfig.from_mapping(_config()),
+        _tiny_weights(torch),
+        torch,
+        torch.device("cpu"),
+    )
+    query = torch.randn((1, 2, 4, 4), dtype=torch.float32)
+    key = torch.randn((1, 1, 4, 4), dtype=torch.float32)
+    value = torch.randn((1, 1, 4, 4), dtype=torch.float32)
+    actual = runtime._attention(query, key, value, None, is_causal=True)
+
+    expanded_key = key.repeat_interleave(2, dim=1)
+    expanded_value = value.repeat_interleave(2, dim=1)
+    scores = torch.matmul(query, expanded_key.transpose(-2, -1)) / (4 ** 0.5)
+    causal = torch.triu(torch.ones((4, 4), dtype=torch.bool), diagonal=1)
+    probabilities = torch.softmax(
+        scores.masked_fill(causal[None, None], float("-inf")), dim=-1
+    )
+    expected = torch.matmul(probabilities, expanded_value)
+    assert torch.allclose(actual, expected, atol=2e-5, rtol=1e-4)
+
+
 def test_native_forward_and_incremental_kv_cache_run_without_transformers() -> None:
     torch = pytest.importorskip("torch")
     from axiom.core.native_engine import NativeLlamaRuntime

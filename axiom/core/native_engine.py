@@ -813,11 +813,20 @@ class NativeLlamaRuntime:
             result = result + functional.linear(functional.linear(hidden, adapter["A"]), adapter["B"]) * self.adapter_scaling[module]
         return result
 
-    def _attention(self, query: Any, key: Any, value: Any, blocked_mask: Any) -> Any:
+    def _attention(
+        self,
+        query: Any,
+        key: Any,
+        value: Any,
+        blocked_mask: Any | None,
+        *,
+        is_causal: bool = False,
+    ) -> Any:
         """Run explicit masks with native GQA when available and a compatible fallback."""
         torch = self.torch
         functional = torch.nn.functional
         scaled_dot_product = getattr(functional, "scaled_dot_product_attention", None)
+        attention_mask = None if blocked_mask is None else ~blocked_mask
         query_heads, kv_heads = query.shape[1], key.shape[1]
         if kv_heads < 1 or query_heads % kv_heads:
             raise NativeEngineError("Grouped-query attention head counts are inconsistent.")
@@ -835,9 +844,9 @@ class NativeLlamaRuntime:
                         query,
                         key,
                         value,
-                        attn_mask=~blocked_mask,
+                        attn_mask=attention_mask,
                         dropout_p=0.0,
-                        is_causal=False,
+                        is_causal=is_causal,
                         enable_gqa=True,
                     )
                 except (TypeError, NotImplementedError, RuntimeError) as exc:
@@ -866,9 +875,9 @@ class NativeLlamaRuntime:
                         query,
                         key,
                         value,
-                        attn_mask=~blocked_mask,
+                        attn_mask=attention_mask,
                         dropout_p=0.0,
-                        is_causal=False,
+                        is_causal=is_causal,
                     )
                 self.last_attention_backend = "pytorch-scaled-dot-product-attention-gqa"
                 return result
@@ -878,9 +887,9 @@ class NativeLlamaRuntime:
                 query,
                 key,
                 value,
-                attn_mask=~blocked_mask,
+                attn_mask=attention_mask,
                 dropout_p=0.0,
-                is_causal=False,
+                is_causal=is_causal,
             )
 
         # Older/minimal tensor backends use AXIOM's own masked attention math.
@@ -888,8 +897,18 @@ class NativeLlamaRuntime:
         if grouped_query:
             key = key.repeat_interleave(query_heads // kv_heads, dim=1)
             value = value.repeat_interleave(query_heads // kv_heads, dim=1)
+        if blocked_mask is None and is_causal:
+            query_length, key_length = query.shape[-2], key.shape[-2]
+            query_positions = torch.arange(
+                key_length - query_length,
+                key_length,
+                device=query.device,
+            )
+            key_positions = torch.arange(key_length, device=query.device)
+            blocked_mask = key_positions[None, :] > query_positions[:, None]
         scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(query.shape[-1])
-        scores = scores.masked_fill(blocked_mask[None, None, :, :], float("-inf"))
+        if blocked_mask is not None:
+            scores = scores.masked_fill(blocked_mask[None, None, :, :], float("-inf"))
         probabilities = torch.softmax(scores.float(), dim=-1).to(dtype=query.dtype)
         self.last_attention_backend = (
             "axiom-manual-matmul-attention-gqa" if grouped_query else "axiom-manual-matmul-attention"
@@ -1048,11 +1067,23 @@ class NativeLlamaRuntime:
                     cache.append((cache_k, cache_v))
                 else:
                     cache.append((cache_k, cache_v))
-                keys = torch.arange(key_start_position, past_len + seq_len, device=self.device)
-                blocked = keys[None, :] > positions[:, None]
-                if c.sliding_window:
-                    blocked = blocked | (keys[None, :] <= positions[:, None] - c.sliding_window)
-                attended = self._attention(q, k, v, blocked).transpose(1, 2).contiguous().view(1, seq_len, c.hidden_size)
+                # Let SDPA use its causal kernel for ordinary prefill and avoid
+                # a dense sequence-by-sequence boolean mask. A one-token decode
+                # with a populated non-sliding cache can attend to all stored keys
+                # without a mask; sliding-window/chunked paths keep exact masks.
+                is_causal = past_key_values is None and not c.sliding_window
+                if not c.sliding_window and (
+                    past_key_values is None or seq_len == 1
+                ):
+                    blocked = None
+                else:
+                    keys = torch.arange(key_start_position, past_len + seq_len, device=self.device)
+                    blocked = keys[None, :] > positions[:, None]
+                    if c.sliding_window:
+                        blocked = blocked | (keys[None, :] <= positions[:, None] - c.sliding_window)
+                attended = self._attention(
+                    q, k, v, blocked, is_causal=is_causal
+                ).transpose(1, 2).contiguous().view(1, seq_len, c.hidden_size)
                 hidden = residual + self._linear(attended, p + "self_attn.o_proj")
                 residual = hidden
                 normed = self._rms_norm(hidden, self.weights[p + "post_attention_layernorm.weight"])
