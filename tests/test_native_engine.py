@@ -480,6 +480,42 @@ def test_mistral_sliding_window_bounds_cache_and_preserves_absolute_rope_positio
         )
 
 
+def test_native_forward_validates_input_tensor_shape_dtype_and_empty_sequences() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+
+    with pytest.raises(NativeEngineError, match="must be a tensor"):
+        runtime.forward([[1]])
+    with pytest.raises(NativeEngineError, match="one prompt sequence"):
+        runtime.forward(torch.tensor([1], dtype=torch.long))
+    with pytest.raises(NativeEngineError, match="at least one token"):
+        runtime.forward(torch.empty((1, 0), dtype=torch.long))
+    with pytest.raises(NativeEngineError, match="integer token-ID dtype"):
+        runtime.forward(torch.tensor([[1.0]], dtype=torch.float32))
+
+    with torch.inference_mode():
+        logits, _ = runtime.forward(torch.tensor([[1, 2]], dtype=torch.int32))
+    assert tuple(logits.shape) == (1, config.vocab_size)
+
+
+@pytest.mark.parametrize("token_ids", [[-1], [8], [True], ["1"]])
+def test_native_decoder_rejects_prompt_token_ids_outside_checkpoint_vocabulary(token_ids) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    with pytest.raises(NativeEngineError, match="Prompt token IDs must be integers inside"):
+        list(runtime.iter_generate(
+            token_ids,
+            max_new_tokens=1,
+            temperature=0,
+        ))
+
+
 def test_native_decoder_stops_before_emitting_eos_and_does_not_step_past_output_limit() -> None:
     torch = pytest.importorskip("torch")
     from axiom.core.native_engine import NativeLlamaRuntime
