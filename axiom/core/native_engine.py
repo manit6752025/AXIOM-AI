@@ -741,6 +741,8 @@ class NativeLlamaRuntime:
                 load_names = [name for name in required if name != "model.embed_tokens.weight"]
                 if "lm_head.weight" in weight_map and "lm_head.weight" not in load_names:
                     load_names.append("lm_head.weight")
+                if "lm_head.bias" in weight_map:
+                    load_names.append("lm_head.bias")
                 for i in range(config.num_hidden_layers):
                     p = f"model.layers.{i}."
                     for module in ("self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.o_proj", "mlp.gate_proj", "mlp.up_proj", "mlp.down_proj"):
@@ -781,11 +783,29 @@ class NativeLlamaRuntime:
                 p + "input_layernorm.weight": (config.hidden_size,),
                 p + "post_attention_layernorm.weight": (config.hidden_size,),
             })
+            # Optional projection biases must match the output dimension. Some
+            # supported checkpoints (for example Qwen2) legitimately use q/k/v
+            # biases while others omit them, so validate only declared tensors.
+            bias_output_dims = {
+                "self_attn.q_proj": config.num_attention_heads * hdim,
+                "self_attn.k_proj": config.num_key_value_heads * hdim,
+                "self_attn.v_proj": config.num_key_value_heads * hdim,
+                "self_attn.o_proj": config.hidden_size,
+                "mlp.gate_proj": config.intermediate_size,
+                "mlp.up_proj": config.intermediate_size,
+                "mlp.down_proj": config.hidden_size,
+            }
+            for module, output_dim in bias_output_dims.items():
+                bias_name = p + module + ".bias"
+                if bias_name in weight_map:
+                    expected[bias_name] = (output_dim,)
             if config.qk_norm:
                 expected[p + "self_attn.q_norm.weight"] = (hdim,)
                 expected[p + "self_attn.k_norm.weight"] = (hdim,)
         if "lm_head.weight" in weight_map:
             expected["lm_head.weight"] = (config.vocab_size, config.hidden_size)
+        if "lm_head.bias" in weight_map:
+            expected["lm_head.bias"] = (config.vocab_size,)
         for name, shape in expected.items():
             if name not in weight_shapes or weight_shapes[name] != shape:
                 if name == "lm_head.weight" and config.tie_word_embeddings and name not in weight_shapes:
@@ -895,9 +915,9 @@ class NativeLlamaRuntime:
         grouped_query = query_heads != kv_heads
 
         if callable(scaled_dot_product):
-            # A boolean SDPA mask uses True for visible positions. Invert AXIOM's
-            # blocked causal/sliding-window mask and keep is_causal=False because
-            # the exact cache-aware mask is already computed for these positions.
+            # A boolean SDPA mask uses True for visible positions. Cache-aware
+            # sliding/chunked paths pass an explicit inverted mask; ordinary prefill
+            # can use is_causal=True with no mask to avoid a dense quadratic allocation.
             if grouped_query:
                 try:
                     # Native GQA avoids allocating repeated K/V heads for common

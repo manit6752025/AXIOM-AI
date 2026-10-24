@@ -1221,6 +1221,71 @@ def test_native_loader_rejects_unsupported_embedding_weight_dtype(
         )
 
 
+@pytest.mark.parametrize(
+    "bias_name,shape",
+    [
+        ("model.layers.0.self_attn.q_proj.bias", (7,)),
+        ("model.layers.0.self_attn.k_proj.bias", (5,)),
+        ("model.layers.0.mlp.gate_proj.bias", (11,)),
+        ("lm_head.bias", (7,)),
+    ],
+)
+def test_native_loader_rejects_projection_bias_shape_mismatches(
+    tmp_path: Path, bias_name: str, shape: tuple[int, ...]
+) -> None:
+    torch = pytest.importorskip("torch")
+    safetensors_torch = pytest.importorskip("safetensors.torch")
+    from axiom.core.native_engine import NativeEngineError, NativeLlamaRuntime
+
+    root = tmp_path / "trusted"
+    model_dir = root / "bad-bias"
+    model_dir.mkdir(parents=True)
+    (model_dir / "config.json").write_text(json.dumps(_config()), encoding="utf-8")
+    (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+    weights = _tiny_weights(torch)
+    weights[bias_name] = torch.zeros(shape, dtype=torch.float32)
+    safetensors_torch.save_file(
+        {name: tensor.detach().cpu().contiguous() for name, tensor in weights.items()},
+        str(model_dir / "model.safetensors"),
+    )
+
+    with pytest.raises(NativeEngineError, match="shape inconsistent with config.json"):
+        NativeLlamaRuntime.from_directory(
+            model_dir, torch, torch.device("cpu"), trusted_roots=(root.resolve(),)
+        )
+
+
+def test_native_loader_accepts_qwen2_query_key_value_biases(tmp_path: Path) -> None:
+    torch = pytest.importorskip("torch")
+    safetensors_torch = pytest.importorskip("safetensors.torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    root = tmp_path / "trusted"
+    model_dir = root / "qwen2-with-biases"
+    model_dir.mkdir(parents=True)
+    config = _config(model_type="qwen2", architectures=["Qwen2ForCausalLM"])
+    (model_dir / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+    weights = _tiny_weights(torch)
+    weights["model.layers.0.self_attn.q_proj.bias"] = torch.zeros(8)
+    weights["model.layers.0.self_attn.k_proj.bias"] = torch.zeros(4)
+    weights["model.layers.0.self_attn.v_proj.bias"] = torch.zeros(4)
+    safetensors_torch.save_file(
+        {name: tensor.detach().cpu().contiguous() for name, tensor in weights.items()},
+        str(model_dir / "model.safetensors"),
+    )
+
+    runtime = NativeLlamaRuntime.from_directory(
+        model_dir, torch, torch.device("cpu"), trusted_roots=(root.resolve(),)
+    )
+    with torch.inference_mode():
+        logits, _ = runtime.forward(torch.tensor([[1, 2, 3]], dtype=torch.long))
+    assert tuple(logits.shape) == (1, config["vocab_size"])
+    assert runtime.weights["model.layers.0.self_attn.q_proj.bias"].shape == (8,)
+    assert runtime.weights["model.layers.0.self_attn.k_proj.bias"].shape == (4,)
+    assert runtime.weights["model.layers.0.self_attn.v_proj.bias"].shape == (4,)
+
+
 def test_native_loader_explicit_fp16_precision_casts_model_weights(tmp_path: Path) -> None:
     torch = pytest.importorskip("torch")
     safetensors_torch = pytest.importorskip("safetensors.torch")
