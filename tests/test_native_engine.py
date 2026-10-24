@@ -374,6 +374,39 @@ def test_native_attention_sdpa_and_manual_paths_match_reference(force_manual: bo
     )
 
 
+@pytest.mark.parametrize(
+    "cache_kind, detail",
+    [
+        ("wrong_layer_count", "one key/value pair per transformer layer"),
+        ("mismatched_key_value_shape", "key/value tensor shapes are inconsistent"),
+        ("wrong_head_count", "tensor dimensions do not match the model configuration"),
+        ("non_tensor", "entries must be tensors"),
+    ],
+)
+def test_native_forward_rejects_malformed_kv_cache(cache_kind: str, detail: str) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    with torch.inference_mode():
+        _, cache = runtime.forward(torch.tensor([[1, 3, 4]], dtype=torch.long))
+        if cache_kind == "wrong_layer_count":
+            malformed = ()
+        elif cache_kind == "mismatched_key_value_shape":
+            malformed = ((cache[0][0][..., :-1, :], cache[0][1]),)
+        elif cache_kind == "wrong_head_count":
+            malformed = ((
+                cache[0][0].repeat_interleave(2, dim=1),
+                cache[0][1].repeat_interleave(2, dim=1),
+            ),)
+        else:
+            malformed = ((None, None),)
+
+        with pytest.raises(NativeEngineError, match=detail):
+            runtime.forward(torch.tensor([[5]], dtype=torch.long), malformed)
+
+
 def test_native_forward_and_incremental_kv_cache_run_without_transformers() -> None:
     torch = pytest.importorskip("torch")
     from axiom.core.native_engine import NativeLlamaRuntime
