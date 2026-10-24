@@ -354,6 +354,45 @@ def test_native_grouped_query_attention_matches_expanded_reference(force_manual:
             assert calls[-1]["key_heads"] == calls[-1]["value_heads"] == 2
 
 
+def test_native_gqa_falls_back_when_backend_reports_unsupported_kernel(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    runtime = NativeLlamaRuntime(
+        NativeLlamaConfig.from_mapping(_config()),
+        _tiny_weights(torch),
+        torch,
+        torch.device("cpu"),
+    )
+    native_sdpa = torch.nn.functional.scaled_dot_product_attention
+    calls = []
+
+    def reject_native_gqa(query, key, value, **kwargs):
+        calls.append((key.shape[1], kwargs.get("enable_gqa", False)))
+        if kwargs.get("enable_gqa"):
+            raise RuntimeError("grouped-query attention is not supported by this test backend")
+        return native_sdpa(query, key, value, **kwargs)
+
+    monkeypatch.setattr(torch.nn.functional, "scaled_dot_product_attention", reject_native_gqa)
+    query = torch.randn((1, 2, 3, 4), dtype=torch.float32)
+    key = torch.randn((1, 1, 3, 4), dtype=torch.float32)
+    value = torch.randn((1, 1, 3, 4), dtype=torch.float32)
+    blocked = torch.triu(torch.ones((3, 3), dtype=torch.bool), diagonal=1)
+
+    actual = runtime._attention(query, key, value, blocked)
+    expanded_key = key.repeat_interleave(2, dim=1)
+    expanded_value = value.repeat_interleave(2, dim=1)
+    scores = torch.matmul(query, expanded_key.transpose(-2, -1)) / (4 ** 0.5)
+    probabilities = torch.softmax(
+        scores.masked_fill(blocked[None, None], float("-inf")), dim=-1
+    )
+    expected = torch.matmul(probabilities, expanded_value)
+
+    assert torch.allclose(actual, expected, atol=2e-5, rtol=1e-4)
+    assert runtime.last_attention_backend == "pytorch-scaled-dot-product-attention-expanded-gqa"
+    assert calls == [(1, True), (2, False)]
+
+
 @pytest.mark.parametrize("force_manual", [False, True])
 def test_native_attention_sdpa_and_manual_paths_match_reference(force_manual: bool, monkeypatch) -> None:
     torch = pytest.importorskip("torch")
@@ -386,6 +425,7 @@ def test_native_attention_sdpa_and_manual_paths_match_reference(force_manual: bo
         ("mismatched_key_value_shape", "key/value tensor shapes are inconsistent"),
         ("wrong_head_count", "tensor dimensions do not match the model configuration"),
         ("wrong_dtype", "dtype does not match the loaded model weights"),
+        ("wrong_device", "device does not match the selected memory mode"),
         ("empty_sequence", "sequence length must be positive"),
         ("non_tensor", "entries must be tensors"),
     ],
@@ -409,6 +449,8 @@ def test_native_forward_rejects_malformed_kv_cache(cache_kind: str, detail: str)
             ),)
         elif cache_kind == "wrong_dtype":
             malformed = ((cache[0][0].double(), cache[0][1].double()),)
+        elif cache_kind == "wrong_device":
+            malformed = ((cache[0][0].to(device="meta"), cache[0][1].to(device="meta")),)
         elif cache_kind == "empty_sequence":
             malformed = ((cache[0][0][..., :0, :], cache[0][1][..., :0, :]),)
         else:
@@ -798,7 +840,10 @@ def test_tiny_safetensors_checkpoint_generates_through_axiom_native_loop(
     assert result["decoder"] == "axiom-autoregressive-kv-cache"
     assert result["attention_backend"] in {
         "pytorch-scaled-dot-product-attention",
+        "pytorch-scaled-dot-product-attention-gqa",
+        "pytorch-scaled-dot-product-attention-expanded-gqa",
         "axiom-manual-matmul-attention",
+        "axiom-manual-matmul-attention-gqa",
     }
     assert result["prefill_ms"] >= 0
     assert result["decode_ms"] >= 0

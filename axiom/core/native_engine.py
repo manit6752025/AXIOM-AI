@@ -840,9 +840,25 @@ class NativeLlamaRuntime:
                         is_causal=False,
                         enable_gqa=True,
                     )
-                except TypeError:
-                    # PyTorch 2.2+ is supported, but older SDPA builds do not
-                    # accept enable_gqa. Expand only for that compatibility path.
+                except (TypeError, NotImplementedError, RuntimeError) as exc:
+                    # Some tensor backends expose enable_gqa but cannot execute it
+                    # for the selected device/kernel. Fall back only for recognized
+                    # GQA capability errors; preserve unrelated runtime failures.
+                    message = str(exc).lower()
+                    gqa_unavailable = isinstance(exc, (TypeError, NotImplementedError)) or any(
+                        reason in message
+                        for reason in (
+                            "gqa",
+                            "grouped query",
+                            "grouped-query",
+                            "not implemented",
+                            "not supported",
+                            "no viable backend",
+                            "no available kernel",
+                        )
+                    )
+                    if not gqa_unavailable:
+                        raise
                     key = key.repeat_interleave(query_heads // kv_heads, dim=1)
                     value = value.repeat_interleave(query_heads // kv_heads, dim=1)
                     self.last_attention_backend = "pytorch-scaled-dot-product-attention-expanded-gqa"
@@ -935,7 +951,13 @@ class NativeLlamaRuntime:
             if key.dtype != self.dtype:
                 raise NativeEngineError("Native KV cache dtype does not match the loaded model weights.")
             expected_device = self.device if self.memory_mode == "full" else self.torch.device("cpu")
-            if key.device != expected_device:
+            if (
+                key.device.type != expected_device.type
+                or (
+                    expected_device.index is not None
+                    and key.device.index != expected_device.index
+                )
+            ):
                 raise NativeEngineError("Native KV cache device does not match the selected memory mode.")
             layer_length = int(key.shape[-2])
             if layer_length < 1:
