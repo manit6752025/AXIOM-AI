@@ -101,16 +101,28 @@ class NativeLlamaConfig:
         if rope:
             if not isinstance(rope, dict) or rope.get("rope_type", rope.get("type", "default")) != "default" or rope.get("factor", 1.0) != 1.0:
                 raise NativeEngineError("This RoPE scaling configuration is not implemented by AXIOM Native Engine.")
+        def config_integer(name: str, default: Any = None) -> int:
+            raw = value[name] if name in value else default
+            if isinstance(raw, bool) or not isinstance(raw, int):
+                raise TypeError
+            return raw
+
+        def config_number(name: str, default: Any) -> float:
+            raw = value.get(name, default)
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                raise TypeError
+            return float(raw)
+
         try:
-            hidden = int(value["hidden_size"])
-            intermediate = int(value["intermediate_size"])
-            layers = int(value["num_hidden_layers"])
-            heads = int(value["num_attention_heads"])
-            kv_heads = int(value.get("num_key_value_heads", heads))
-            vocab = int(value["vocab_size"])
-            max_positions = int(value.get("max_position_embeddings", 4096))
-            rms_eps = float(value.get("rms_norm_eps", 1e-6))
-            theta = float(value.get("rope_theta", 10000.0))
+            hidden = config_integer("hidden_size")
+            intermediate = config_integer("intermediate_size")
+            layers = config_integer("num_hidden_layers")
+            heads = config_integer("num_attention_heads")
+            kv_heads = config_integer("num_key_value_heads", heads)
+            vocab = config_integer("vocab_size")
+            max_positions = config_integer("max_position_embeddings", 4096)
+            rms_eps = config_number("rms_norm_eps", 1e-6)
+            theta = config_number("rope_theta", 10000.0)
         except (KeyError, TypeError, ValueError, OverflowError):
             raise NativeEngineError("Local config.json is missing valid native Llama model dimensions.") from None
         if not (1 <= hidden <= 32768 and 1 <= intermediate <= 131072):
@@ -120,7 +132,11 @@ class NativeLlamaConfig:
         if hidden % heads or (hidden // heads) % 2:
             raise NativeEngineError("hidden_size must be divisible into even-sized attention heads.")
         configured_head_dim = value.get("head_dim")
-        if configured_head_dim is not None and configured_head_dim != hidden // heads:
+        if configured_head_dim is not None and (
+            isinstance(configured_head_dim, bool)
+            or not isinstance(configured_head_dim, int)
+            or configured_head_dim != hidden // heads
+        ):
             raise NativeEngineError("Custom head_dim values are not supported unless they equal hidden_size / num_attention_heads.")
         if not (1 <= kv_heads <= heads) or heads % kv_heads:
             raise NativeEngineError("num_key_value_heads must divide num_attention_heads.")
