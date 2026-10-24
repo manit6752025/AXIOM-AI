@@ -94,12 +94,30 @@ class NativeLlamaConfig:
         model_type = value.get("model_type")
         if model_type not in _SUPPORTED_MODEL_TYPES:
             raise NativeEngineError("AXIOM Native Engine supports llama, mistral, qwen2, and qwen3 model_type only; there is no Transformers/Ollama fallback.")
+        expected_architecture = {
+            "llama": "LlamaForCausalLM",
+            "mistral": "MistralForCausalLM",
+            "qwen2": "Qwen2ForCausalLM",
+            "qwen3": "Qwen3ForCausalLM",
+        }[model_type]
         architectures = value.get("architectures", [])
-        if architectures and not any(isinstance(x, str) and x in {"LlamaForCausalLM", "MistralForCausalLM", "Qwen2ForCausalLM", "Qwen3ForCausalLM"} for x in architectures):
-            raise NativeEngineError("Checkpoint architecture is not a supported Llama/Mistral/Qwen2/Qwen3 causal-LM class.")
+        if architectures and (
+            not isinstance(architectures, list)
+            or expected_architecture not in architectures
+        ):
+            raise NativeEngineError(
+                "Checkpoint architecture does not match the supported causal-LM class for its model_type."
+            )
         rope = value.get("rope_scaling")
         if rope:
-            if not isinstance(rope, dict) or rope.get("rope_type", rope.get("type", "default")) != "default" or rope.get("factor", 1.0) != 1.0:
+            factor = rope.get("factor", 1.0) if isinstance(rope, dict) else None
+            if (
+                not isinstance(rope, dict)
+                or rope.get("rope_type", rope.get("type", "default")) != "default"
+                or isinstance(factor, bool)
+                or not isinstance(factor, (int, float))
+                or factor != 1.0
+            ):
                 raise NativeEngineError("This RoPE scaling configuration is not implemented by AXIOM Native Engine.")
         def config_integer(name: str, default: Any = None) -> int:
             raw = value[name] if name in value else default
