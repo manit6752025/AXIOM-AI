@@ -772,14 +772,49 @@ class NativeLlamaRuntime:
         return result
 
     def _attention(self, query: Any, key: Any, value: Any, blocked_mask: Any) -> Any:
-        """Run explicit AXIOM masks through optimized tensor attention, with a manual fallback."""
+        """Run explicit masks with native GQA when available and a compatible fallback."""
         torch = self.torch
         functional = torch.nn.functional
         scaled_dot_product = getattr(functional, "scaled_dot_product_attention", None)
+        query_heads, kv_heads = query.shape[1], key.shape[1]
+        if kv_heads < 1 or query_heads % kv_heads:
+            raise NativeEngineError("Grouped-query attention head counts are inconsistent.")
+        grouped_query = query_heads != kv_heads
+
         if callable(scaled_dot_product):
             # A boolean SDPA mask uses True for visible positions. Invert AXIOM's
             # blocked causal/sliding-window mask and keep is_causal=False because
             # the exact cache-aware mask is already computed for these positions.
+            if grouped_query:
+                try:
+                    # Native GQA avoids allocating repeated K/V heads for common
+                    # Llama, Mistral and Qwen checkpoints.
+                    result = scaled_dot_product(
+                        query,
+                        key,
+                        value,
+                        attn_mask=~blocked_mask,
+                        dropout_p=0.0,
+                        is_causal=False,
+                        enable_gqa=True,
+                    )
+                except TypeError:
+                    # PyTorch 2.2+ is supported, but older SDPA builds do not
+                    # accept enable_gqa. Expand only for that compatibility path.
+                    key = key.repeat_interleave(query_heads // kv_heads, dim=1)
+                    value = value.repeat_interleave(query_heads // kv_heads, dim=1)
+                    self.last_attention_backend = "pytorch-scaled-dot-product-attention-expanded-gqa"
+                    return scaled_dot_product(
+                        query,
+                        key,
+                        value,
+                        attn_mask=~blocked_mask,
+                        dropout_p=0.0,
+                        is_causal=False,
+                    )
+                self.last_attention_backend = "pytorch-scaled-dot-product-attention-gqa"
+                return result
+
             self.last_attention_backend = "pytorch-scaled-dot-product-attention"
             return scaled_dot_product(
                 query,
@@ -789,13 +824,19 @@ class NativeLlamaRuntime:
                 dropout_p=0.0,
                 is_causal=False,
             )
-        # Older/minimal tensor backends keep working through AXIOM's own masked
-        # attention math. This path remains numerically equivalent to SDPA.
+
+        # Older/minimal tensor backends use AXIOM's own masked attention math.
+        # Their fallback expands grouped K/V heads only when the math requires it.
+        if grouped_query:
+            key = key.repeat_interleave(query_heads // kv_heads, dim=1)
+            value = value.repeat_interleave(query_heads // kv_heads, dim=1)
         scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(query.shape[-1])
         scores = scores.masked_fill(blocked_mask[None, None, :, :], float("-inf"))
-        probabilities = self.torch.softmax(scores.float(), dim=-1).to(dtype=query.dtype)
-        self.last_attention_backend = "axiom-manual-matmul-attention"
-        return self.torch.matmul(probabilities, value)
+        probabilities = torch.softmax(scores.float(), dim=-1).to(dtype=query.dtype)
+        self.last_attention_backend = (
+            "axiom-manual-matmul-attention-gqa" if grouped_query else "axiom-manual-matmul-attention"
+        )
+        return torch.matmul(probabilities, value)
 
     def _rms_norm(self, hidden: Any, weight: Any) -> Any:
         variance = hidden.float().pow(2).mean(dim=-1, keepdim=True)
@@ -836,7 +877,6 @@ class NativeLlamaRuntime:
         positions = torch.arange(past_len, past_len + seq_len, device=self.device)
         key_start_position = past_len - stored_past_len
         cache, head_dim = [], c.hidden_size // c.num_attention_heads
-        repeat_factor = c.num_attention_heads // c.num_key_value_heads
         for i in range(c.num_hidden_layers):
             if cancel_event is not None and cancel_event.is_set():
                 raise NativeGenerationCancelled("Native generation was cancelled.")
@@ -880,13 +920,11 @@ class NativeLlamaRuntime:
                     cache.append((cache_k, cache_v))
                 else:
                     cache.append((cache_k, cache_v))
-                ak = k.repeat_interleave(repeat_factor, dim=1) if repeat_factor > 1 else k
-                av = v.repeat_interleave(repeat_factor, dim=1) if repeat_factor > 1 else v
                 keys = torch.arange(key_start_position, past_len + seq_len, device=self.device)
                 blocked = keys[None, :] > positions[:, None]
                 if c.sliding_window:
                     blocked = blocked | (keys[None, :] <= positions[:, None] - c.sliding_window)
-                attended = self._attention(q, ak, av, blocked).transpose(1, 2).contiguous().view(1, seq_len, c.hidden_size)
+                attended = self._attention(q, k, v, blocked).transpose(1, 2).contiguous().view(1, seq_len, c.hidden_size)
                 hidden = residual + self._linear(attended, p + "self_attn.o_proj")
                 residual = hidden
                 normed = self._rms_norm(hidden, self.weights[p + "post_attention_layernorm.weight"])
