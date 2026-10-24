@@ -640,6 +640,14 @@ class NativeLlamaRuntime:
             with ExitStack() as stack:
                 handles = {name: stack.enter_context(safe_open(str(path), framework="pt", device="cpu")) for name, path in file_paths.items()}
                 embedding = handles[weight_map["model.embed_tokens.weight"]].get_tensor("model.embed_tokens.weight")
+                if embedding.dtype not in (
+                    torch_module.float16,
+                    torch_module.bfloat16,
+                    torch_module.float32,
+                ):
+                    raise NativeEngineError(
+                        "Unsupported embedding weight dtype; native checkpoints require fp16, bf16, or fp32 weights."
+                    )
                 checkpoint_dtype = embedding.dtype
                 dtype_map = {
                     "fp32": getattr(torch_module, "float32", None),
@@ -876,14 +884,31 @@ class NativeLlamaRuntime:
         variance = hidden.float().pow(2).mean(dim=-1, keepdim=True)
         return hidden * self.torch.rsqrt(variance + self.config.rms_norm_eps).to(dtype=hidden.dtype) * weight
 
-    def _apply_rope(self, values: Any, positions: Any) -> Any:
-        torch, dim = self.torch, values.shape[-1]
-        inv_freq = 1.0 / (self.config.rope_theta ** (torch.arange(0, dim, 2, device=self.device, dtype=torch.float32) / dim))
+    def _rope_embeddings(self, positions: Any, dtype: Any) -> tuple[Any, Any]:
+        """Compute the rotary cosine/sine tables once for one forward sequence."""
+        torch = self.torch
+        dim = self.config.hidden_size // self.config.num_attention_heads
+        inv_freq = 1.0 / (
+            self.config.rope_theta
+            ** (torch.arange(0, dim, 2, device=self.device, dtype=torch.float32) / dim)
+        )
         frequencies = torch.einsum("i,j->ij", positions.to(dtype=torch.float32), inv_freq)
         embedding = torch.cat((frequencies, frequencies), dim=-1)
-        cos, sin = embedding.cos().to(dtype=values.dtype)[None, None, :, :], embedding.sin().to(dtype=values.dtype)[None, None, :, :]
+        cos = embedding.cos().to(dtype=dtype)[None, None, :, :]
+        sin = embedding.sin().to(dtype=dtype)[None, None, :, :]
+        return cos, sin
+
+    def _apply_rope(
+        self,
+        values: Any,
+        positions: Any,
+        embeddings: tuple[Any, Any] | None = None,
+    ) -> Any:
+        _, dim = self.torch, values.shape[-1]
+        cos, sin = embeddings if embeddings is not None else self._rope_embeddings(positions, values.dtype)
         half = dim // 2
-        return values * cos + torch.cat((-values[..., half:], values[..., :half]), dim=-1) * sin
+        rotated = self.torch.cat((-values[..., half:], values[..., :half]), dim=-1)
+        return values * cos + rotated * sin
 
     def _cached_sequence_length(self, past_key_values: Any) -> int:
         """Validate a KV cache before any tensor operations and return its stored length."""
@@ -955,6 +980,7 @@ class NativeLlamaRuntime:
             raise NativeEngineError("Generation would exceed the checkpoint's configured maximum context length.")
         hidden = torch.nn.functional.embedding(input_ids, self.weights["model.embed_tokens.weight"])
         positions = torch.arange(past_len, past_len + seq_len, device=self.device)
+        rope_embeddings = self._rope_embeddings(positions, self.dtype)
         key_start_position = past_len - stored_past_len
         cache, head_dim = [], c.hidden_size // c.num_attention_heads
         for i in range(c.num_hidden_layers):
@@ -970,8 +996,8 @@ class NativeLlamaRuntime:
                 if c.qk_norm:
                     q = self._rms_norm(q, self.weights[p + "self_attn.q_norm.weight"])
                     k = self._rms_norm(k, self.weights[p + "self_attn.k_norm.weight"])
-                q = self._apply_rope(q.transpose(1, 2), positions)
-                k = self._apply_rope(k.transpose(1, 2), positions)
+                q = self._apply_rope(q.transpose(1, 2), positions, rope_embeddings)
+                k = self._apply_rope(k.transpose(1, 2), positions, rope_embeddings)
                 v = v.view(1, seq_len, c.num_key_value_heads, head_dim).transpose(1, 2)
                 if past_key_values is not None:
                     old_k, old_v = past_key_values[i]

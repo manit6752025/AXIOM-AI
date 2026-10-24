@@ -354,6 +354,7 @@ def test_native_grouped_query_attention_matches_expanded_reference(force_manual:
             assert calls[-1]["key_heads"] == calls[-1]["value_heads"] == 2
 
 
+@pytest.mark.parametrize("force_manual", [False, True])
 def test_native_attention_sdpa_and_manual_paths_match_reference(force_manual: bool, monkeypatch) -> None:
     torch = pytest.importorskip("torch")
     from axiom.core.native_engine import NativeLlamaRuntime
@@ -417,6 +418,31 @@ def test_native_forward_rejects_malformed_kv_cache(cache_kind: str, detail: str)
             runtime.forward(torch.tensor([[5]], dtype=torch.long), malformed)
 
 
+def test_native_forward_computes_rope_embeddings_once_for_all_layers(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config(num_hidden_layers=2))
+    weights = _tiny_weights(torch)
+    for name, tensor in list(weights.items()):
+        if name.startswith("model.layers.0."):
+            weights[name.replace("model.layers.0.", "model.layers.1.", 1)] = tensor.clone()
+    runtime = NativeLlamaRuntime(config, weights, torch, torch.device("cpu"))
+    original = runtime._rope_embeddings
+    calls = []
+
+    def capture(positions, dtype):
+        calls.append((positions.detach().cpu().tolist(), dtype))
+        return original(positions, dtype)
+
+    monkeypatch.setattr(runtime, "_rope_embeddings", capture)
+    with torch.inference_mode():
+        logits, _ = runtime.forward(torch.tensor([[1, 2, 3]], dtype=torch.long))
+
+    assert tuple(logits.shape) == (1, config.vocab_size)
+    assert calls == [([0, 1, 2], torch.float32)]
+
+
 def test_native_forward_and_incremental_kv_cache_run_without_transformers() -> None:
     torch = pytest.importorskip("torch")
     from axiom.core.native_engine import NativeLlamaRuntime
@@ -449,9 +475,9 @@ def test_mistral_sliding_window_bounds_cache_and_preserves_absolute_rope_positio
     observed_positions = []
     original_rope = runtime._apply_rope
 
-    def capture_rope(values, positions):
+    def capture_rope(values, positions, embeddings=None):
         observed_positions.append(positions.detach().cpu().tolist())
-        return original_rope(values, positions)
+        return original_rope(values, positions, embeddings)
 
     monkeypatch.setattr(runtime, "_apply_rope", capture_rope)
     prompt = torch.tensor([[1, 2, 3, 4, 5, 6, 7]], dtype=torch.long)
@@ -996,6 +1022,34 @@ def test_qwen3_native_loader_applies_query_key_rms_norm(tmp_path: Path) -> None:
     assert logits.shape == (1, config["vocab_size"])
     assert len(cache) == config["num_hidden_layers"]
     assert runtime.config.qk_norm is True
+
+
+@pytest.mark.parametrize("dtype_name", ["int64", "float64"])
+def test_native_loader_rejects_unsupported_embedding_weight_dtype(
+    tmp_path: Path, dtype_name: str
+) -> None:
+    torch = pytest.importorskip("torch")
+    safetensors_torch = pytest.importorskip("safetensors.torch")
+    from axiom.core.native_engine import NativeEngineError, NativeLlamaRuntime
+
+    root = tmp_path / "trusted"
+    model_dir = root / "invalid-embedding-dtype"
+    model_dir.mkdir(parents=True)
+    (model_dir / "config.json").write_text(json.dumps(_config()), encoding="utf-8")
+    (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+    weights = _tiny_weights(torch)
+    weights["model.embed_tokens.weight"] = weights["model.embed_tokens.weight"].to(
+        dtype=getattr(torch, dtype_name)
+    )
+    safetensors_torch.save_file(
+        {name: tensor.detach().cpu().contiguous() for name, tensor in weights.items()},
+        str(model_dir / "model.safetensors"),
+    )
+
+    with pytest.raises(NativeEngineError, match="Unsupported embedding weight dtype"):
+        NativeLlamaRuntime.from_directory(
+            model_dir, torch, torch.device("cpu"), trusted_roots=(root.resolve(),)
+        )
 
 
 def test_native_loader_explicit_fp16_precision_casts_model_weights(tmp_path: Path) -> None:
