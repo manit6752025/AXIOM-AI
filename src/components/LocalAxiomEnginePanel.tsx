@@ -274,7 +274,7 @@ export default function LocalAxiomEnginePanel() {
         {status?.loaded && <button type="button" className="button secondary-button" onClick={() => void unload()} disabled={loading || running || unloading}><Unplug size={14} /> {unloading ? "Unloading…" : "Unload model"}</button>}
       </div>
     </div>
-    <p>AXIOM Native Engine implements its own PyTorch Llama/Mistral/Qwen2 forward pass and also supports Qwen3 with query/key RMS normalization. The native path provides KV-cache decode, attention, sampling and supported LoRA application. It supports model-aware memory selection, in-RAM layer streaming, and disk-resident safetensors layer loading with a CPU KV cache. Model Studio can pull compatible public Hugging Face safetensors checkpoints directly into AXIOM. GGUF/EXL2/GPTQ/AWQ loading, multimodal architectures, and vLLM-style continuous-batching serving are not yet native capabilities.</p>
+    <p>AXIOM Native Engine implements its own PyTorch Llama/Mistral/Qwen2/Qwen3 forward pass, KV-cache decode, attention, sampling, and supported LoRA application. It loads floating-point safetensors checkpoints and can ingest a single-file dense Llama/Mistral/Qwen2/Qwen3 GGUF checkpoint through gguf-py, dequantizing GGUF tensors to floating-point for AXIOM's own runtime. That means GGUF source quantization does not provide low-bit execution or low-bit memory usage. Model Studio can pull compatible public Hugging Face safetensors checkpoints directly into AXIOM. Split GGUF files, EXL2/GPTQ/AWQ low-bit kernels, multimodal architectures, and vLLM-style continuous-batching serving remain unsupported.</p>
     <div className="status-strip" aria-label="AXIOM Engine status">
       <div className="status-strip-item">
         <span className={`status-pill ${status?.ready ? "success" : "warning"}`}><i />{loading ? "CHECKING" : status?.ready ? "ENGINE READY" : "SETUP REQUIRED"}</span>
@@ -316,7 +316,7 @@ export default function LocalAxiomEnginePanel() {
       <label className="field">
         <span className="field-label-row"><span>Local Llama / Mistral model directory</span></span>
         <input value={modelPath} onChange={(event) => { setModelPath(event.target.value); if (event.target.value !== selectedModelPath) setSelectedModelPath(""); setAdapterCompatibility(null); }} required maxLength={4096} placeholder="/home/user/models/my-llama-model" autoComplete="off" />
-        <small>Existing directory with config.json, tokenizer.json and model.safetensors (or the safetensors shard index). GGUF, quantized formats and pickle .bin weights are not supported by this native path. Paths must match a directory discovered under a trusted root; set AXIOM_MODEL_ROOTS for additional locations.</small>
+        <small>Existing directory with config.json, tokenizer.json and model.safetensors (or its shard index), or a directory containing one supported GGUF file. GGUF tensors are dequantized to floating-point; source Q4/Q5/Q8 quantization does not mean low-bit execution or memory usage. Split GGUF files, EXL2/GPTQ/AWQ kernels and pickle .bin weights are not supported. Paths must match a directory discovered under a trusted root; set AXIOM_MODEL_ROOTS for additional locations.</small>
       </label>
       <label className="field">
         <span className="field-label-row"><span>Discovered LoRA adapter (optional)</span><span>{assets?.adapters.length ?? 0} found</span></span>
@@ -377,7 +377,7 @@ export default function LocalAxiomEnginePanel() {
           <option value="layer_streaming">Layer streaming + CPU KV cache · lower VRAM, slower</option>
           <option value="disk_streaming">Disk-resident layer streaming + CPU KV cache · lowest RAM/VRAM, slowest</option>
         </select>
-        <small>Auto-fit estimates checkpoint weight bytes, KV-cache and workspace demand for the configured context, and observed free VRAM/system RAM to select full weights, in-RAM layer streaming, or disk-resident layer streaming. Estimates are advisory, not a guarantee against device OOM. Layer streaming keeps all transformer weights in system RAM and stages one layer at a time; disk streaming reads layers from the local safetensors shards on demand. Both streaming modes keep the KV cache in system RAM and trade throughput for lower RAM/VRAM weight residency. Embeddings, output projection, LoRA adapter tensors, activations, and the active layer still need memory.</small>
+        <small>Auto-fit estimates checkpoint weight bytes, KV-cache and workspace demand for the configured context, and observed free VRAM/system RAM to select full weights, in-RAM layer streaming, or disk-resident layer streaming. Estimates are advisory, not a guarantee against device OOM. Layer streaming keeps all transformer weights in system RAM and stages one layer at a time; disk streaming reads layers from local safetensors shards or dequantizes local GGUF layer tensors on demand. Both streaming modes keep the KV cache in system RAM and trade throughput for lower RAM/VRAM weight residency. Embeddings, output projection, LoRA adapter tensors, activations, and the active layer still need memory.</small>
       </label>
       <label className="field">
         <span className="field-label-row"><span>AXIOM Native Engine prompt</span><span>{prompt.length.toLocaleString()} / 12,000 characters</span></span>

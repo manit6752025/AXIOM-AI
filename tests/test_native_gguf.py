@@ -146,7 +146,7 @@ def test_native_gguf_quantized_source_dequantizes_layers_on_demand(tmp_path: Pat
     model_dir = root / "quantized-gguf"
     _write_gguf(model_dir, torch, quantized=True, hidden=64, intermediate=64)
     runtime, _tokenizer, details = load_native_runtime(
-        model_dir, torch, torch.device("cpu"), trusted_roots=(root.resolve()),
+        model_dir, torch, torch.device("cpu"), trusted_roots=(root.resolve(),),
         memory_mode="disk_streaming", precision="fp32",
     )
     layer_weight = "model.layers.0.self_attn.q_proj.weight"

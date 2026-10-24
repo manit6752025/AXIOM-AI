@@ -312,6 +312,19 @@ def runtime_status() -> dict[str, Any]:
             problems.append(f"{name} is not installed")
         elif versions[name] is not None and _version_key(versions[name]) < _version_key(minimum_versions[name]):
             problems.append(f"{name} {versions[name]} is too old (need >= {minimum_versions[name]})")
+    # GGUF stays optional: environments without gguf-py can still use
+    # safetensors checkpoints. GGUF is dequantized into floating-point compute
+    # tensors when enabled; source quantization does not provide low-bit kernels.
+    for name in ("gguf", "numpy"):
+        try:
+            packages[name] = importlib.util.find_spec(name) is not None
+        except (ImportError, ModuleNotFoundError, ValueError):
+            packages[name] = False
+        try:
+            versions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            versions[name] = None
+
     devices = _device_capability_rows()
     if packages["torch"] and not any(item["available"] for item in devices):
         problems.append("PyTorch is installed but no supported execution device could be initialized")
@@ -334,25 +347,34 @@ def runtime_status() -> dict[str, Any]:
         "loaded_precision": _LOADED_RUNTIME["details"].get("precision") if _LOADED_RUNTIME is not None else None,
         "devices": devices,
         "recommended_device": recommended_device,
-        "model_loading": "local_safetensors_only",
+        "model_loading": "local_safetensors_and_gguf_if_available",
         "execution_backend": "pytorch-native-axiom",
         "transformers_generation_used": False,
         "ollama_used": False,
         "remote_code": False,
         "supported_model_types": ["llama", "mistral", "qwen2", "qwen3"],
-        "supported_weights": ["safetensors"],
+        "supported_weights": (
+            ["safetensors", "gguf-dequantized-float"]
+            if packages["gguf"] and packages["numpy"] else
+            ["safetensors"]
+        ),
         "setup_note": (
-            "AXIOM Native Engine is ready for supported local Llama/Mistral/Qwen2/Qwen3 safetensors checkpoints."
+            "AXIOM Native Engine is ready for local Llama/Mistral/Qwen2/Qwen3 safetensors checkpoints"
+            + (
+                " and single-file GGUF checkpoints (dequantized to floating-point; no low-bit kernels)."
+                if packages["gguf"] and packages["numpy"] else "."
+            )
             if ready else
             "AXIOM Native Engine setup required: " + "; ".join(problems)
             + ". Install with: python -m pip install -e '.[native-inference]'"
         ),
         "scope_note": (
             "AXIOM implements its own Llama/Mistral/Qwen2/Qwen3 forward pass, RMSNorm, RoPE, grouped-query attention, KV cache, "
-            "LoRA application and token-by-token decoder using PyTorch tensor operations. It supports full-weight, "
-            "CPU-staged layer streaming, and disk-resident safetensors layer streaming with CPU KV-cache offload. It does not call "
-            "Transformers model.generate or an Ollama server. Model Studio can pull compatible public checkpoints; quantized "
-            "checkpoint formats, additional architectures, and training remain separate capabilities."
+            "LoRA application and token-by-token decoder using PyTorch tensor operations. It supports full-weight, CPU-staged "
+            "layer streaming and disk-resident layer streaming with CPU KV-cache offload. GGUF files are dequantized to the chosen "
+            "floating-point compute dtype; this is not low-bit inference and can use much more memory than the source quantized file. "
+            "Single-file GGUF is supported when gguf-py and NumPy are installed; split GGUF, EXL2/GPTQ/AWQ kernels, additional "
+            "architectures and training remain unsupported. It does not call Transformers model.generate or an Ollama server."
         ),
         "checked_at": datetime.now(UTC).isoformat(),
     }

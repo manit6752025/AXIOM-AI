@@ -25,13 +25,13 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
     connectors: [],
   } }));
   await page.route("**/api/engine/status", (route) => route.fulfill({ json: {
-    engine: "axiom-native-pytorch-llama", ready: true, packages: { torch: true, tokenizers: true, safetensors: true },
-    versions: { torch: "2.9.0", tokenizers: "0.22.0", safetensors: "0.6.0" },
+    engine: "axiom-native-pytorch-llama", ready: true, packages: { torch: true, tokenizers: true, safetensors: true, gguf: true, numpy: true },
+    versions: { torch: "2.9.0", tokenizers: "0.22.0", safetensors: "0.6.0", gguf: "0.19.0", numpy: "2.4.6" },
     minimum_versions: { torch: "2.2.0", tokenizers: "0.19.0", safetensors: "0.4.0" },
     problems: [], execution_backend: "pytorch-native-axiom", transformers_generation_used: false, ollama_used: false,
-    supported_model_types: ["llama", "mistral"], supported_weights: ["safetensors"],
-    loaded: engineLoaded, architecture: engineLoaded ? "LlamaForCausalLM" : null, model_loading: "local_safetensors_only", remote_code: false,
-    setup_note: "AXIOM Native Engine is ready for supported local Llama/Mistral safetensors checkpoints.",
+    supported_model_types: ["llama", "mistral", "qwen2", "qwen3"], supported_weights: ["safetensors", "gguf-dequantized-float"],
+    loaded: engineLoaded, architecture: engineLoaded ? "LlamaForCausalLM" : null, model_loading: "local_safetensors_and_gguf_if_available", remote_code: false,
+    setup_note: "AXIOM Native Engine is ready for supported local Llama/Mistral safetensors and single-file GGUF checkpoints (GGUF dequantizes to floating-point; no low-bit kernels).",
     scope_note: "AXIOM-owned Llama/Mistral forward pass and autoregressive KV-cache decoder.", checked_at: "2026-10-22T00:00:00Z",
   } }));
   await page.route("**/api/engine/adapters/compatibility", (route) => route.fulfill({ json: {
@@ -130,6 +130,8 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(engine.getByRole("heading", { name: "AXIOM Local Engine" })).toBeVisible();
   await expect(engine).toContainText("own PyTorch Llama/Mistral/Qwen2 forward pass");
   await expect(engine).toContainText("safetensors");
+  await expect(engine).toContainText("GGUF");
+  await expect(engine).toContainText("dequantized to floating-point");
   await expect(engine.getByText("ENGINE READY")).toBeVisible();
 
   await engine.getByLabel("Select discovered native model").selectOption("/models/llama-test");
