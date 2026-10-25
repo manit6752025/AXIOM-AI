@@ -95,6 +95,25 @@ class EngineFabricError(RuntimeError):
     """A selected local backend cannot satisfy a bounded engine-fabric request."""
 
 
+def _public_failure_reason(exc: Exception) -> str:
+    text = str(exc).lower()
+    if "authentication" in text:
+        return "Local runtime requires authentication; AXIOM did not send credentials."
+    if "expected api route" in text:
+        return "Local runtime did not expose the expected API route or model."
+    if "invalid model inventory" in text:
+        return "Local runtime returned an invalid model inventory."
+    if "not responding" in text:
+        return "Local runtime is not responding on its configured loopback endpoint."
+    if "safety limit" in text:
+        return "Local runtime response exceeded the 2 MB safety limit."
+    if "invalid json" in text or "unexpected response shape" in text or "without a text response" in text:
+        return "Local runtime returned an unusable response."
+    if "http" in text:
+        return "Local runtime returned an HTTP error."
+    return "The backend could not complete this request."
+
+
 def _package_present(package: str | None) -> bool:
     if not package:
         return False
@@ -242,9 +261,9 @@ def _probe_backend(definition: dict[str, Any]) -> dict[str, Any]:
         models = []
         reachable = "authentication" in str(exc).lower()
         if reachable:
-            status, error = "auth_required", str(exc)
+            status, error = "auth_required", _public_failure_reason(exc)
         elif "expected api route" in str(exc).lower() or "invalid model inventory" in str(exc).lower():
-            status, error = "incompatible", str(exc)
+            status, error = "incompatible", _public_failure_reason(exc)
         else:
             status = "offline"
             error = "No compatible local API responded at the configured loopback endpoint."
@@ -500,8 +519,8 @@ def run_engine_backend_chat(
                 seed=seed,
                 stop_sequences=stops,
             )
-        except (ValueError, llm_client.LLMClientError) as exc:
-            raise EngineFabricError(str(exc)) from None
+        except (ValueError, llm_client.LLMClientError):
+            raise EngineFabricError("AXIOM Native Engine could not complete this request.") from None
         elapsed_ms = max(0.0, (time.perf_counter() - started) * 1000.0)
         return {
             "schema_version": _SCHEMA_VERSION,
@@ -683,7 +702,7 @@ def run_engine_fabric_chat(
                 "backend_id": backend_id,
                 "backend_name": backend_name,
                 "outcome": "failed",
-                "reason": str(exc),
+                "reason": _public_failure_reason(exc),
             })
             continue
         attempts.append({"backend_id": backend_id, "backend_name": backend_name, "outcome": "selected"})
