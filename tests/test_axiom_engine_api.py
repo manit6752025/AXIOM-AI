@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from threading import Event
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -96,7 +97,7 @@ def test_native_batch_generate_endpoint_dispatches_to_axiom_batch_runner(monkeyp
     })
     assert response.status_code == 200, response.text
     assert response.json() == expected
-    assert observed == {
+    assert {key: value for key, value in observed.items() if key != "cancel_event"} == {
         "model_path": "/trusted/models/tiny",
         "prompts": ["first", "second"],
         "adapter_path": None,
@@ -112,6 +113,7 @@ def test_native_batch_generate_endpoint_dispatches_to_axiom_batch_runner(monkeyp
         "memory_mode": "layer_streaming",
         "precision": "bf16",
     }
+    assert isinstance(observed["cancel_event"], Event)
 
 
 def test_engine_request_rejects_absolute_path_outside_configured_roots(tmp_path, monkeypatch) -> None:

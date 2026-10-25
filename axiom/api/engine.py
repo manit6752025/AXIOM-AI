@@ -275,25 +275,48 @@ def engine_generate(request: GenerateRequest) -> dict[str, Any]:
 
 
 @router.post("/generate/batch")
-def engine_generate_batch(request: BatchGenerateRequest) -> dict[str, Any]:
-    """Run bounded prompt microbatches through AXIOM's own native decoder."""
+async def engine_generate_batch(
+    request: BatchGenerateRequest,
+    raw_request: Request,
+) -> dict[str, Any]:
+    """Run native batch inference with client-disconnect cancellation."""
+    cancel_event = Event()
+    worker = asyncio.create_task(asyncio.to_thread(
+        generate_local_batch,
+        request.model_path,
+        request.prompts,
+        adapter_path=request.adapter_path,
+        max_new_tokens=request.max_new_tokens,
+        temperature=request.temperature,
+        top_p=request.top_p,
+        top_k=request.top_k,
+        min_p=request.min_p,
+        repetition_penalty=request.repetition_penalty,
+        seed=request.seed,
+        stop_sequences=request.stop_sequences,
+        device_preference=request.device,
+        memory_mode=request.memory_mode,
+        precision=request.precision,
+        cancel_event=cancel_event,
+    ))
+    while not worker.done():
+        if await raw_request.is_disconnected():
+            cancel_event.set()
+            # The model loop observes this event at decode boundaries. Do not
+            # block the server response on a checkpoint still loading; consume
+            # a later exception if the worker finishes after the client leaves.
+            def consume_background_result(task: asyncio.Task[Any]) -> None:
+                if not task.cancelled():
+                    try:
+                        task.exception()
+                    except Exception:
+                        pass
+            worker.add_done_callback(consume_background_result)
+            raise HTTPException(status_code=499, detail="Batch generation cancelled because the client disconnected.")
+        await asyncio.sleep(0.05)
+
     try:
-        return generate_local_batch(
-            request.model_path,
-            request.prompts,
-            adapter_path=request.adapter_path,
-            max_new_tokens=request.max_new_tokens,
-            temperature=request.temperature,
-            top_p=request.top_p,
-            top_k=request.top_k,
-            min_p=request.min_p,
-            repetition_penalty=request.repetition_penalty,
-            seed=request.seed,
-            stop_sequences=request.stop_sequences,
-            device_preference=request.device,
-            memory_mode=request.memory_mode,
-            precision=request.precision,
-        )
+        return await worker
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     except AxiomEngineError as exc:
