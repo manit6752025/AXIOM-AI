@@ -116,7 +116,15 @@ jobs:
           release_workflow_path = Path(".github/workflows/release-assets.yml")
           release_workflow = release_workflow_path.read_text(encoding="utf-8")
           release_workflow, count = re.subn(
-              r'(?m)^([ \\t]*default:[ \\t]*)["\']v\\d+\\.\\d+\\.\\d+(?:-(?:beta|b)\\.\\d+)?["\'][ \\t]*
+              r'(?m)^( *default: *)"v[0-9]+[.][0-9]+[.][0-9]+(?:-(?:beta|b)[.][0-9]+)?" *$',
+              lambda m: m.group(1) + f'"v{version}"',
+              release_workflow,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("Could not update workflow_dispatch tag default in release-assets.yml")
+          release_workflow_path.write_text(release_workflow, encoding="utf-8")
+
           if readme_path.exists():
               readme = readme_path.read_text(encoding="utf-8")
               readme, count = re.subn(
@@ -129,7 +137,7 @@ jobs:
           PYVERSION
           )"
           echo "package_tag=v${VERSION}" >> "$GITHUB_OUTPUT"
-          git add pyproject.toml axiom/version.py README.md
+          git add pyproject.toml axiom/version.py README.md .github/workflows/release-assets.yml
           git commit -m "chore: prepare verified weekly build v${VERSION}"
 
       - name: Record integration commit
