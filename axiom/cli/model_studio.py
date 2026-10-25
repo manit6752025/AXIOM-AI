@@ -95,7 +95,7 @@ def install_gguf(
             register_ollama,
             on_log=(lambda msg: console.print(msg)) if not json_output else None,
             on_progress=(lambda current, total: console.print(
-                f"\\rDownloaded {current:,}" + (f" / {total:,} bytes" if total else " bytes"),
+                f"\rDownloaded {current:,}" + (f" / {total:,} bytes" if total else " bytes"),
                 end="",
             )) if not json_output else None,
             install_native=native,
@@ -106,10 +106,10 @@ def install_gguf(
         console.print_json(json.dumps(result, ensure_ascii=False))
         return
     if native:
-        console.print("\\n[green]Installed for AXIOM Native Engine:[/green] " + result["path"])
+        console.print("\n[green]Installed for AXIOM Native Engine:[/green] " + result["path"])
         console.print("Run: axiom engine run --model-path " + repr(result["path"]) + ' --prompt "Hello."')
     else:
-        console.print("\\n[green]GGUF saved:[/green] " + result["path"])
+        console.print("\n[green]GGUF saved:[/green] " + result["path"])
         if result.get("registered_with_ollama"):
             console.print(f"[green]Ready for local inference:[/green] {result['model_name']}")
 
