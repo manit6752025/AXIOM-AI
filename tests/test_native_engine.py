@@ -694,8 +694,11 @@ def test_native_generate_batch_handles_eos_and_validates_prompts(monkeypatch) ->
 
     config = NativeLlamaConfig.from_mapping(_config())
     runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
-    with pytest.raises(NativeEngineError, match="equal-length prompts"):
-        runtime.generate_batch([[1, 2], [3]], max_new_tokens=1, temperature=0)
+    variable_length_outputs = runtime.generate_batch(
+        [[1, 2], [3]], max_new_tokens=1, temperature=0, eos_token_ids=()
+    )
+    assert len(variable_length_outputs) == 2
+    assert runtime.last_batch_generation["batch_groups"] == 2
     with pytest.raises(NativeEngineError, match="inside the checkpoint vocabulary"):
         runtime.generate_batch([[1], [config.vocab_size]], max_new_tokens=1, temperature=0)
 
