@@ -1848,11 +1848,12 @@ def generate_local_batch(
     memory_mode: str = "auto",
     precision: str = "auto",
     cancel_event: threading.Event | None = None,
+    chat_messages: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Generate a bounded prompt batch with one AXIOM-owned runtime.
 
-    Prompts are formatted and tokenized individually, then the native runtime
-    batches by prompt length without injecting padding tokens into attention.
+    Prompts may be independent text items or multiple choices for one chat
+    context. The native runtime buckets by token length without padding.
     """
     if not isinstance(prompts, list) or not prompts:
         raise ValueError("Batch generation requires at least one prompt.")
@@ -1864,7 +1865,31 @@ def generate_local_batch(
         valid_prompt, _token_limit, _temperature = validate_generation(item, max_new_tokens, temperature)
         combined_chars += len(valid_prompt)
         normalized_prompts.append(valid_prompt)
-    if combined_chars > _MAX_CHAT_CHARS:
+
+    normalized_chat_messages: list[dict[str, str]] | None = None
+    if chat_messages is not None:
+        if not isinstance(chat_messages, list) or not 1 <= len(chat_messages) <= 128:
+            raise ValueError("Chat messages must contain between 1 and 128 entries.")
+        normalized_chat_messages = []
+        total_message_chars = 0
+        valid_roles = {"system", "user", "assistant"}
+        for item in chat_messages:
+            if (
+                not isinstance(item, dict)
+                or item.get("role") not in valid_roles
+                or not isinstance(item.get("content"), str)
+            ):
+                raise ValueError("Native chat messages support only system, user, and assistant roles with string content.")
+            role, content = item["role"], item["content"]
+            if not content.strip() or len(content) > _MAX_PROMPT_CHARS:
+                raise ValueError("Each chat message must contain non-blank text within the prompt limit.")
+            total_message_chars += len(content)
+            if total_message_chars > _MAX_CHAT_CHARS:
+                raise ValueError(f"Combined chat messages exceed the {_MAX_CHAT_CHARS:,}-character limit.")
+            normalized_chat_messages.append({"role": role, "content": content})
+        if not any(item["role"] == "user" for item in normalized_chat_messages):
+            raise ValueError("Native chat requests must contain at least one user message.")
+    elif combined_chars > _MAX_CHAT_CHARS:
         raise ValueError(f"Combined batch prompts exceed the {_MAX_CHAT_CHARS:,}-character limit.")
     top_p, top_k, repetition_penalty, seed = validate_sampling_parameters(
         top_p, top_k, repetition_penalty, seed
@@ -1895,30 +1920,71 @@ def generate_local_batch(
         model_dir = Path(details.get("model_directory_path", model_path))
 
         for prompt in normalized_prompts:
-            formatted, prompt_format = _format_prompt_for_native_model(
-                prompt, model_dir, details["model_type"], tokenizer
-            )
-            try:
-                ids = list(tokenizer.encode(formatted, add_special_tokens=False).ids)
-            except Exception:
-                raise ValueError("A batch prompt could not be tokenized by the local tokenizer.") from None
-            if details.get("add_bos_token") and bos_id is not None and (not ids or ids[0] != bos_id):
-                ids.insert(0, bos_id)
-            if not ids:
-                raise ValueError("Batch prompt tokenization returned no tokens.")
+            active_messages = list(normalized_chat_messages) if normalized_chat_messages is not None else None
+
+            def encode_context(messages: list[dict[str, str]] | None) -> tuple[list[int], str]:
+                formatted, source = _format_prompt_for_native_model(
+                    prompt,
+                    model_dir,
+                    details["model_type"],
+                    tokenizer,
+                    chat_messages=messages,
+                )
+                try:
+                    ids = list(tokenizer.encode(formatted, add_special_tokens=False).ids)
+                except Exception:
+                    raise ValueError("A batch prompt could not be tokenized by the local tokenizer.") from None
+                if details.get("add_bos_token") and bos_id is not None and (not ids or ids[0] != bos_id):
+                    ids.insert(0, bos_id)
+                if not ids:
+                    raise ValueError("Batch prompt tokenization returned no tokens.")
+                return ids, source
+
+            ids, prompt_format = encode_context(active_messages)
             before = len(ids)
-            truncated = before > input_limit
-            if truncated:
+            messages_dropped = 0
+            # Match single-chat context management: preserve system instructions
+            # and the newest user request by dropping the oldest non-system turn
+            # before cutting tokens from a still-oversized template.
+            while active_messages is not None and len(ids) > input_limit:
+                latest_user_index = max(
+                    (index for index, message in enumerate(active_messages) if message["role"] == "user"),
+                    default=-1,
+                )
+                drop_index = next(
+                    (
+                        index for index, message in enumerate(active_messages)
+                        if message["role"] != "system" and index != latest_user_index
+                    ),
+                    -1,
+                )
+                if drop_index < 0:
+                    break
+                del active_messages[drop_index]
+                messages_dropped += 1
+                ids, prompt_format = encode_context(active_messages)
+
+            tail_truncated = len(ids) > input_limit
+            truncated = messages_dropped > 0 or tail_truncated
+            if tail_truncated:
                 ids = ids[-input_limit:]
                 if details.get("add_bos_token") and bos_id is not None and ids:
                     ids[0] = bos_id
             prompt_ids_batch.append(ids)
             prompt_formats.append(prompt_format)
-            context_rows.append({
+            context_row = {
                 "prompt_tokens_before_truncation": before,
                 "prompt_tokens_used": len(ids),
                 "token_truncation_applied": truncated,
-            })
+            }
+            if normalized_chat_messages is not None:
+                context_row["messages_dropped_to_fit_context"] = messages_dropped
+                context_row["system_prompt_may_be_truncated"] = (
+                    tail_truncated and any(
+                        message["role"] == "system" for message in normalized_chat_messages
+                    )
+                )
+            context_rows.append(context_row)
         effective_max_new_tokens = min(
             effective_max_new_tokens,
             max(1, min(model.config.max_position_embeddings - len(ids) for ids in prompt_ids_batch)),
