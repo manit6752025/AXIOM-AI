@@ -3,7 +3,7 @@
 ![AXIOM. Know what fits before you train.](docs/assets/banner.svg)
 
 [![Status](https://img.shields.io/badge/status-beta-f59e0b?style=flat-square&labelColor=0f172a)](https://github.com/manit6752025/AXIOM-AI)
-[![Version](https://img.shields.io/badge/version-v0.3.0--beta.5-f59e0b?style=flat-square&labelColor=0f172a)](https://github.com/manit6752025/AXIOM-AI/releases)
+[![Version](https://img.shields.io/badge/version-v0.3.0--beta.6-f59e0b?style=flat-square&labelColor=0f172a)](https://github.com/manit6752025/AXIOM-AI/releases)
 [![License](https://img.shields.io/badge/license-MIT-7c3aed?style=flat-square&labelColor=0f172a)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&labelColor=0f172a&logo=python&logoColor=white)](https://www.python.org/)
 [![Local first](https://img.shields.io/badge/local--first-yes-22c55e?style=flat-square&labelColor=0f172a)](#privacy-and-safety)

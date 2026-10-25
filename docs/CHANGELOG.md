@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0-beta.5 — Beta candidate
+## 0.3.0-beta.6 — Beta candidate
 
 ### Added and improved
 - Added workspace diagnostics and privacy-minimized support bundles through the CLI, API, and Control Center.
@@ -10,7 +10,7 @@
 - Continued hardening native inference controls, cancellation, runtime metrics, and CLI/API/GUI diagnostics.
 
 ### Release status
-- Source metadata is aligned to 0.3.0-beta.5. This entry describes the intended candidate scope, not proof that every feature or platform has passed validation.
+- Source metadata is aligned to 0.3.0-beta.6. This entry describes the intended candidate scope, not proof that every feature or platform has passed validation.
 - Publish only after the release workflow, platform installer smoke tests, interactive GUI checks, full test suite, and package/tag version checks succeed.
 - The npm package is @netcore-technologies/axiom-cli; its version is tracked separately from the private axiom-ui development package.
 

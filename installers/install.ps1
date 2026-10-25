@@ -38,7 +38,7 @@ try {
         $Tag = [string]$Release.tag_name
     } else {
         if ($Tag -notmatch '^v\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') {
-            Stop-Install "Invalid release tag. Expected a version such as v0.3.0-beta.5."
+            Stop-Install "Invalid release tag. Expected a version such as v0.3.0-beta.6."
         }
         $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/tags/$Tag" -Headers @{ "User-Agent" = "AXIOM-Installer" }
         if ($Release.draft) {
@@ -134,7 +134,7 @@ try {
     } else {
         Write-Host "Open a new PowerShell window, then run: axiom guide"
     }
-    Write-Host "For a pinned beta, download this script and run: .\install.ps1 -Tag v0.3.0-beta.5"
+    Write-Host "For a pinned beta, download this script and run: .\install.ps1 -Tag v0.3.0-beta.6"
 } catch {
     Write-Error $_
     exit 1

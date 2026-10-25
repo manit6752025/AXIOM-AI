@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "axiom-all"
-version = "0.3.0-beta.5"
+version = "0.3.0-beta.6"
 description = "Local-first CLI and daemon for inspecting models, datasets, and hardware-aware AI plans."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -1,13 +1,11 @@
-# Releases
+# AXIOM releases
 
-## v0.3.0-beta.1
+## v0.3.0-beta.6 — Beta candidate
 
-Highlights include the bounded JSONL dataset profiling foundation, workspace
-API foundations and existing model, optimisation, quantization and GUI
-components.
+The source metadata and package/installer examples target `v0.3.0-beta.6` (B.6). This is a candidate version update, not proof that binaries were built, tested, or published. Check the [GitHub Releases page](https://github.com/NetCore-Technologies/AXIOM-AI/releases) and [release workflow](https://github.com/manit6752025/AXIOM-AI/actions/workflows/release-assets.yml) for actual build status and downloadable assets.
 
-See the full
-[release notes](https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/docs/releases/v0.3.0-beta.1.md).
+See the [B.6 release notes](https://github.com/manit6752025/AXIOM-AI/blob/latest/development/docs/releases/v0.3.0-beta.6.md).
 
-This is a beta release; consult installed command help and release notes for
-known limitations.
+## Earlier releases
+
+For older historical release records, see the [release archive](https://github.com/manit6752025/AXIOM-AI/tree/main/docs/releases).

@@ -1,4 +1,4 @@
-"""Hardware-aware AXIOM Beta.5 optimization planner.
+"""Hardware-aware AXIOM Beta.6 optimization planner.
 
 Plans optimization candidates; measured throughput is only reported after a real benchmark.
 """

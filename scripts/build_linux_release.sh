@@ -12,7 +12,7 @@ APPIMAGE_TOOL="${3:-${APPIMAGE_TOOL:-}}"
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-  echo "release tag must look like v0.3.0-beta.5" >&2
+  echo "release tag must look like v0.3.0-beta.6" >&2
   exit 2
 fi
 

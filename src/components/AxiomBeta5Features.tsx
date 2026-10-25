@@ -81,7 +81,7 @@ export default function AxiomBeta5Features() {
   return (
     <section className="axiom-beta5-grid">
       <article className="axiom-beta5-card">
-        <div className="axiom-beta5-eyebrow">BETA.5 / AI ENGINEERING</div>
+        <div className="axiom-beta5-eyebrow">BETA.6 / AI ENGINEERING</div>
         <h2>Agent Model Optimizer</h2>
         <p>Answer the questionnaire and AXIOM builds a hardware-aware model plan.</p>
 
@@ -113,7 +113,7 @@ export default function AxiomBeta5Features() {
       </article>
 
       <article className="axiom-beta5-card">
-        <div className="axiom-beta5-eyebrow">BETA.5 / MODEL SECURITY</div>
+        <div className="axiom-beta5-eyebrow">BETA.6 / MODEL SECURITY</div>
         <h2>Model Policy Audit</h2>
         <p>Inspect visible model policy and safety indicators without modifying the model.</p>
         <label>Local model path<input value={auditPath} onChange={(e) => setAuditPath(e.target.value)} placeholder="my-model" /></label>

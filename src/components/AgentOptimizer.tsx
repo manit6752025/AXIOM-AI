@@ -81,7 +81,7 @@ export default function AgentOptimizer() {
     <div className="optimizer-page">
       <div className="optimizer-hero">
         <div>
-          <p className="eyebrow">BETA 5 / AGENT MODEL OPTIMIZER</p>
+          <p className="eyebrow">BETA 6 / AGENT MODEL OPTIMIZER</p>
           <h1>Make the model fit the machine.</h1>
           <p>Tell AXIOM what you are building and what performance matters. AXIOM inspects the model and hardware, selects an appropriate optimization path, and leaves throughput unverified until a real benchmark runs.</p>
         </div>
