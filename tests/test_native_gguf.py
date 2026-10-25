@@ -40,7 +40,10 @@ def _name_map():
     }
 
 
-def _write_gguf(model_dir: Path, torch, *, quantized=False, embedded_hf_json=True, hidden=8, intermediate=12):
+def _write_gguf(
+    model_dir: Path, torch, *, quantized=False, embedded_hf_json=True,
+    hidden=8, intermediate=12, split_max_tensors=0,
+):
     import gguf
     from gguf.constants import GGMLQuantizationType
     from gguf.quants import quantize
@@ -64,7 +67,7 @@ def _write_gguf(model_dir: Path, torch, *, quantized=False, embedded_hf_json=Tru
             "model.layers.0.mlp.up_proj.weight": torch.randn(intermediate, hidden) * 0.02,
             "model.layers.0.mlp.down_proj.weight": torch.randn(hidden, intermediate) * 0.02,
         }
-    writer = gguf.GGUFWriter(model_dir / "tiny.gguf", "llama")
+    writer = gguf.GGUFWriter(model_dir / "tiny.gguf", "llama", split_max_tensors=split_max_tensors)
     writer.add_context_length(32)
     writer.add_embedding_length(hidden)
     writer.add_feed_forward_length(intermediate)
@@ -118,6 +121,43 @@ def test_native_gguf_loads_and_generates_with_axiom_runtime(tmp_path: Path) -> N
     output = runtime.generate([0, 1], max_new_tokens=2, temperature=0, eos_token_ids=())
     assert len(output) == 2
     assert all(0 <= token_id < runtime.config.vocab_size for token_id in output)
+
+
+def test_native_gguf_split_shards_load_and_generate(tmp_path: Path) -> None:
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("gguf")
+    pytest.importorskip("tokenizers")
+    from axiom.core.native_engine import load_native_runtime
+
+    root = tmp_path / "trusted"
+    model_dir = root / "split-gguf"
+    _write_gguf(model_dir, torch, split_max_tensors=5)
+    shards = sorted(model_dir.glob("*.gguf"))
+    assert len(shards) > 1
+
+    runtime, tokenizer, details = load_native_runtime(
+        model_dir, torch, torch.device("cpu"), trusted_roots=(root.resolve(),), precision="fp32"
+    )
+    assert details["checkpoint_format"] == "gguf"
+    assert details["gguf_shard_count"] == len(shards)
+    assert len(details["gguf_paths"]) == len(shards)
+    assert tokenizer.encode("a").ids == [1]
+    output = runtime.generate([0, 1], max_new_tokens=2, temperature=0, eos_token_ids=())
+    assert len(output) == 2
+
+
+def test_native_gguf_rejects_incomplete_split_shard_set(tmp_path: Path) -> None:
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("gguf")
+    from axiom.core.native_gguf import inspect_gguf_checkpoint
+
+    model_dir = tmp_path / "split-incomplete"
+    _write_gguf(model_dir, torch, split_max_tensors=5)
+    shards = sorted(model_dir.glob("*.gguf"))
+    assert len(shards) > 1
+    shards[-1].unlink()
+    with pytest.raises(ValueError, match="split metadata does not match"):
+        inspect_gguf_checkpoint(model_dir, trusted_roots=(tmp_path.resolve(),))
 
 
 def test_native_gguf_embedded_bpe_tokenizer_preserves_token_ids(tmp_path: Path) -> None:

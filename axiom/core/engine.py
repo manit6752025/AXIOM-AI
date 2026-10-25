@@ -361,7 +361,7 @@ def runtime_status() -> dict[str, Any]:
         "setup_note": (
             "AXIOM Native Engine is ready for local Llama/Mistral/Qwen2/Qwen3 safetensors checkpoints"
             + (
-                " and single-file GGUF checkpoints (dequantized to floating-point; no low-bit kernels)."
+                " and complete single-file or split-shard GGUF checkpoints (dequantized to floating-point; no low-bit kernels)."
                 if packages["gguf"] and packages["numpy"] else "."
             )
             if ready else
@@ -373,7 +373,7 @@ def runtime_status() -> dict[str, Any]:
             "LoRA application and token-by-token decoder using PyTorch tensor operations. It supports full-weight, CPU-staged "
             "layer streaming and disk-resident layer streaming with CPU KV-cache offload. GGUF files are dequantized to the chosen "
             "floating-point compute dtype; this is not low-bit inference and can use much more memory than the source quantized file. "
-            "Single-file GGUF is supported when gguf-py and NumPy are installed; split GGUF, EXL2/GPTQ/AWQ kernels, additional "
+            "Single-file and metadata-validated split-shard GGUF are supported when gguf-py and NumPy are installed; EXL2/GPTQ/AWQ kernels, additional "
             "architectures and training remain unsupported. It does not call Transformers model.generate or an Ollama server."
         ),
         "checked_at": datetime.now(UTC).isoformat(),
@@ -625,13 +625,13 @@ def _trusted_directory_index(
             has_config = "config.json" in filenames
             adapter_config = "adapter_config.json" in filenames
             gguf_names = tuple(name for name in filenames if name.lower().endswith(".gguf"))
-            model_config = has_config or len(gguf_names) == 1
+            model_config = has_config or bool(gguf_names)
             if not model_config and not adapter_config:
                 continue
             marker_names = (
                 (("config.json",) if has_config else ())
                 + (("adapter_config.json",) if adapter_config else ())
-                + (gguf_names if len(gguf_names) == 1 else ())
+                + gguf_names
             )
             # HF cache metadata may be symlinked to blobs. Only accept targets
             # whose canonical path remains below this root.
