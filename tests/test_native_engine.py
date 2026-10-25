@@ -655,6 +655,39 @@ def test_native_generate_batch_buckets_different_prompt_lengths() -> None:
     assert all(len(output) == 2 for output in actual)
 
 
+def test_native_generate_batch_bounds_same_length_microbatches_and_preserves_order(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    prompts = [[(index % (config.vocab_size - 1)) + 1, 2, 3] for index in range(10)]
+    observed_batch_sizes = []
+    original_forward = runtime.forward
+
+    def record_forward(input_ids, *args, **kwargs):
+        observed_batch_sizes.append(int(input_ids.shape[0]))
+        return original_forward(input_ids, *args, **kwargs)
+
+    monkeypatch.setattr(runtime, "forward", record_forward)
+    with torch.inference_mode():
+        actual = runtime.generate_batch(
+            prompts, max_new_tokens=2, temperature=0, eos_token_ids=()
+        )
+    batched_sizes = list(observed_batch_sizes)
+    assert actual == [
+        runtime.generate(prompt, max_new_tokens=2, temperature=0, eos_token_ids=())
+        for prompt in prompts
+    ]
+    assert len(actual) == 10
+    assert batched_sizes
+    assert max(batched_sizes) <= 8
+    assert runtime.last_batch_generation["batch_groups"] == 1
+    assert runtime.last_batch_generation["microbatch_count"] == 2
+    assert runtime.last_batch_generation["microbatch_size_limit"] == 8
+    assert runtime.last_batch_generation["max_microbatch_size"] == 8
+
+
 def test_native_generate_batch_handles_eos_and_validates_prompts(monkeypatch) -> None:
     torch = pytest.importorskip("torch")
     from axiom.core.native_engine import NativeEngineError, NativeLlamaRuntime

@@ -4,8 +4,9 @@ AXIOM implements transformer forward operations, RMSNorm, RoPE, grouped-query
 attention, KV caching, LoRA projection deltas, autoregressive decoding, and
 full/in-RAM/disk-resident weight loading strategies. PyTorch supplies tensor
 kernels; Transformers model.generate and Ollama are not used here. The native
-loader accepts supported architectures with tokenizer.json and floating-point
-safetensors. Unsupported formats/configurations are explicitly rejected.
+loader accepts floating-point safetensors and supported GGUF checkpoints that
+are dequantized to the chosen floating-point compute dtype. Unsupported
+formats/configurations are explicitly rejected.
 """
 from __future__ import annotations
 from contextlib import ExitStack, contextmanager
@@ -18,6 +19,7 @@ _MAX_CONFIG_BYTES = 1_048_576
 _MAX_TOKENIZER_BYTES = 64 * 1024 * 1024
 _MAX_INDEX_BYTES = 64 * 1024 * 1024
 _MAX_WEIGHT_SHARDS = 512
+_MAX_NATIVE_MICROBATCH_SIZE = 8
 _SUPPORTED_MODEL_TYPES = {"llama", "mistral", "qwen2", "qwen3"}
 
 class NativeEngineError(ValueError):
@@ -1546,44 +1548,70 @@ class NativeLlamaRuntime:
         if top_k > self.config.vocab_size:
             raise NativeEngineError("top_k cannot exceed the checkpoint vocabulary size.")
 
-        # Bucket prompts by exact length rather than padding them and accidentally
-        # letting padded positions enter attention or rotary-position calculations.
+        # Bucket prompts by exact length, then cap each device microbatch so a
+        # large group of same-length prompts cannot expand into one huge VRAM
+        # allocation. Output slots preserve the caller's original prompt order.
         length_groups: dict[int, list[tuple[int, list[int]]]] = {}
         for index, prompt in enumerate(prompt_token_ids):
             length_groups.setdefault(len(prompt), []).append((index, prompt))
-        if len(length_groups) > 1:
+        bucketed_microbatches = (
+            len(length_groups) > 1
+            or any(len(entries) > _MAX_NATIVE_MICROBATCH_SIZE for entries in length_groups.values())
+        )
+        if bucketed_microbatches:
             grouped_outputs: list[list[int] | None] = [None] * len(prompt_token_ids)
             grouped_reasons: list[str | None] = [None] * len(prompt_token_ids)
             started = time.perf_counter()
             total_finished = 0
-            for group_index, length in enumerate(sorted(length_groups)):
+            microbatch_index = 0
+            aggregated_memory_stats: dict[str, int] = {}
+            for length in sorted(length_groups):
+                entries = length_groups[length]
+                for offset in range(0, len(entries), _MAX_NATIVE_MICROBATCH_SIZE):
+                    if cancel_event is not None and cancel_event.is_set():
+                        break
+                    chunk = entries[offset:offset + _MAX_NATIVE_MICROBATCH_SIZE]
+                    group_seed = None if seed is None else (seed + microbatch_index) % (2**63)
+                    original_indices = [original_index for original_index, _prompt in chunk]
+                    local_stop_checker = None
+                    if stop_checker is not None:
+                        def local_stop_checker(local_index: int, generated_ids: list[int], indices=original_indices) -> bool:
+                            return stop_checker(indices[local_index], generated_ids)
+                    group_outputs = self.generate_batch(
+                        [prompt for _index, prompt in chunk],
+                        max_new_tokens=max_new_tokens,
+                        temperature=temperature,
+                        top_p=top_p,
+                        top_k=top_k,
+                        min_p=min_p,
+                        repetition_penalty=repetition_penalty,
+                        seed=group_seed,
+                        eos_token_ids=eos_token_ids,
+                        cancel_event=cancel_event,
+                        stop_checker=local_stop_checker,
+                    )
+                    group_metrics = dict(self.last_batch_generation)
+                    group_reasons = group_metrics.get("sequence_stop_reasons", [])
+                    for local_index, ((original_index, _prompt), output) in enumerate(zip(chunk, group_outputs)):
+                        grouped_outputs[original_index] = output
+                        if local_index < len(group_reasons):
+                            grouped_reasons[original_index] = group_reasons[local_index]
+                    total_finished += int(group_metrics.get("finished_sequences", 0))
+                    for name, value in self.memory_stats.items():
+                        if isinstance(value, int) and not isinstance(value, bool):
+                            aggregated_memory_stats[name] = aggregated_memory_stats.get(name, 0) + value
+                    microbatch_index += 1
                 if cancel_event is not None and cancel_event.is_set():
                     break
-                entries = length_groups[length]
-                group_seed = None if seed is None else (seed + group_index) % (2**63)
-                group_outputs = self.generate_batch(
-                    [prompt for _index, prompt in entries],
-                    max_new_tokens=max_new_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    top_k=top_k,
-                    min_p=min_p,
-                    repetition_penalty=repetition_penalty,
-                    seed=group_seed,
-                    eos_token_ids=eos_token_ids,
-                    cancel_event=cancel_event,
-                    stop_checker=stop_checker,
-                )
-                group_reasons = self.last_batch_generation.get("sequence_stop_reasons", [])
-                for local_index, ((original_index, _prompt), output) in enumerate(zip(entries, group_outputs)):
-                    grouped_outputs[original_index] = output
-                    if local_index < len(group_reasons):
-                        grouped_reasons[original_index] = group_reasons[local_index]
-                total_finished += int(self.last_batch_generation.get("finished_sequences", 0))
+
             result = [output if output is not None else [] for output in grouped_outputs]
+            self.memory_stats = aggregated_memory_stats
             summary = {
                 "batch_size": len(prompt_token_ids),
                 "batch_groups": len(length_groups),
+                "microbatch_count": microbatch_index,
+                "microbatch_size_limit": _MAX_NATIVE_MICROBATCH_SIZE,
+                "max_microbatch_size": min(_MAX_NATIVE_MICROBATCH_SIZE, max(len(entries) for entries in length_groups.values())),
                 "prompt_tokens": sum(map(len, prompt_token_ids)),
                 "completion_tokens": sum(map(len, result)),
                 "finished_sequences": total_finished,
@@ -1593,7 +1621,7 @@ class NativeLlamaRuntime:
                 ],
                 "stop_reason": "cancelled" if cancel_event is not None and cancel_event.is_set() else "length_buckets_complete",
                 "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
-                "decoder": "axiom-length-bucketed-autoregressive-kv-cache",
+                "decoder": "axiom-length-bucketed-microbatch-autoregressive-kv-cache",
             }
             self.last_batch_generation = summary
             self.live_generation.update({"stage": "complete", **summary})
