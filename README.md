@@ -627,7 +627,7 @@ The web UI is React, TypeScript, and Vite. The CLI and API are Python, built on 
 
 ## License
 
-AXIOM is available under the [MIT License](LICENSE).
+AXIOM is available under the [MIT License](LICENSE)
 
 <br>
 
