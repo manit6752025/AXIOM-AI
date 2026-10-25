@@ -1243,7 +1243,7 @@ class NativeLlamaRuntime:
                         blocked = blocked | (keys[None, :] <= positions[:, None] - c.sliding_window)
                 attended = self._attention(
                     q, k, v, blocked, is_causal=is_causal
-                ).transpose(1, 2).contiguous().view(1, seq_len, c.hidden_size)
+                ).transpose(1, 2).contiguous().view(batch_size, seq_len, c.hidden_size)
                 hidden = residual + self._linear(attended, p + "self_attn.o_proj")
                 residual = hidden
                 normed = self._rms_norm(hidden, self.weights[p + "post_attention_layernorm.weight"])
