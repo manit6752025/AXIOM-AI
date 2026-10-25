@@ -133,7 +133,7 @@ def test_native_gguf_auto_memory_planning_uses_compute_size_and_reports_format(
 
     root = tmp_path / "trusted"
     model_dir = root / "tiny-gguf-auto"
-    _write_gguf(model_dir, torch, quantized=True)
+    _write_gguf(model_dir, torch, quantized=True, hidden=64, intermediate=64)
     # A stale sidecar must not override the format/config in the GGUF metadata.
     (model_dir / "config.json").write_text(
         '{"model_type":"qwen2","hidden_size":999}',
