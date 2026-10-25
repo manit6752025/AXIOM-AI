@@ -18,6 +18,7 @@ import math
 import os
 import re
 import shutil
+import sys
 import threading
 import time
 from datetime import UTC, datetime
@@ -217,6 +218,35 @@ def _reset_device_peak_memory(torch_module: Any | None, device: Any | None) -> b
         return False
 
 
+def _process_peak_rss_bytes() -> int | None:
+    """Return a process high-water RSS counter when the operating system exposes one.
+
+    Windows exposes peak working-set size through psutil. Unix resource usage
+    is reported in bytes on macOS and KiB on Linux and other supported Unix
+    platforms. Unsupported platforms deliberately return None.
+    """
+    try:
+        import psutil
+
+        info = psutil.Process().memory_info()
+        for attribute in ("peak_wset", "peak_rss", "peak_working_set_size"):
+            value = getattr(info, attribute, None)
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0:
+                return int(value)
+    except Exception:
+        _LOG.debug("Peak process RSS is unavailable through psutil.", exc_info=True)
+
+    try:
+        import resource
+
+        value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0:
+            return int(value) if sys.platform == "darwin" else int(value * 1024)
+    except Exception:
+        _LOG.debug("Peak process RSS is unavailable through resource usage.", exc_info=True)
+    return None
+
+
 def _device_memory_snapshot(
     torch_module: Any | None,
     device: Any | None,
@@ -235,6 +265,8 @@ def _device_memory_snapshot(
         "peak_increment_bytes": None,
         "process_rss_bytes": None,
         "process_rss_delta_bytes": None,
+        "process_peak_rss_bytes": _process_peak_rss_bytes(),
+        "process_peak_rss_delta_bytes": None,
         "peak_reset_supported": False,
         "device_allocator_metrics_supported": False,
     }
@@ -289,6 +321,10 @@ def _device_memory_snapshot(
         pass
     if baseline and isinstance(baseline.get("current_allocated_bytes"), int) and isinstance(result.get("peak_allocated_bytes"), int):
         result["peak_increment_bytes"] = max(0, result["peak_allocated_bytes"] - baseline["current_allocated_bytes"])
+    if baseline and isinstance(baseline.get("process_peak_rss_bytes"), int) and isinstance(result.get("process_peak_rss_bytes"), int):
+        result["process_peak_rss_delta_bytes"] = max(
+            0, result["process_peak_rss_bytes"] - baseline["process_peak_rss_bytes"]
+        )
     if baseline:
         result["peak_reset_supported"] = bool(baseline.get("peak_reset_supported"))
     return result
@@ -396,6 +432,7 @@ def runtime_telemetry() -> dict[str, Any]:
     process: dict[str, Any] = {
         "pid": os.getpid(),
         "rss_bytes": None,
+        "peak_rss_bytes": _process_peak_rss_bytes(),
         "threads": None,
     }
     try:

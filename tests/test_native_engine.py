@@ -1207,6 +1207,43 @@ def test_device_selection_rejects_unavailable_or_invalid_explicit_backend(monkey
         _resolve_execution_device(fake_torch, "network")
 
 
+def test_process_peak_rss_is_reported_in_device_and_system_telemetry(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+    from axiom.core import engine
+
+    peaks = iter((8_192, 12_288, 16_384))
+    monkeypatch.setattr(engine, "_process_peak_rss_bytes", lambda: next(peaks))
+    fake_psutil = SimpleNamespace(
+        Process=lambda: SimpleNamespace(
+            memory_info=lambda: SimpleNamespace(rss=4_096),
+            num_threads=lambda: 1,
+            cpu_percent=lambda interval=None: 0.0,
+        ),
+        cpu_percent=lambda interval=None: 0.0,
+        virtual_memory=lambda: SimpleNamespace(
+            total=64 * 1024**3,
+            available=48 * 1024**3,
+            used=16 * 1024**3,
+            percent=25.0,
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+    monkeypatch.setattr(engine, "_device_capability_rows", lambda _torch=None: [])
+    monkeypatch.setattr(engine, "_LOADED_RUNTIME", None)
+    monkeypatch.setattr(engine, "_LOADED_ARCHITECTURE", None)
+
+    before = engine._device_memory_snapshot(None, None)
+    after = engine._device_memory_snapshot(None, None, baseline=before)
+    assert before["process_peak_rss_bytes"] == 8_192
+    assert after["process_peak_rss_bytes"] == 12_288
+    assert after["process_peak_rss_delta_bytes"] == 4_096
+
+    telemetry = engine.runtime_telemetry()
+    assert telemetry["process"]["peak_rss_bytes"] == 16_384
+    assert telemetry["privacy_scope"]["model_paths_included"] is False
+
+
 def test_auto_device_falls_back_when_accelerator_memory_plan_cannot_fit(monkeypatch, tmp_path: Path) -> None:
     import sys
     from types import SimpleNamespace

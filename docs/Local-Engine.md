@@ -82,7 +82,7 @@ A checkpoint outside this contract is rejected with a compatibility error; the e
 ## API and CLI
 
 - GET /api/engine/status reports native dependency readiness, supported formats, observed execution-device availability, a recommended device, loaded backend and model state.
-- GET /api/engine/telemetry and `axiom engine telemetry --json` return point-in-time CPU, process RSS, system RAM, device allocator and trusted-model-storage snapshots where supported. They omit raw paths, prompts, generated text, environment values and credentials; poll the endpoint for a time series.
+- GET /api/engine/telemetry and `axiom engine telemetry --json` return point-in-time CPU, current and peak process RSS (where the OS exposes a high-water counter), system RAM, device allocator and trusted-model-storage snapshots where supported. They omit raw paths, prompts, generated text, environment values and credentials; poll the endpoint for a time series.
 - POST /api/engine/generate and POST /api/engine/generate/stream run AXIOM-native inference with a local model path, optional LoRA adapter, prompt, generation parameters, optional `device` choice (`auto`, `cpu`, `cuda`, `rocm`, `mps`, `xpu`), `memory_mode` (`auto`, `full`, `layer_streaming`, `disk_streaming`), and `precision` (`auto`, `fp32`, `fp16`, `bf16`). Stream events contain text updates and live inference/memory telemetry.
 - POST /api/engine/unload releases the model cached by the current API process.
 - `axiom engine status`, `axiom engine run`, and `axiom engine pull` use the same native engine.
