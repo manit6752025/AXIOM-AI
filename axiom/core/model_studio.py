@@ -444,7 +444,6 @@ def install_hf_gguf(repo_id: str, filename: str, model_name: str, register_ollam
                 f"Downloaded GGUF into AXIOM's trusted native model root at {target}. "
                 "AXIOM will validate its architecture/tokenizer and dequantize tensors to floating-point when loaded."
             )
-    elif register_ollama:
     if register_ollama:
         _require_loopback_ollama()
         executable = shutil.which("ollama")
