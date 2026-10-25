@@ -83,12 +83,12 @@ test("Model Studio installs GGUF directly into AXIOM Native Engine trusted stora
     }
     return route.fulfill({ json: { jobs: [] }});
   });
-  await page.route(/\\/api\\/models\\/studio\\/search(?:\\?.*)?$/, route => route.fulfill({ json: {
+  await page.route("**/api/models/studio/search**", route => route.fulfill({ json: {
     provider: "huggingface", query: "tiny GGUF", count: 1, note: "metadata",
     results: [{ id: "example/tiny-gguf", author: "example", downloads: 20, likes: 2,
       pipeline_tag: "text-generation", last_modified: "2026-10-20", tags: ["gguf"], url: "https://huggingface.co/example/tiny-gguf" }],
   }}));
-  await page.route(/\\/api\\/models\\/studio\\/files(?:\\?.*)?$/, route => route.fulfill({ json: {
+  await page.route("**/api/models/studio/files**", route => route.fulfill({ json: {
     repo_id: "example/tiny-gguf", count: 1, url: "https://huggingface.co/example/tiny-gguf", note: "file",
     files: [{ filename: "tiny-Q4_K_M.gguf", size_bytes: 1234, quantization: "Q4_K_M" }],
   }}));
