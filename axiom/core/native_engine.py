@@ -1100,7 +1100,7 @@ class NativeLlamaRuntime:
             raise NativeEngineError("Native KV cache must contain one key/value pair per transformer layer.")
 
         head_dim = self.config.hidden_size // self.config.num_attention_heads
-        expected_prefix = (1, self.config.num_key_value_heads)
+        batch_size: int | None = None
         sequence_length: int | None = None
         for layer_index, pair in enumerate(past_key_values):
             if not isinstance(pair, (tuple, list)) or len(pair) != 2:
@@ -1110,8 +1110,14 @@ class NativeLlamaRuntime:
                 raise NativeEngineError("Native KV cache entries must be tensors.")
             if key.ndim != 4 or value.ndim != 4 or tuple(key.shape) != tuple(value.shape):
                 raise NativeEngineError("Native KV cache key/value tensor shapes are inconsistent.")
-            if tuple(key.shape[:2]) != expected_prefix or key.shape[-1] != head_dim:
+            if key.shape[0] < 1 or key.shape[1] != self.config.num_key_value_heads or key.shape[-1] != head_dim:
                 raise NativeEngineError("Native KV cache tensor dimensions do not match the model configuration.")
+            if batch_size is None:
+                batch_size = int(key.shape[0])
+            elif int(key.shape[0]) != batch_size:
+                raise NativeEngineError(
+                    f"Native KV cache batch dimension is inconsistent at layer {layer_index}."
+                )
             if key.dtype != value.dtype or key.device != value.device:
                 raise NativeEngineError("Native KV cache key/value tensor types or devices are inconsistent.")
             if key.dtype != self.dtype:
@@ -1147,8 +1153,12 @@ class NativeLlamaRuntime:
         torch, c = self.torch, self.config
         if not torch.is_tensor(input_ids):
             raise NativeEngineError("Native model input_ids must be a tensor.")
-        if input_ids.ndim != 2 or input_ids.shape[0] != 1:
-            raise NativeEngineError("AXIOM Native Engine currently accepts one prompt sequence per request.")
+        if input_ids.ndim != 2:
+            raise NativeEngineError(
+                "AXIOM Native Engine expects rank-2 input_ids for one prompt sequence or a positive-sized batch."
+            )
+        if input_ids.shape[0] < 1:
+            raise NativeEngineError("Native model input batch must contain at least one prompt sequence.")
         if input_ids.shape[1] < 1:
             raise NativeEngineError("Native model input_ids must contain at least one token.")
         if input_ids.dtype not in (torch.int32, torch.int64):
@@ -1157,6 +1167,8 @@ class NativeLlamaRuntime:
             input_ids = input_ids.to(device=self.device, dtype=torch.long)
         seq_len = input_ids.shape[1]
         stored_past_len = self._cached_sequence_length(past_key_values)
+        if past_key_values is not None and int(input_ids.shape[0]) != int(past_key_values[0][0].shape[0]):
+            raise NativeEngineError("Native input batch size must match the KV cache batch dimension.")
         past_len = stored_past_len if past_sequence_length is None else past_sequence_length
         if (
             isinstance(past_len, bool)
@@ -1179,14 +1191,15 @@ class NativeLlamaRuntime:
                 residual = hidden
                 normed = self._rms_norm(hidden, self.weights[p + "input_layernorm.weight"])
                 q, k, v = (self._linear(normed, p + "self_attn." + name) for name in ("q_proj", "k_proj", "v_proj"))
-                q = q.view(1, seq_len, c.num_attention_heads, head_dim)
-                k = k.view(1, seq_len, c.num_key_value_heads, head_dim)
+                batch_size = int(input_ids.shape[0])
+                q = q.view(batch_size, seq_len, c.num_attention_heads, head_dim)
+                k = k.view(batch_size, seq_len, c.num_key_value_heads, head_dim)
                 if c.qk_norm:
                     q = self._rms_norm(q, self.weights[p + "self_attn.q_norm.weight"])
                     k = self._rms_norm(k, self.weights[p + "self_attn.k_norm.weight"])
                 q = self._apply_rope(q.transpose(1, 2), positions, rope_embeddings)
                 k = self._apply_rope(k.transpose(1, 2), positions, rope_embeddings)
-                v = v.view(1, seq_len, c.num_key_value_heads, head_dim).transpose(1, 2)
+                v = v.view(batch_size, seq_len, c.num_key_value_heads, head_dim).transpose(1, 2)
                 if past_key_values is not None:
                     old_k, old_v = past_key_values[i]
                     if self.memory_mode in {"layer_streaming", "disk_streaming"}:
