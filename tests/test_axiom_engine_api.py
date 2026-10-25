@@ -41,7 +41,7 @@ def test_batch_generate_request_validates_size_prompt_limits_and_sampling(tmp_pa
     model.mkdir(parents=True)
     # This endpoint-schema test still needs a directory discoverable by the
     # trusted-root validator; weights are deliberately not loaded by this test.
-    (model / "config.json").write_text("{}", encoding="utf-8")
+    (model / "config.json").write_text('{"model_type":"llama"}', encoding="utf-8")
     monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(root))
 
     request = engine_api.BatchGenerateRequest(
