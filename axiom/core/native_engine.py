@@ -1243,7 +1243,7 @@ class NativeLlamaRuntime:
                         blocked = blocked | (keys[None, :] <= positions[:, None] - c.sliding_window)
                 attended = self._attention(
                     q, k, v, blocked, is_causal=is_causal
-                ).transpose(1, 2).contiguous().view(1, seq_len, c.hidden_size)
+                ).transpose(1, 2).contiguous().view(batch_size, seq_len, c.hidden_size)
                 hidden = residual + self._linear(attended, p + "self_attn.o_proj")
                 residual = hidden
                 normed = self._rms_norm(hidden, self.weights[p + "post_attention_layernorm.weight"])
@@ -1507,9 +1507,9 @@ class NativeLlamaRuntime:
     ) -> list[list[int]]:
         """Generate a fixed-length prompt microbatch using shared forward passes.
 
-        Prompts must have equal token lengths. Rows that hit EOS finish independently
-        while the remaining rows continue against the shared batched KV cache. This
-        is not a continuous batching scheduler for variable-length or arriving work.
+        Prompts with different lengths are bucketed into exact-length batches to
+        avoid padding-token contamination. Rows that hit EOS finish independently.
+        This is not an asynchronous continuous-batching scheduler.
         """
         if not isinstance(prompt_token_ids, list) or not prompt_token_ids:
             raise NativeEngineError("Native batch generation requires at least one prompt.")
@@ -1517,11 +1517,6 @@ class NativeLlamaRuntime:
             raise NativeEngineError("Native batch generation is limited to 128 prompt sequences per call.")
         if any(not isinstance(prompt, list) or not prompt for prompt in prompt_token_ids):
             raise NativeEngineError("Every native batch prompt must be a non-empty list of token IDs.")
-        prompt_length = len(prompt_token_ids[0])
-        if any(len(prompt) != prompt_length for prompt in prompt_token_ids):
-            raise NativeEngineError(
-                "Native batch generation requires equal-length prompts; padding policy is not inferred."
-            )
         if any(
             isinstance(token_id, bool)
             or not isinstance(token_id, int)
@@ -1533,7 +1528,7 @@ class NativeLlamaRuntime:
             raise NativeEngineError("Native batch prompt token IDs must be integers inside the checkpoint vocabulary.")
         if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens <= 2048:
             raise NativeEngineError("Native generation token limit must be between 1 and 2048.")
-        if prompt_length + max_new_tokens > self.config.max_position_embeddings:
+        if any(len(prompt) + max_new_tokens > self.config.max_position_embeddings for prompt in prompt_token_ids):
             raise NativeEngineError("Batch generation would exceed the checkpoint's configured maximum context length.")
         if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or not math.isfinite(float(temperature)) or not 0 <= float(temperature) <= 2:
             raise NativeEngineError("Native generation temperature must be a finite number between 0 and 2.")
@@ -1550,6 +1545,51 @@ class NativeLlamaRuntime:
         if top_k > self.config.vocab_size:
             raise NativeEngineError("top_k cannot exceed the checkpoint vocabulary size.")
 
+        # Bucket prompts by exact length rather than padding them and accidentally
+        # letting padded positions enter attention or rotary-position calculations.
+        length_groups: dict[int, list[tuple[int, list[int]]]] = {}
+        for index, prompt in enumerate(prompt_token_ids):
+            length_groups.setdefault(len(prompt), []).append((index, prompt))
+        if len(length_groups) > 1:
+            grouped_outputs: list[list[int] | None] = [None] * len(prompt_token_ids)
+            started = time.perf_counter()
+            total_finished = 0
+            for group_index, length in enumerate(sorted(length_groups)):
+                if cancel_event is not None and cancel_event.is_set():
+                    break
+                entries = length_groups[length]
+                group_seed = None if seed is None else (seed + group_index) % (2**63)
+                group_outputs = self.generate_batch(
+                    [prompt for _index, prompt in entries],
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    min_p=min_p,
+                    repetition_penalty=repetition_penalty,
+                    seed=group_seed,
+                    eos_token_ids=eos_token_ids,
+                    cancel_event=cancel_event,
+                )
+                for (original_index, _prompt), output in zip(entries, group_outputs):
+                    grouped_outputs[original_index] = output
+                total_finished += int(self.last_batch_generation.get("finished_sequences", 0))
+            result = [output if output is not None else [] for output in grouped_outputs]
+            summary = {
+                "batch_size": len(prompt_token_ids),
+                "batch_groups": len(length_groups),
+                "prompt_tokens": sum(map(len, prompt_token_ids)),
+                "completion_tokens": sum(map(len, result)),
+                "finished_sequences": total_finished,
+                "stop_reason": "cancelled" if cancel_event is not None and cancel_event.is_set() else "length_buckets_complete",
+                "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
+                "decoder": "axiom-length-bucketed-autoregressive-kv-cache",
+            }
+            self.last_batch_generation = summary
+            self.live_generation.update({"stage": "complete", **summary})
+            return result
+
+        prompt_length = len(prompt_token_ids[0])
         torch = self.torch
         generator = None
         if seed is not None:

@@ -632,6 +632,29 @@ def test_native_generate_batch_matches_serial_greedy_generation() -> None:
     assert runtime.last_batch_generation["batch_size"] == 2
 
 
+def test_native_generate_batch_buckets_different_prompt_lengths() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    prompts = [[1, 2, 3], [3, 2], [2, 3, 1, 1], [3, 2, 1]]
+
+    with torch.inference_mode():
+        actual = runtime.generate_batch(
+            prompts, max_new_tokens=2, temperature=0, eos_token_ids=()
+        )
+        expected = [
+            runtime.generate(prompt, max_new_tokens=2, temperature=0, eos_token_ids=())
+            for prompt in prompts
+        ]
+
+    assert actual == expected
+    assert runtime.last_batch_generation["batch_size"] == len(prompts)
+    assert runtime.last_batch_generation["batch_groups"] == 3
+    assert all(len(output) == 2 for output in actual)
+
+
 def test_native_generate_batch_handles_eos_and_validates_prompts(monkeypatch) -> None:
     torch = pytest.importorskip("torch")
     from axiom.core.native_engine import NativeEngineError, NativeLlamaRuntime
