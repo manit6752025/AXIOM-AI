@@ -1283,7 +1283,57 @@ def _load_local_model(
         "estimates_are_advisory": True,
     }
     if requested_memory_mode == "auto":
-        memory_mode, memory_selection = _choose_memory_mode(base_dir, inspected, torch, device, device_selection, resolved_adapter, precision)
+        try:
+            memory_mode, memory_selection = _choose_memory_mode(
+                base_dir, inspected, torch, device, device_selection, resolved_adapter, precision
+            )
+        except AxiomEngineError as planning_error:
+            # If the accelerator is already estimated not to fit, do not wait
+            # for a real allocation failure before considering CPU. Explicit
+            # device choices remain strict, and malformed/unsupported checkpoints
+            # must not be disguised as a memory fallback.
+            device_type = str(getattr(device, "type", device)).split(":", 1)[0]
+            no_accelerator_fit = (
+                "could not find an estimated strategy that fits this device"
+                in str(planning_error).lower()
+            )
+            if (
+                device_preference.strip().lower() != "auto"
+                or device_type not in {"cuda", "mps", "xpu"}
+                or not no_accelerator_fit
+            ):
+                raise
+            cpu_device = torch.device("cpu")
+            cpu_selection = {
+                "requested": "auto",
+                "selected": "cpu",
+                "reason": (
+                    "The accelerator memory planner found no estimated fitting strategy; "
+                    "AXIOM is checking whether a CPU memory strategy fits."
+                ),
+            }
+            try:
+                memory_mode, memory_selection = _choose_memory_mode(
+                    base_dir, inspected, torch, cpu_device, cpu_selection, resolved_adapter, precision
+                )
+            except AxiomEngineError as cpu_planning_error:
+                raise AxiomEngineError(
+                    f"{planning_error} CPU fallback was also unavailable: {cpu_planning_error}"
+                ) from None
+            device = cpu_device
+            device_selection = {
+                "requested": "auto",
+                "selected": "cpu",
+                "reason": (
+                    "The accelerator memory estimate had no fitting strategy; "
+                    "CPU fallback was selected after its memory planner succeeded."
+                ),
+            }
+            memory_selection = {
+                **memory_selection,
+                "fallback_from": device_type,
+                "fallback_reason": "No estimated accelerator strategy fit; CPU memory planning succeeded.",
+            }
     key = (str(base_dir), str(resolved_adapter) if resolved_adapter else None, str(device), device_preference, memory_mode, requested_memory_mode, precision)
     if _LOADED_RUNTIME is not None and _LOADED_RUNTIME["key"] == key:
         return (
