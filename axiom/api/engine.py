@@ -20,6 +20,7 @@ from axiom.core.engine import (
     discover_local_engine_assets,
     estimate_native_quantization,
     generate_local,
+    generate_local_batch,
     generate_local_stream,
     resolve_local_model_directory,
     runtime_status,
@@ -97,6 +98,59 @@ class GenerateRequest(BaseModel):
         if not value.strip():
             raise ValueError("Prompt must contain at least one non-whitespace character.")
         return value
+
+
+class BatchGenerateRequest(BaseModel):
+    model_path: str = Field(min_length=1, max_length=4096)
+    adapter_path: str | None = Field(default=None, max_length=4096)
+    prompts: list[str] = Field(min_length=1, max_length=128)
+    max_new_tokens: int = Field(default=256, ge=1, le=2048)
+    temperature: float = Field(default=0.7, ge=0, le=2)
+    top_p: float = Field(default=0.9, gt=0, le=1)
+    top_k: int = Field(default=0, ge=0, le=100000)
+    min_p: float = Field(default=0.0, ge=0, le=1)
+    repetition_penalty: float = Field(default=1.0, ge=0.1, le=5)
+    seed: int | None = Field(default=None, ge=0, le=9223372036854775807)
+    stop_sequences: list[str] = Field(default_factory=list, max_length=16)
+    device: str = Field(default="auto", pattern="^(auto|cpu|cuda|rocm|mps|xpu)$")
+    memory_mode: str = Field(default="auto", pattern="^(auto|full|layer_streaming|disk_streaming)$")
+    precision: str = Field(default="auto", pattern="^(auto|fp32|fp16|bf16)$")
+
+    @field_validator("model_path", mode="before")
+    @classmethod
+    def base_model_path_must_be_trusted(cls, value: Any) -> Any:
+        return _validated_path(value, "Base model")
+
+    @field_validator("adapter_path", mode="before")
+    @classmethod
+    def adapter_path_must_be_trusted(cls, value: Any) -> Any:
+        return _validated_path(value, "LoRA adapter")
+
+    @field_validator("prompts")
+    @classmethod
+    def prompts_must_be_nonblank_and_bounded(cls, value: list[str]) -> list[str]:
+        if not value:
+            raise ValueError("Batch generation requires at least one prompt.")
+        if any(not isinstance(prompt, str) or not prompt.strip() for prompt in value):
+            raise ValueError("Every batch prompt must contain non-whitespace text.")
+        if any(len(prompt) > 12000 for prompt in value):
+            raise ValueError("Each batch prompt is limited to 12000 characters.")
+        if sum(len(prompt) for prompt in value) > 24000:
+            raise ValueError("Combined batch prompts exceed the 24000-character limit.")
+        return value
+
+    @field_validator("stop_sequences")
+    @classmethod
+    def stop_sequences_must_be_bounded(cls, value: list[str]) -> list[str]:
+        unique: list[str] = []
+        for sequence in value:
+            if not isinstance(sequence, str) or not sequence or not sequence.strip():
+                raise ValueError("Stop sequences must be non-empty text strings.")
+            if len(sequence) > 256:
+                raise ValueError("Each stop sequence is limited to 256 characters.")
+            if sequence not in unique:
+                unique.append(sequence)
+        return unique
 
 
 class QuantizationEstimateRequest(BaseModel):
@@ -201,6 +255,32 @@ def engine_generate(request: GenerateRequest) -> dict[str, Any]:
         return generate_local(
             request.model_path,
             request.prompt,
+            adapter_path=request.adapter_path,
+            max_new_tokens=request.max_new_tokens,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            top_k=request.top_k,
+            min_p=request.min_p,
+            repetition_penalty=request.repetition_penalty,
+            seed=request.seed,
+            stop_sequences=request.stop_sequences,
+            device_preference=request.device,
+            memory_mode=request.memory_mode,
+            precision=request.precision,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except AxiomEngineError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+@router.post("/generate/batch")
+def engine_generate_batch(request: BatchGenerateRequest) -> dict[str, Any]:
+    """Run bounded prompt microbatches through AXIOM's own native decoder."""
+    try:
+        return generate_local_batch(
+            request.model_path,
+            request.prompts,
             adapter_path=request.adapter_path,
             max_new_tokens=request.max_new_tokens,
             temperature=request.temperature,

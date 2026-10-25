@@ -1504,6 +1504,7 @@ class NativeLlamaRuntime:
         seed: int | None = None,
         eos_token_ids: tuple[int, ...] | None = None,
         cancel_event: threading.Event | None = None,
+        stop_checker: Callable[[int, list[int]], bool] | None = None,
     ) -> list[list[int]]:
         """Generate a fixed-length prompt microbatch using shared forward passes.
 
@@ -1552,6 +1553,7 @@ class NativeLlamaRuntime:
             length_groups.setdefault(len(prompt), []).append((index, prompt))
         if len(length_groups) > 1:
             grouped_outputs: list[list[int] | None] = [None] * len(prompt_token_ids)
+            grouped_reasons: list[str | None] = [None] * len(prompt_token_ids)
             started = time.perf_counter()
             total_finished = 0
             for group_index, length in enumerate(sorted(length_groups)):
@@ -1570,9 +1572,13 @@ class NativeLlamaRuntime:
                     seed=group_seed,
                     eos_token_ids=eos_token_ids,
                     cancel_event=cancel_event,
+                    stop_checker=stop_checker,
                 )
-                for (original_index, _prompt), output in zip(entries, group_outputs):
+                group_reasons = self.last_batch_generation.get("sequence_stop_reasons", [])
+                for local_index, ((original_index, _prompt), output) in enumerate(zip(entries, group_outputs)):
                     grouped_outputs[original_index] = output
+                    if local_index < len(group_reasons):
+                        grouped_reasons[original_index] = group_reasons[local_index]
                 total_finished += int(self.last_batch_generation.get("finished_sequences", 0))
             result = [output if output is not None else [] for output in grouped_outputs]
             summary = {
@@ -1581,6 +1587,10 @@ class NativeLlamaRuntime:
                 "prompt_tokens": sum(map(len, prompt_token_ids)),
                 "completion_tokens": sum(map(len, result)),
                 "finished_sequences": total_finished,
+                "sequence_stop_reasons": [
+                    reason or ("cancelled" if cancel_event is not None and cancel_event.is_set() else "max_new_tokens")
+                    for reason in grouped_reasons
+                ],
                 "stop_reason": "cancelled" if cancel_event is not None and cancel_event.is_set() else "length_buckets_complete",
                 "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
                 "decoder": "axiom-length-bucketed-autoregressive-kv-cache",
@@ -1602,6 +1612,7 @@ class NativeLlamaRuntime:
         eos = set(self.config.eos_token_ids if eos_token_ids is None else eos_token_ids)
         generated: list[list[int]] = [[] for _ in prompt_token_ids]
         finished = [False] * batch_size
+        sequence_stop_reasons = ["max_new_tokens"] * batch_size
         tokens = torch.tensor(prompt_token_ids, device=self.device, dtype=torch.long)
         started = time.perf_counter()
         self.memory_stats = {
@@ -1679,10 +1690,14 @@ class NativeLlamaRuntime:
                             raise NativeEngineError("Native batch decoder produced a token ID outside vocab_size.")
                         if token_id in eos:
                             finished[row] = True
+                            sequence_stop_reasons[row] = "eos_token"
                             next_input.append(token_id)
                         else:
                             generated[row].append(token_id)
                             next_input.append(token_id)
+                            if stop_checker is not None and stop_checker(row, generated[row]):
+                                finished[row] = True
+                                sequence_stop_reasons[row] = "stop_sequence"
                     completed = sum(len(row) for row in generated)
                     self.live_generation.update({
                         "stage": "decode",
@@ -1707,6 +1722,11 @@ class NativeLlamaRuntime:
                 "prompt_tokens": prompt_length * batch_size,
                 "completion_tokens": sum(len(row) for row in generated),
                 "finished_sequences": sum(finished),
+                "sequence_stop_reasons": [
+                    "cancelled" if cancel_event is not None and cancel_event.is_set() and not finished[index]
+                    else sequence_stop_reasons[index]
+                    for index in range(batch_size)
+                ],
                 "stop_reason": stop_reason,
                 "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
                 "decoder": "axiom-batched-autoregressive-kv-cache",

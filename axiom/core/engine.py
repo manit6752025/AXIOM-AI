@@ -1829,3 +1829,192 @@ def generate_local(
     if completed is None:
         raise AxiomEngineError("Native generation ended before a completion event was produced.")
     return completed
+
+
+def generate_local_batch(
+    model_path: str,
+    prompts: list[str],
+    *,
+    adapter_path: str | None = None,
+    max_new_tokens: int = 256,
+    temperature: float = 0.7,
+    top_p: float = 0.9,
+    top_k: int = 0,
+    min_p: float = 0.0,
+    repetition_penalty: float = 1.0,
+    seed: int | None = None,
+    stop_sequences: list[str] | tuple[str, ...] = (),
+    device_preference: str = "auto",
+    memory_mode: str = "auto",
+    precision: str = "auto",
+    cancel_event: threading.Event | None = None,
+) -> dict[str, Any]:
+    """Generate a bounded prompt batch with one AXIOM-owned runtime.
+
+    Prompts are formatted and tokenized individually, then the native runtime
+    batches by prompt length without injecting padding tokens into attention.
+    """
+    if not isinstance(prompts, list) or not prompts:
+        raise ValueError("Batch generation requires at least one prompt.")
+    if len(prompts) > 128:
+        raise ValueError("Batch generation is limited to 128 prompts per request.")
+    normalized_prompts: list[str] = []
+    combined_chars = 0
+    for item in prompts:
+        valid_prompt, _token_limit, _temperature = validate_generation(item, max_new_tokens, temperature)
+        combined_chars += len(valid_prompt)
+        normalized_prompts.append(valid_prompt)
+    if combined_chars > _MAX_CHAT_CHARS:
+        raise ValueError(f"Combined batch prompts exceed the {_MAX_CHAT_CHARS:,}-character limit.")
+    top_p, top_k, repetition_penalty, seed = validate_sampling_parameters(
+        top_p, top_k, repetition_penalty, seed
+    )
+    min_p = validate_min_p(min_p)
+    stop_sequences = validate_stop_sequences(stop_sequences)
+    requested_started = time.perf_counter()
+
+    with _engine_request_lock(cancel_event):
+        model, tokenizer, torch, device, details = _load_local_model(
+            model_path, adapter_path, device_preference, memory_mode, precision
+        )
+        selected_backend = details.get("device_selection", {}).get("selected")
+        device_memory_before = _device_memory_snapshot(
+            torch, device, selected_backend=selected_backend
+        )
+        device_memory_before["peak_reset_supported"] = _reset_device_peak_memory(torch, device)
+        context_cap = max(
+            2,
+            min(model.config.max_position_embeddings, _MAX_INPUT_TOKENS + max_new_tokens),
+        )
+        effective_max_new_tokens = min(max_new_tokens, context_cap - 1)
+        input_limit = max(1, min(_MAX_INPUT_TOKENS, context_cap - effective_max_new_tokens))
+        prompt_ids_batch: list[list[int]] = []
+        prompt_formats: list[str] = []
+        context_rows: list[dict[str, Any]] = []
+        bos_id = model.config.bos_token_id
+        model_dir = Path(details.get("model_directory_path", model_path))
+
+        for prompt in normalized_prompts:
+            formatted, prompt_format = _format_prompt_for_native_model(
+                prompt, model_dir, details["model_type"], tokenizer
+            )
+            try:
+                ids = list(tokenizer.encode(formatted, add_special_tokens=False).ids)
+            except Exception:
+                raise ValueError("A batch prompt could not be tokenized by the local tokenizer.") from None
+            if details.get("add_bos_token") and bos_id is not None and (not ids or ids[0] != bos_id):
+                ids.insert(0, bos_id)
+            if not ids:
+                raise ValueError("Batch prompt tokenization returned no tokens.")
+            before = len(ids)
+            truncated = before > input_limit
+            if truncated:
+                ids = ids[-input_limit:]
+                if details.get("add_bos_token") and bos_id is not None and ids:
+                    ids[0] = bos_id
+            prompt_ids_batch.append(ids)
+            prompt_formats.append(prompt_format)
+            context_rows.append({
+                "prompt_tokens_before_truncation": before,
+                "prompt_tokens_used": len(ids),
+                "token_truncation_applied": truncated,
+            })
+        effective_max_new_tokens = min(
+            effective_max_new_tokens,
+            max(1, min(model.config.max_position_embeddings - len(ids) for ids in prompt_ids_batch)),
+        )
+
+        def should_stop(_row: int, generated_ids: list[int]) -> bool:
+            if not stop_sequences:
+                return False
+            try:
+                decoded = tokenizer.decode(generated_ids, skip_special_tokens=True)[:100_000]
+            except Exception:
+                raise AxiomEngineError("Generated batch tokens could not be decoded by the local tokenizer.") from None
+            return any(sequence in decoded for sequence in stop_sequences)
+
+        outputs = model.generate_batch(
+            prompt_ids_batch,
+            max_new_tokens=effective_max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            min_p=min_p,
+            repetition_penalty=repetition_penalty,
+            seed=seed,
+            eos_token_ids=model.config.eos_token_ids,
+            cancel_event=cancel_event,
+            stop_checker=should_stop if stop_sequences else None,
+        )
+        batch_metrics = dict(getattr(model, "last_batch_generation", {}))
+        sequence_reasons = batch_metrics.get("sequence_stop_reasons", [])
+        results: list[dict[str, Any]] = []
+        for index, generated_ids in enumerate(outputs):
+            try:
+                response = tokenizer.decode(generated_ids, skip_special_tokens=True)[:100_000]
+            except Exception:
+                raise AxiomEngineError("Generated batch response could not be decoded by the local tokenizer.") from None
+            stop_reason = (
+                sequence_reasons[index]
+                if isinstance(sequence_reasons, list) and index < len(sequence_reasons)
+                else "max_new_tokens"
+            )
+            if stop_sequences and response:
+                matches = [
+                    (response.find(sequence), sequence)
+                    for sequence in stop_sequences
+                    if sequence in response
+                ]
+                if matches:
+                    response = response[:min(position for position, _sequence in matches)]
+                    stop_reason = "stop_sequence"
+            results.append({
+                "index": index + 1,
+                "prompt_format": prompt_formats[index],
+                "context_management": context_rows[index],
+                "prompt_tokens": len(prompt_ids_batch[index]),
+                "completion_tokens": len(generated_ids),
+                "stop_reason": stop_reason,
+                "response": response,
+            })
+
+        return {
+            "engine": "axiom-native-engine",
+            "execution_backend": "pytorch-native-axiom",
+            "transformers_generation_used": False,
+            "ollama_used": False,
+            "model": details.get("model_directory_name") or "local-model",
+            "architecture": details["architecture"],
+            "model_type": details["model_type"],
+            "adapter": details.get("adapter_directory_name"),
+            "device": str(device),
+            "device_selection": details.get("device_selection"),
+            "precision": details.get("precision"),
+            "precision_selection": details.get("precision_selection"),
+            "memory_mode": getattr(model, "memory_mode", memory_mode),
+            "memory_selection": details.get("memory_selection"),
+            "memory_stats": dict(getattr(model, "memory_stats", {})),
+            "device_memory": _device_memory_snapshot(
+                torch, device, selected_backend=selected_backend, baseline=device_memory_before
+            ),
+            "checkpoint_format": details.get("checkpoint_format", "safetensors"),
+            "decoder": batch_metrics.get("decoder", "axiom-batched-autoregressive-kv-cache"),
+            "attention_backend": getattr(model, "last_attention_backend", "native"),
+            "sampling": {
+                "temperature": temperature,
+                "top_p": top_p,
+                "top_k": top_k,
+                "min_p": min_p,
+                "repetition_penalty": repetition_penalty,
+                "seed": seed,
+            },
+            "stop_sequences": list(stop_sequences),
+            "batch_size": len(results),
+            "batch_generation": batch_metrics,
+            "results": results,
+            "prompt_tokens": sum(result["prompt_tokens"] for result in results),
+            "completion_tokens": sum(result["completion_tokens"] for result in results),
+            "elapsed_ms": round((time.perf_counter() - requested_started) * 1000, 2),
+            "generated_at": datetime.now(UTC).isoformat(),
+            "local_only": True,
+        }

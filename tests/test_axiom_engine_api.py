@@ -34,6 +34,86 @@ def test_engine_request_accepts_absolute_paths_only_inside_explicit_roots(tmp_pa
     assert request.model_path == str(model.resolve())
 
 
+def test_batch_generate_request_validates_size_prompt_limits_and_sampling(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "models"
+    model = root / "tiny"
+    model.mkdir(parents=True)
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(root))
+
+    request = engine_api.BatchGenerateRequest(
+        model_path=str(model), prompts=["first prompt", "second prompt"],
+        max_new_tokens=17, temperature=0, top_p=0.8, top_k=4, min_p=0.1,
+        repetition_penalty=1.1, seed=42, stop_sequences=["END", "END"],
+    )
+    assert request.model_path == str(model.resolve())
+    assert request.prompts == ["first prompt", "second prompt"]
+    assert request.top_k == 4
+    assert request.stop_sequences == ["END"]
+
+    with pytest.raises(ValidationError, match="at least 1 item"):
+        engine_api.BatchGenerateRequest(model_path=str(model), prompts=[])
+    with pytest.raises(ValidationError, match="non-whitespace text"):
+        engine_api.BatchGenerateRequest(model_path=str(model), prompts=[" ", "ok"])
+    with pytest.raises(ValidationError, match="Combined batch prompts"):
+        engine_api.BatchGenerateRequest(model_path=str(model), prompts=["a" * 12000, "b" * 12000, "c"])
+    with pytest.raises(ValidationError, match="max_length"):
+        engine_api.BatchGenerateRequest(model_path=str(model), prompts=["x"] * 129)
+
+
+def test_native_batch_generate_endpoint_dispatches_to_axiom_batch_runner(monkeypatch) -> None:
+    monkeypatch.setattr(engine_api, "resolve_local_model_directory", lambda value, label: value)
+    expected = {
+        "engine": "axiom-native-engine",
+        "execution_backend": "pytorch-native-axiom",
+        "batch_size": 2,
+        "results": [
+            {"index": 1, "response": "one", "completion_tokens": 1, "stop_reason": "max_new_tokens"},
+            {"index": 2, "response": "two", "completion_tokens": 1, "stop_reason": "eos_token"},
+        ],
+        "local_only": True,
+    }
+    observed = {}
+
+    def fake_batch(model_path, prompts, **kwargs):
+        observed.update(model_path=model_path, prompts=prompts, **kwargs)
+        return expected
+
+    monkeypatch.setattr(engine_api, "generate_local_batch", fake_batch)
+    response = _client().post("/api/engine/generate/batch", json={
+        "model_path": "/trusted/models/tiny",
+        "prompts": ["first", "second"],
+        "max_new_tokens": 32,
+        "temperature": 0,
+        "top_p": 0.8,
+        "top_k": 4,
+        "min_p": 0.1,
+        "repetition_penalty": 1.1,
+        "seed": 42,
+        "stop_sequences": ["END"],
+        "device": "cpu",
+        "memory_mode": "layer_streaming",
+        "precision": "bf16",
+    })
+    assert response.status_code == 200, response.text
+    assert response.json() == expected
+    assert observed == {
+        "model_path": "/trusted/models/tiny",
+        "prompts": ["first", "second"],
+        "adapter_path": None,
+        "max_new_tokens": 32,
+        "temperature": 0,
+        "top_p": 0.8,
+        "top_k": 4,
+        "min_p": 0.1,
+        "repetition_penalty": 1.1,
+        "seed": 42,
+        "stop_sequences": ["END"],
+        "device_preference": "cpu",
+        "memory_mode": "layer_streaming",
+        "precision": "bf16",
+    }
+
+
 def test_engine_request_rejects_absolute_path_outside_configured_roots(tmp_path, monkeypatch) -> None:
     root = tmp_path / "models"
     root.mkdir()
