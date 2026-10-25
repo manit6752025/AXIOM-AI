@@ -1491,6 +1491,192 @@ class NativeLlamaRuntime:
         ))
 
 
+    def generate_batch(
+        self,
+        prompt_token_ids: list[list[int]],
+        *,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float = 0.9,
+        top_k: int = 0,
+        min_p: float = 0.0,
+        repetition_penalty: float = 1.0,
+        seed: int | None = None,
+        eos_token_ids: tuple[int, ...] | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> list[list[int]]:
+        """Generate a fixed-length prompt microbatch using shared forward passes.
+
+        Prompts must have equal token lengths. Rows that hit EOS finish independently
+        while the remaining rows continue against the shared batched KV cache. This
+        is not a continuous batching scheduler for variable-length or arriving work.
+        """
+        if not isinstance(prompt_token_ids, list) or not prompt_token_ids:
+            raise NativeEngineError("Native batch generation requires at least one prompt.")
+        if len(prompt_token_ids) > 128:
+            raise NativeEngineError("Native batch generation is limited to 128 prompt sequences per call.")
+        if any(not isinstance(prompt, list) or not prompt for prompt in prompt_token_ids):
+            raise NativeEngineError("Every native batch prompt must be a non-empty list of token IDs.")
+        prompt_length = len(prompt_token_ids[0])
+        if any(len(prompt) != prompt_length for prompt in prompt_token_ids):
+            raise NativeEngineError(
+                "Native batch generation requires equal-length prompts; padding policy is not inferred."
+            )
+        if any(
+            isinstance(token_id, bool)
+            or not isinstance(token_id, int)
+            or token_id < 0
+            or token_id >= self.config.vocab_size
+            for prompt in prompt_token_ids
+            for token_id in prompt
+        ):
+            raise NativeEngineError("Native batch prompt token IDs must be integers inside the checkpoint vocabulary.")
+        if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens <= 2048:
+            raise NativeEngineError("Native generation token limit must be between 1 and 2048.")
+        if prompt_length + max_new_tokens > self.config.max_position_embeddings:
+            raise NativeEngineError("Batch generation would exceed the checkpoint's configured maximum context length.")
+        if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or not math.isfinite(float(temperature)) or not 0 <= float(temperature) <= 2:
+            raise NativeEngineError("Native generation temperature must be a finite number between 0 and 2.")
+        if isinstance(top_p, bool) or not isinstance(top_p, (int, float)) or not math.isfinite(float(top_p)) or not 0 < float(top_p) <= 1:
+            raise NativeEngineError("Native generation top_p must be a finite number greater than 0 and at most 1.")
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or not 0 <= top_k <= 100_000:
+            raise NativeEngineError("Native generation top_k must be an integer from 0 through 100000 (0 disables top-k).")
+        if isinstance(min_p, bool) or not isinstance(min_p, (int, float)) or not math.isfinite(float(min_p)) or not 0 <= float(min_p) <= 1:
+            raise NativeEngineError("Native generation min_p must be between 0 and 1 (0 disables min-p).")
+        if isinstance(repetition_penalty, bool) or not isinstance(repetition_penalty, (int, float)) or not math.isfinite(float(repetition_penalty)) or not 0.1 <= float(repetition_penalty) <= 5:
+            raise NativeEngineError("Native repetition_penalty must be a finite number between 0.1 and 5.")
+        if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= (2**63 - 1)):
+            raise NativeEngineError("Native sampling seed must be an integer from 0 through 2^63-1.")
+        if top_k > self.config.vocab_size:
+            raise NativeEngineError("top_k cannot exceed the checkpoint vocabulary size.")
+
+        torch = self.torch
+        generator = None
+        if seed is not None:
+            try:
+                generator = torch.Generator(device=self.device)
+                generator.manual_seed(seed)
+            except (RuntimeError, TypeError, AttributeError):
+                raise NativeEngineError("Seeded sampling is not supported by the selected tensor device.") from None
+        batch_size = len(prompt_token_ids)
+        eos = set(self.config.eos_token_ids if eos_token_ids is None else eos_token_ids)
+        generated: list[list[int]] = [[] for _ in prompt_token_ids]
+        finished = [False] * batch_size
+        tokens = torch.tensor(prompt_token_ids, device=self.device, dtype=torch.long)
+        started = time.perf_counter()
+        self.memory_stats = {
+            "layer_weight_tensors_staged": 0,
+            "layer_weight_bytes_staged": 0,
+            "layer_weight_bytes_returned_to_cpu": 0,
+            "layer_weight_bytes_released": 0,
+            "disk_layer_weight_loads": 0,
+            "disk_layer_weight_bytes_read": 0,
+            "kv_cache_layer_offloads": 0,
+            "kv_cache_bytes_offloaded": 0,
+        }
+        self.live_generation = {
+            "stage": "prefill",
+            "prompt_tokens": prompt_length * batch_size,
+            "completion_tokens": 0,
+            "batch_size": batch_size,
+            "elapsed_ms": 0.0,
+        }
+        stop_reason = "max_new_tokens"
+        cache: tuple[Any, ...] = ()
+        try:
+            with torch.inference_mode():
+                if cancel_event is not None and cancel_event.is_set():
+                    stop_reason = "cancelled"
+                    return generated
+                logits, cache = self.forward(tokens, cancel_event=cancel_event)
+                for step in range(max_new_tokens):
+                    if cancel_event is not None and cancel_event.is_set():
+                        stop_reason = "cancelled"
+                        break
+                    scores = _sanitize_sampling_scores(logits.float(), torch)
+                    if repetition_penalty != 1.0:
+                        for row, prompt in enumerate(prompt_token_ids):
+                            if finished[row]:
+                                continue
+                            history = sorted(set(prompt + generated[row]))
+                            if history:
+                                history_ids = torch.tensor(history, device=self.device, dtype=torch.long)
+                                prior_scores = scores[row].index_select(-1, history_ids)
+                                adjusted = torch.where(
+                                    prior_scores < 0,
+                                    prior_scores * float(repetition_penalty),
+                                    prior_scores / float(repetition_penalty),
+                                )
+                                scores[row].scatter_(0, history_ids, adjusted)
+                    if temperature == 0:
+                        next_tokens = torch.argmax(scores, dim=-1)
+                    else:
+                        scores = _sanitize_sampling_scores(scores / float(temperature), torch)
+                        scores = _apply_top_k_filter(scores, top_k, torch)
+                        if top_p < 1:
+                            sorted_scores, sorted_ids = torch.sort(scores, descending=True, dim=-1)
+                            cumulative = torch.softmax(sorted_scores, dim=-1).cumsum(dim=-1)
+                            remove = cumulative > float(top_p)
+                            remove[..., 1:] = remove[..., :-1].clone()
+                            remove[..., 0] = False
+                            sorted_scores = sorted_scores.masked_fill(remove, float("-inf"))
+                            scores = torch.full_like(scores, float("-inf")).scatter(
+                                dim=-1, index=sorted_ids, src=sorted_scores
+                            )
+                        scores = _apply_min_p_filter(scores, float(min_p))
+                        if not bool(torch.isfinite(scores).any(dim=-1).all().item()):
+                            raise NativeEngineError("Native batch sampling filters removed every usable token.")
+                        probabilities = torch.softmax(scores, dim=-1)
+                        next_tokens = torch.multinomial(probabilities, num_samples=1, generator=generator).squeeze(-1)
+
+                    next_input: list[int] = []
+                    for row in range(batch_size):
+                        token_id = int(next_tokens[row].item())
+                        if finished[row]:
+                            next_input.append(0)
+                            continue
+                        if token_id < 0 or token_id >= self.config.vocab_size:
+                            raise NativeEngineError("Native batch decoder produced a token ID outside vocab_size.")
+                        if token_id in eos:
+                            finished[row] = True
+                            next_input.append(token_id)
+                        else:
+                            generated[row].append(token_id)
+                            next_input.append(token_id)
+                    completed = sum(len(row) for row in generated)
+                    self.live_generation.update({
+                        "stage": "decode",
+                        "completion_tokens": completed,
+                        "batch_size": batch_size,
+                        "finished_sequences": sum(finished),
+                        "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
+                    })
+                    if all(finished):
+                        stop_reason = "eos_token"
+                        break
+                    if step + 1 < max_new_tokens:
+                        logits, cache = self.forward(
+                            torch.tensor(next_input, device=self.device, dtype=torch.long).view(batch_size, 1),
+                            cache,
+                            past_sequence_length=prompt_length + step,
+                            cancel_event=cancel_event,
+                        )
+        finally:
+            self.last_batch_generation = {
+                "batch_size": batch_size,
+                "prompt_tokens": prompt_length * batch_size,
+                "completion_tokens": sum(len(row) for row in generated),
+                "finished_sequences": sum(finished),
+                "stop_reason": stop_reason,
+                "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
+                "decoder": "axiom-batched-autoregressive-kv-cache",
+            }
+            self.live_generation.update({
+                "stage": "complete",
+                **self.last_batch_generation,
+            })
+        return generated
+
 def load_native_runtime(
     model_dir: Path,
     torch_module: Any,

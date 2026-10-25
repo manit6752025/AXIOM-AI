@@ -609,6 +609,63 @@ def test_native_attention_implicit_causal_mask_matches_explicit_reference() -> N
     assert torch.allclose(actual, expected, atol=2e-5, rtol=1e-4)
 
 
+def test_native_generate_batch_matches_serial_greedy_generation() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    prompts = [[1, 2, 3], [3, 2, 1]]
+
+    with torch.inference_mode():
+        actual = runtime.generate_batch(
+            prompts, max_new_tokens=3, temperature=0, eos_token_ids=()
+        )
+        expected = [
+            runtime.generate(prompt, max_new_tokens=3, temperature=0, eos_token_ids=())
+            for prompt in prompts
+        ]
+
+    assert actual == expected
+    assert len(actual) == 2
+    assert all(len(output) == 3 for output in actual)
+    assert runtime.last_batch_generation["batch_size"] == 2
+
+
+def test_native_generate_batch_handles_eos_and_validates_prompts(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeEngineError, NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    with pytest.raises(NativeEngineError, match="equal-length prompts"):
+        runtime.generate_batch([[1, 2], [3]], max_new_tokens=1, temperature=0)
+    with pytest.raises(NativeEngineError, match="inside the checkpoint vocabulary"):
+        runtime.generate_batch([[1], [config.vocab_size]], max_new_tokens=1, temperature=0)
+
+    eos_id = 7
+    def eos_forward(input_ids, past_key_values=None, *, past_sequence_length=None, cancel_event=None):
+        batch = int(input_ids.shape[0])
+        logits = torch.full((batch, config.vocab_size), -100.0)
+        logits[:, eos_id] = 100.0
+        cache_length = int(input_ids.shape[1]) if past_key_values is None else int(past_key_values[0][0].shape[-2]) + int(input_ids.shape[1])
+        cache = tuple(
+            (
+                torch.zeros((batch, config.num_key_value_heads, cache_length, config.hidden_size // config.num_attention_heads)),
+                torch.zeros((batch, config.num_key_value_heads, cache_length, config.hidden_size // config.num_attention_heads)),
+            )
+            for _ in range(config.num_hidden_layers)
+        )
+        return logits, cache
+
+    monkeypatch.setattr(runtime, "forward", eos_forward)
+    outputs = runtime.generate_batch(
+        [[1, 2], [2, 1]], max_new_tokens=2, temperature=0, eos_token_ids=(eos_id,)
+    )
+    assert outputs == [[], []]
+    assert runtime.last_batch_generation["finished_sequences"] == 2
+
+
 def test_native_forward_supports_batched_prefill_and_incremental_decode() -> None:
     torch = pytest.importorskip("torch")
     from axiom.core.native_engine import NativeLlamaRuntime
