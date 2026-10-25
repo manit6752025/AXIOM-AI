@@ -75,16 +75,43 @@ def pull_native(repo_id: str = typer.Argument(..., help="Public Hugging Face rep
     console.print("Run: axiom engine run --model-path " + repr(result["path"]) + ' --prompt "Hello."')
 
 @studio_app.command("install-gguf")
-def install_gguf(repo_id: str, filename: str, model_name: str = typer.Option(..., "--name", help="Local Ollama model name."),
-                 no_ollama: bool = typer.Option(False, "--download-only", help="Download GGUF without registering it with Ollama.")) -> None:
-    """Download a public Hub GGUF, then optionally register it in local Ollama."""
+def install_gguf(
+    repo_id: str,
+    filename: str,
+    model_name: str = typer.Option(..., "--name", help="Local name used for storage or runtime registration."),
+    no_ollama: bool = typer.Option(False, "--download-only", help="Download to Model Studio storage without registering with Ollama."),
+    native: bool = typer.Option(False, "--native", help="Install directly into AXIOM Native Engine's trusted model root."),
+    json_output: bool = typer.Option(False, "--json", help="Print the final result as machine-readable JSON."),
+) -> None:
+    """Download a public Hub GGUF to Model Studio, Ollama, or AXIOM Native Engine."""
+    if native and no_ollama:
+        _fail("Choose either --native or --download-only, not both.")
+    register_ollama = not (no_ollama or native)
     try:
-        result = studio.install_hf_gguf(repo_id, filename, model_name, not no_ollama,
-            on_log=lambda msg: console.print(msg),
-            on_progress=lambda current, total: console.print(f"\rDownloaded {current:,}" + (f" / {total:,} bytes" if total else " bytes"), end=""))
-    except (ValueError, studio.ModelStudioError) as exc: _fail(str(exc))
-    console.print("\n[green]GGUF saved:[/green] " + result["path"])
-    if result["registered_with_ollama"]: console.print(f"[green]Ready for local inference:[/green] {result['model_name']}")
+        result = studio.install_hf_gguf(
+            repo_id,
+            filename,
+            model_name,
+            register_ollama,
+            on_log=(lambda msg: console.print(msg)) if not json_output else None,
+            on_progress=(lambda current, total: console.print(
+                f"\\rDownloaded {current:,}" + (f" / {total:,} bytes" if total else " bytes"),
+                end="",
+            )) if not json_output else None,
+            install_native=native,
+        )
+    except (ValueError, studio.ModelStudioError) as exc:
+        _fail(str(exc))
+    if json_output:
+        console.print_json(json.dumps(result, ensure_ascii=False))
+        return
+    if native:
+        console.print("\\n[green]Installed for AXIOM Native Engine:[/green] " + result["path"])
+        console.print("Run: axiom engine run --model-path " + repr(result["path"]) + ' --prompt "Hello."')
+    else:
+        console.print("\\n[green]GGUF saved:[/green] " + result["path"])
+        if result.get("registered_with_ollama"):
+            console.print(f"[green]Ready for local inference:[/green] {result['model_name']}")
 
 @studio_app.command("convert-gguf")
 def convert_gguf(source_dir: str = typer.Argument(..., help="Existing local Transformers model directory."),
