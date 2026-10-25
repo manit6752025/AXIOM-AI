@@ -19,7 +19,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.responses import JSONResponse, StreamingResponse
 
-from axiom.core.engine import AxiomEngineError, discover_local_engine_assets, generate_local_stream
+from axiom.core.engine import AxiomEngineError, discover_local_engine_assets, generate_local_batch, generate_local_stream
 from axiom.core.inference import InferenceRuntimeError, run_local_chat, runtime_status as ollama_runtime_status
 
 router = APIRouter()
@@ -207,7 +207,7 @@ class OpenAIChatCompletionRequest(BaseModel):
     seed: int | None = Field(default=None, ge=0, le=9223372036854775807)
     stop: str | list[str] | None = None
     stream: bool = False
-    n: int = Field(default=1, ge=1, le=1)
+    n: int = Field(default=1, ge=1, le=8)
     user: str | None = Field(default=None, max_length=256)
     adapter_path: str | None = Field(default=None, max_length=4096)
     device: Literal["auto", "cpu", "cuda", "rocm", "mps", "xpu"] = "auto"
@@ -318,6 +318,62 @@ def openai_list_models(request: Request) -> Any:
 
 
 
+def _run_batched_nonstream(request: OpenAIChatCompletionRequest, model: dict[str, Any]) -> Any:
+    """Return independent OpenAI choices through one AXIOM native microbatch."""
+    try:
+        last_user = next(message.content for message in reversed(request.messages) if message.role == "user")
+        batch = generate_local_batch(
+            model["path"],
+            [last_user] * request.n,
+            adapter_path=request.adapter_path,
+            max_new_tokens=request.max_completion_tokens or request.max_tokens or 256,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            top_k=request.top_k,
+            repetition_penalty=request.repetition_penalty,
+            seed=request.seed,
+            stop_sequences=_stop_sequences(request),
+            device_preference=request.device,
+            memory_mode=request.memory_mode,
+            precision=request.precision,
+            chat_messages=[message.model_dump() for message in request.messages],
+        )
+    except ValueError as exc:
+        return _openai_error(str(exc), 422, code="invalid_request")
+    except AxiomEngineError as exc:
+        return _openai_error(str(exc), 503, code="native_engine_error", error_type="server_error")
+    results = batch.get("results", [])
+    if not isinstance(results, list) or len(results) != request.n or any(not isinstance(row, dict) for row in results):
+        return _openai_error("AXIOM Native Engine did not return every requested choice.", 503, code="native_engine_error", error_type="server_error")
+    choices = [
+        {
+            "index": index,
+            "message": {"role": "assistant", "content": str(row.get("response", ""))},
+            "finish_reason": _finish_reason(str(row.get("stop_reason", "stop"))),
+        }
+        for index, row in enumerate(results)
+    ]
+    usage_prompt = int(results[0].get("prompt_tokens", 0))
+    usage_completion = sum(
+        int(row.get("completion_tokens", 0))
+        for row in results
+        if isinstance(row.get("completion_tokens", 0), int) and not isinstance(row.get("completion_tokens", 0), bool)
+    )
+    return {
+        "id": "chatcmpl-" + uuid.uuid4().hex,
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": request.model,
+        "choices": choices,
+        "usage": {
+            "prompt_tokens": usage_prompt,
+            "completion_tokens": usage_completion,
+            "total_tokens": usage_prompt + usage_completion,
+        },
+        "system_fingerprint": "axiom-native",
+    }
+
+
 def _run_nonstream(request: OpenAIChatCompletionRequest, model: dict[str, Any]) -> Any:
     try:
         final: dict[str, Any] | None = None
@@ -422,6 +478,8 @@ async def openai_chat_completions(request: OpenAIChatCompletionRequest, http_req
     if auth_error is not None:
         return auth_error
     if request.model.startswith("ollama/"):
+        if request.n > 1:
+            return _openai_error("Multiple n choices are supported for AXIOM-native models only; the Ollama compatibility path requires n=1.", 422, code="unsupported_parameter")
         ollama_model = _resolve_ollama_model(request.model)
         if not ollama_model:
             return _openai_error(f"Installed local Ollama model {request.model!r} was not found.", 404, code="model_not_found")
@@ -431,6 +489,10 @@ async def openai_chat_completions(request: OpenAIChatCompletionRequest, http_req
     model = _resolve_model(request.model)
     if model is None:
         return _openai_error(f"Native model {request.model!r} was not found or its ID is ambiguous.", 404, code="model_not_found")
+    if request.stream and request.n > 1:
+        return _openai_error("Streaming n>1 is not supported yet; set stream=false to use native batched choices.", 422, code="unsupported_parameter")
     if request.stream:
         return _streaming_response(request, model, http_request)
+    if request.n > 1:
+        return await asyncio.to_thread(_run_batched_nonstream, request, model)
     return await asyncio.to_thread(_run_nonstream, request, model)

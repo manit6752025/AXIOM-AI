@@ -167,3 +167,82 @@ def test_llm_chat_api_rejects_invalid_sampling_limits() -> None:
             **body,
         })
         assert response.status_code == 422, body
+
+
+def test_openai_native_n_choices_use_one_batched_run_with_full_chat_history(monkeypatch) -> None:
+    captured = {}
+
+    monkeypatch.setattr(openai_compat, "_native_models", lambda: [{
+        "name": "tiny", "path": "/trusted/tiny", "model_type": "llama",
+    }])
+
+    def fake_batch(model_path, prompts, **kwargs):
+        captured.update(model_path=model_path, prompts=prompts, **kwargs)
+        return {
+            "model": "tiny",
+            "batch_size": 3,
+            "prompt_tokens": 15,
+            "completion_tokens": 9,
+            "results": [
+                {"index": 1, "response": "choice A", "prompt_tokens": 5, "completion_tokens": 2, "stop_reason": "max_new_tokens"},
+                {"index": 2, "response": "choice B", "prompt_tokens": 5, "completion_tokens": 3, "stop_reason": "eos_token"},
+                {"index": 3, "response": "choice C", "prompt_tokens": 5, "completion_tokens": 4, "stop_reason": "stop_sequence"},
+            ],
+        }
+
+    monkeypatch.setattr(openai_compat, "generate_local_batch", fake_batch)
+    response = _client(openai_compat.router).post("/v1/chat/completions", json={
+        "model": "tiny",
+        "n": 3,
+        "max_tokens": 64,
+        "temperature": 0.7,
+        "seed": 42,
+        "messages": [
+            {"role": "system", "content": "Keep answers concise."},
+            {"role": "user", "content": "Summarize the attached design."},
+            {"role": "assistant", "content": "I will review the design."},
+            {"role": "user", "content": "Focus on the runtime."},
+        ],
+    })
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [choice["index"] for choice in body["choices"]] == [0, 1, 2]
+    assert [choice["message"]["content"] for choice in body["choices"]] == ["choice A", "choice B", "choice C"]
+    assert [choice["finish_reason"] for choice in body["choices"]] == ["length", "stop", "stop"]
+    assert body["usage"] == {"prompt_tokens": 5, "completion_tokens": 9, "total_tokens": 14}
+    assert captured["model_path"] == "/trusted/tiny"
+    assert captured["prompts"] == ["Focus on the runtime."] * 3
+    assert captured["chat_messages"] == [
+        {"role": "system", "content": "Keep answers concise."},
+        {"role": "user", "content": "Summarize the attached design."},
+        {"role": "assistant", "content": "I will review the design."},
+        {"role": "user", "content": "Focus on the runtime."},
+    ]
+    assert captured["seed"] == 42
+
+
+def test_openai_n_is_bounded_and_streaming_multi_choice_is_rejected(monkeypatch) -> None:
+    monkeypatch.setattr(openai_compat, "_native_models", lambda: [{
+        "name": "tiny", "path": "/trusted/tiny", "model_type": "llama",
+    }])
+    client = _client(openai_compat.router)
+    too_many = client.post("/v1/chat/completions", json={
+        "model": "tiny", "n": 9, "messages": [{"role": "user", "content": "hello"}],
+    })
+    streamed = client.post("/v1/chat/completions", json={
+        "model": "tiny", "n": 2, "stream": True, "messages": [{"role": "user", "content": "hello"}],
+    })
+    assert too_many.status_code == 422
+    assert streamed.status_code == 422
+    assert "stream=false" in streamed.json()["error"]["message"]
+
+
+def test_openai_ollama_multi_choice_is_rejected_without_invoking_ollama(monkeypatch) -> None:
+    monkeypatch.setattr(openai_compat, "_resolve_ollama_model", lambda _model: "tiny")
+    monkeypatch.setattr(openai_compat, "run_local_chat", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not run")))
+    response = _client(openai_compat.router).post("/v1/chat/completions", json={
+        "model": "ollama/tiny", "n": 2, "messages": [{"role": "user", "content": "hello"}],
+    })
+    assert response.status_code == 422
+    assert "AXIOM-native models only" in response.json()["error"]["message"]
