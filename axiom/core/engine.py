@@ -967,7 +967,20 @@ def discover_local_engine_assets() -> dict[str, Any]:
 
 def _inspect_model_config(model_dir: Path) -> dict[str, Any]:
     config_path = model_dir / "config.json"
-    if not config_path.exists():
+    safetensors_present = (
+        (model_dir / "model.safetensors").is_file()
+        or (model_dir / "model.safetensors.index.json").is_file()
+    )
+    try:
+        gguf_present = any(
+            item.is_file() and item.suffix.lower() == ".gguf"
+            for item in model_dir.iterdir()
+        )
+    except OSError:
+        gguf_present = False
+    # The runtime prefers safetensors when they exist; otherwise GGUF metadata
+    # is authoritative even if a stale/foreign config.json sidecar is present.
+    if not safetensors_present and (gguf_present or not config_path.exists()):
         from axiom.core.native_gguf import inspect_gguf_checkpoint
         return inspect_gguf_checkpoint(model_dir, trusted_roots=_allowed_model_roots())
     try:
@@ -1102,12 +1115,47 @@ def _choose_memory_mode(
     """
     from axiom.core.native_engine import NativeLlamaConfig, _resolve_safetensor_files, _resolve_trusted_file
 
+    checkpoint_format = inspected.get("checkpoint_format", "safetensors")
+    device_type = str(getattr(device, "type", device)).split(":", 1)[0]
+    dtype_bytes = {"fp32": 4, "fp16": 2, "bf16": 2}.get(precision, 4)
+    checkpoint_source_bytes = 0
     try:
         config = NativeLlamaConfig.from_mapping(inspected["config"])
-        weight_files, _weight_map = _resolve_safetensor_files(model_dir, _allowed_model_roots())
-        weight_bytes = sum(int(path.stat().st_size) for path in weight_files)
-        if weight_bytes <= 0:
-            raise ValueError("the checkpoint weight file size is unavailable")
+        if checkpoint_format == "gguf":
+            from axiom.core.native_gguf import _find_files
+
+            weight_files = _find_files(model_dir, _allowed_model_roots())
+            checkpoint_source_bytes = sum(int(path.stat().st_size) for path in weight_files)
+            weight_elements = inspected.get("gguf_weight_elements")
+            if isinstance(weight_elements, bool) or not isinstance(weight_elements, int) or weight_elements <= 0:
+                raise ValueError("GGUF tensor element count is unavailable for safe memory planning")
+            # GGUF is loaded as floating-point tensors, not in its source
+            # quantization. Auto precision mirrors the native GGUF loader:
+            # FP32 on CPU, FP16 on supported accelerator devices.
+            if precision == "auto":
+                dtype_bytes = 4 if device_type == "cpu" else 2
+            weight_bytes = weight_elements * dtype_bytes
+        else:
+            weight_files, _weight_map = _resolve_safetensor_files(model_dir, _allowed_model_roots())
+            checkpoint_source_bytes = sum(int(path.stat().st_size) for path in weight_files)
+            weight_bytes = checkpoint_source_bytes
+            if precision == "auto":
+                try:
+                    from safetensors import safe_open
+                    for shard in weight_files:
+                        with safe_open(str(shard), framework="pt", device="cpu") as handle:
+                            if "model.embed_tokens.weight" not in handle.keys():
+                                continue
+                            dtype_name = handle.get_slice("model.embed_tokens.weight").get_dtype()
+                            dtype_bytes = {"F16": 2, "BF16": 2, "F32": 4}.get(str(dtype_name).upper(), 4)
+                            break
+                except Exception:
+                    # Header inspection is an optional precision improvement.
+                    # Keep the conservative FP32 estimate on format/driver errors.
+                    _LOG.debug("Could not inspect checkpoint dtype for memory planning.", exc_info=True)
+
+        if checkpoint_source_bytes <= 0 or weight_bytes <= 0:
+            raise ValueError("the checkpoint weight size is unavailable")
         adapter_weight_bytes = 0
         if adapter_dir is not None:
             adapter_file = _resolve_trusted_file(
@@ -1118,21 +1166,6 @@ def _choose_memory_mode(
             adapter_weight_bytes = int(adapter_file.stat().st_size)
             if adapter_weight_bytes <= 0:
                 raise ValueError("the LoRA adapter weight file is empty")
-        dtype_bytes = {"fp32": 4, "fp16": 2, "bf16": 2}.get(precision, 4)
-        try:
-            from safetensors import safe_open
-            for shard in weight_files:
-                with safe_open(str(shard), framework="pt", device="cpu") as handle:
-                    if "model.embed_tokens.weight" not in handle.keys():
-                        continue
-                    dtype_name = handle.get_slice("model.embed_tokens.weight").get_dtype()
-                    if precision == "auto":
-                        dtype_bytes = {"F16": 2, "BF16": 2, "F32": 4}.get(str(dtype_name).upper(), 4)
-                    break
-        except Exception:
-            # Header inspection is an optional precision improvement. Keep the
-            # conservative FP32 estimate if a driver/format cannot expose dtype.
-            _LOG.debug("Could not inspect checkpoint dtype for memory planning.", exc_info=True)
     except Exception as exc:
         raise AxiomEngineError(f"AXIOM could not safely estimate this checkpoint for automatic memory selection: {exc}") from None
 
@@ -1171,7 +1204,9 @@ def _choose_memory_mode(
         "requested": "auto",
         "selected": "full",
         "reason": "",
+        "checkpoint_format": checkpoint_format,
         "estimated_checkpoint_weight_bytes": weight_bytes,
+        "estimated_source_checkpoint_bytes": checkpoint_source_bytes,
         "estimated_adapter_weight_bytes": adapter_weight_bytes,
         "estimated_total_weight_bytes": total_weight_bytes,
         "estimated_non_layer_weight_bytes": non_layer_weight_bytes,
@@ -1799,7 +1834,7 @@ def generate_local_stream(
                 "device_memory": _device_memory_snapshot(
                     torch, device, selected_backend=selected_backend, baseline=device_memory_before
                 ),
-                "checkpoint_format": "safetensors",
+                "checkpoint_format": details.get("checkpoint_format", "safetensors"),
                 "decoder": model.last_generation.get("decoder", "axiom-autoregressive-kv-cache"),
                 "attention_backend": model.last_attention_backend,
                 "prefill_ms": model.last_generation.get("prefill_ms", 0.0),

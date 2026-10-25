@@ -123,6 +123,66 @@ def test_native_gguf_loads_and_generates_with_axiom_runtime(tmp_path: Path) -> N
     assert all(0 <= token_id < runtime.config.vocab_size for token_id in output)
 
 
+def test_native_gguf_auto_memory_planning_uses_compute_size_and_reports_format(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("gguf")
+    pytest.importorskip("tokenizers")
+    from axiom.core import engine
+
+    root = tmp_path / "trusted"
+    model_dir = root / "tiny-gguf-auto"
+    _write_gguf(model_dir, torch, quantized=True)
+    # A stale sidecar must not override the format/config in the GGUF metadata.
+    (model_dir / "config.json").write_text(
+        '{"model_type":"qwen2","hidden_size":999}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(root))
+    monkeypatch.setattr(engine, "_available_system_memory_bytes", lambda: 8 * 1024**3)
+    monkeypatch.setattr(engine, "_device_capability_rows", lambda _torch=None: [
+        {
+            "id": "cpu", "name": "CPU", "available": True, "reason": "available",
+            "memory_free_gib": None, "memory_total_gib": None,
+        }
+    ])
+
+    inspected = engine._inspect_model_config(model_dir)
+    assert inspected["checkpoint_format"] == "gguf"
+    assert inspected["config"]["model_type"] == "llama"
+    assert inspected["gguf_weight_elements"] > 0
+
+    selection_mode, selection = engine._choose_memory_mode(
+        model_dir,
+        inspected,
+        torch,
+        torch.device("cpu"),
+        {"selected": "cpu"},
+        precision="fp32",
+    )
+    assert selection_mode == "full"
+    assert selection["checkpoint_format"] == "gguf"
+    assert selection["estimated_checkpoint_weight_bytes"] == inspected["gguf_weight_elements"] * 4
+    assert selection["estimated_source_checkpoint_bytes"] == sum(
+        path.stat().st_size for path in model_dir.glob("*.gguf")
+    )
+    assert selection["estimated_checkpoint_weight_bytes"] != 0
+
+    result = engine.generate_local(
+        str(model_dir),
+        "a",
+        max_new_tokens=1,
+        temperature=0,
+        device_preference="cpu",
+        memory_mode="auto",
+        precision="fp32",
+    )
+    assert result["checkpoint_format"] == "gguf"
+    assert result["memory_mode"] == "full"
+    assert result["memory_selection"]["checkpoint_format"] == "gguf"
+
+
 def test_native_gguf_split_shards_load_and_generate(tmp_path: Path) -> None:
     torch = pytest.importorskip("torch")
     pytest.importorskip("gguf")

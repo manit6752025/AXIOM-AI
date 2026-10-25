@@ -343,6 +343,10 @@ def inspect_gguf_checkpoint(model_dir: Path, trusted_roots: tuple[Path, ...] | N
             "gguf_paths": [str(path) for path in paths],
             "tokenizer_source": tokenizer_source,
             "tensor_type_counts": type_counts,
+            # Count native-mapped tensor elements without dequantizing them.
+            # Memory planning multiplies this by the chosen floating-point dtype,
+            # because the compact GGUF source size is not its runtime footprint.
+            "gguf_weight_elements": sum(math.prod(shape) for shape in details["weight_shapes"].values()),
             "scope_note": "GGUF tensors are dequantized for AXIOM's own PyTorch runtime; this release does not include low-bit kernels.",
         }
     except NativeEngineError:
