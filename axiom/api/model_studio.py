@@ -13,6 +13,7 @@ class ModelJobRequest(BaseModel):
     repo_id: str = Field(default="", max_length=192)
     filename: str = Field(default="", max_length=255)
     register_ollama: bool = True
+    install_native: bool = False
     source_dir: str = Field(default="", max_length=4096)
     llama_cpp_dir: str = Field(default="", max_length=4096)
     output_path: str = Field(default="", max_length=4096)
