@@ -6,7 +6,7 @@ The Engine Fabric is AXIOM's local execution control plane. It does not replace 
 
 | Engine | Main strengths | Trade-offs |
 | --- | --- | --- |
-| AXIOM Native Engine | AXIOM-owned forward pass and token loop; trusted safetensors roots; explicit device, precision and memory modes; cancellation and runtime telemetry | Currently supports Llama, Mistral, Qwen2 and Qwen3 floating-point safetensors; broader architectures and quantized formats are still work in progress |
+| AXIOM Native Engine | AXIOM-owned forward pass and token loop; trusted model roots; floating-point safetensors plus validated single-file/split-shard dense GGUF for Llama, Mistral, Qwen2 and Qwen3; explicit device, precision and memory modes; cancellation and runtime telemetry | GGUF tensors are dequantized for floating-point execution, not run through low-bit kernels; EXL2/GPTQ/AWQ, unsupported tensor types/architectures and broader model families remain unsupported |
 | Ollama | Simple local model lifecycle, straightforward model catalogue and chat API, broad user-friendly model distribution | Adds a separate service and offers fewer low-level scheduler/memory controls than specialist servers |
 | llama.cpp server | Quantized GGUF, CPU/GPU hybrid offload, many hardware backends, OpenAI-compatible API | Binary flags/build options and model chat templates matter |
 | LM Studio local server | Desktop model management and a convenient local API | Depends on its installed desktop/server runtime |
