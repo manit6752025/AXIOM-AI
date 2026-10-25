@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from axiom.core.engine import AxiomEngineError, discover_local_engine_assets, estimate_native_quantization, generate_local, generate_local_stream, runtime_status, runtime_telemetry
+from axiom.core.engine import AxiomEngineError, discover_local_engine_assets, estimate_native_quantization, generate_local, generate_local_batch, generate_local_stream, runtime_status, runtime_telemetry
 from axiom.core import model_studio
 from axiom.core.engine_fabric import EngineFabricError, discover_engine_backends, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
 
@@ -366,6 +366,86 @@ def engine_run(
     ))
     if not stream_output:
         console.print(result["response"], markup=False)
+
+
+@engine_app.command("batch")
+def engine_batch(
+    model_path: Path = typer.Option(..., "--model-path", exists=True, file_okay=False, dir_okay=True, help="Trusted local safetensors or GGUF model directory."),
+    prompt: list[str] = typer.Option([], "--prompt", help="Prompt text; repeat this option for each batch item."),
+    prompts_file: Path | None = typer.Option(None, "--prompts-file", exists=True, file_okay=True, dir_okay=False, readable=True, help="UTF-8 file with one prompt per line; blank lines are ignored."),
+    adapter_path: Path | None = typer.Option(None, "--adapter-path", exists=True, file_okay=False, dir_okay=True, help="Optional local native-compatible LoRA adapter directory."),
+    device: str = typer.Option("auto", "--device", help="Execution backend: auto, cpu, cuda, rocm, mps, or xpu."),
+    memory_mode: str = typer.Option("auto", "--memory-mode", help="Memory policy: auto, full, layer_streaming, or disk_streaming."),
+    precision: str = typer.Option("auto", "--precision", help="Compute dtype: auto, fp32, fp16, or bf16."),
+    max_new_tokens: int = typer.Option(256, "--max-new-tokens", min=1, max=2048),
+    temperature: float = typer.Option(0.7, "--temperature", min=0, max=2),
+    top_p: float = typer.Option(0.9, "--top-p", min=0.000001, max=1),
+    top_k: int = typer.Option(0, "--top-k", min=0, max=100_000),
+    min_p: float = typer.Option(0.0, "--min-p", min=0, max=1),
+    repetition_penalty: float = typer.Option(1.0, "--repeat-penalty", min=0.1, max=5),
+    seed: int | None = typer.Option(None, "--seed", min=0, max=9_223_372_036_854_775_807),
+    stop_sequences: list[str] = typer.Option([], "--stop-sequence", help="Stop at exact text; repeat the option for multiple stops."),
+    json_output: bool = typer.Option(False, "--json", help="Print results and batch metrics as JSON."),
+) -> None:
+    """Generate independent prompt responses through AXIOM's native batched decoder."""
+    if bool(prompt) == (prompts_file is not None):
+        _fail("Provide repeated --prompt options or --prompts-file, but not both.")
+    if prompts_file is not None:
+        try:
+            with prompts_file.open("r", encoding="utf-8") as handle:
+                prompt_text = handle.read(24_001)
+        except (OSError, UnicodeError):
+            _fail("Prompts file could not be read as UTF-8 text.")
+        if len(prompt_text) > 24_000:
+            _fail("Prompts file exceeds the combined 24,000-character batch limit.")
+        prompts = [line.strip() for line in prompt_text.splitlines() if line.strip()]
+    else:
+        prompts = [value.strip() for value in prompt if value.strip()]
+    if not prompts:
+        _fail("Batch generation requires at least one non-blank prompt.")
+    if len(prompts) > 128:
+        _fail("Batch generation is limited to 128 prompts per request.")
+    if any(len(value) > 12_000 for value in prompts):
+        _fail("Each batch prompt is limited to 12,000 characters.")
+    if sum(len(value) for value in prompts) > 24_000:
+        _fail("Combined batch prompts exceed the 24,000-character limit.")
+    try:
+        result = generate_local_batch(
+            str(model_path),
+            prompts,
+            adapter_path=str(adapter_path) if adapter_path is not None else None,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            min_p=min_p,
+            repetition_penalty=repetition_penalty,
+            seed=seed,
+            stop_sequences=stop_sequences,
+            device_preference=device,
+            memory_mode=memory_mode,
+            precision=precision,
+        )
+    except (ValueError, AxiomEngineError) as exc:
+        _fail(str(exc))
+    if json_output:
+        typer.echo(json.dumps(result, indent=2, ensure_ascii=False))
+        return
+
+    console.print(Panel.fit(
+        f"Model: {result.get('model', 'local-model')}\n"
+        f"Architecture: {result.get('architecture', 'unknown')}\n"
+        f"Execution: {result.get('execution_backend', 'pytorch-native-axiom')} · {result.get('device', 'unknown')}\n"
+        f"Batch size: {result.get('batch_size', len(result.get('results', [])))}\n"
+        f"Prompt tokens: {result.get('prompt_tokens', 0)} · Completion tokens: {result.get('completion_tokens', 0)}\n"
+        f"Wall time: {result.get('elapsed_ms', 0)} ms",
+        title="AXIOM ENGINE · NATIVE BATCH",
+    ))
+    for item in result.get("results", []):
+        console.print(Panel(
+            Text(str(item.get("response", "")), overflow="fold"),
+            title=f"Prompt {item.get('index', '?')} · {item.get('stop_reason', 'unknown')}",
+        ))
 
 
 __all__ = ["engine_app"]

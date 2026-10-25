@@ -374,3 +374,86 @@ def test_engine_auto_chat_cli_exposes_local_routing_metadata(monkeypatch) -> Non
     assert payload["routing"]["attempts"][1]["outcome"] == "selected"
     assert observed["profile"] == "low-memory"
     assert observed["messages"] == [{"role": "user", "content": "Hello"}]
+
+
+def test_engine_batch_cli_forwards_repeated_prompts_and_sampling(tmp_path: Path, monkeypatch) -> None:
+    model_path = tmp_path / "local-model"
+    model_path.mkdir()
+    observed: dict[str, object] = {}
+
+    def fake_batch(_model_path, prompts, **kwargs):
+        observed["prompts"] = prompts
+        observed.update(kwargs)
+        return {
+            "engine": "axiom-native-engine",
+            "execution_backend": "pytorch-native-axiom",
+            "model": "fixture-model",
+            "architecture": "LlamaForCausalLM",
+            "device": "cpu",
+            "batch_size": 2,
+            "prompt_tokens": 6,
+            "completion_tokens": 4,
+            "elapsed_ms": 20.0,
+            "results": [
+                {"index": 1, "response": "Alpha result", "stop_reason": "max_new_tokens"},
+                {"index": 2, "response": "Beta result", "stop_reason": "eos_token"},
+            ],
+        }
+
+    monkeypatch.setattr(engine_cli, "generate_local_batch", fake_batch)
+    result = runner.invoke(engine_app, [
+        "batch", "--model-path", str(model_path),
+        "--prompt", "Alpha", "--prompt", "Beta",
+        "--max-new-tokens", "4", "--temperature", "0",
+        "--top-p", "0.82", "--top-k", "32", "--min-p", "0.2",
+        "--repeat-penalty", "1.15", "--seed", "17",
+        "--stop-sequence", "<END>", "--json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["batch_size"] == 2
+    assert [item["response"] for item in payload["results"]] == ["Alpha result", "Beta result"]
+    assert observed["prompts"] == ["Alpha", "Beta"]
+    assert observed["max_new_tokens"] == 4
+    assert observed["temperature"] == 0
+    assert observed["top_p"] == 0.82
+    assert observed["top_k"] == 32
+    assert observed["min_p"] == 0.2
+    assert observed["repetition_penalty"] == 1.15
+    assert observed["seed"] == 17
+    assert observed["stop_sequences"] == ["<END>"]
+
+
+def test_engine_batch_cli_reads_prompt_files_and_rejects_blank_batch(tmp_path: Path, monkeypatch) -> None:
+    model_path = tmp_path / "local-model"
+    model_path.mkdir()
+    prompts_file = tmp_path / "prompts.txt"
+    prompts_file.write_text("First prompt\n\n  Second prompt  \n", encoding="utf-8")
+    observed: dict[str, object] = {}
+
+    def fake_batch(_model_path, prompts, **kwargs):
+        observed["prompts"] = prompts
+        return {"batch_size": len(prompts), "results": []}
+
+    monkeypatch.setattr(engine_cli, "generate_local_batch", fake_batch)
+    result = runner.invoke(engine_app, [
+        "batch", "--model-path", str(model_path), "--prompts-file", str(prompts_file), "--json",
+    ])
+    assert result.exit_code == 0, result.output
+    assert observed["prompts"] == ["First prompt", "Second prompt"]
+
+    prompts_file.write_text(" \n\t\n", encoding="utf-8")
+    result = runner.invoke(engine_app, [
+        "batch", "--model-path", str(model_path), "--prompts-file", str(prompts_file),
+    ])
+    assert result.exit_code == 1
+    assert "at least one non-blank prompt" in result.output
+
+
+def test_engine_batch_cli_help_documents_repeatable_prompt_input() -> None:
+    result = runner.invoke(engine_app, ["batch", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "--prompts-file" in result.output
+    assert "--prompt" in result.output
+    assert "repeat" in result.output.lower()

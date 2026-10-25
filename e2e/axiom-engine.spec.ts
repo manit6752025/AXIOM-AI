@@ -115,6 +115,36 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
       ].join("\n") + "\n",
     });
   });
+  await page.route("**/api/engine/generate/batch", (route) => {
+    const requestBody = route.request().postDataJSON() as Record<string, unknown>;
+    expect(requestBody.prompts).toEqual(["First batch prompt", "Second batch prompt"]);
+    expect(requestBody.top_p).toBe(0.8);
+    expect(requestBody.top_k).toBe(4);
+    expect(requestBody.min_p).toBe(0.05);
+    expect(requestBody.repetition_penalty).toBe(1.1);
+    expect(requestBody.seed).toBe(42);
+    expect(requestBody.adapter_path).toBe("/runs/my-lora-adapter");
+    return route.fulfill({ json: {
+      engine: "axiom-native-engine",
+      execution_backend: "pytorch-native-axiom",
+      transformers_generation_used: false,
+      ollama_used: false,
+      model: "llama-test",
+      architecture: "LlamaForCausalLM",
+      model_type: "llama",
+      batch_size: 2,
+      prompt_tokens: 8,
+      completion_tokens: 6,
+      elapsed_ms: 45.5,
+      memory_mode: "auto",
+      checkpoint_format: "safetensors",
+      local_only: true,
+      results: [
+        { index: 1, prompt_format: "plain", context_management: { prompt_tokens_before_truncation: 4, prompt_tokens_used: 4, token_truncation_applied: false }, prompt_tokens: 4, completion_tokens: 3, stop_reason: "max_new_tokens", response: "First batch result." },
+        { index: 2, prompt_format: "plain", context_management: { prompt_tokens_before_truncation: 4, prompt_tokens_used: 4, token_truncation_applied: false }, prompt_tokens: 4, completion_tokens: 3, stop_reason: "eos_token", response: "Second batch result." },
+      ],
+    } });
+  });
   await page.route("**/api/engine/unload", (route) => {
     unloadCalls += 1;
     engineLoaded = false;
@@ -164,6 +194,13 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(engine).toContainText("Finish: stop sequence · Stop sequences: 2 · Attention: pytorch-scaled-dot-product-attention · Sampling: temperature 0.7 · top-p 0.8 · top-k 4 · min-p 0.05 · repetition penalty 1.1 · seed 42");
   await expect(engine).toContainText("LlamaForCausalLM");
   await expect(engine.getByRole("button", { name: "Unload model" })).toBeVisible();
+
+  await engine.getByLabel("AXIOM Native batch prompts").fill("First batch prompt\nSecond batch prompt");
+  await engine.getByRole("button", { name: "Run native batch" }).click();
+  const batchResults = engine.getByRole("region", { name: "Native batch results" });
+  await expect(batchResults).toContainText("2 prompt results");
+  await expect(batchResults).toContainText("First batch result.");
+  await expect(batchResults).toContainText("Second batch result.");
 
   await engine.getByRole("button", { name: "Unload model" }).click();
   await expect(engine.getByRole("status")).toContainText("released its loaded model and tokenizer references");

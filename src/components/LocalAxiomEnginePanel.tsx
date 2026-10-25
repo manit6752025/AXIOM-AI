@@ -15,7 +15,7 @@ const formatEstimatedMemory = (gib: number): string => {
   return `${(gib * 1024 ** 3).toFixed(0)} bytes`;
 };
 
-import { axiomApi, type AxiomEngineAdapterCompatibility, type AxiomEngineAssets, type AxiomEngineLiveTelemetry, type AxiomEngineResult, type AxiomEngineStatus, type AxiomEngineStreamEvent, type AxiomEngineSystemTelemetry, type AxiomQuantizationEstimate } from "../api/client";
+import { axiomApi, type AxiomEngineAdapterCompatibility, type AxiomEngineAssets, type AxiomEngineBatchResult, type AxiomEngineLiveTelemetry, type AxiomEngineResult, type AxiomEngineStatus, type AxiomEngineStreamEvent, type AxiomEngineSystemTelemetry, type AxiomQuantizationEstimate } from "../api/client";
 
 export default function LocalAxiomEnginePanel() {
   const [status, setStatus] = useState<AxiomEngineStatus | null>(null);
@@ -31,6 +31,8 @@ export default function LocalAxiomEnginePanel() {
   const [adapterPath, setAdapterPath] = useState("");
   const [selectedAdapterPath, setSelectedAdapterPath] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [batchPromptsText, setBatchPromptsText] = useState("");
+  const [batchResult, setBatchResult] = useState<AxiomEngineBatchResult | null>(null);
   const [maxNewTokens, setMaxNewTokens] = useState("256");
   const [temperature, setTemperature] = useState("0.7");
   const [topP, setTopP] = useState("0.9");
@@ -176,6 +178,7 @@ export default function LocalAxiomEnginePanel() {
     setError("");
     setLifecycleNotice("");
     setResult(null);
+    setBatchResult(null);
     setStreamResponse("");
     setStreamTokenCount(0);
     streamTokenCountRef.current = 0;
@@ -245,6 +248,82 @@ export default function LocalAxiomEnginePanel() {
       } else {
         setError(cause instanceof Error ? cause.message : "AXIOM Native Engine generation failed.");
       }
+    } finally {
+      if (activeStreamRef.current === controller) activeStreamRef.current = null;
+      setRunning(false);
+    }
+  };
+
+  const runBatch = async () => {
+    setError("");
+    setLifecycleNotice("");
+    setResult(null);
+    setBatchResult(null);
+    setStreamResponse("");
+    setStreamTokenCount(0);
+    streamTokenCountRef.current = 0;
+
+    const prompts = batchPromptsText.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    if (!modelPath.trim()) { setError("Choose a discovered native model or enter a trusted local model path."); return; }
+    if (prompts.length < 1) { setError("Enter at least one batch prompt, one prompt per line."); return; }
+    if (prompts.length > 128) { setError("Batch generation supports at most 128 prompts per request."); return; }
+    if (prompts.some((value) => value.length > 12000)) { setError("Each batch prompt is limited to 12,000 characters."); return; }
+    if (prompts.reduce((total, value) => total + value.length, 0) > 24000) {
+      setError("Combined batch prompts exceed the 24,000-character limit.");
+      return;
+    }
+
+    const tokenLimit = Number(maxNewTokens);
+    const temp = Number(temperature);
+    const p = Number(topP);
+    const k = Number(topK);
+    const minPValue = Number(minP);
+    const repeatPenalty = Number(repetitionPenalty);
+    const seedValue = seed.trim() === "" ? null : Number(seed);
+    const stopSequences = stopSequencesText.split("\n").map((value) => value.replace(/\r$/, "")).filter((value) => value.length > 0);
+    if (!Number.isInteger(tokenLimit) || tokenLimit < 1 || tokenLimit > 2048) { setError("Maximum generated tokens must be between 1 and 2048."); return; }
+    if (!Number.isFinite(temp) || temp < 0 || temp > 2) { setError("Temperature must be between 0 and 2."); return; }
+    if (!Number.isFinite(p) || p <= 0 || p > 1) { setError("Top-p must be greater than 0 and at most 1."); return; }
+    if (!Number.isInteger(k) || k < 0 || k > 100000) { setError("Top-k must be an integer from 0 through 100000; 0 disables top-k."); return; }
+    if (!Number.isFinite(minPValue) || minPValue < 0 || minPValue > 1) { setError("Min-p must be between 0 and 1; 0 disables min-p."); return; }
+    if (!Number.isFinite(repeatPenalty) || repeatPenalty < 0.1 || repeatPenalty > 5) { setError("Repetition penalty must be between 0.1 and 5."); return; }
+    if (seed.trim() !== "" && (!Number.isSafeInteger(seedValue) || seedValue! < 0 || seedValue! > Number.MAX_SAFE_INTEGER)) {
+      setError("Seed must be a whole number from 0 through 9007199254740991, or blank for a non-fixed seed.");
+      return;
+    }
+    if (stopSequences.length > 16) { setError("At most 16 stop sequences may be configured."); return; }
+    if (stopSequences.some((value) => !value.trim() || value.length > 256)) {
+      setError("Each stop sequence must contain non-whitespace text and be no longer than 256 characters.");
+      return;
+    }
+
+    const controller = new AbortController();
+    activeStreamRef.current = controller;
+    setLiveTelemetry(null);
+    setRunning(true);
+    try {
+      const completed = await axiomApi.runAxiomEngineBatch({
+        model_path: modelPath.trim(),
+        adapter_path: adapterPath.trim() || undefined,
+        prompts,
+        device: devicePreference,
+        memory_mode: memoryMode,
+        precision,
+        max_new_tokens: tokenLimit,
+        temperature: temp,
+        top_p: p,
+        top_k: k,
+        min_p: minPValue,
+        repetition_penalty: repeatPenalty,
+        seed: seedValue,
+        stop_sequences: stopSequences,
+      }, controller.signal);
+      setBatchResult(completed);
+      void refresh();
+    } catch (cause) {
+      setError(controller.signal.aborted
+        ? "Batch generation cancelled."
+        : cause instanceof Error ? cause.message : "AXIOM native batch generation failed.");
     } finally {
       if (activeStreamRef.current === controller) activeStreamRef.current = null;
       setRunning(false);
@@ -381,7 +460,12 @@ export default function LocalAxiomEnginePanel() {
       </label>
       <label className="field">
         <span className="field-label-row"><span>AXIOM Native Engine prompt</span><span>{prompt.length.toLocaleString()} / 12,000 characters</span></span>
-        <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={12000} rows={5} required placeholder="Ask the local model to do something…" />
+        <textarea aria-label="AXIOM Native Engine prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={12000} rows={5} required placeholder="Ask the local model to do something…" />
+      </label>
+      <label className="field">
+        <span className="field-label-row"><span>Batch prompts (optional)</span><span>{batchPromptsText.split(/\r?\n/).filter((value) => value.trim().length > 0).length} / 128 prompts · 24,000 characters total</span></span>
+        <textarea aria-label="AXIOM Native batch prompts" value={batchPromptsText} onChange={(event) => setBatchPromptsText(event.target.value)} maxLength={24000} rows={4} placeholder={"One prompt per line for length-bucketed native batch generation…\nSummarize this sample.\nClassify this second sample."} />
+        <small>Each non-blank line becomes an independent prompt. AXIOM groups prompts by token length, completes each response independently, and returns per-prompt token counts and stop reasons.</small>
       </label>
       <div className="two-column-grid">
         <label className="field"><span className="field-label-row"><span>Maximum generated tokens</span></span><input aria-label="Maximum generated tokens" type="number" min={1} max={2048} step={1} value={maxNewTokens} onChange={(event) => setMaxNewTokens(event.target.value)} required /></label>
@@ -399,11 +483,26 @@ export default function LocalAxiomEnginePanel() {
       </label>
       <div className="integration-form-actions">
         <button type="submit" className="button primary-button" disabled={!status?.ready || loading || running || !modelPath.trim() || !prompt.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}><Play size={15} /> {running ? "Generating locally…" : "Run with AXIOM Engine"}</button>
+        <button type="button" className="button secondary-button" onClick={() => void runBatch()} disabled={!status?.ready || loading || running || !modelPath.trim() || !batchPromptsText.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}>{running ? "Batch running…" : "Run native batch"}</button>
         {running && <button type="button" className="button secondary-button" onClick={() => activeStreamRef.current?.abort()}><Unplug size={14} /> Stop generation</button>}
         {result && <span className="quiet-note"><Activity size={14} /> {result.completion_tokens} tokens · {result.elapsed_ms} ms wall time · {result.prefill_ms} ms prefill · {result.decode_ms} ms decode · {result.generation_tokens_per_second} tok/s</span>}
         {!result && streamTokenCount > 0 && <span className="quiet-note"><Activity size={14} /> {streamTokenCount} token(s) streamed</span>}
       </div>
     </form>
+    {batchResult && <section className="panel-surface" aria-label="Native batch results" style={{ padding: 14, marginTop: 14 }}>
+      <div className="surface-head">
+        <div><p className="surface-eyebrow">AXIOM ENGINE · NATIVE BATCH</p><h3>{batchResult.batch_size} prompt results</h3></div>
+        <span className="status-pill">COMPLETE</span>
+      </div>
+      <p className="quiet-note">{batchResult.prompt_tokens.toLocaleString()} prompt tokens · {batchResult.completion_tokens.toLocaleString()} completion tokens · {batchResult.elapsed_ms.toFixed(1)} ms wall time · {batchResult.memory_mode.replaceAll("_", " ")} · local-only execution</p>
+      <div style={{ display: "grid", gap: 12 }}>
+        {batchResult.results.map((item) => <article key={item.index} className="panel-surface" style={{ padding: 12 }}>
+          <h4>Prompt {item.index}</h4>
+          <p className="quiet-note">{item.prompt_tokens} input token(s) · {item.completion_tokens} output token(s) · finish: {item.stop_reason}{item.context_management.token_truncation_applied ? " · input truncated to fit context" : ""}</p>
+          <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", font: "inherit", margin: 0 }}>{item.response}</pre>
+        </article>)}
+      </div>
+    </section>}
     <section className="surface axiom-quantization-planner" aria-label="Memory and quantization planner">
       <div className="surface-head">
         <div>

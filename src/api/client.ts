@@ -321,6 +321,36 @@ export type AxiomEngineResult = {
   prompt_tokens: number; completion_tokens: number; elapsed_ms: number; generated_at: string; local_only: true;
 };
 
+export type AxiomEngineBatchResult = {
+  engine: "axiom-native-engine";
+  execution_backend: "pytorch-native-axiom";
+  transformers_generation_used: false;
+  ollama_used: false;
+  model: string;
+  architecture: string;
+  model_type: "llama" | "mistral" | "qwen2" | "qwen3";
+  batch_size: number;
+  results: Array<{
+    index: number;
+    prompt_format: string;
+    context_management: {
+      prompt_tokens_before_truncation: number;
+      prompt_tokens_used: number;
+      token_truncation_applied: boolean;
+    };
+    prompt_tokens: number;
+    completion_tokens: number;
+    stop_reason: string;
+    response: string;
+  }>;
+  prompt_tokens: number;
+  completion_tokens: number;
+  elapsed_ms: number;
+  memory_mode: "full" | "layer_streaming" | "disk_streaming";
+  checkpoint_format: "safetensors" | "gguf";
+  local_only: true;
+};
+
 export type AxiomEngineStreamEvent =
   | { type: "token"; response: string; completion_tokens: number }
   | { type: "complete"; result: AxiomEngineResult }
@@ -1568,6 +1598,17 @@ export const axiomApi = {
   runAxiomEngine: (input: { model_path: string; adapter_path?: string; prompt: string; max_new_tokens: number; temperature: number; top_p: number; top_k: number; min_p: number; repetition_penalty: number; seed: number | null; stop_sequences: string[]; device?: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu"; memory_mode?: "auto" | "full" | "layer_streaming" | "disk_streaming"; precision?: "auto" | "fp32" | "fp16" | "bf16" }) =>
     requestJson<AxiomEngineResult>("/api/engine/generate", {
       method: "POST", body: JSON.stringify(input),
+    }, 300_000),
+  runAxiomEngineBatch: (input: {
+    model_path: string; adapter_path?: string; prompts: string[];
+    max_new_tokens: number; temperature: number; top_p: number; top_k: number;
+    min_p: number; repetition_penalty: number; seed: number | null; stop_sequences: string[];
+    device: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu";
+    memory_mode: "auto" | "full" | "layer_streaming" | "disk_streaming";
+    precision?: "auto" | "fp32" | "fp16" | "bf16";
+  }, signal?: AbortSignal) =>
+    requestJson<AxiomEngineBatchResult>("/api/engine/generate/batch", {
+      method: "POST", body: JSON.stringify(input), signal,
     }, 300_000),
   streamAxiomEngine: (
     input: { model_path: string; adapter_path?: string; prompt: string; max_new_tokens: number; temperature: number; top_p: number; top_k: number; min_p: number; repetition_penalty: number; seed: number | null; stop_sequences: string[]; device: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu"; memory_mode: "auto" | "full" | "layer_streaming" | "disk_streaming"; precision?: "auto" | "fp32" | "fp16" | "bf16" },
