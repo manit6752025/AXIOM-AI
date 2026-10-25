@@ -609,6 +609,59 @@ def test_native_attention_implicit_causal_mask_matches_explicit_reference() -> N
     assert torch.allclose(actual, expected, atol=2e-5, rtol=1e-4)
 
 
+def test_native_forward_supports_batched_prefill_and_incremental_decode() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    input_ids = torch.tensor([[1, 2, 3], [3, 2, 1]], dtype=torch.long)
+
+    with torch.inference_mode():
+        batch_logits, batch_cache = runtime.forward(input_ids)
+        single_runs = [runtime.forward(input_ids[row:row + 1]) for row in range(input_ids.shape[0])]
+
+    assert tuple(batch_logits.shape) == (2, config.vocab_size)
+    assert torch.allclose(batch_logits, torch.cat([item[0] for item in single_runs]), atol=2e-5, rtol=1e-4)
+    for layer_index, (batch_key, batch_value) in enumerate(batch_cache):
+        assert tuple(batch_key.shape[:3]) == (2, config.num_key_value_heads, input_ids.shape[1])
+        assert torch.allclose(batch_key[0:1], single_runs[0][1][layer_index][0], atol=1e-6, rtol=1e-5)
+        assert torch.allclose(batch_key[1:2], single_runs[1][1][layer_index][0], atol=1e-6, rtol=1e-5)
+        assert torch.allclose(batch_value[0:1], single_runs[0][1][layer_index][1], atol=1e-6, rtol=1e-5)
+        assert torch.allclose(batch_value[1:2], single_runs[1][1][layer_index][1], atol=1e-6, rtol=1e-5)
+
+    next_ids = torch.tensor([[4], [5]], dtype=torch.long)
+    with torch.inference_mode():
+        batch_next_logits, batch_next_cache = runtime.forward(
+            next_ids, batch_cache, past_sequence_length=input_ids.shape[1]
+        )
+        single_next = [
+            runtime.forward(
+                next_ids[row:row + 1],
+                single_runs[row][1],
+                past_sequence_length=input_ids.shape[1],
+            )
+            for row in range(next_ids.shape[0])
+        ]
+    assert tuple(batch_next_logits.shape) == (2, config.vocab_size)
+    assert torch.allclose(
+        batch_next_logits, torch.cat([item[0] for item in single_next]), atol=2e-5, rtol=1e-4
+    )
+    with pytest.raises(NativeEngineError, match="batch size must match"):
+        runtime.forward(torch.tensor([[6], [7], [1]], dtype=torch.long), batch_next_cache)
+
+
+def test_native_forward_rejects_zero_sized_batches() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeEngineError, NativeLlamaRuntime
+
+    runtime = NativeLlamaRuntime(
+        NativeLlamaConfig.from_mapping(_config()), _tiny_weights(torch), torch, torch.device("cpu")
+    )
+    with pytest.raises(NativeEngineError, match="batch must contain at least one"):
+        runtime.forward(torch.empty((0, 1), dtype=torch.long))
+
+
 def test_native_forward_and_incremental_kv_cache_run_without_transformers() -> None:
     torch = pytest.importorskip("torch")
     from axiom.core.native_engine import NativeLlamaRuntime
