@@ -214,3 +214,44 @@ def test_install_gguf_native_target_rejects_conflicting_ollama_or_existing_check
             "example/tiny-gguf", "tiny.gguf", "tiny",
             register_ollama=False, install_native=True,
         )
+
+
+
+def test_cli_can_install_gguf_directly_for_native_engine(monkeypatch):
+    from typer.testing import CliRunner
+    from axiom.cli.model_studio import studio_app
+
+    observed = {}
+
+    def fake_install(repo_id, filename, model_name, register_ollama, **kwargs):
+        observed.update(
+            repo_id=repo_id,
+            filename=filename,
+            model_name=model_name,
+            register_ollama=register_ollama,
+            install_native=kwargs.get("install_native"),
+        )
+        return {
+            "path": "/trusted/models/tiny/model-Q4_K_M.gguf",
+            "model_name": model_name,
+            "registered_with_ollama": False,
+            "installed_for_native_engine": True,
+            "checkpoint_format": "gguf",
+        }
+
+    monkeypatch.setattr(studio, "install_hf_gguf", fake_install)
+    result = CliRunner().invoke(studio_app, [
+        "install-gguf", "example/tiny-gguf", "model-Q4_K_M.gguf",
+        "--name", "tiny", "--native",
+    ])
+
+    assert result.exit_code == 0, f"{result.output}\\n{result.exception!r}"
+    assert observed == {
+        "repo_id": "example/tiny-gguf",
+        "filename": "model-Q4_K_M.gguf",
+        "model_name": "tiny",
+        "register_ollama": False,
+        "install_native": True,
+    }
+    assert "Installed for AXIOM Native Engine" in result.output
+    assert "axiom engine run --model-path" in result.output
