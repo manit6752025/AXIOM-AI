@@ -239,7 +239,7 @@ axiom --no-banner engine run --model-path "$HOME/models/my-llama-model" --prompt
 
 - Use a local `tokenizer.json` with floating-point safetensors, or a supported GGUF checkpoint with a local or supported embedded tokenizer. GGUF support is limited to complete, validated dense Llama/Mistral/Qwen2/Qwen3 text checkpoints. EXL2/GPTQ/AWQ low-bit kernels, pickle `.bin` weights, and unsupported architectures are rejected.
 - Pick a device with `--device`. AXIOM reports detected CPU, CUDA, ROCm, Metal, and XPU options.
-- Pick `--precision auto|fp32|fp16|bf16`. Auto preserves the checkpoint dtype; FP16/BF16 may reduce memory for FP32 checkpoints where the backend supports them. This is floating-point precision, not INT8/INT4 quantization.
+- Pick `--precision auto|fp32|fp16|bf16`. Auto preserves safetensors checkpoint dtype; for GGUF, it selects a floating-point compute dtype (FP32 on CPU, FP16 by default on accelerators) because source tensors are dequantized. This is floating-point precision, not INT8/INT4 execution.
 - Choose `--memory-mode layer_streaming` when accelerator memory is constrained. Supported GGUF can also be loaded by dequantizing tensors to floating-point; this does not provide low-bit execution or low-bit memory savings. Native EXL2/GPTQ/AWQ kernels remain unsupported.
 - Choose `--memory-mode disk_streaming` when the entire model's layer weights also do not fit in CPU RAM. Expect extra disk I/O on every prompt/decode forward pass.
 - Use `engine estimate` to compare estimated weights, KV-cache, and workspace against RAM/VRAM budgets. INT4/INT8 candidate rows are sizing-only; supported GGUF inputs are dequantized to floating-point, and budget fit never guarantees that a checkpoint will load.
