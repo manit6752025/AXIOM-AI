@@ -74,7 +74,12 @@ def _logical_shape(tensor: Any) -> tuple[int, ...]:
     return tuple(reversed(tuple(int(value) for value in tensor.shape)))
 
 
-def _find_file(model_dir: Path, roots: tuple[Path, ...]) -> Path:
+_MAX_GGUF_SHARDS = 256
+_MAX_GGUF_TOTAL_BYTES = 1024 * 1024**3
+
+
+def _find_files(model_dir: Path, roots: tuple[Path, ...]) -> tuple[Path, ...]:
+    """Resolve all GGUF files under one trusted model directory."""
     from axiom.core.native_engine import _resolve_trusted_file
 
     try:
@@ -84,34 +89,86 @@ def _find_file(model_dir: Path, roots: tuple[Path, ...]) -> Path:
         )
     except OSError:
         raise ValueError("Trusted model directory could not be enumerated.") from None
-    if len(candidates) != 1:
-        raise ValueError(
-            "AXIOM Native Engine currently requires exactly one GGUF file per model directory; split GGUF shards are not supported."
-        )
-    path = _resolve_trusted_file(candidates[0], roots, "GGUF checkpoint")
-    try:
-        size = path.stat().st_size
-    except OSError:
-        raise ValueError("Trusted GGUF checkpoint could not be inspected.") from None
-    if not 0 < size <= _MAX_GGUF_BYTES:
-        raise ValueError("GGUF checkpoint size must be between 1 byte and 160 GiB.")
-    return path
+    if not candidates:
+        raise ValueError("Trusted model directory contains no GGUF checkpoint.")
+    if len(candidates) > _MAX_GGUF_SHARDS:
+        raise ValueError("GGUF checkpoint contains more than AXIOM's 256-shard safety limit.")
+    resolved: list[Path] = []
+    total_size = 0
+    for candidate in candidates:
+        path = _resolve_trusted_file(candidate, roots, "GGUF checkpoint")
+        try:
+            size = path.stat().st_size
+        except OSError:
+            raise ValueError("Trusted GGUF checkpoint could not be inspected.") from None
+        if not 0 < size <= _MAX_GGUF_BYTES:
+            raise ValueError("Each GGUF shard must be between 1 byte and 160 GiB.")
+        total_size += size
+        resolved.append(path)
+    if total_size > _MAX_GGUF_TOTAL_BYTES:
+        raise ValueError("Combined GGUF shards exceed AXIOM's 1 TiB checkpoint safety limit.")
+    return tuple(resolved)
 
 
-def _open_reader(path: Path) -> tuple[Any, Any, Any]:
+class _MergedGGUFReader:
+    """Keep all shard mmap owners alive while presenting the combined tensors."""
+
+    def __init__(self, readers: tuple[Any, ...]):
+        self.readers = readers
+        self.fields = readers[0].fields
+        self.tensors = [tensor for reader in readers for tensor in reader.tensors]
+
+
+def _open_reader(paths: tuple[Path, ...]) -> tuple[Any, Any, Any]:
     try:
         import gguf
         from gguf.constants import GGMLQuantizationType
         from gguf.quants import dequantize
     except (ImportError, OSError):
         raise RuntimeError("GGUF support requires gguf-py. Reinstall AXIOM with the native-inference extra.") from None
+    readers: list[Any] = []
     try:
-        reader = gguf.GGUFReader(str(path), mode="r")
+        for path in paths:
+            reader = gguf.GGUFReader(str(path), mode="r")
+            if len(reader.tensors) > _MAX_GGUF_TENSORS:
+                raise ValueError("GGUF shard contains too many tensors for AXIOM's safety limit.")
+            readers.append(reader)
     except Exception:
-        raise ValueError("Local GGUF checkpoint is malformed or uses an unsupported GGUF version.") from None
-    if len(reader.tensors) > _MAX_GGUF_TENSORS:
-        raise ValueError("GGUF checkpoint contains too many tensors for AXIOM's safety limit.")
-    return reader, dequantize, GGMLQuantizationType
+        raise ValueError("Local GGUF checkpoint or one of its shards is malformed or uses an unsupported GGUF version.") from None
+    if len(readers) == 1:
+        reader = readers[0]
+        reader._axiom_readers = tuple(readers)
+        return reader, dequantize, GGMLQuantizationType
+
+    shard_info: list[tuple[int, int, int]] = []
+    for reader in readers:
+        index = _field(reader, "split.no")
+        count = _field(reader, "split.count")
+        total_tensors = _field(reader, "split.tensors.count")
+        if any(isinstance(value, bool) or not isinstance(value, (int, np.integer)) for value in (index, count, total_tensors)):
+            raise ValueError("Multiple GGUF files are present but do not contain valid split-shard metadata.")
+        shard_info.append((int(index), int(count), int(total_tensors)))
+    expected_count = len(readers)
+    if any(count != expected_count for _index, count, _total in shard_info):
+        raise ValueError("GGUF split metadata does not match the number of shard files.")
+    indices = [index for index, _count, _total in shard_info]
+    if sorted(indices) != list(range(expected_count)):
+        raise ValueError("GGUF split metadata contains missing or duplicate shard indices.")
+    total_counts = {total for _index, _count, total in shard_info}
+    if len(total_counts) != 1:
+        raise ValueError("GGUF shards disagree about the total tensor count.")
+    ordered_readers = tuple(reader for _index, reader in sorted(zip(indices, readers), key=lambda pair: pair[0]))
+    merged = _MergedGGUFReader(ordered_readers)
+    declared_total = next(iter(total_counts))
+    if declared_total != len(merged.tensors):
+        raise ValueError("GGUF split metadata tensor count does not match the combined shards.")
+    names = [tensor.name for tensor in merged.tensors]
+    if len(names) != len(set(names)):
+        raise ValueError("GGUF shards contain duplicate tensor names.")
+    if _field(merged, "general.architecture") is None:
+        raise ValueError("First GGUF shard is missing model architecture metadata.")
+    merged._axiom_readers = ordered_readers
+    return merged, dequantize, GGMLQuantizationType
 
 
 def _configuration(reader: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -266,8 +323,8 @@ def inspect_gguf_checkpoint(model_dir: Path, trusted_roots: tuple[Path, ...] | N
     from axiom.core.native_engine import NativeEngineError
 
     roots = tuple(root.resolve() for root in (trusted_roots or (model_dir.resolve(),)))
-    path = _find_file(model_dir, roots)
-    reader, _dequantize, _qtypes = _open_reader(path)
+    paths = _find_files(model_dir, roots)
+    reader, _dequantize, _qtypes = _open_reader(paths)
     try:
         config, _mapped, details = _configuration(reader)
         tokenizer_source = _tokenizer_source(reader, model_dir, roots)
@@ -282,7 +339,9 @@ def inspect_gguf_checkpoint(model_dir: Path, trusted_roots: tuple[Path, ...] | N
         return {
             "config": config, "model_type": config["model_type"],
             "architecture": details["architecture"], "checkpoint_format": "gguf",
-            "gguf_path": str(path), "tokenizer_source": tokenizer_source,
+            "gguf_path": str(paths[0]) if len(paths) == 1 else None,
+            "gguf_paths": [str(path) for path in paths],
+            "tokenizer_source": tokenizer_source,
             "tensor_type_counts": type_counts,
             "scope_note": "GGUF tensors are dequantized for AXIOM's own PyTorch runtime; this release does not include low-bit kernels.",
         }
@@ -432,8 +491,8 @@ def load_native_gguf_runtime(
     if memory_mode not in {"full", "layer_streaming", "disk_streaming"}:
         raise ValueError("Native memory mode must be full, layer_streaming, or disk_streaming.")
     roots = tuple(root.resolve() for root in (trusted_roots or (model_dir.resolve(),)))
-    path = _find_file(model_dir, roots)
-    reader, dequantize, quant_types = _open_reader(path)
+    paths = _find_files(model_dir, roots)
+    reader, dequantize, quant_types = _open_reader(paths)
     _config_values, mapped, meta = _configuration(reader)
     config = meta["native_config"]
     tokenizer, tokenizer_source = _load_tokenizer(reader, model_dir, roots)
@@ -505,7 +564,10 @@ def load_native_gguf_runtime(
                       str(getattr(torch_module, "float16", "float16")): "fp16",
                       str(getattr(torch_module, "bfloat16", "bfloat16")): "bf16"}.get(str(runtime.dtype), str(runtime.dtype)),
         "precision_requested": precision, "device": str(device), "memory_mode": runtime.memory_mode,
-        "gguf_tensor_types": tensor_types, "gguf_low_bit_kernels_used": False,
+        "gguf_tensor_types": tensor_types,
+        "gguf_paths": [str(path) for path in paths],
+        "gguf_shard_count": len(paths),
+        "gguf_low_bit_kernels_used": False,
         "gguf_tensors_dequantized_to": "floating-point compute dtype", "tokenizer_source": tokenizer_source,
         "scope_note": (
             "GGUF executes through AXIOM's own transformer/decode path; tensors are dequantized on load or per-layer. "
