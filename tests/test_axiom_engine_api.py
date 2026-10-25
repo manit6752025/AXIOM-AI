@@ -60,7 +60,7 @@ def test_batch_generate_request_validates_size_prompt_limits_and_sampling(tmp_pa
         engine_api.BatchGenerateRequest(model_path=str(model), prompts=[" ", "ok"])
     with pytest.raises(ValidationError, match="Combined batch prompts"):
         engine_api.BatchGenerateRequest(model_path=str(model), prompts=["a" * 12000, "b" * 12000, "c"])
-    with pytest.raises(ValidationError, match="max_length"):
+    with pytest.raises(ValidationError, match="too_long"):
         engine_api.BatchGenerateRequest(model_path=str(model), prompts=["x"] * 129)
 
 
