@@ -169,6 +169,26 @@ def test_native_gguf_auto_memory_planning_uses_compute_size_and_reports_format(
     )
     assert selection["estimated_checkpoint_weight_bytes"] != 0
 
+def test_native_gguf_auto_generation_reports_checkpoint_format(tmp_path: Path, monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("gguf")
+    pytest.importorskip("tokenizers")
+    from axiom.core import engine
+
+    root = tmp_path / "trusted"
+    model_dir = root / "tiny-gguf-generation"
+    _write_gguf(model_dir, torch)
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(root))
+    monkeypatch.setattr(engine, "_available_system_memory_bytes", lambda: 8 * 1024**3)
+    monkeypatch.setattr(engine, "_device_capability_rows", lambda _torch=None: [
+        {
+            "id": "cpu", "name": "CPU", "available": True, "reason": "available",
+            "memory_free_gib": None, "memory_total_gib": None,
+        }
+    ])
+    monkeypatch.setattr(engine, "_LOADED_RUNTIME", None)
+    monkeypatch.setattr(engine, "_LOADED_ARCHITECTURE", None)
+
     result = engine.generate_local(
         str(model_dir),
         "a",
