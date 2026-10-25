@@ -1207,6 +1207,78 @@ def test_device_selection_rejects_unavailable_or_invalid_explicit_backend(monkey
         _resolve_execution_device(fake_torch, "network")
 
 
+def test_auto_device_falls_back_when_accelerator_memory_plan_cannot_fit(monkeypatch, tmp_path: Path) -> None:
+    import sys
+    from types import SimpleNamespace
+    from axiom.core import engine
+    from axiom.core.engine import AxiomEngineError
+
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    fake_torch = SimpleNamespace(device=lambda name: name)
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(engine, "_LOADED_RUNTIME", None)
+    monkeypatch.setattr(engine, "_LOADED_ARCHITECTURE", None)
+    monkeypatch.setattr(engine, "_resolve_model_directory", lambda *_args: model_dir)
+    monkeypatch.setattr(engine, "_inspect_model_config", lambda _path: {
+        "config": _config(), "model_type": "llama", "architecture": "LlamaForCausalLM",
+    })
+    monkeypatch.setattr(engine, "_allowed_model_roots", lambda: (tmp_path.resolve(),))
+    monkeypatch.setattr(engine, "_device_capability_rows", lambda _torch=None: [
+        {"id": "cuda", "name": "NVIDIA CUDA", "available": True, "reason": "available", "memory_free_gib": 0.1, "memory_total_gib": 8.0},
+        {"id": "rocm", "name": "AMD ROCm", "available": False, "reason": "unavailable", "memory_free_gib": None, "memory_total_gib": None},
+        {"id": "mps", "name": "Apple Metal (MPS)", "available": False, "reason": "unavailable", "memory_free_gib": None, "memory_total_gib": None},
+        {"id": "xpu", "name": "Intel XPU", "available": False, "reason": "unavailable", "memory_free_gib": None, "memory_total_gib": None},
+        {"id": "cpu", "name": "CPU", "available": True, "reason": "available", "memory_free_gib": None, "memory_total_gib": None},
+    ])
+
+    class FakeModel:
+        config = SimpleNamespace(max_position_embeddings=128)
+        memory_mode = "disk_streaming"
+
+    planner_devices: list[str] = []
+    load_devices: list[str] = []
+
+    def fake_plan(_path, _inspected, _torch, device, device_selection, _adapter=None, _precision="auto"):
+        selected = str(device)
+        planner_devices.append(selected)
+        if selected == "cuda":
+            raise AxiomEngineError(
+                "Automatic memory planning could not find an estimated strategy that fits this device."
+            )
+        assert device_selection["selected"] == "cpu"
+        return "disk_streaming", {
+            "requested": "auto",
+            "selected": "disk_streaming",
+            "reason": "The CPU memory estimate fits.",
+            "estimates_are_advisory": True,
+        }
+
+    def fake_load(_path, _torch, device, **_kwargs):
+        load_devices.append(str(device))
+        return FakeModel(), object(), {
+            "architecture": "LlamaForCausalLM",
+            "model_type": "llama",
+            "adapter_directory_name": None,
+            "precision": "fp32",
+        }
+
+    monkeypatch.setattr(engine, "_choose_memory_mode", fake_plan)
+    monkeypatch.setattr("axiom.core.native_engine.load_native_runtime", fake_load)
+
+    _model, _tokenizer, _torch, device, details = engine._load_local_model(
+        str(model_dir), None, device_preference="auto", memory_mode="auto"
+    )
+
+    assert planner_devices == ["cuda", "cpu"]
+    assert load_devices == ["cpu"]
+    assert device == "cpu"
+    assert details["device_selection"]["selected"] == "cpu"
+    assert "memory planner" in details["device_selection"]["reason"]
+    assert details["memory_selection"]["selected"] == "disk_streaming"
+    assert details["memory_selection"]["fallback_from"] == "cuda"
+
+
 def test_auto_device_retries_cpu_after_accelerator_oom(monkeypatch, tmp_path: Path) -> None:
     import sys
     from types import SimpleNamespace
