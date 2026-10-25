@@ -245,7 +245,7 @@ def test_cli_can_install_gguf_directly_for_native_engine(monkeypatch):
         "--name", "tiny", "--native",
     ])
 
-    assert result.exit_code == 0, f"{result.output}\\n{result.exception!r}"
+    assert result.exit_code == 0, f"{result.output}\n{result.exception!r}"
     assert observed == {
         "repo_id": "example/tiny-gguf",
         "filename": "model-Q4_K_M.gguf",
