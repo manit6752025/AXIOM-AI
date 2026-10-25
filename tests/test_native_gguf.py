@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 import pytest
+
+# GGUF/native-inference tests are optional when the numerical runtime is not installed.
+np = pytest.importorskip("numpy")
 
 
 def _weights(torch, vocab_size=8, hidden=8, intermediate=12):
