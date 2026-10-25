@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "axiom-all"
-version = "0.3.0-beta.5"
+version = "0.3.0-beta.6"
 description = "Local-first CLI and daemon for inspecting models, datasets, and hardware-aware AI plans."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -37,6 +37,8 @@ native-inference = [
     "torch>=2.2",
     "tokenizers>=0.19",
     "safetensors>=0.4",
+    "gguf>=0.10.0",
+    "numpy>=1.24",
     "jinja2>=3.1",
 ]
 training = [

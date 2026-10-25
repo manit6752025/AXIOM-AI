@@ -98,7 +98,7 @@ export default function Beta5Optimizer() {
     <section className="beta5-optimizer-page">
       <div className="beta5-hero">
         <div>
-          <p className="eyebrow">BETA 5 / AGENT MODEL OPTIMIZER</p>
+          <p className="eyebrow">BETA 6 / AGENT MODEL OPTIMIZER</p>
           <h1>Fit a model to the machine you actually have.</h1>
           <p>
             Choose the workload, target and model. AXIOM inspects hardware,

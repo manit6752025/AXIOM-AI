@@ -19,7 +19,7 @@ To inspect the script first or pin a release, download it and run it locally:
 ```powershell
 Invoke-WebRequest https://raw.githubusercontent.com/NetCore-Technologies/AXIOM-AI/main/installers/install.ps1 -OutFile .\install-axiom.ps1
 Get-Help .\install-axiom.ps1 -Full
-.\install-axiom.ps1 -Tag v0.3.0-beta.5
+.\install-axiom.ps1 -Tag v0.3.0-beta.6
 ```
 
 Options include `-Tag` to pin a published release, `-InstallDir` to choose the install directory, `-Force` to skip the overwrite prompt, and `-NoPathUpdate` to leave PATH unchanged. The installer refuses a missing or mismatched checksum.
@@ -38,7 +38,7 @@ Set environment variables before running the script to customise the installatio
 
 | Variable | Purpose |
 | --- | --- |
-| `AXIOM_RELEASE_TAG` | Pin a published release, e.g. `v0.3.0-beta.5` |
+| `AXIOM_RELEASE_TAG` | Pin a published release, e.g. `v0.3.0-beta.6` |
 | `AXIOM_SOURCE_REF` | Git ref for source-based installs |
 | `AXIOM_INSTALL_DIR` | Absolute path for release files and the virtual environment |
 | `AXIOM_BIN_DIR` | Absolute path for the `axiom` launcher |

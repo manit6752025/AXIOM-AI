@@ -15,7 +15,7 @@ const formatEstimatedMemory = (gib: number): string => {
   return `${(gib * 1024 ** 3).toFixed(0)} bytes`;
 };
 
-import { axiomApi, type AxiomEngineAdapterCompatibility, type AxiomEngineAssets, type AxiomEngineLiveTelemetry, type AxiomEngineResult, type AxiomEngineStatus, type AxiomEngineStreamEvent, type AxiomEngineSystemTelemetry, type AxiomQuantizationEstimate } from "../api/client";
+import { axiomApi, type AxiomEngineAdapterCompatibility, type AxiomEngineAssets, type AxiomEngineBatchResult, type AxiomEngineLiveTelemetry, type AxiomEngineResult, type AxiomEngineStatus, type AxiomEngineStreamEvent, type AxiomEngineSystemTelemetry, type AxiomQuantizationEstimate } from "../api/client";
 
 export default function LocalAxiomEnginePanel() {
   const [status, setStatus] = useState<AxiomEngineStatus | null>(null);
@@ -31,6 +31,8 @@ export default function LocalAxiomEnginePanel() {
   const [adapterPath, setAdapterPath] = useState("");
   const [selectedAdapterPath, setSelectedAdapterPath] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [batchPromptsText, setBatchPromptsText] = useState("");
+  const [batchResult, setBatchResult] = useState<AxiomEngineBatchResult | null>(null);
   const [maxNewTokens, setMaxNewTokens] = useState("256");
   const [temperature, setTemperature] = useState("0.7");
   const [topP, setTopP] = useState("0.9");
@@ -176,6 +178,7 @@ export default function LocalAxiomEnginePanel() {
     setError("");
     setLifecycleNotice("");
     setResult(null);
+    setBatchResult(null);
     setStreamResponse("");
     setStreamTokenCount(0);
     streamTokenCountRef.current = 0;
@@ -251,6 +254,82 @@ export default function LocalAxiomEnginePanel() {
     }
   };
 
+  const runBatch = async () => {
+    setError("");
+    setLifecycleNotice("");
+    setResult(null);
+    setBatchResult(null);
+    setStreamResponse("");
+    setStreamTokenCount(0);
+    streamTokenCountRef.current = 0;
+
+    const prompts = batchPromptsText.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    if (!modelPath.trim()) { setError("Choose a discovered native model or enter a trusted local model path."); return; }
+    if (prompts.length < 1) { setError("Enter at least one batch prompt, one prompt per line."); return; }
+    if (prompts.length > 128) { setError("Batch generation supports at most 128 prompts per request."); return; }
+    if (prompts.some((value) => value.length > 12000)) { setError("Each batch prompt is limited to 12,000 characters."); return; }
+    if (prompts.reduce((total, value) => total + value.length, 0) > 24000) {
+      setError("Combined batch prompts exceed the 24,000-character limit.");
+      return;
+    }
+
+    const tokenLimit = Number(maxNewTokens);
+    const temp = Number(temperature);
+    const p = Number(topP);
+    const k = Number(topK);
+    const minPValue = Number(minP);
+    const repeatPenalty = Number(repetitionPenalty);
+    const seedValue = seed.trim() === "" ? null : Number(seed);
+    const stopSequences = stopSequencesText.split("\n").map((value) => value.replace(/\r$/, "")).filter((value) => value.length > 0);
+    if (!Number.isInteger(tokenLimit) || tokenLimit < 1 || tokenLimit > 2048) { setError("Maximum generated tokens must be between 1 and 2048."); return; }
+    if (!Number.isFinite(temp) || temp < 0 || temp > 2) { setError("Temperature must be between 0 and 2."); return; }
+    if (!Number.isFinite(p) || p <= 0 || p > 1) { setError("Top-p must be greater than 0 and at most 1."); return; }
+    if (!Number.isInteger(k) || k < 0 || k > 100000) { setError("Top-k must be an integer from 0 through 100000; 0 disables top-k."); return; }
+    if (!Number.isFinite(minPValue) || minPValue < 0 || minPValue > 1) { setError("Min-p must be between 0 and 1; 0 disables min-p."); return; }
+    if (!Number.isFinite(repeatPenalty) || repeatPenalty < 0.1 || repeatPenalty > 5) { setError("Repetition penalty must be between 0.1 and 5."); return; }
+    if (seed.trim() !== "" && (!Number.isSafeInteger(seedValue) || seedValue! < 0 || seedValue! > Number.MAX_SAFE_INTEGER)) {
+      setError("Seed must be a whole number from 0 through 9007199254740991, or blank for a non-fixed seed.");
+      return;
+    }
+    if (stopSequences.length > 16) { setError("At most 16 stop sequences may be configured."); return; }
+    if (stopSequences.some((value) => !value.trim() || value.length > 256)) {
+      setError("Each stop sequence must contain non-whitespace text and be no longer than 256 characters.");
+      return;
+    }
+
+    const controller = new AbortController();
+    activeStreamRef.current = controller;
+    setLiveTelemetry(null);
+    setRunning(true);
+    try {
+      const completed = await axiomApi.runAxiomEngineBatch({
+        model_path: modelPath.trim(),
+        adapter_path: adapterPath.trim() || undefined,
+        prompts,
+        device: devicePreference,
+        memory_mode: memoryMode,
+        precision,
+        max_new_tokens: tokenLimit,
+        temperature: temp,
+        top_p: p,
+        top_k: k,
+        min_p: minPValue,
+        repetition_penalty: repeatPenalty,
+        seed: seedValue,
+        stop_sequences: stopSequences,
+      }, controller.signal);
+      setBatchResult(completed);
+      void refresh();
+    } catch (cause) {
+      setError(controller.signal.aborted
+        ? "Batch generation cancelled."
+        : cause instanceof Error ? cause.message : "AXIOM native batch generation failed.");
+    } finally {
+      if (activeStreamRef.current === controller) activeStreamRef.current = null;
+      setRunning(false);
+    }
+  };
+
   const telemetryMetrics = result ? {
     stage: "complete",
     prompt_tokens: result.prompt_tokens,
@@ -274,7 +353,7 @@ export default function LocalAxiomEnginePanel() {
         {status?.loaded && <button type="button" className="button secondary-button" onClick={() => void unload()} disabled={loading || running || unloading}><Unplug size={14} /> {unloading ? "Unloading…" : "Unload model"}</button>}
       </div>
     </div>
-    <p>AXIOM Native Engine implements its own PyTorch Llama/Mistral/Qwen2 forward pass and also supports Qwen3 with query/key RMS normalization. The native path provides KV-cache decode, attention, sampling and supported LoRA application. It supports model-aware memory selection, in-RAM layer streaming, and disk-resident safetensors layer loading with a CPU KV cache. Model Studio can pull compatible public Hugging Face safetensors checkpoints directly into AXIOM. GGUF/EXL2/GPTQ/AWQ loading, multimodal architectures, and vLLM-style continuous-batching serving are not yet native capabilities.</p>
+    <p>AXIOM Native Engine implements its own PyTorch Llama/Mistral/Qwen2/Qwen3 forward pass, KV-cache decode, attention, sampling, and supported LoRA application. It loads floating-point safetensors checkpoints and can ingest single-file or complete split-shard dense Llama/Mistral/Qwen2/Qwen3 GGUF checkpoints through gguf-py, dequantizing GGUF tensors to floating-point for AXIOM's own runtime. That means GGUF source quantization does not provide low-bit execution or low-bit memory usage. Model Studio can pull compatible public Hugging Face safetensors checkpoints directly into AXIOM. Malformed or incomplete GGUF shard sets, EXL2/GPTQ/AWQ low-bit kernels, multimodal architectures, and vLLM-style continuous-batching serving remain unsupported.</p>
     <div className="status-strip" aria-label="AXIOM Engine status">
       <div className="status-strip-item">
         <span className={`status-pill ${status?.ready ? "success" : "warning"}`}><i />{loading ? "CHECKING" : status?.ready ? "ENGINE READY" : "SETUP REQUIRED"}</span>
@@ -297,7 +376,7 @@ export default function LocalAxiomEnginePanel() {
       <div className="two-column-grid">
         <article className="surface"><p className="surface-eyebrow">System CPU</p><h3>{systemTelemetry.cpu.system_percent === null ? "not exposed" : systemTelemetry.cpu.system_percent.toFixed(1) + "%"}</h3><p className="quiet-note">{systemTelemetry.cpu.logical_cores ?? "?"} logical cores</p></article>
         <article className="surface"><p className="surface-eyebrow">System RAM</p><h3>{formatMemoryBytes(systemTelemetry.memory.available_bytes)} free</h3><p className="quiet-note">{formatMemoryBytes(systemTelemetry.memory.used_bytes)} used / {formatMemoryBytes(systemTelemetry.memory.total_bytes)} total{systemTelemetry.memory.percent === null ? "" : " · " + systemTelemetry.memory.percent.toFixed(1) + "% used"}</p></article>
-        <article className="surface"><p className="surface-eyebrow">AXIOM process</p><h3>{formatMemoryBytes(systemTelemetry.process.rss_bytes)} RSS</h3><p className="quiet-note">{systemTelemetry.cpu.process_percent === null ? "CPU usage not exposed" : systemTelemetry.cpu.process_percent.toFixed(1) + "% CPU"} · {systemTelemetry.process.threads ?? "?"} threads</p></article>
+        <article className="surface"><p className="surface-eyebrow">AXIOM process</p><h3>{formatMemoryBytes(systemTelemetry.process.rss_bytes)} RSS</h3><p className="quiet-note">Peak RSS: {formatMemoryBytes(systemTelemetry.process.peak_rss_bytes)} · {systemTelemetry.cpu.process_percent === null ? "CPU usage not exposed" : systemTelemetry.cpu.process_percent.toFixed(1) + "% CPU"} · {systemTelemetry.process.threads ?? "?"} threads</p></article>
         <article className="surface"><p className="surface-eyebrow">Trusted model storage</p><h3>{systemTelemetry.disks.length} root(s)</h3><p className="quiet-note">{systemTelemetry.disks.length ? systemTelemetry.disks.map(disk => disk.label + ": " + formatMemoryBytes(disk.free_bytes) + " free").join(" · ") : "No trusted model roots are currently available."}</p></article>
       </div>
       {systemTelemetry.loaded_runtime.device_allocator && <p className="quiet-note">Loaded-device allocator: {formatMemoryBytes(systemTelemetry.loaded_runtime.device_allocator.current_allocated_bytes)} allocated · {formatMemoryBytes(systemTelemetry.loaded_runtime.device_allocator.current_reserved_bytes)} reserved · {formatMemoryBytes(systemTelemetry.loaded_runtime.device_allocator.peak_allocated_bytes)} peak allocated</p>}
@@ -316,7 +395,7 @@ export default function LocalAxiomEnginePanel() {
       <label className="field">
         <span className="field-label-row"><span>Local Llama / Mistral model directory</span></span>
         <input value={modelPath} onChange={(event) => { setModelPath(event.target.value); if (event.target.value !== selectedModelPath) setSelectedModelPath(""); setAdapterCompatibility(null); }} required maxLength={4096} placeholder="/home/user/models/my-llama-model" autoComplete="off" />
-        <small>Existing directory with config.json, tokenizer.json and model.safetensors (or the safetensors shard index). GGUF, quantized formats and pickle .bin weights are not supported by this native path. Paths must match a directory discovered under a trusted root; set AXIOM_MODEL_ROOTS for additional locations.</small>
+        <small>Existing directory with config.json, tokenizer.json and model.safetensors (or its shard index), or a directory containing a complete single-file or metadata-validated split GGUF checkpoint. GGUF tensors are dequantized to floating-point; source Q4/Q5/Q8 quantization does not mean low-bit execution or memory usage. Malformed or incomplete GGUF shard sets, EXL2/GPTQ/AWQ kernels and pickle .bin weights are not supported. Paths must match a directory discovered under a trusted root; set AXIOM_MODEL_ROOTS for additional locations.</small>
       </label>
       <label className="field">
         <span className="field-label-row"><span>Discovered LoRA adapter (optional)</span><span>{assets?.adapters.length ?? 0} found</span></span>
@@ -377,11 +456,16 @@ export default function LocalAxiomEnginePanel() {
           <option value="layer_streaming">Layer streaming + CPU KV cache · lower VRAM, slower</option>
           <option value="disk_streaming">Disk-resident layer streaming + CPU KV cache · lowest RAM/VRAM, slowest</option>
         </select>
-        <small>Auto-fit estimates checkpoint weight bytes, KV-cache and workspace demand for the configured context, and observed free VRAM/system RAM to select full weights, in-RAM layer streaming, or disk-resident layer streaming. Estimates are advisory, not a guarantee against device OOM. Layer streaming keeps all transformer weights in system RAM and stages one layer at a time; disk streaming reads layers from the local safetensors shards on demand. Both streaming modes keep the KV cache in system RAM and trade throughput for lower RAM/VRAM weight residency. Embeddings, output projection, LoRA adapter tensors, activations, and the active layer still need memory.</small>
+        <small>Auto-fit estimates checkpoint weight bytes, KV-cache and workspace demand for the configured context, and observed free VRAM/system RAM to select full weights, in-RAM layer streaming, or disk-resident layer streaming. Estimates are advisory, not a guarantee against device OOM. Layer streaming keeps all transformer weights in system RAM and stages one layer at a time; disk streaming reads layers from local safetensors shards or dequantizes local GGUF layer tensors on demand. Both streaming modes keep the KV cache in system RAM and trade throughput for lower RAM/VRAM weight residency. Embeddings, output projection, LoRA adapter tensors, activations, and the active layer still need memory.</small>
       </label>
       <label className="field">
         <span className="field-label-row"><span>AXIOM Native Engine prompt</span><span>{prompt.length.toLocaleString()} / 12,000 characters</span></span>
-        <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={12000} rows={5} required placeholder="Ask the local model to do something…" />
+        <textarea aria-label="AXIOM Native Engine prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={12000} rows={5} required placeholder="Ask the local model to do something…" />
+      </label>
+      <label className="field">
+        <span className="field-label-row"><span>Batch prompts (optional)</span><span>{batchPromptsText.split(/\r?\n/).filter((value) => value.trim().length > 0).length} / 128 prompts · 24,000 characters total</span></span>
+        <textarea aria-label="AXIOM Native batch prompts" value={batchPromptsText} onChange={(event) => setBatchPromptsText(event.target.value)} maxLength={24000} rows={4} placeholder={"One prompt per line for length-bucketed native batch generation…\nSummarize this sample.\nClassify this second sample."} />
+        <small>Each non-blank line becomes an independent prompt. AXIOM groups prompts by token length, completes each response independently, and returns per-prompt token counts and stop reasons.</small>
       </label>
       <div className="two-column-grid">
         <label className="field"><span className="field-label-row"><span>Maximum generated tokens</span></span><input aria-label="Maximum generated tokens" type="number" min={1} max={2048} step={1} value={maxNewTokens} onChange={(event) => setMaxNewTokens(event.target.value)} required /></label>
@@ -399,11 +483,26 @@ export default function LocalAxiomEnginePanel() {
       </label>
       <div className="integration-form-actions">
         <button type="submit" className="button primary-button" disabled={!status?.ready || loading || running || !modelPath.trim() || !prompt.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}><Play size={15} /> {running ? "Generating locally…" : "Run with AXIOM Engine"}</button>
+        <button type="button" className="button secondary-button" onClick={() => void runBatch()} disabled={!status?.ready || loading || running || !modelPath.trim() || !batchPromptsText.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}>{running ? "Batch running…" : "Run native batch"}</button>
         {running && <button type="button" className="button secondary-button" onClick={() => activeStreamRef.current?.abort()}><Unplug size={14} /> Stop generation</button>}
         {result && <span className="quiet-note"><Activity size={14} /> {result.completion_tokens} tokens · {result.elapsed_ms} ms wall time · {result.prefill_ms} ms prefill · {result.decode_ms} ms decode · {result.generation_tokens_per_second} tok/s</span>}
         {!result && streamTokenCount > 0 && <span className="quiet-note"><Activity size={14} /> {streamTokenCount} token(s) streamed</span>}
       </div>
     </form>
+    {batchResult && <section className="panel-surface" aria-label="Native batch results" style={{ padding: 14, marginTop: 14 }}>
+      <div className="surface-head">
+        <div><p className="surface-eyebrow">AXIOM ENGINE · NATIVE BATCH</p><h3>{batchResult.batch_size} prompt results</h3></div>
+        <span className="status-pill">COMPLETE</span>
+      </div>
+      <p className="quiet-note">{batchResult.prompt_tokens.toLocaleString()} prompt tokens · {batchResult.completion_tokens.toLocaleString()} completion tokens · {batchResult.elapsed_ms.toFixed(1)} ms wall time · {batchResult.memory_mode.replaceAll("_", " ")} · local-only execution</p>
+      <div style={{ display: "grid", gap: 12 }}>
+        {batchResult.results.map((item) => <article key={item.index} className="panel-surface" style={{ padding: 12 }}>
+          <h4>Prompt {item.index}</h4>
+          <p className="quiet-note">{item.prompt_tokens} input token(s) · {item.completion_tokens} output token(s) · finish: {item.stop_reason}{item.context_management.token_truncation_applied ? " · input truncated to fit context" : ""}</p>
+          <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", font: "inherit", margin: 0 }}>{item.response}</pre>
+        </article>)}
+      </div>
+    </section>}
     <section className="surface axiom-quantization-planner" aria-label="Memory and quantization planner">
       <div className="surface-head">
         <div>
@@ -486,7 +585,7 @@ export default function LocalAxiomEnginePanel() {
           <article className="surface"><p className="surface-eyebrow">Decode · wall time</p><h3>{telemetryMetrics.decode_ms.toFixed(1)} ms</h3><p className="quiet-note">Elapsed: {telemetryMetrics.elapsed_ms.toFixed(1)} ms</p></article>
         </div>
         {memorySelection && <p className="quiet-note">Memory planner: {memorySelection.reason} {memorySelection.estimates_are_advisory ? "(estimate, not a fit guarantee)" : ""}</p>}
-        <p className="quiet-note">Memory mode: {telemetryMemoryMode.replaceAll("_", " ")} · Process RSS: {formatMemoryBytes(deviceMemory?.process_rss_bytes)}{typeof deviceMemory?.process_rss_delta_bytes === "number" ? " (" + (deviceMemory.process_rss_delta_bytes >= 0 ? "+" : "") + formatMemoryBytes(Math.abs(deviceMemory.process_rss_delta_bytes)) + " since generation start)" : ""} · Device: {deviceMemory?.backend ?? result?.device_selection?.selected ?? "unknown"}</p>
+        <p className="quiet-note">Memory mode: {telemetryMemoryMode.replaceAll("_", " ")} · Process RSS: {formatMemoryBytes(deviceMemory?.process_rss_bytes)}{typeof deviceMemory?.process_rss_delta_bytes === "number" ? " (" + (deviceMemory.process_rss_delta_bytes >= 0 ? "+" : "") + formatMemoryBytes(Math.abs(deviceMemory.process_rss_delta_bytes)) + " since generation start)" : ""} · Peak RSS: {formatMemoryBytes(deviceMemory?.process_peak_rss_bytes)}{typeof deviceMemory?.process_peak_rss_delta_bytes === "number" && deviceMemory.process_peak_rss_delta_bytes > 0 ? " (+" + formatMemoryBytes(deviceMemory.process_peak_rss_delta_bytes) + " peak increase)" : ""} · Device: {deviceMemory?.backend ?? result?.device_selection?.selected ?? "unknown"}</p>
         <p className="quiet-note">Device allocator current: {formatMemoryBytes(deviceMemory?.current_allocated_bytes)} · reserved: {formatMemoryBytes(deviceMemory?.current_reserved_bytes)} · peak allocated: {formatMemoryBytes(deviceMemory?.peak_allocated_bytes)} · peak reserved: {formatMemoryBytes(deviceMemory?.peak_reserved_bytes)}{typeof deviceMemory?.peak_increment_bytes === "number" ? " · peak increase: " + formatMemoryBytes(deviceMemory.peak_increment_bytes) : ""}</p>
         {memoryStats && <p className="quiet-note">Layer staging: {formatMemoryBytes(memoryStats.layer_weight_bytes_staged)} · Returned to CPU: {formatMemoryBytes(memoryStats.layer_weight_bytes_returned_to_cpu)} · Disk reads: {memoryStats.disk_layer_weight_loads} tensor(s) / {formatMemoryBytes(memoryStats.disk_layer_weight_bytes_read)} · KV cache copied to CPU: {formatMemoryBytes(memoryStats.kv_cache_bytes_offloaded)}</p>}
         {!deviceMemory?.device_allocator_metrics_supported && <p className="quiet-note">This backend does not expose allocator peak metrics through the installed PyTorch runtime. Null metrics are intentionally shown as "not exposed" rather than estimated.</p>}

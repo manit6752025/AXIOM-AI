@@ -262,7 +262,7 @@ export type AxiomEngineSystemTelemetry = {
   schema_version: 1; sampled_at: string; sample_type: "point_in_time";
   cpu: { logical_cores: number | null; system_percent: number | null; process_percent: number | null };
   memory: { total_bytes: number | null; available_bytes: number | null; used_bytes: number | null; percent: number | null };
-  process: { pid: number; rss_bytes: number | null; threads: number | null };
+  process: { pid: number; rss_bytes: number | null; peak_rss_bytes: number | null; threads: number | null };
   devices: Array<{ id: string | null; name: string | null; available: boolean; memory_free_gib: number | null; memory_total_gib: number | null }>;
   loaded_runtime: { loaded: boolean; model: string | null; architecture: string | null; device: string | null; memory_mode: "full" | "layer_streaming" | "disk_streaming" | null; precision: string | null; last_generation: Record<string, string | number> | null; device_allocator: AxiomEngineDeviceMemory | null };
   disks: Array<{ label: string; total_bytes: number; free_bytes: number; used_bytes: number }>;
@@ -274,7 +274,7 @@ export type AxiomEngineStatus = {
   minimum_versions?: Record<string, string>; problems?: string[];
   devices?: Array<{ id: "cpu" | "cuda" | "rocm" | "mps" | "xpu"; name: string; available: boolean; reason: string; memory_free_gib: number | null; memory_total_gib: number | null }>;
   recommended_device?: "cpu" | "cuda" | "rocm" | "mps" | "xpu" | null; loaded_device?: string | null; loaded_memory_mode?: "full" | "layer_streaming" | "disk_streaming" | null; loaded_precision?: string | null;
-  loaded: boolean; architecture: string | null; model_loading: "local_files_only" | "local_safetensors_only";
+  loaded: boolean; architecture: string | null; model_loading: "local_safetensors_and_gguf_if_available";
   execution_backend?: string; transformers_generation_used?: false; ollama_used?: false;
   supported_model_types?: string[]; supported_weights?: string[]; remote_code: false;
   setup_note: string; scope_note: string; checked_at: string;
@@ -292,9 +292,33 @@ export type AxiomEngineMemoryStats = {
 export type AxiomEngineDeviceMemory = {
   backend: string; current_allocated_bytes: number | null; current_reserved_bytes: number | null;
   peak_allocated_bytes: number | null; peak_reserved_bytes: number | null; peak_increment_bytes: number | null;
-  process_rss_bytes: number | null; process_rss_delta_bytes: number | null;
+  process_rss_bytes: number | null; process_rss_delta_bytes: number | null; process_peak_rss_bytes: number | null; process_peak_rss_delta_bytes: number | null;
   peak_reset_supported: boolean; device_allocator_metrics_supported: boolean;
 };
+export type AxiomEngineMemorySelection = {
+  requested: string;
+  selected: "full" | "layer_streaming" | "disk_streaming";
+  reason: string;
+  checkpoint_format?: "safetensors" | "gguf";
+  estimated_checkpoint_weight_bytes?: number;
+  estimated_source_checkpoint_bytes?: number;
+  estimated_adapter_weight_bytes?: number;
+  estimated_total_weight_bytes?: number;
+  estimated_non_layer_weight_bytes?: number;
+  estimated_kv_cache_bytes?: number;
+  estimated_context_tokens?: number;
+  estimated_dtype_bytes?: number;
+  estimated_full_execution_bytes?: number;
+  estimated_streaming_device_bytes?: number;
+  estimated_disk_streaming_system_ram_bytes?: number;
+  available_system_ram_bytes?: number | null;
+  available_device_memory_bytes?: number | null;
+  available_checkpoint_disk_bytes?: number | null;
+  estimates_are_advisory?: boolean;
+  fallback_from?: string;
+  fallback_reason?: string;
+};
+
 export type AxiomEngineLiveTelemetry = {
   type: "telemetry";
   metrics: {
@@ -304,7 +328,7 @@ export type AxiomEngineLiveTelemetry = {
     stop_reason?: string;
   };
   memory_mode: "full" | "layer_streaming" | "disk_streaming";
-  memory_selection?: { requested: string; selected: "full" | "layer_streaming" | "disk_streaming"; reason: string; estimated_checkpoint_weight_bytes?: number; estimated_kv_cache_bytes?: number; estimated_context_tokens?: number; available_system_ram_bytes?: number | null; available_device_memory_bytes?: number | null; estimates_are_advisory?: boolean };
+  memory_selection?: AxiomEngineMemorySelection;
   memory_stats: AxiomEngineMemoryStats;
   device_memory: AxiomEngineDeviceMemory;
 };
@@ -312,13 +336,43 @@ export type AxiomEngineResult = {
   engine: "axiom-native-engine"; execution_backend: "pytorch-native-axiom";
   transformers_generation_used: false; ollama_used: false;
   model: string; architecture: string; model_type: "llama" | "mistral" | "qwen2" | "qwen3"; prompt_format?: string; context_management?: { chat_history_supplied: boolean; original_message_count: number; original_message_characters: number; messages_dropped_to_fit_context: number; prompt_tokens_before_token_truncation: number; prompt_tokens_used: number; token_truncation_applied: boolean; system_prompt_may_be_truncated: boolean };
-  adapter: string | null; device: string; device_selection?: { requested: string; selected: string; reason: string }; precision?: string; precision_selection?: { requested: string; selected: string }; memory_selection?: { requested: string; selected: "full" | "layer_streaming" | "disk_streaming"; reason: string; estimated_checkpoint_weight_bytes?: number; estimated_kv_cache_bytes?: number; estimated_context_tokens?: number; available_system_ram_bytes?: number | null; available_device_memory_bytes?: number | null; estimates_are_advisory?: boolean }; memory_mode?: "full" | "layer_streaming" | "disk_streaming"; memory_stats?: AxiomEngineMemoryStats; device_memory?: AxiomEngineDeviceMemory; checkpoint_format: "safetensors";
+  adapter: string | null; device: string; device_selection?: { requested: string; selected: string; reason: string }; precision?: string; precision_selection?: { requested: string; selected: string }; memory_selection?: AxiomEngineMemorySelection; memory_mode?: "full" | "layer_streaming" | "disk_streaming"; memory_stats?: AxiomEngineMemoryStats; device_memory?: AxiomEngineDeviceMemory; checkpoint_format: "safetensors" | "gguf";
   decoder: "axiom-autoregressive-kv-cache"; attention_backend: string;
   prefill_ms: number; decode_ms: number; time_to_first_token_ms: number; generation_tokens_per_second: number;
   sampling: AxiomEngineSampling; stop_sequences: string[];
   stop_reason: "eos_token" | "max_new_tokens" | "stop_sequence" | "cancelled";
   response: string;
   prompt_tokens: number; completion_tokens: number; elapsed_ms: number; generated_at: string; local_only: true;
+};
+
+export type AxiomEngineBatchResult = {
+  engine: "axiom-native-engine";
+  execution_backend: "pytorch-native-axiom";
+  transformers_generation_used: false;
+  ollama_used: false;
+  model: string;
+  architecture: string;
+  model_type: "llama" | "mistral" | "qwen2" | "qwen3";
+  batch_size: number;
+  results: Array<{
+    index: number;
+    prompt_format: string;
+    context_management: {
+      prompt_tokens_before_truncation: number;
+      prompt_tokens_used: number;
+      token_truncation_applied: boolean;
+    };
+    prompt_tokens: number;
+    completion_tokens: number;
+    stop_reason: string;
+    response: string;
+  }>;
+  prompt_tokens: number;
+  completion_tokens: number;
+  elapsed_ms: number;
+  memory_mode: "full" | "layer_streaming" | "disk_streaming";
+  checkpoint_format: "safetensors" | "gguf";
+  local_only: true;
 };
 
 export type AxiomEngineStreamEvent =
@@ -1568,6 +1622,17 @@ export const axiomApi = {
   runAxiomEngine: (input: { model_path: string; adapter_path?: string; prompt: string; max_new_tokens: number; temperature: number; top_p: number; top_k: number; min_p: number; repetition_penalty: number; seed: number | null; stop_sequences: string[]; device?: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu"; memory_mode?: "auto" | "full" | "layer_streaming" | "disk_streaming"; precision?: "auto" | "fp32" | "fp16" | "bf16" }) =>
     requestJson<AxiomEngineResult>("/api/engine/generate", {
       method: "POST", body: JSON.stringify(input),
+    }, 300_000),
+  runAxiomEngineBatch: (input: {
+    model_path: string; adapter_path?: string; prompts: string[];
+    max_new_tokens: number; temperature: number; top_p: number; top_k: number;
+    min_p: number; repetition_penalty: number; seed: number | null; stop_sequences: string[];
+    device: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu";
+    memory_mode: "auto" | "full" | "layer_streaming" | "disk_streaming";
+    precision?: "auto" | "fp32" | "fp16" | "bf16";
+  }, signal?: AbortSignal) =>
+    requestJson<AxiomEngineBatchResult>("/api/engine/generate/batch", {
+      method: "POST", body: JSON.stringify(input), signal,
     }, 300_000),
   streamAxiomEngine: (
     input: { model_path: string; adapter_path?: string; prompt: string; max_new_tokens: number; temperature: number; top_p: number; top_k: number; min_p: number; repetition_penalty: number; seed: number | null; stop_sequences: string[]; device: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu"; memory_mode: "auto" | "full" | "layer_streaming" | "disk_streaming"; precision?: "auto" | "fp32" | "fp16" | "bf16" },

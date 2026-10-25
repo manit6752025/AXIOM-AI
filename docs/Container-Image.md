@@ -38,7 +38,7 @@ docker pull ghcr.io/manit6752025/axiom-ai-training:latest-development
 docker pull ghcr.io/manit6752025/axiom-ai-full:latest-development
 ```
 
-For a tagged release, replace the tag with the exact release tag, such as `v0.3.0-beta.5`. Model weights are not bundled in any image. GPU device access and drivers remain host/runtime-specific; this does not guarantee CUDA or ROCm support in every container environment.
+For a tagged release, replace the tag with the exact release tag, such as `v0.3.0-beta.6`. Model weights are not bundled in any image. GPU device access and drivers remain host/runtime-specific; this does not guarantee CUDA or ROCm support in every container environment.
 
 ## Security notes
 

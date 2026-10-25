@@ -1,11 +1,11 @@
-# AXIOM v0.3.0-beta.5 — Release notes
+# AXIOM v0.3.0-beta.6 — Release notes
 
 **Status:** Beta candidate. These notes describe the intended source release; they do not imply that GitHub assets or package registries have published successfully.
 
 ## Version alignment
 
-- Align Python package and runtime metadata to `0.3.0-beta.5`.
-- Align the npm CLI launcher package and release workflow default to `v0.3.0-beta.5`.
+- Align Python package and runtime metadata to `0.3.0-beta.6`.
+- Align the npm CLI launcher package and release workflow default to `v0.3.0-beta.6`.
 - Refresh the Control Center version label, installer examples, and package-manager manifest templates.
 - Improve the beginner `my-first-ai` example and installer guidance.
 

@@ -4,20 +4,22 @@ AXIOM implements transformer forward operations, RMSNorm, RoPE, grouped-query
 attention, KV caching, LoRA projection deltas, autoregressive decoding, and
 full/in-RAM/disk-resident weight loading strategies. PyTorch supplies tensor
 kernels; Transformers model.generate and Ollama are not used here. The native
-loader accepts supported architectures with tokenizer.json and floating-point
-safetensors. Unsupported formats/configurations are explicitly rejected.
+loader accepts floating-point safetensors and supported GGUF checkpoints that
+are dequantized to the chosen floating-point compute dtype. Unsupported
+formats/configurations are explicitly rejected.
 """
 from __future__ import annotations
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 import json, math, re, threading, time
 from pathlib import Path
-from typing import Any, Iterator, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 _MAX_CONFIG_BYTES = 1_048_576
 _MAX_TOKENIZER_BYTES = 64 * 1024 * 1024
 _MAX_INDEX_BYTES = 64 * 1024 * 1024
 _MAX_WEIGHT_SHARDS = 512
+_MAX_NATIVE_MICROBATCH_SIZE = 8
 _SUPPORTED_MODEL_TYPES = {"llama", "mistral", "qwen2", "qwen3"}
 
 class NativeEngineError(ValueError):
@@ -88,29 +90,54 @@ class NativeLlamaConfig:
     tie_word_embeddings: bool
     sliding_window: int | None
     qk_norm: bool
+    rope_scaling_type: str = "default"
+    rope_scaling_factor: float = 1.0
+    rope_original_max_position_embeddings: int | None = None
+    rope_low_freq_factor: float | None = None
+    rope_high_freq_factor: float | None = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "NativeLlamaConfig":
         model_type = value.get("model_type")
         if model_type not in _SUPPORTED_MODEL_TYPES:
             raise NativeEngineError("AXIOM Native Engine supports llama, mistral, qwen2, and qwen3 model_type only; there is no Transformers/Ollama fallback.")
-        architectures = value.get("architectures", [])
-        if architectures and not any(isinstance(x, str) and x in {"LlamaForCausalLM", "MistralForCausalLM", "Qwen2ForCausalLM", "Qwen3ForCausalLM"} for x in architectures):
-            raise NativeEngineError("Checkpoint architecture is not a supported Llama/Mistral/Qwen2/Qwen3 causal-LM class.")
-        rope = value.get("rope_scaling")
-        if rope:
-            if not isinstance(rope, dict) or rope.get("rope_type", rope.get("type", "default")) != "default" or rope.get("factor", 1.0) != 1.0:
-                raise NativeEngineError("This RoPE scaling configuration is not implemented by AXIOM Native Engine.")
+        expected_architecture = {
+            "llama": "LlamaForCausalLM",
+            "mistral": "MistralForCausalLM",
+            "qwen2": "Qwen2ForCausalLM",
+            "qwen3": "Qwen3ForCausalLM",
+        }[model_type]
+        architectures = value.get("architectures")
+        if architectures is not None and (
+            not isinstance(architectures, list)
+            or any(not isinstance(name, str) for name in architectures)
+            or (architectures and expected_architecture not in architectures)
+        ):
+            raise NativeEngineError(
+                "Checkpoint architecture does not match the supported causal-LM class for its model_type."
+            )
+        def config_integer(name: str, default: Any = None) -> int:
+            raw = value[name] if name in value else default
+            if isinstance(raw, bool) or not isinstance(raw, int):
+                raise TypeError
+            return raw
+
+        def config_number(name: str, default: Any) -> float:
+            raw = value.get(name, default)
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                raise TypeError
+            return float(raw)
+
         try:
-            hidden = int(value["hidden_size"])
-            intermediate = int(value["intermediate_size"])
-            layers = int(value["num_hidden_layers"])
-            heads = int(value["num_attention_heads"])
-            kv_heads = int(value.get("num_key_value_heads", heads))
-            vocab = int(value["vocab_size"])
-            max_positions = int(value.get("max_position_embeddings", 4096))
-            rms_eps = float(value.get("rms_norm_eps", 1e-6))
-            theta = float(value.get("rope_theta", 10000.0))
+            hidden = config_integer("hidden_size")
+            intermediate = config_integer("intermediate_size")
+            layers = config_integer("num_hidden_layers")
+            heads = config_integer("num_attention_heads")
+            kv_heads = config_integer("num_key_value_heads", heads)
+            vocab = config_integer("vocab_size")
+            max_positions = config_integer("max_position_embeddings", 4096)
+            rms_eps = config_number("rms_norm_eps", 1e-6)
+            theta = config_number("rope_theta", 10000.0)
         except (KeyError, TypeError, ValueError, OverflowError):
             raise NativeEngineError("Local config.json is missing valid native Llama model dimensions.") from None
         if not (1 <= hidden <= 32768 and 1 <= intermediate <= 131072):
@@ -120,7 +147,11 @@ class NativeLlamaConfig:
         if hidden % heads or (hidden // heads) % 2:
             raise NativeEngineError("hidden_size must be divisible into even-sized attention heads.")
         configured_head_dim = value.get("head_dim")
-        if configured_head_dim is not None and configured_head_dim != hidden // heads:
+        if configured_head_dim is not None and (
+            isinstance(configured_head_dim, bool)
+            or not isinstance(configured_head_dim, int)
+            or configured_head_dim != hidden // heads
+        ):
             raise NativeEngineError("Custom head_dim values are not supported unless they equal hidden_size / num_attention_heads.")
         if not (1 <= kv_heads <= heads) or heads % kv_heads:
             raise NativeEngineError("num_key_value_heads must divide num_attention_heads.")
@@ -128,15 +159,82 @@ class NativeLlamaConfig:
             raise NativeEngineError("Checkpoint vocabulary/context dimensions exceed native safety limits.")
         if not math.isfinite(rms_eps) or rms_eps <= 0 or not math.isfinite(theta) or theta <= 0:
             raise NativeEngineError("Checkpoint normalization/RoPE settings are invalid.")
+        rope = value.get("rope_scaling")
+        rope_type = "default"
+        rope_factor = 1.0
+        rope_original: int | None = None
+        rope_low: float | None = None
+        rope_high: float | None = None
+        if rope is not None:
+            if not isinstance(rope, dict):
+                raise NativeEngineError("This RoPE scaling configuration is not implemented by AXIOM Native Engine.")
+            rope_type = rope.get("rope_type", rope.get("type", "default"))
+            raw_factor = rope.get("factor", 1.0)
+            if (
+                isinstance(raw_factor, bool)
+                or not isinstance(raw_factor, (int, float))
+                or not math.isfinite(float(raw_factor))
+            ):
+                raise NativeEngineError("RoPE scaling factor must be a finite number.")
+            rope_factor = float(raw_factor)
+            if rope_type == "default":
+                if rope_factor != 1.0:
+                    raise NativeEngineError("Default RoPE scaling requires factor 1.")
+            elif rope_type == "linear":
+                if not 1.0 <= rope_factor <= 128.0:
+                    raise NativeEngineError("Linear RoPE scaling factor must be between 1 and 128.")
+            elif rope_type == "llama3":
+                if not 1.0 <= rope_factor <= 128.0:
+                    raise NativeEngineError("Llama 3 RoPE scaling factor must be between 1 and 128.")
+                raw_original = rope.get("original_max_position_embeddings")
+                raw_low, raw_high = rope.get("low_freq_factor"), rope.get("high_freq_factor")
+                if (
+                    isinstance(raw_original, bool)
+                    or not isinstance(raw_original, int)
+                    or not 1 <= raw_original <= max_positions
+                    or isinstance(raw_low, bool)
+                    or not isinstance(raw_low, (int, float))
+                    or not math.isfinite(float(raw_low))
+                    or isinstance(raw_high, bool)
+                    or not isinstance(raw_high, (int, float))
+                    or not math.isfinite(float(raw_high))
+                    or float(raw_low) <= 0
+                    or float(raw_high) <= float(raw_low)
+                ):
+                    raise NativeEngineError("Llama 3 RoPE scaling requires valid original context and low/high frequency factors.")
+                rope_original = raw_original
+                rope_low, rope_high = float(raw_low), float(raw_high)
+            else:
+                raise NativeEngineError("This RoPE scaling configuration is not implemented by AXIOM Native Engine.")
         sliding = value.get("sliding_window") if model_type == "mistral" else None
         if sliding is not None and (isinstance(sliding, bool) or not isinstance(sliding, int) or sliding < 1):
             raise NativeEngineError("Mistral sliding_window must be a positive integer.")
         bos0, eos0 = value.get("bos_token_id"), value.get("eos_token_id")
-        bos = bos0 if isinstance(bos0, int) and not isinstance(bos0, bool) else None
-        eos = (eos0,) if isinstance(eos0, int) and not isinstance(eos0, bool) else tuple(eos0) if isinstance(eos0, list) and all(isinstance(x, int) and not isinstance(x, bool) for x in eos0) else ()
+        if bos0 is not None and (isinstance(bos0, bool) or not isinstance(bos0, int)):
+            raise NativeEngineError("Configured BOS token ID must be an integer or null.")
+        if eos0 is None:
+            eos: tuple[int, ...] = ()
+        elif isinstance(eos0, int) and not isinstance(eos0, bool):
+            eos = (eos0,)
+        elif isinstance(eos0, list) and all(isinstance(x, int) and not isinstance(x, bool) for x in eos0):
+            eos = tuple(eos0)
+        else:
+            raise NativeEngineError("Configured EOS token IDs must be integers or a list of integers.")
+        bos = bos0
         if any(x < 0 or x >= vocab for x in (*eos, *((bos,) if bos is not None else ()))):
             raise NativeEngineError("Configured BOS/EOS token ID is outside vocab_size.")
-        return cls(model_type, hidden, intermediate, layers, heads, kv_heads, vocab, max_positions, rms_eps, theta, bos, eos, value.get("tie_word_embeddings") is True, sliding, model_type == "qwen3")
+        tied = value.get("tie_word_embeddings", False)
+        if not isinstance(tied, bool):
+            raise NativeEngineError("tie_word_embeddings must be a boolean.")
+        return cls(
+            model_type, hidden, intermediate, layers, heads, kv_heads, vocab,
+            max_positions, rms_eps, theta, bos, eos, tied, sliding, model_type == "qwen3",
+            rope_scaling_type=rope_type,
+            rope_scaling_factor=rope_factor,
+            rope_original_max_position_embeddings=rope_original,
+            rope_low_freq_factor=rope_low,
+            rope_high_freq_factor=rope_high,
+        )
 
 def _within_trusted_roots(path: Path, trusted_roots: tuple[Path, ...]) -> bool:
     for root in trusted_roots:
@@ -455,6 +553,7 @@ class NativeLlamaRuntime:
         adapter_scaling: dict[str, float] | None = None,
         memory_mode: str = "full",
         layer_weight_sources: dict[str, Path] | None = None,
+        layer_weight_loaders: dict[str, Callable[[], Any]] | None = None,
         weight_shapes: dict[str, tuple[int, ...]] | None = None,
     ) -> None:
         if memory_mode not in {"full", "layer_streaming", "disk_streaming"}:
@@ -463,15 +562,20 @@ class NativeLlamaRuntime:
         self.adapter, self.adapter_scaling = adapter or {}, adapter_scaling or {}
         self.memory_mode = memory_mode
         self.layer_weight_sources = layer_weight_sources or {}
+        self.layer_weight_loaders = layer_weight_loaders or {}
         self.layer_weight_names_by_index: dict[int, list[str]] = {}
         self.layer_weight_sources_by_index: dict[int, dict[str, Path]] = {}
-        for tensor_name in set(weights) | set(self.layer_weight_sources):
+        self.layer_weight_loaders_by_index: dict[int, dict[str, Callable[[], Any]]] = {}
+        for tensor_name in set(weights) | set(self.layer_weight_sources) | set(self.layer_weight_loaders):
             match = re.match(r"^model\.layers\.(\d+)\.", tensor_name)
             if match:
                 self.layer_weight_names_by_index.setdefault(int(match.group(1)), []).append(tensor_name)
                 source = self.layer_weight_sources.get(tensor_name)
                 if source is not None:
                     self.layer_weight_sources_by_index.setdefault(int(match.group(1)), {})[tensor_name] = source
+                loader = self.layer_weight_loaders.get(tensor_name)
+                if loader is not None:
+                    self.layer_weight_loaders_by_index.setdefault(int(match.group(1)), {})[tensor_name] = loader
         for tensor_names in self.layer_weight_names_by_index.values():
             tensor_names.sort()
         self.weight_shapes = weight_shapes or {name: tuple(value.shape) for name, value in weights.items()}
@@ -493,10 +597,48 @@ class NativeLlamaRuntime:
 
     @contextmanager
     def _layer_weights(self, layer_index: int):
-        """Stage a CPU-resident or disk-resident transformer layer on the execution device."""
-        if self.memory_mode not in {"layer_streaming", "disk_streaming"}:
+        """Stage CPU, GGUF-mapped, or disk-resident weights for one transformer layer."""
+        if self.memory_mode not in {"full", "layer_streaming", "disk_streaming"}:
+            raise NativeEngineError("Native memory mode must be full, layer_streaming, or disk_streaming.")
+        if self.memory_mode == "full":
             yield
             return
+
+        # GGUF layers are dequantized on demand, so only the active layer's
+        # floating-point tensors are materialized instead of expanding the file.
+        loaders = self.layer_weight_loaders_by_index.get(layer_index, {})
+        if loaders:
+            loaded: list[str] = []
+            try:
+                for name, loader in loaders.items():
+                    tensor = loader()
+                    if not self.torch.is_tensor(tensor) or tensor.dtype not in (
+                        self.torch.float16, self.torch.bfloat16, self.torch.float32
+                    ):
+                        raise NativeEngineError(
+                            f"On-demand layer tensor {name!r} did not decode to a supported floating dtype."
+                        )
+                    byte_count = int(tensor.numel() * tensor.element_size())
+                    active = tensor.to(device=self.device, dtype=self.dtype)
+                    self.weights[name] = active
+                    loaded.append(name)
+                    if self.memory_mode == "disk_streaming":
+                        source_bytes = int(getattr(loader, "_axiom_source_bytes", 0) or byte_count)
+                        self.memory_stats["disk_layer_weight_loads"] += 1
+                        self.memory_stats["disk_layer_weight_bytes_read"] += source_bytes
+                    else:
+                        self.memory_stats["layer_weight_tensors_staged"] += 1
+                    self.memory_stats["layer_weight_bytes_staged"] += byte_count
+                yield
+            finally:
+                for name in loaded:
+                    active_weight = self.weights.pop(name, None)
+                    if active_weight is not None:
+                        self.memory_stats["layer_weight_bytes_released"] += int(
+                            active_weight.numel() * active_weight.element_size()
+                        )
+            return
+
         if self.memory_mode == "disk_streaming":
             loaded: list[str] = []
             try:
@@ -529,6 +671,7 @@ class NativeLlamaRuntime:
                             active_weight.numel() * active_weight.element_size()
                         )
             return
+
         staged: dict[str, Any] = {}
         try:
             for name in self.layer_weight_names_by_index.get(layer_index, []):
@@ -542,8 +685,7 @@ class NativeLlamaRuntime:
             yield
         finally:
             for name in staged:
-                active_weight = self.weights[name]
-                self.weights[name] = active_weight.to(device="cpu")
+                self.weights[name] = self.weights[name].to(device="cpu")
                 self.memory_stats["layer_weight_bytes_returned_to_cpu"] += int(
                     self.weights[name].numel() * self.weights[name].element_size()
                 )
@@ -606,6 +748,14 @@ class NativeLlamaRuntime:
             with ExitStack() as stack:
                 handles = {name: stack.enter_context(safe_open(str(path), framework="pt", device="cpu")) for name, path in file_paths.items()}
                 embedding = handles[weight_map["model.embed_tokens.weight"]].get_tensor("model.embed_tokens.weight")
+                if embedding.dtype not in (
+                    torch_module.float16,
+                    torch_module.bfloat16,
+                    torch_module.float32,
+                ):
+                    raise NativeEngineError(
+                        "Unsupported embedding weight dtype; native checkpoints require fp16, bf16, or fp32 weights."
+                    )
                 checkpoint_dtype = embedding.dtype
                 dtype_map = {
                     "fp32": getattr(torch_module, "float32", None),
@@ -637,6 +787,8 @@ class NativeLlamaRuntime:
                 load_names = [name for name in required if name != "model.embed_tokens.weight"]
                 if "lm_head.weight" in weight_map and "lm_head.weight" not in load_names:
                     load_names.append("lm_head.weight")
+                if "lm_head.bias" in weight_map:
+                    load_names.append("lm_head.bias")
                 for i in range(config.num_hidden_layers):
                     p = f"model.layers.{i}."
                     for module in ("self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.o_proj", "mlp.gate_proj", "mlp.up_proj", "mlp.down_proj"):
@@ -677,11 +829,29 @@ class NativeLlamaRuntime:
                 p + "input_layernorm.weight": (config.hidden_size,),
                 p + "post_attention_layernorm.weight": (config.hidden_size,),
             })
+            # Optional projection biases must match the output dimension. Some
+            # supported checkpoints (for example Qwen2) legitimately use q/k/v
+            # biases while others omit them, so validate only declared tensors.
+            bias_output_dims = {
+                "self_attn.q_proj": config.num_attention_heads * hdim,
+                "self_attn.k_proj": config.num_key_value_heads * hdim,
+                "self_attn.v_proj": config.num_key_value_heads * hdim,
+                "self_attn.o_proj": config.hidden_size,
+                "mlp.gate_proj": config.intermediate_size,
+                "mlp.up_proj": config.intermediate_size,
+                "mlp.down_proj": config.hidden_size,
+            }
+            for module, output_dim in bias_output_dims.items():
+                bias_name = p + module + ".bias"
+                if bias_name in weight_map:
+                    expected[bias_name] = (output_dim,)
             if config.qk_norm:
                 expected[p + "self_attn.q_norm.weight"] = (hdim,)
                 expected[p + "self_attn.k_norm.weight"] = (hdim,)
         if "lm_head.weight" in weight_map:
             expected["lm_head.weight"] = (config.vocab_size, config.hidden_size)
+        if "lm_head.bias" in weight_map:
+            expected["lm_head.bias"] = (config.vocab_size,)
         for name, shape in expected.items():
             if name not in weight_shapes or weight_shapes[name] != shape:
                 if name == "lm_head.weight" and config.tie_word_embeddings and name not in weight_shapes:
@@ -771,44 +941,208 @@ class NativeLlamaRuntime:
             result = result + functional.linear(functional.linear(hidden, adapter["A"]), adapter["B"]) * self.adapter_scaling[module]
         return result
 
-    def _attention(self, query: Any, key: Any, value: Any, blocked_mask: Any) -> Any:
-        """Run explicit AXIOM masks through optimized tensor attention, with a manual fallback."""
+    def _attention(
+        self,
+        query: Any,
+        key: Any,
+        value: Any,
+        blocked_mask: Any | None,
+        *,
+        is_causal: bool = False,
+    ) -> Any:
+        """Run explicit masks with native GQA when available and a compatible fallback."""
         torch = self.torch
         functional = torch.nn.functional
         scaled_dot_product = getattr(functional, "scaled_dot_product_attention", None)
+        attention_mask = None if blocked_mask is None else ~blocked_mask
+        query_heads, kv_heads = query.shape[1], key.shape[1]
+        if kv_heads < 1 or query_heads % kv_heads:
+            raise NativeEngineError("Grouped-query attention head counts are inconsistent.")
+        grouped_query = query_heads != kv_heads
+
         if callable(scaled_dot_product):
-            # A boolean SDPA mask uses True for visible positions. Invert AXIOM's
-            # blocked causal/sliding-window mask and keep is_causal=False because
-            # the exact cache-aware mask is already computed for these positions.
+            # A boolean SDPA mask uses True for visible positions. Cache-aware
+            # sliding/chunked paths pass an explicit inverted mask; ordinary prefill
+            # can use is_causal=True with no mask to avoid a dense quadratic allocation.
+            if grouped_query:
+                try:
+                    # Native GQA avoids allocating repeated K/V heads for common
+                    # Llama, Mistral and Qwen checkpoints.
+                    result = scaled_dot_product(
+                        query,
+                        key,
+                        value,
+                        attn_mask=attention_mask,
+                        dropout_p=0.0,
+                        is_causal=is_causal,
+                        enable_gqa=True,
+                    )
+                except (TypeError, NotImplementedError, RuntimeError) as exc:
+                    # Some tensor backends expose enable_gqa but cannot execute it
+                    # for the selected device/kernel. Fall back only for recognized
+                    # GQA capability errors; preserve unrelated runtime failures.
+                    message = str(exc).lower()
+                    gqa_unavailable = isinstance(exc, (TypeError, NotImplementedError)) or any(
+                        reason in message
+                        for reason in (
+                            "gqa",
+                            "grouped query",
+                            "grouped-query",
+                            "not implemented",
+                            "not supported",
+                            "no viable backend",
+                            "no available kernel",
+                        )
+                    )
+                    if not gqa_unavailable:
+                        raise
+                    key = key.repeat_interleave(query_heads // kv_heads, dim=1)
+                    value = value.repeat_interleave(query_heads // kv_heads, dim=1)
+                    self.last_attention_backend = "pytorch-scaled-dot-product-attention-expanded-gqa"
+                    return scaled_dot_product(
+                        query,
+                        key,
+                        value,
+                        attn_mask=attention_mask,
+                        dropout_p=0.0,
+                        is_causal=is_causal,
+                    )
+                self.last_attention_backend = "pytorch-scaled-dot-product-attention-gqa"
+                return result
+
             self.last_attention_backend = "pytorch-scaled-dot-product-attention"
             return scaled_dot_product(
                 query,
                 key,
                 value,
-                attn_mask=~blocked_mask,
+                attn_mask=attention_mask,
                 dropout_p=0.0,
-                is_causal=False,
+                is_causal=is_causal,
             )
-        # Older/minimal tensor backends keep working through AXIOM's own masked
-        # attention math. This path remains numerically equivalent to SDPA.
+
+        # Older/minimal tensor backends use AXIOM's own masked attention math.
+        # Their fallback expands grouped K/V heads only when the math requires it.
+        if grouped_query:
+            key = key.repeat_interleave(query_heads // kv_heads, dim=1)
+            value = value.repeat_interleave(query_heads // kv_heads, dim=1)
+        if blocked_mask is None and is_causal:
+            query_length, key_length = query.shape[-2], key.shape[-2]
+            query_positions = torch.arange(
+                key_length - query_length,
+                key_length,
+                device=query.device,
+            )
+            key_positions = torch.arange(key_length, device=query.device)
+            blocked_mask = key_positions[None, :] > query_positions[:, None]
         scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(query.shape[-1])
-        scores = scores.masked_fill(blocked_mask[None, None, :, :], float("-inf"))
-        probabilities = self.torch.softmax(scores.float(), dim=-1).to(dtype=query.dtype)
-        self.last_attention_backend = "axiom-manual-matmul-attention"
-        return self.torch.matmul(probabilities, value)
+        if blocked_mask is not None:
+            scores = scores.masked_fill(blocked_mask[None, None, :, :], float("-inf"))
+        probabilities = torch.softmax(scores.float(), dim=-1).to(dtype=query.dtype)
+        self.last_attention_backend = (
+            "axiom-manual-matmul-attention-gqa" if grouped_query else "axiom-manual-matmul-attention"
+        )
+        return torch.matmul(probabilities, value)
 
     def _rms_norm(self, hidden: Any, weight: Any) -> Any:
         variance = hidden.float().pow(2).mean(dim=-1, keepdim=True)
         return hidden * self.torch.rsqrt(variance + self.config.rms_norm_eps).to(dtype=hidden.dtype) * weight
 
-    def _apply_rope(self, values: Any, positions: Any) -> Any:
-        torch, dim = self.torch, values.shape[-1]
-        inv_freq = 1.0 / (self.config.rope_theta ** (torch.arange(0, dim, 2, device=self.device, dtype=torch.float32) / dim))
-        frequencies = torch.einsum("i,j->ij", positions.to(dtype=torch.float32), inv_freq)
+    def _rope_embeddings(self, positions: Any, dtype: Any) -> tuple[Any, Any]:
+        """Compute the rotary cosine/sine tables once for one forward sequence."""
+        torch = self.torch
+        dim = self.config.hidden_size // self.config.num_attention_heads
+        inv_freq = 1.0 / (
+            self.config.rope_theta
+            ** (torch.arange(0, dim, 2, device=self.device, dtype=torch.float32) / dim)
+        )
+        scaled_positions = positions.to(dtype=torch.float32)
+        if self.config.rope_scaling_type == "linear":
+            scaled_positions = scaled_positions / self.config.rope_scaling_factor
+        elif self.config.rope_scaling_type == "llama3":
+            # Match Llama 3's wavelength-dependent frequency interpolation:
+            # preserve high frequencies, scale low frequencies, and smooth the
+            # transition between them instead of bluntly stretching all positions.
+            wavelength = (2.0 * math.pi) / inv_freq
+            original = float(self.config.rope_original_max_position_embeddings)
+            low = float(self.config.rope_low_freq_factor)
+            high = float(self.config.rope_high_freq_factor)
+            low_wavelength = original / low
+            high_wavelength = original / high
+            scaled_inv_freq = inv_freq / self.config.rope_scaling_factor
+            smooth = (original / wavelength - low) / (high - low)
+            smooth_inv_freq = (1.0 - smooth) * scaled_inv_freq + smooth * inv_freq
+            inv_freq = torch.where(
+                wavelength < high_wavelength,
+                inv_freq,
+                torch.where(wavelength > low_wavelength, scaled_inv_freq, smooth_inv_freq),
+            )
+        frequencies = torch.einsum("i,j->ij", scaled_positions, inv_freq)
         embedding = torch.cat((frequencies, frequencies), dim=-1)
-        cos, sin = embedding.cos().to(dtype=values.dtype)[None, None, :, :], embedding.sin().to(dtype=values.dtype)[None, None, :, :]
+        cos = embedding.cos().to(dtype=dtype)[None, None, :, :]
+        sin = embedding.sin().to(dtype=dtype)[None, None, :, :]
+        return cos, sin
+
+    def _apply_rope(
+        self,
+        values: Any,
+        positions: Any,
+        embeddings: tuple[Any, Any] | None = None,
+    ) -> Any:
+        _, dim = self.torch, values.shape[-1]
+        cos, sin = embeddings if embeddings is not None else self._rope_embeddings(positions, values.dtype)
         half = dim // 2
-        return values * cos + torch.cat((-values[..., half:], values[..., :half]), dim=-1) * sin
+        rotated = self.torch.cat((-values[..., half:], values[..., :half]), dim=-1)
+        return values * cos + rotated * sin
+
+    def _cached_sequence_length(self, past_key_values: Any) -> int:
+        """Validate a KV cache before any tensor operations and return its stored length."""
+        if past_key_values is None:
+            return 0
+        if not isinstance(past_key_values, (tuple, list)) or len(past_key_values) != self.config.num_hidden_layers:
+            raise NativeEngineError("Native KV cache must contain one key/value pair per transformer layer.")
+
+        head_dim = self.config.hidden_size // self.config.num_attention_heads
+        batch_size: int | None = None
+        sequence_length: int | None = None
+        for layer_index, pair in enumerate(past_key_values):
+            if not isinstance(pair, (tuple, list)) or len(pair) != 2:
+                raise NativeEngineError("Native KV cache layer entries must be key/value pairs.")
+            key, value = pair
+            if not self.torch.is_tensor(key) or not self.torch.is_tensor(value):
+                raise NativeEngineError("Native KV cache entries must be tensors.")
+            if key.ndim != 4 or value.ndim != 4 or tuple(key.shape) != tuple(value.shape):
+                raise NativeEngineError("Native KV cache key/value tensor shapes are inconsistent.")
+            if key.shape[0] < 1 or key.shape[1] != self.config.num_key_value_heads or key.shape[-1] != head_dim:
+                raise NativeEngineError("Native KV cache tensor dimensions do not match the model configuration.")
+            if batch_size is None:
+                batch_size = int(key.shape[0])
+            elif int(key.shape[0]) != batch_size:
+                raise NativeEngineError(
+                    f"Native KV cache batch dimension is inconsistent at layer {layer_index}."
+                )
+            if key.dtype != value.dtype or key.device != value.device:
+                raise NativeEngineError("Native KV cache key/value tensor types or devices are inconsistent.")
+            if key.dtype != self.dtype:
+                raise NativeEngineError("Native KV cache dtype does not match the loaded model weights.")
+            expected_device = self.device if self.memory_mode == "full" else self.torch.device("cpu")
+            if (
+                key.device.type != expected_device.type
+                or (
+                    expected_device.index is not None
+                    and key.device.index != expected_device.index
+                )
+            ):
+                raise NativeEngineError("Native KV cache device does not match the selected memory mode.")
+            layer_length = int(key.shape[-2])
+            if layer_length < 1:
+                raise NativeEngineError("Native KV cache sequence length must be positive.")
+            if sequence_length is None:
+                sequence_length = layer_length
+            elif layer_length != sequence_length:
+                raise NativeEngineError(
+                    f"Native KV cache sequence length is inconsistent at layer {layer_index}."
+                )
+        return sequence_length or 0
 
     def forward(
         self,
@@ -819,10 +1153,24 @@ class NativeLlamaRuntime:
         cancel_event: threading.Event | None = None,
     ) -> tuple[Any, tuple[Any, ...]]:
         torch, c = self.torch, self.config
-        if input_ids.ndim != 2 or input_ids.shape[0] != 1:
-            raise NativeEngineError("AXIOM Native Engine currently accepts one prompt sequence per request.")
+        if not torch.is_tensor(input_ids):
+            raise NativeEngineError("Native model input_ids must be a tensor.")
+        if input_ids.ndim != 2:
+            raise NativeEngineError(
+                "AXIOM Native Engine expects rank-2 input_ids for one prompt sequence or a positive-sized batch."
+            )
+        if input_ids.shape[0] < 1:
+            raise NativeEngineError("Native model input batch must contain at least one prompt sequence.")
+        if input_ids.shape[1] < 1:
+            raise NativeEngineError("Native model input_ids must contain at least one token.")
+        if input_ids.dtype not in (torch.int32, torch.int64):
+            raise NativeEngineError("Native model input_ids must use an integer token-ID dtype.")
+        if input_ids.device != self.device or input_ids.dtype != torch.long:
+            input_ids = input_ids.to(device=self.device, dtype=torch.long)
         seq_len = input_ids.shape[1]
-        stored_past_len = 0 if past_key_values is None else int(past_key_values[0][0].shape[-2])
+        stored_past_len = self._cached_sequence_length(past_key_values)
+        if past_key_values is not None and int(input_ids.shape[0]) != int(past_key_values[0][0].shape[0]):
+            raise NativeEngineError("Native input batch size must match the KV cache batch dimension.")
         past_len = stored_past_len if past_sequence_length is None else past_sequence_length
         if (
             isinstance(past_len, bool)
@@ -834,9 +1182,9 @@ class NativeLlamaRuntime:
             raise NativeEngineError("Generation would exceed the checkpoint's configured maximum context length.")
         hidden = torch.nn.functional.embedding(input_ids, self.weights["model.embed_tokens.weight"])
         positions = torch.arange(past_len, past_len + seq_len, device=self.device)
+        rope_embeddings = self._rope_embeddings(positions, self.dtype)
         key_start_position = past_len - stored_past_len
         cache, head_dim = [], c.hidden_size // c.num_attention_heads
-        repeat_factor = c.num_attention_heads // c.num_key_value_heads
         for i in range(c.num_hidden_layers):
             if cancel_event is not None and cancel_event.is_set():
                 raise NativeGenerationCancelled("Native generation was cancelled.")
@@ -845,14 +1193,15 @@ class NativeLlamaRuntime:
                 residual = hidden
                 normed = self._rms_norm(hidden, self.weights[p + "input_layernorm.weight"])
                 q, k, v = (self._linear(normed, p + "self_attn." + name) for name in ("q_proj", "k_proj", "v_proj"))
-                q = q.view(1, seq_len, c.num_attention_heads, head_dim)
-                k = k.view(1, seq_len, c.num_key_value_heads, head_dim)
+                batch_size = int(input_ids.shape[0])
+                q = q.view(batch_size, seq_len, c.num_attention_heads, head_dim)
+                k = k.view(batch_size, seq_len, c.num_key_value_heads, head_dim)
                 if c.qk_norm:
                     q = self._rms_norm(q, self.weights[p + "self_attn.q_norm.weight"])
                     k = self._rms_norm(k, self.weights[p + "self_attn.k_norm.weight"])
-                q = self._apply_rope(q.transpose(1, 2), positions)
-                k = self._apply_rope(k.transpose(1, 2), positions)
-                v = v.view(1, seq_len, c.num_key_value_heads, head_dim).transpose(1, 2)
+                q = self._apply_rope(q.transpose(1, 2), positions, rope_embeddings)
+                k = self._apply_rope(k.transpose(1, 2), positions, rope_embeddings)
+                v = v.view(batch_size, seq_len, c.num_key_value_heads, head_dim).transpose(1, 2)
                 if past_key_values is not None:
                     old_k, old_v = past_key_values[i]
                     if self.memory_mode in {"layer_streaming", "disk_streaming"}:
@@ -880,13 +1229,23 @@ class NativeLlamaRuntime:
                     cache.append((cache_k, cache_v))
                 else:
                     cache.append((cache_k, cache_v))
-                ak = k.repeat_interleave(repeat_factor, dim=1) if repeat_factor > 1 else k
-                av = v.repeat_interleave(repeat_factor, dim=1) if repeat_factor > 1 else v
-                keys = torch.arange(key_start_position, past_len + seq_len, device=self.device)
-                blocked = keys[None, :] > positions[:, None]
-                if c.sliding_window:
-                    blocked = blocked | (keys[None, :] <= positions[:, None] - c.sliding_window)
-                attended = self._attention(q, ak, av, blocked).transpose(1, 2).contiguous().view(1, seq_len, c.hidden_size)
+                # Let SDPA use its causal kernel for ordinary prefill and avoid
+                # a dense sequence-by-sequence boolean mask. A one-token decode
+                # with a populated non-sliding cache can attend to all stored keys
+                # without a mask; sliding-window/chunked paths keep exact masks.
+                is_causal = past_key_values is None and not c.sliding_window
+                if not c.sliding_window and (
+                    past_key_values is None or seq_len == 1
+                ):
+                    blocked = None
+                else:
+                    keys = torch.arange(key_start_position, past_len + seq_len, device=self.device)
+                    blocked = keys[None, :] > positions[:, None]
+                    if c.sliding_window:
+                        blocked = blocked | (keys[None, :] <= positions[:, None] - c.sliding_window)
+                attended = self._attention(
+                    q, k, v, blocked, is_causal=is_causal
+                ).transpose(1, 2).contiguous().view(batch_size, seq_len, c.hidden_size)
                 hidden = residual + self._linear(attended, p + "self_attn.o_proj")
                 residual = hidden
                 normed = self._rms_norm(hidden, self.weights[p + "post_attention_layernorm.weight"])
@@ -912,6 +1271,14 @@ class NativeLlamaRuntime:
         """Yield decoded tokens and stop cooperatively when cancellation is requested."""
         if not prompt_token_ids:
             raise NativeEngineError("Tokenizer returned no IDs for the prompt.")
+        if any(
+            isinstance(token_id, bool)
+            or not isinstance(token_id, int)
+            or token_id < 0
+            or token_id >= self.config.vocab_size
+            for token_id in prompt_token_ids
+        ):
+            raise NativeEngineError("Prompt token IDs must be integers inside the checkpoint vocabulary.")
         if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens <= 2048:
             raise NativeEngineError("Native generation token limit must be between 1 and 2048.")
         if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or not math.isfinite(float(temperature)) or not 0 <= float(temperature) <= 2:
@@ -1126,6 +1493,278 @@ class NativeLlamaRuntime:
         ))
 
 
+    def generate_batch(
+        self,
+        prompt_token_ids: list[list[int]],
+        *,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float = 0.9,
+        top_k: int = 0,
+        min_p: float = 0.0,
+        repetition_penalty: float = 1.0,
+        seed: int | None = None,
+        eos_token_ids: tuple[int, ...] | None = None,
+        cancel_event: threading.Event | None = None,
+        stop_checker: Callable[[int, list[int]], bool] | None = None,
+    ) -> list[list[int]]:
+        """Generate a fixed-length prompt microbatch using shared forward passes.
+
+        Prompts with different lengths are bucketed into exact-length batches to
+        avoid padding-token contamination. Rows that hit EOS finish independently.
+        This is not an asynchronous continuous-batching scheduler.
+        """
+        if not isinstance(prompt_token_ids, list) or not prompt_token_ids:
+            raise NativeEngineError("Native batch generation requires at least one prompt.")
+        if len(prompt_token_ids) > 128:
+            raise NativeEngineError("Native batch generation is limited to 128 prompt sequences per call.")
+        if any(not isinstance(prompt, list) or not prompt for prompt in prompt_token_ids):
+            raise NativeEngineError("Every native batch prompt must be a non-empty list of token IDs.")
+        if any(
+            isinstance(token_id, bool)
+            or not isinstance(token_id, int)
+            or token_id < 0
+            or token_id >= self.config.vocab_size
+            for prompt in prompt_token_ids
+            for token_id in prompt
+        ):
+            raise NativeEngineError("Native batch prompt token IDs must be integers inside the checkpoint vocabulary.")
+        if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens <= 2048:
+            raise NativeEngineError("Native generation token limit must be between 1 and 2048.")
+        if any(len(prompt) + max_new_tokens > self.config.max_position_embeddings for prompt in prompt_token_ids):
+            raise NativeEngineError("Batch generation would exceed the checkpoint's configured maximum context length.")
+        if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or not math.isfinite(float(temperature)) or not 0 <= float(temperature) <= 2:
+            raise NativeEngineError("Native generation temperature must be a finite number between 0 and 2.")
+        if isinstance(top_p, bool) or not isinstance(top_p, (int, float)) or not math.isfinite(float(top_p)) or not 0 < float(top_p) <= 1:
+            raise NativeEngineError("Native generation top_p must be a finite number greater than 0 and at most 1.")
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or not 0 <= top_k <= 100_000:
+            raise NativeEngineError("Native generation top_k must be an integer from 0 through 100000 (0 disables top-k).")
+        if isinstance(min_p, bool) or not isinstance(min_p, (int, float)) or not math.isfinite(float(min_p)) or not 0 <= float(min_p) <= 1:
+            raise NativeEngineError("Native generation min_p must be between 0 and 1 (0 disables min-p).")
+        if isinstance(repetition_penalty, bool) or not isinstance(repetition_penalty, (int, float)) or not math.isfinite(float(repetition_penalty)) or not 0.1 <= float(repetition_penalty) <= 5:
+            raise NativeEngineError("Native repetition_penalty must be a finite number between 0.1 and 5.")
+        if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= (2**63 - 1)):
+            raise NativeEngineError("Native sampling seed must be an integer from 0 through 2^63-1.")
+        if top_k > self.config.vocab_size:
+            raise NativeEngineError("top_k cannot exceed the checkpoint vocabulary size.")
+
+        # Bucket prompts by exact length, then cap each device microbatch so a
+        # large group of same-length prompts cannot expand into one huge VRAM
+        # allocation. Output slots preserve the caller's original prompt order.
+        length_groups: dict[int, list[tuple[int, list[int]]]] = {}
+        for index, prompt in enumerate(prompt_token_ids):
+            length_groups.setdefault(len(prompt), []).append((index, prompt))
+        bucketed_microbatches = (
+            len(length_groups) > 1
+            or any(len(entries) > _MAX_NATIVE_MICROBATCH_SIZE for entries in length_groups.values())
+        )
+        if bucketed_microbatches:
+            grouped_outputs: list[list[int] | None] = [None] * len(prompt_token_ids)
+            grouped_reasons: list[str | None] = [None] * len(prompt_token_ids)
+            started = time.perf_counter()
+            total_finished = 0
+            microbatch_index = 0
+            aggregated_memory_stats: dict[str, int] = {}
+            for length in sorted(length_groups):
+                entries = length_groups[length]
+                for offset in range(0, len(entries), _MAX_NATIVE_MICROBATCH_SIZE):
+                    if cancel_event is not None and cancel_event.is_set():
+                        break
+                    chunk = entries[offset:offset + _MAX_NATIVE_MICROBATCH_SIZE]
+                    group_seed = None if seed is None else (seed + microbatch_index) % (2**63)
+                    original_indices = [original_index for original_index, _prompt in chunk]
+                    local_stop_checker = None
+                    if stop_checker is not None:
+                        def local_stop_checker(local_index: int, generated_ids: list[int], indices=original_indices) -> bool:
+                            return stop_checker(indices[local_index], generated_ids)
+                    group_outputs = self.generate_batch(
+                        [prompt for _index, prompt in chunk],
+                        max_new_tokens=max_new_tokens,
+                        temperature=temperature,
+                        top_p=top_p,
+                        top_k=top_k,
+                        min_p=min_p,
+                        repetition_penalty=repetition_penalty,
+                        seed=group_seed,
+                        eos_token_ids=eos_token_ids,
+                        cancel_event=cancel_event,
+                        stop_checker=local_stop_checker,
+                    )
+                    group_metrics = dict(self.last_batch_generation)
+                    group_reasons = group_metrics.get("sequence_stop_reasons", [])
+                    for local_index, ((original_index, _prompt), output) in enumerate(zip(chunk, group_outputs)):
+                        grouped_outputs[original_index] = output
+                        if local_index < len(group_reasons):
+                            grouped_reasons[original_index] = group_reasons[local_index]
+                    total_finished += int(group_metrics.get("finished_sequences", 0))
+                    for name, value in self.memory_stats.items():
+                        if isinstance(value, int) and not isinstance(value, bool):
+                            aggregated_memory_stats[name] = aggregated_memory_stats.get(name, 0) + value
+                    microbatch_index += 1
+                if cancel_event is not None and cancel_event.is_set():
+                    break
+
+            result = [output if output is not None else [] for output in grouped_outputs]
+            self.memory_stats = aggregated_memory_stats
+            summary = {
+                "batch_size": len(prompt_token_ids),
+                "batch_groups": len(length_groups),
+                "microbatch_count": microbatch_index,
+                "microbatch_size_limit": _MAX_NATIVE_MICROBATCH_SIZE,
+                "max_microbatch_size": min(_MAX_NATIVE_MICROBATCH_SIZE, max(len(entries) for entries in length_groups.values())),
+                "prompt_tokens": sum(map(len, prompt_token_ids)),
+                "completion_tokens": sum(map(len, result)),
+                "finished_sequences": total_finished,
+                "sequence_stop_reasons": [
+                    reason or ("cancelled" if cancel_event is not None and cancel_event.is_set() else "max_new_tokens")
+                    for reason in grouped_reasons
+                ],
+                "stop_reason": "cancelled" if cancel_event is not None and cancel_event.is_set() else "length_buckets_complete",
+                "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
+                "decoder": "axiom-length-bucketed-microbatch-autoregressive-kv-cache",
+            }
+            self.last_batch_generation = summary
+            self.live_generation.update({"stage": "complete", **summary})
+            return result
+
+        prompt_length = len(prompt_token_ids[0])
+        torch = self.torch
+        generator = None
+        if seed is not None:
+            try:
+                generator = torch.Generator(device=self.device)
+                generator.manual_seed(seed)
+            except (RuntimeError, TypeError, AttributeError):
+                raise NativeEngineError("Seeded sampling is not supported by the selected tensor device.") from None
+        batch_size = len(prompt_token_ids)
+        eos = set(self.config.eos_token_ids if eos_token_ids is None else eos_token_ids)
+        generated: list[list[int]] = [[] for _ in prompt_token_ids]
+        finished = [False] * batch_size
+        sequence_stop_reasons = ["max_new_tokens"] * batch_size
+        tokens = torch.tensor(prompt_token_ids, device=self.device, dtype=torch.long)
+        started = time.perf_counter()
+        self.memory_stats = {
+            "layer_weight_tensors_staged": 0,
+            "layer_weight_bytes_staged": 0,
+            "layer_weight_bytes_returned_to_cpu": 0,
+            "layer_weight_bytes_released": 0,
+            "disk_layer_weight_loads": 0,
+            "disk_layer_weight_bytes_read": 0,
+            "kv_cache_layer_offloads": 0,
+            "kv_cache_bytes_offloaded": 0,
+        }
+        self.live_generation = {
+            "stage": "prefill",
+            "prompt_tokens": prompt_length * batch_size,
+            "completion_tokens": 0,
+            "batch_size": batch_size,
+            "elapsed_ms": 0.0,
+        }
+        stop_reason = "max_new_tokens"
+        cache: tuple[Any, ...] = ()
+        try:
+            with torch.inference_mode():
+                if cancel_event is not None and cancel_event.is_set():
+                    stop_reason = "cancelled"
+                    return generated
+                logits, cache = self.forward(tokens, cancel_event=cancel_event)
+                for step in range(max_new_tokens):
+                    if cancel_event is not None and cancel_event.is_set():
+                        stop_reason = "cancelled"
+                        break
+                    scores = _sanitize_sampling_scores(logits.float(), torch)
+                    if repetition_penalty != 1.0:
+                        for row, prompt in enumerate(prompt_token_ids):
+                            if finished[row]:
+                                continue
+                            history = sorted(set(prompt + generated[row]))
+                            if history:
+                                history_ids = torch.tensor(history, device=self.device, dtype=torch.long)
+                                prior_scores = scores[row].index_select(-1, history_ids)
+                                adjusted = torch.where(
+                                    prior_scores < 0,
+                                    prior_scores * float(repetition_penalty),
+                                    prior_scores / float(repetition_penalty),
+                                )
+                                scores[row].scatter_(0, history_ids, adjusted)
+                    if temperature == 0:
+                        next_tokens = torch.argmax(scores, dim=-1)
+                    else:
+                        scores = _sanitize_sampling_scores(scores / float(temperature), torch)
+                        scores = _apply_top_k_filter(scores, top_k, torch)
+                        if top_p < 1:
+                            sorted_scores, sorted_ids = torch.sort(scores, descending=True, dim=-1)
+                            cumulative = torch.softmax(sorted_scores, dim=-1).cumsum(dim=-1)
+                            remove = cumulative > float(top_p)
+                            remove[..., 1:] = remove[..., :-1].clone()
+                            remove[..., 0] = False
+                            sorted_scores = sorted_scores.masked_fill(remove, float("-inf"))
+                            scores = torch.full_like(scores, float("-inf")).scatter(
+                                dim=-1, index=sorted_ids, src=sorted_scores
+                            )
+                        scores = _apply_min_p_filter(scores, float(min_p))
+                        if not bool(torch.isfinite(scores).any(dim=-1).all().item()):
+                            raise NativeEngineError("Native batch sampling filters removed every usable token.")
+                        probabilities = torch.softmax(scores, dim=-1)
+                        next_tokens = torch.multinomial(probabilities, num_samples=1, generator=generator).squeeze(-1)
+
+                    next_input: list[int] = []
+                    for row in range(batch_size):
+                        token_id = int(next_tokens[row].item())
+                        if finished[row]:
+                            next_input.append(0)
+                            continue
+                        if token_id < 0 or token_id >= self.config.vocab_size:
+                            raise NativeEngineError("Native batch decoder produced a token ID outside vocab_size.")
+                        if token_id in eos:
+                            finished[row] = True
+                            sequence_stop_reasons[row] = "eos_token"
+                            next_input.append(token_id)
+                        else:
+                            generated[row].append(token_id)
+                            next_input.append(token_id)
+                            if stop_checker is not None and stop_checker(row, generated[row]):
+                                finished[row] = True
+                                sequence_stop_reasons[row] = "stop_sequence"
+                    completed = sum(len(row) for row in generated)
+                    self.live_generation.update({
+                        "stage": "decode",
+                        "completion_tokens": completed,
+                        "batch_size": batch_size,
+                        "finished_sequences": sum(finished),
+                        "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
+                    })
+                    if all(finished):
+                        stop_reason = "eos_token"
+                        break
+                    if step + 1 < max_new_tokens:
+                        logits, cache = self.forward(
+                            torch.tensor(next_input, device=self.device, dtype=torch.long).view(batch_size, 1),
+                            cache,
+                            past_sequence_length=prompt_length + step,
+                            cancel_event=cancel_event,
+                        )
+        finally:
+            self.last_batch_generation = {
+                "batch_size": batch_size,
+                "prompt_tokens": prompt_length * batch_size,
+                "completion_tokens": sum(len(row) for row in generated),
+                "finished_sequences": sum(finished),
+                "sequence_stop_reasons": [
+                    "cancelled" if cancel_event is not None and cancel_event.is_set() and not finished[index]
+                    else sequence_stop_reasons[index]
+                    for index in range(batch_size)
+                ],
+                "stop_reason": stop_reason,
+                "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
+                "decoder": "axiom-batched-autoregressive-kv-cache",
+            }
+            self.live_generation.update({
+                "stage": "complete",
+                **self.last_batch_generation,
+            })
+        return generated
+
 def load_native_runtime(
     model_dir: Path,
     torch_module: Any,
@@ -1142,6 +1781,18 @@ def load_native_runtime(
     except (ImportError, OSError):
         raise NativeDependencyError("AXIOM Native Engine requires tokenizers. Install the native-inference extra.") from None
     roots = trusted_roots or (model_dir.resolve(),)
+    has_safetensors = (model_dir / "model.safetensors").is_file() or (model_dir / "model.safetensors.index.json").is_file()
+    if not has_safetensors:
+        try:
+            has_gguf = any(item.is_file() and item.suffix.lower() == ".gguf" for item in model_dir.iterdir())
+        except OSError:
+            has_gguf = False
+        if has_gguf:
+            from axiom.core.native_gguf import load_native_gguf_runtime
+            return load_native_gguf_runtime(
+                model_dir, torch_module, device, adapter_dir=adapter_dir,
+                trusted_roots=roots, memory_mode=memory_mode, precision=precision,
+            )
     model = NativeLlamaRuntime.from_directory(
         model_dir, torch_module, device, adapter_dir=adapter_dir,
         trusted_roots=roots, memory_mode=memory_mode, precision=precision,

@@ -3,7 +3,7 @@ set -euo pipefail
 
 # AXIOM installer contract
 #
-#   AXIOM_RELEASE_TAG   Optional exact release tag, for example v0.3.0-beta.5.
+#   AXIOM_RELEASE_TAG   Optional exact release tag, for example v0.3.0-beta.6.
 #                       When unset, the newest published non-draft GitHub release is selected.
 #   AXIOM_SOURCE_REF    Optional Git ref for the source fallback. It defaults
 #                       to AXIOM_RELEASE_TAG when pinned, otherwise main.
@@ -37,7 +37,7 @@ Usage:
   curl -fsSL https://raw.githubusercontent.com/NetCore-Technologies/AXIOM-AI/main/installers/install.sh | bash
 
 Optional environment overrides:
-  AXIOM_RELEASE_TAG=v0.3.0-beta.5  Install one exact GitHub release.
+  AXIOM_RELEASE_TAG=v0.3.0-beta.6  Install one exact GitHub release.
   AXIOM_SOURCE_REF=main             Git ref for the source fallback.
   AXIOM_INSTALL_DIR=/path/to/data   User-scoped runtime and release storage.
   AXIOM_BIN_DIR=/path/to/bin        Directory receiving the axiom symlink.
@@ -71,7 +71,7 @@ valid_release_tag() {
 }
 
 if [[ -n "$REQUESTED_TAG" ]] && ! valid_release_tag "$REQUESTED_TAG"; then
-  die "AXIOM_RELEASE_TAG must look like v0.3.0-beta.5 (received '$REQUESTED_TAG')"
+  die "AXIOM_RELEASE_TAG must look like v0.3.0-beta.6 (received '$REQUESTED_TAG')"
 fi
 
 cleanup_download() {

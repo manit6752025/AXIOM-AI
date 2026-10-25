@@ -270,12 +270,12 @@ const pageMeta: Record<
 > = {
   optimizer: {
     label: "Agent Optimizer",
-    kicker: "BETA 5 / MODEL OPTIMIZATION",
+    kicker: "BETA 6 / MODEL OPTIMIZATION",
     description: "Interactive questionnaire, hardware detection and quantization planning.",
   },
   quantizer: {
     label: "Quantization Lab",
-    kicker: "BETA 5 / HARDWARE OPTIMIZATION",
+    kicker: "BETA 6 / HARDWARE OPTIMIZATION",
     description: "Choose an agent profile and hardware target to select a model quantization plan.",
   },
   dashboard: {
@@ -374,7 +374,7 @@ const platformModules: Array<{
     page: "optimizer",
     title: "Agent Optimizer",
     description: "Questionnaire-driven model sizing, quantization and benchmark planning",
-    state: "Beta 5",
+    state: "Beta 6",
     tone: "success",
     icon: Zap,
   },
@@ -1052,7 +1052,7 @@ function Welcome({
       </div>
 
       <div className="auth-footer">
-        <span>AXIOM / 0.3.0-beta.5</span>
+        <span>AXIOM / 0.3.0-beta.6</span>
         <span>LOCAL · PRIVATE · ENGINEERED FOR AI</span>
       </div>
     </div>

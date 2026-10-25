@@ -25,13 +25,13 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
     connectors: [],
   } }));
   await page.route("**/api/engine/status", (route) => route.fulfill({ json: {
-    engine: "axiom-native-pytorch-llama", ready: true, packages: { torch: true, tokenizers: true, safetensors: true },
-    versions: { torch: "2.9.0", tokenizers: "0.22.0", safetensors: "0.6.0" },
+    engine: "axiom-native-pytorch-llama", ready: true, packages: { torch: true, tokenizers: true, safetensors: true, gguf: true, numpy: true },
+    versions: { torch: "2.9.0", tokenizers: "0.22.0", safetensors: "0.6.0", gguf: "0.19.0", numpy: "2.4.6" },
     minimum_versions: { torch: "2.2.0", tokenizers: "0.19.0", safetensors: "0.4.0" },
     problems: [], execution_backend: "pytorch-native-axiom", transformers_generation_used: false, ollama_used: false,
-    supported_model_types: ["llama", "mistral"], supported_weights: ["safetensors"],
-    loaded: engineLoaded, architecture: engineLoaded ? "LlamaForCausalLM" : null, model_loading: "local_safetensors_only", remote_code: false,
-    setup_note: "AXIOM Native Engine is ready for supported local Llama/Mistral safetensors checkpoints.",
+    supported_model_types: ["llama", "mistral", "qwen2", "qwen3"], supported_weights: ["safetensors", "gguf-dequantized-float"],
+    loaded: engineLoaded, architecture: engineLoaded ? "LlamaForCausalLM" : null, model_loading: "local_safetensors_and_gguf_if_available", remote_code: false,
+    setup_note: "AXIOM Native Engine is ready for supported local Llama/Mistral safetensors and single-file GGUF checkpoints (GGUF dequantizes to floating-point; no low-bit kernels).",
     scope_note: "AXIOM-owned Llama/Mistral forward pass and autoregressive KV-cache decoder.", checked_at: "2026-10-22T00:00:00Z",
   } }));
   await page.route("**/api/engine/adapters/compatibility", (route) => route.fulfill({ json: {
@@ -115,6 +115,36 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
       ].join("\n") + "\n",
     });
   });
+  await page.route("**/api/engine/generate/batch", (route) => {
+    const requestBody = route.request().postDataJSON() as Record<string, unknown>;
+    expect(requestBody.prompts).toEqual(["First batch prompt", "Second batch prompt"]);
+    expect(requestBody.top_p).toBe(0.8);
+    expect(requestBody.top_k).toBe(4);
+    expect(requestBody.min_p).toBe(0.05);
+    expect(requestBody.repetition_penalty).toBe(1.1);
+    expect(requestBody.seed).toBe(42);
+    expect(requestBody.adapter_path).toBe("/runs/my-lora-adapter");
+    return route.fulfill({ json: {
+      engine: "axiom-native-engine",
+      execution_backend: "pytorch-native-axiom",
+      transformers_generation_used: false,
+      ollama_used: false,
+      model: "llama-test",
+      architecture: "LlamaForCausalLM",
+      model_type: "llama",
+      batch_size: 2,
+      prompt_tokens: 8,
+      completion_tokens: 6,
+      elapsed_ms: 45.5,
+      memory_mode: "auto",
+      checkpoint_format: "safetensors",
+      local_only: true,
+      results: [
+        { index: 1, prompt_format: "plain", context_management: { prompt_tokens_before_truncation: 4, prompt_tokens_used: 4, token_truncation_applied: false }, prompt_tokens: 4, completion_tokens: 3, stop_reason: "max_new_tokens", response: "First batch result." },
+        { index: 2, prompt_format: "plain", context_management: { prompt_tokens_before_truncation: 4, prompt_tokens_used: 4, token_truncation_applied: false }, prompt_tokens: 4, completion_tokens: 3, stop_reason: "eos_token", response: "Second batch result." },
+      ],
+    } });
+  });
   await page.route("**/api/engine/unload", (route) => {
     unloadCalls += 1;
     engineLoaded = false;
@@ -128,8 +158,10 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
 
   const engine = page.locator(".axiom-engine-panel");
   await expect(engine.getByRole("heading", { name: "AXIOM Local Engine" })).toBeVisible();
-  await expect(engine).toContainText("own PyTorch Llama/Mistral/Qwen2 forward pass");
+  await expect(engine).toContainText("own PyTorch Llama/Mistral/Qwen2/Qwen3 forward pass");
   await expect(engine).toContainText("safetensors");
+  await expect(engine).toContainText("GGUF");
+  await expect(engine).toContainText("dequantizing GGUF tensors to floating-point");
   await expect(engine.getByText("ENGINE READY")).toBeVisible();
 
   await engine.getByLabel("Select discovered native model").selectOption("/models/llama-test");
@@ -162,6 +194,13 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(engine).toContainText("Finish: stop sequence · Stop sequences: 2 · Attention: pytorch-scaled-dot-product-attention · Sampling: temperature 0.7 · top-p 0.8 · top-k 4 · min-p 0.05 · repetition penalty 1.1 · seed 42");
   await expect(engine).toContainText("LlamaForCausalLM");
   await expect(engine.getByRole("button", { name: "Unload model" })).toBeVisible();
+
+  await engine.getByLabel("AXIOM Native batch prompts").fill("First batch prompt\nSecond batch prompt");
+  await engine.getByRole("button", { name: "Run native batch" }).click();
+  const batchResults = engine.getByRole("region", { name: "Native batch results" });
+  await expect(batchResults).toContainText("2 prompt results");
+  await expect(batchResults).toContainText("First batch result.");
+  await expect(batchResults).toContainText("Second batch result.");
 
   await engine.getByRole("button", { name: "Unload model" }).click();
   await expect(engine.getByRole("status")).toContainText("released its loaded model and tokenizer references");

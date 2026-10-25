@@ -1,4 +1,4 @@
-"""AXIOM Beta.5 agent/model optimization helpers."""
+"""AXIOM Beta.6 agent/model optimization helpers."""
 
 from __future__ import annotations
 

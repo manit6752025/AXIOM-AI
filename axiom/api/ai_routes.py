@@ -1,4 +1,4 @@
-"""FastAPI routes for the beta.5 AI features."""
+"""FastAPI routes for the beta.6 AI features."""
 
 from __future__ import annotations
 

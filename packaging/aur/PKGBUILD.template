@@ -1,6 +1,6 @@
 # Replace URL/hash with verified release values.
 pkgname=axiom-ai
-pkgver=0.3.0_beta.1
+pkgver=0.3.0_beta.6
 pkgrel=1
 pkgdesc="Local-first AI engineering CLI"
 arch=('any')

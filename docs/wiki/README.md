@@ -4,7 +4,7 @@ These Markdown files are the maintained source copy for the separate GitHub Wiki
 
 ## Publish to the GitHub Wiki
 
-Open https://github.com/NetCore-Technologies/AXIOM-AI/wiki and create or update pages using the matching filenames without `.md`: `Home`, `Getting-Started`, `Release-Notes-v0.3.0-beta.5`, `Control-Center-and-Module-Explorer`, `CLI-Guide`, `Workspace-Diagnostics-and-Support-Bundles`, `Local-API-and-Security`, `Workflow-Design-and-Execution-Boundaries`, and `Troubleshooting`.
+Open https://github.com/NetCore-Technologies/AXIOM-AI/wiki and create or update pages using the matching filenames without `.md`: `Home`, `Getting-Started`, `Release-Notes-v0.3.0-beta.6`, `Control-Center-and-Module-Explorer`, `CLI-Guide`, `Workspace-Diagnostics-and-Support-Bundles`, `Local-API-and-Security`, `Workflow-Design-and-Execution-Boundaries`, and `Troubleshooting`.
 
 The page links in these files use GitHub Wiki slug syntax. After pasting them into the live Wiki, test the links from Home.
 

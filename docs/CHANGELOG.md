@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0-beta.5 — Beta candidate
+## 0.3.0-beta.6 — Beta candidate
 
 ### Added and improved
 - Added workspace diagnostics and privacy-minimized support bundles through the CLI, API, and Control Center.
@@ -10,7 +10,7 @@
 - Continued hardening native inference controls, cancellation, runtime metrics, and CLI/API/GUI diagnostics.
 
 ### Release status
-- Source metadata is aligned to 0.3.0-beta.5. This entry describes the intended candidate scope, not proof that every feature or platform has passed validation.
+- Source metadata is aligned to 0.3.0-beta.6. This entry describes the intended candidate scope, not proof that every feature or platform has passed validation.
 - Publish only after the release workflow, platform installer smoke tests, interactive GUI checks, full test suite, and package/tag version checks succeed.
 - The npm package is @netcore-technologies/axiom-cli; its version is tracked separately from the private axiom-ui development package.
 
@@ -38,6 +38,7 @@
 - Added versioned `--json` output for model/integration inventory, Hugging Face metadata inspection, local model inspection/search, and dataset inspect/validate/stats; dataset commands now share one JSON schema and preserve validation exit codes.
 - Added schema-versioned JSON output to `axiom dataset clean`, including per-category removal counts and source-preservation semantics; added model registry export/import/remove/favorite commands with duplicate-batch checks and live-registry overwrite protection.
 - Exposed architecture, license, repeatable tags, content SHA-256 and validated metadata updates through `axiom model add/update`; failed metadata edits leave the existing record unchanged.
+- Added native GGUF installation from Model Studio and the CLI's `install-gguf --native` target, plus direct AXIOM-owned GGUF parsing/dequantization for supported single-file and complete split-shard dense Llama/Mistral/Qwen2/Qwen3 checkpoints. Source quantization remains input storage only; the runtime uses floating-point tensors and does not claim low-bit memory/speed benefits.
 
 - Added AXIOM-owned Llama/Mistral inference execution with custom RMSNorm, RoPE, grouped-query attention, KV cache, supported LoRA deltas, sampling and autoregressive decode over local safetensors; the inference path does not call Transformers model.generate or Ollama.
 - Constrained direct AXIOM Engine model/adapter paths to configured trusted roots (including post-resolution symlink checks), replaced path-derived API names with names from validated directories, and added explicit model unload/resource cleanup.

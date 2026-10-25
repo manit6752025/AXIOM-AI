@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide covers installing AXIOM v0.3.0-beta.5, validating a workspace, and opening the local Control Center.
+This guide covers installing AXIOM v0.3.0-beta.6, validating a workspace, and opening the local Control Center.
 
 ## 1. Install
 
@@ -35,7 +35,7 @@ The user-scoped installer places `axiom` in `~/.local/bin`. Ensure that director
 
 Follow the installer output and reopen PowerShell if the `PATH` update is not visible.
 
-> Check the [beta.5 release page](https://github.com/NetCore-Technologies/AXIOM-AI/releases/tag/v0.3.0-beta.5) and [Actions workflow](https://github.com/NetCore-Technologies/AXIOM-AI/actions/workflows/release-assets.yml) before relying on any specific platform binary.
+> Check the [beta.6 release page](https://github.com/NetCore-Technologies/AXIOM-AI/releases/tag/v0.3.0-beta.6) and [Actions workflow](https://github.com/NetCore-Technologies/AXIOM-AI/actions/workflows/release-assets.yml) before relying on any specific platform binary.
 
 ## 2. Learn the command path
 

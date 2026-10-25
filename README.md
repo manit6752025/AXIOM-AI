@@ -3,7 +3,7 @@
 ![AXIOM. Know what fits before you train.](docs/assets/banner.svg)
 
 [![Status](https://img.shields.io/badge/status-beta-f59e0b?style=flat-square&labelColor=0f172a)](https://github.com/manit6752025/AXIOM-AI)
-[![Version](https://img.shields.io/badge/version-v0.3.0--beta.5-f59e0b?style=flat-square&labelColor=0f172a)](https://github.com/manit6752025/AXIOM-AI/releases)
+[![Version](https://img.shields.io/badge/version-v0.3.0--beta.6-f59e0b?style=flat-square&labelColor=0f172a)](https://github.com/manit6752025/AXIOM-AI/releases)
 [![License](https://img.shields.io/badge/license-MIT-7c3aed?style=flat-square&labelColor=0f172a)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&labelColor=0f172a&logo=python&logoColor=white)](https://www.python.org/)
 [![Local first](https://img.shields.io/badge/local--first-yes-22c55e?style=flat-square&labelColor=0f172a)](#privacy-and-safety)
@@ -229,7 +229,7 @@ See the [fine-tuning guide](docs/Local-Fine-Tuning.md) for supported data, limit
 <details>
 <summary><b>AXIOM Engine (direct local inference)</b></summary>
 
-AXIOM owns this inference path. It runs Llama, Mistral, Qwen2, and Qwen3 text-decoder forward passes and an autoregressive KV-cache decoder on PyTorch tensor kernels: RMSNorm, RoPE, grouped-query attention, Qwen3 query/key RMS normalization, SwiGLU, and supported LoRA deltas. It does not call Ollama or Transformers `model.generate`. Select full-weight loading, in-RAM layer streaming with a CPU KV cache, or disk-resident layer streaming that reads a safetensors layer on demand and releases it after use. Both streaming modes trade throughput for lower memory use.
+AXIOM owns this inference path. It runs Llama, Mistral, Qwen2, and Qwen3 text-decoder forward passes and an autoregressive KV-cache decoder on PyTorch tensor kernels: RMSNorm, RoPE, grouped-query attention, Qwen3 query/key RMS normalization, SwiGLU, and supported LoRA deltas. It does not call Ollama or Transformers `model.generate`. Supported inputs are floating-point safetensors checkpoints and single-file or complete split-shard dense GGUF checkpoints for these standard text architectures. GGUF tensors are validated and dequantized to floating-point for AXIOM's own execution; source Q4/Q5/Q8 quantization does not provide low-bit inference or low-bit memory usage. Choose full-weight loading, in-RAM layer streaming with a CPU KV cache, or disk-resident streaming, which can dequantize one supported GGUF layer on demand. Streaming modes trade throughput for lower weight residency.
 
 ```bash
 axiom --no-banner engine status
@@ -237,13 +237,13 @@ axiom --no-banner engine estimate --model-path "$HOME/models/my-llama-model" --c
 axiom --no-banner engine run --model-path "$HOME/models/my-llama-model" --prompt "Explain AXIOM in one sentence." --max-new-tokens 128
 ```
 
-- Needs a local `tokenizer.json` and floating-point safetensors weights. GGUF, quantized weights, pickle `.bin` files, and unsupported architectures are rejected with a clear message.
+- Use a local `tokenizer.json` with floating-point safetensors, or a supported GGUF checkpoint with a local or supported embedded tokenizer. GGUF support is limited to complete, validated dense Llama/Mistral/Qwen2/Qwen3 text checkpoints. EXL2/GPTQ/AWQ low-bit kernels, pickle `.bin` weights, and unsupported architectures are rejected.
 - Pick a device with `--device`. AXIOM reports detected CPU, CUDA, ROCm, Metal, and XPU options.
-- Pick `--precision auto|fp32|fp16|bf16`. Auto preserves the checkpoint dtype; FP16/BF16 may reduce memory for FP32 checkpoints where the backend supports them. This is floating-point precision, not INT8/INT4 quantization.
-- Choose `--memory-mode layer_streaming` when accelerator memory is constrained. This is not quantization; native GGUF/EXL2/GPTQ/AWQ support remains pending.
+- Pick `--precision auto|fp32|fp16|bf16`. Auto preserves safetensors checkpoint dtype; for GGUF, it selects a floating-point compute dtype (FP32 on CPU, FP16 by default on accelerators) because source tensors are dequantized. This is floating-point precision, not INT8/INT4 execution.
+- Choose `--memory-mode layer_streaming` when accelerator memory is constrained. Supported GGUF can also be loaded by dequantizing tensors to floating-point; this does not provide low-bit execution or low-bit memory savings. Native EXL2/GPTQ/AWQ kernels remain unsupported.
 - Choose `--memory-mode disk_streaming` when the entire model's layer weights also do not fit in CPU RAM. Expect extra disk I/O on every prompt/decode forward pass.
-- Use `engine estimate` to compare estimated weights, KV-cache, and workspace against RAM/VRAM budgets. INT4/INT8 figures are planning-only; AXIOM's native loader still requires supported floating-point Safetensors.
-- Model Studio can pull compatible public Hugging Face safetensors checkpoints directly into AXIOM's trusted native-model directory; the runtime also accepts compatible local checkpoints.
+- Use `engine estimate` to compare estimated weights, KV-cache, and workspace against RAM/VRAM budgets. INT4/INT8 candidate rows are sizing-only; supported GGUF inputs are dequantized to floating-point, and budget fit never guarantees that a checkpoint will load.
+- Model Studio can pull compatible public Hugging Face safetensors checkpoints or install a supported GGUF directly into AXIOM's trusted native-model directory. Use `axiom model studio install-gguf REPO_ID FILENAME --name my-native-model --native`; this is separate from the default Ollama target and from `--download-only`.
 
 Details: [AXIOM Engine](docs/Local-Engine.md). A local OpenAI-compatible chat endpoint is available at `/v1/chat/completions`; it only exposes native-compatible models discovered inside AXIOM's trusted model roots and currently supports text chat, not tool calling or continuous batching.
 
@@ -276,6 +276,7 @@ axiom model studio wizard
 axiom model studio search "coding"
 axiom model studio files REPO_ID
 axiom model studio install-gguf REPO_ID FILENAME --name my-local-model
+axiom model studio install-gguf REPO_ID FILENAME --name my-native-model --native
 axiom model studio pull qwen3.5:0.8b
 axiom model studio convert-gguf ./models/my-model --llama-cpp-dir ./llama.cpp --output ./out/model.gguf --quantization Q4_K_M
 ```

@@ -223,13 +223,91 @@ def test_native_config_accepts_llama_mistral_qwen2_and_qwen3() -> None:
     assert qwen3.qk_norm is True
 
 
+def test_native_config_supports_linear_rope_scaling() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    default_config = NativeLlamaConfig.from_mapping(_config())
+    linear_config = NativeLlamaConfig.from_mapping(_config(
+        rope_scaling={"rope_type": "linear", "factor": 2.0}
+    ))
+    assert linear_config.rope_scaling_type == "linear"
+    assert linear_config.rope_scaling_factor == 2.0
+
+    weights = _tiny_weights(torch)
+    default_runtime = NativeLlamaRuntime(default_config, weights, torch, torch.device("cpu"))
+    linear_runtime = NativeLlamaRuntime(linear_config, weights, torch, torch.device("cpu"))
+    values = torch.randn((1, 2, 2, 4), dtype=torch.float32)
+    scaled = linear_runtime._apply_rope(values, torch.tensor([0, 2]))
+    reference = default_runtime._apply_rope(values, torch.tensor([0, 1]))
+    assert torch.allclose(scaled, reference, atol=1e-6, rtol=1e-5)
+
+
+def test_native_config_supports_llama3_rope_scaling_formula() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config(
+        rope_scaling={
+            "rope_type": "llama3",
+            "factor": 8.0,
+            "original_max_position_embeddings": 16,
+            "low_freq_factor": 1.0,
+            "high_freq_factor": 4.0,
+        }
+    ))
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    positions = torch.arange(4)
+    actual_cos, actual_sin = runtime._rope_embeddings(positions, torch.float32)
+
+    dim = config.hidden_size // config.num_attention_heads
+    inv_freq = 1.0 / (
+        config.rope_theta
+        ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim)
+    )
+    wavelength = (2.0 * torch.pi) / inv_freq
+    low_wavelength = 16.0 / 1.0
+    high_wavelength = 16.0 / 4.0
+    scaled_inv = inv_freq / 8.0
+    smooth = (16.0 / wavelength - 1.0) / (4.0 - 1.0)
+    smooth_inv = (1.0 - smooth) * scaled_inv + smooth * inv_freq
+    expected_inv = torch.where(
+        wavelength < high_wavelength,
+        inv_freq,
+        torch.where(wavelength > low_wavelength, scaled_inv, smooth_inv),
+    )
+    frequencies = torch.einsum("i,j->ij", positions.to(torch.float32), expected_inv)
+    embedding = torch.cat((frequencies, frequencies), dim=-1)
+    assert torch.allclose(actual_cos[0, 0], embedding.cos(), atol=1e-6, rtol=1e-5)
+    assert torch.allclose(actual_sin[0, 0], embedding.sin(), atol=1e-6, rtol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "overrides,detail",
+    [
+        ({"bos_token_id": True}, "BOS token ID"),
+        ({"eos_token_id": [2, True]}, "EOS token IDs"),
+        ({"tie_word_embeddings": "true"}, "tie_word_embeddings"),
+        ({"rope_scaling": 0}, "RoPE scaling"),
+    ],
+)
+def test_native_config_rejects_malformed_token_and_rope_metadata(overrides, detail) -> None:
+    with pytest.raises(NativeEngineError, match=detail):
+        NativeLlamaConfig.from_mapping(_config(**overrides))
+
+
 @pytest.mark.parametrize(
     "overrides,detail",
     [
         ({"model_type": "gemma3"}, "supports llama, mistral, qwen2, and qwen3"),
         ({"hidden_size": 7}, "even-sized attention heads"),
         ({"rope_scaling": {"rope_type": "yarn", "factor": 2.0}}, "RoPE scaling"),
+        ({"rope_scaling": {"rope_type": "default", "factor": True}}, "RoPE scaling"),
+        ({"model_type": "llama", "architectures": ["Qwen3ForCausalLM"]}, "does not match"),
         ({"num_attention_heads": 3, "hidden_size": 12, "num_key_value_heads": 2}, "num_key_value_heads"),
+        ({"hidden_size": True}, "missing valid native Llama model dimensions"),
+        ({"num_hidden_layers": 1.5}, "missing valid native Llama model dimensions"),
+        ({"rope_theta": True}, "missing valid native Llama model dimensions"),
     ],
 )
 def test_native_config_rejects_unsupported_or_inconsistent_architecture(overrides, detail) -> None:
@@ -296,6 +374,99 @@ def _tiny_weights(torch, vocab_size=8, hidden=8, intermediate=12):
 
 
 @pytest.mark.parametrize("force_manual", [False, True])
+def test_native_grouped_query_attention_matches_expanded_reference(force_manual: bool, monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    query = torch.randn((1, 2, 3, 4), dtype=torch.float32)
+    key = torch.randn((1, 1, 3, 4), dtype=torch.float32)
+    value = torch.randn((1, 1, 3, 4), dtype=torch.float32)
+    blocked = torch.triu(torch.ones((3, 3), dtype=torch.bool), diagonal=1)
+    native_sdpa = torch.nn.functional.scaled_dot_product_attention
+    calls = []
+
+    if force_manual:
+        monkeypatch.setattr(torch.nn.functional, "scaled_dot_product_attention", None)
+    else:
+        def capture_sdpa(q, k, v, **kwargs):
+            calls.append({
+                "query_heads": q.shape[1],
+                "key_heads": k.shape[1],
+                "value_heads": v.shape[1],
+                "enable_gqa": kwargs.get("enable_gqa"),
+            })
+            return native_sdpa(q, k, v, **kwargs)
+
+        monkeypatch.setattr(torch.nn.functional, "scaled_dot_product_attention", capture_sdpa)
+
+    actual = runtime._attention(query, key, value, blocked)
+    expanded_key = key.repeat_interleave(2, dim=1)
+    expanded_value = value.repeat_interleave(2, dim=1)
+    scores = torch.matmul(query, expanded_key.transpose(-2, -1)) / (4 ** 0.5)
+    probabilities = torch.softmax(
+        scores.masked_fill(blocked[None, None, :, :], float("-inf")), dim=-1
+    )
+    expected = torch.matmul(probabilities, expanded_value)
+
+    assert torch.allclose(actual, expected, atol=2e-5, rtol=1e-4)
+    if force_manual:
+        assert runtime.last_attention_backend == "axiom-manual-matmul-attention-gqa"
+    else:
+        assert runtime.last_attention_backend in {
+            "pytorch-scaled-dot-product-attention-gqa",
+            "pytorch-scaled-dot-product-attention-expanded-gqa",
+        }
+        assert calls[0]["query_heads"] == 2
+        if runtime.last_attention_backend == "pytorch-scaled-dot-product-attention-gqa":
+            assert calls[0]["key_heads"] == calls[0]["value_heads"] == 1
+            assert calls[0]["enable_gqa"] is True
+        else:
+            # Older SDPA builds reject enable_gqa; the compatibility path expands K/V.
+            assert calls[-1]["key_heads"] == calls[-1]["value_heads"] == 2
+
+
+def test_native_gqa_falls_back_when_backend_reports_unsupported_kernel(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    runtime = NativeLlamaRuntime(
+        NativeLlamaConfig.from_mapping(_config()),
+        _tiny_weights(torch),
+        torch,
+        torch.device("cpu"),
+    )
+    native_sdpa = torch.nn.functional.scaled_dot_product_attention
+    calls = []
+
+    def reject_native_gqa(query, key, value, **kwargs):
+        calls.append((key.shape[1], kwargs.get("enable_gqa", False)))
+        if kwargs.get("enable_gqa"):
+            raise RuntimeError("grouped-query attention is not supported by this test backend")
+        return native_sdpa(query, key, value, **kwargs)
+
+    monkeypatch.setattr(torch.nn.functional, "scaled_dot_product_attention", reject_native_gqa)
+    query = torch.randn((1, 2, 3, 4), dtype=torch.float32)
+    key = torch.randn((1, 1, 3, 4), dtype=torch.float32)
+    value = torch.randn((1, 1, 3, 4), dtype=torch.float32)
+    blocked = torch.triu(torch.ones((3, 3), dtype=torch.bool), diagonal=1)
+
+    actual = runtime._attention(query, key, value, blocked)
+    expanded_key = key.repeat_interleave(2, dim=1)
+    expanded_value = value.repeat_interleave(2, dim=1)
+    scores = torch.matmul(query, expanded_key.transpose(-2, -1)) / (4 ** 0.5)
+    probabilities = torch.softmax(
+        scores.masked_fill(blocked[None, None], float("-inf")), dim=-1
+    )
+    expected = torch.matmul(probabilities, expanded_value)
+
+    assert torch.allclose(actual, expected, atol=2e-5, rtol=1e-4)
+    assert runtime.last_attention_backend == "pytorch-scaled-dot-product-attention-expanded-gqa"
+    assert calls == [(1, True), (2, False)]
+
+
+@pytest.mark.parametrize("force_manual", [False, True])
 def test_native_attention_sdpa_and_manual_paths_match_reference(force_manual: bool, monkeypatch) -> None:
     torch = pytest.importorskip("torch")
     from axiom.core.native_engine import NativeLlamaRuntime
@@ -318,6 +489,293 @@ def test_native_attention_sdpa_and_manual_paths_match_reference(force_manual: bo
     assert runtime.last_attention_backend == (
         "axiom-manual-matmul-attention" if force_manual else "pytorch-scaled-dot-product-attention"
     )
+
+
+@pytest.mark.parametrize(
+    "cache_kind, detail",
+    [
+        ("wrong_layer_count", "one key/value pair per transformer layer"),
+        ("mismatched_key_value_shape", "key/value tensor shapes are inconsistent"),
+        ("wrong_head_count", "tensor dimensions do not match the model configuration"),
+        ("wrong_dtype", "dtype does not match the loaded model weights"),
+        ("wrong_device", "device does not match the selected memory mode"),
+        ("empty_sequence", "sequence length must be positive"),
+        ("non_tensor", "entries must be tensors"),
+    ],
+)
+def test_native_forward_rejects_malformed_kv_cache(cache_kind: str, detail: str) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    with torch.inference_mode():
+        _, cache = runtime.forward(torch.tensor([[1, 3, 4]], dtype=torch.long))
+        if cache_kind == "wrong_layer_count":
+            malformed = ()
+        elif cache_kind == "mismatched_key_value_shape":
+            malformed = ((cache[0][0][..., :-1, :], cache[0][1]),)
+        elif cache_kind == "wrong_head_count":
+            malformed = ((
+                cache[0][0].repeat_interleave(2, dim=1),
+                cache[0][1].repeat_interleave(2, dim=1),
+            ),)
+        elif cache_kind == "wrong_dtype":
+            malformed = ((cache[0][0].double(), cache[0][1].double()),)
+        elif cache_kind == "wrong_device":
+            malformed = ((cache[0][0].to(device="meta"), cache[0][1].to(device="meta")),)
+        elif cache_kind == "empty_sequence":
+            malformed = ((cache[0][0][..., :0, :], cache[0][1][..., :0, :]),)
+        else:
+            malformed = ((None, None),)
+
+        with pytest.raises(NativeEngineError, match=detail):
+            runtime.forward(torch.tensor([[5]], dtype=torch.long), malformed)
+
+
+def test_native_forward_computes_rope_embeddings_once_for_all_layers(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config(num_hidden_layers=2))
+    weights = _tiny_weights(torch)
+    for name, tensor in list(weights.items()):
+        if name.startswith("model.layers.0."):
+            weights[name.replace("model.layers.0.", "model.layers.1.", 1)] = tensor.clone()
+    runtime = NativeLlamaRuntime(config, weights, torch, torch.device("cpu"))
+    original = runtime._rope_embeddings
+    calls = []
+
+    def capture(positions, dtype):
+        calls.append((positions.detach().cpu().tolist(), dtype))
+        return original(positions, dtype)
+
+    monkeypatch.setattr(runtime, "_rope_embeddings", capture)
+    with torch.inference_mode():
+        logits, _ = runtime.forward(torch.tensor([[1, 2, 3]], dtype=torch.long))
+
+    assert tuple(logits.shape) == (1, config.vocab_size)
+    assert calls == [([0, 1, 2], torch.float32)]
+
+
+def test_native_forward_uses_implicit_causal_prefill_and_unmasked_decode(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    calls = []
+    original = runtime._attention
+
+    def capture(query, key, value, blocked_mask, *, is_causal=False):
+        calls.append((None if blocked_mask is None else tuple(blocked_mask.shape), is_causal))
+        return original(query, key, value, blocked_mask, is_causal=is_causal)
+
+    monkeypatch.setattr(runtime, "_attention", capture)
+    with torch.inference_mode():
+        _, cache = runtime.forward(torch.tensor([[1, 2, 3, 4]], dtype=torch.long))
+        runtime.forward(
+            torch.tensor([[5]], dtype=torch.long),
+            cache,
+            past_sequence_length=4,
+        )
+
+    assert calls == [(None, True), (None, False)]
+
+
+def test_native_attention_implicit_causal_mask_matches_explicit_reference() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    runtime = NativeLlamaRuntime(
+        NativeLlamaConfig.from_mapping(_config()),
+        _tiny_weights(torch),
+        torch,
+        torch.device("cpu"),
+    )
+    query = torch.randn((1, 2, 4, 4), dtype=torch.float32)
+    key = torch.randn((1, 1, 4, 4), dtype=torch.float32)
+    value = torch.randn((1, 1, 4, 4), dtype=torch.float32)
+    actual = runtime._attention(query, key, value, None, is_causal=True)
+
+    expanded_key = key.repeat_interleave(2, dim=1)
+    expanded_value = value.repeat_interleave(2, dim=1)
+    scores = torch.matmul(query, expanded_key.transpose(-2, -1)) / (4 ** 0.5)
+    causal = torch.triu(torch.ones((4, 4), dtype=torch.bool), diagonal=1)
+    probabilities = torch.softmax(
+        scores.masked_fill(causal[None, None], float("-inf")), dim=-1
+    )
+    expected = torch.matmul(probabilities, expanded_value)
+    assert torch.allclose(actual, expected, atol=2e-5, rtol=1e-4)
+
+
+def test_native_generate_batch_matches_serial_greedy_generation() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    prompts = [[1, 2, 3], [3, 2, 1]]
+
+    with torch.inference_mode():
+        actual = runtime.generate_batch(
+            prompts, max_new_tokens=3, temperature=0, eos_token_ids=()
+        )
+        expected = [
+            runtime.generate(prompt, max_new_tokens=3, temperature=0, eos_token_ids=())
+            for prompt in prompts
+        ]
+
+    assert actual == expected
+    assert len(actual) == 2
+    assert all(len(output) == 3 for output in actual)
+    assert runtime.last_batch_generation["batch_size"] == 2
+
+
+def test_native_generate_batch_buckets_different_prompt_lengths() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    prompts = [[1, 2, 3], [3, 2], [2, 3, 1, 1], [3, 2, 1]]
+
+    with torch.inference_mode():
+        actual = runtime.generate_batch(
+            prompts, max_new_tokens=2, temperature=0, eos_token_ids=()
+        )
+        expected = [
+            runtime.generate(prompt, max_new_tokens=2, temperature=0, eos_token_ids=())
+            for prompt in prompts
+        ]
+
+    assert actual == expected
+    assert runtime.last_batch_generation["batch_size"] == len(prompts)
+    assert runtime.last_batch_generation["batch_groups"] == 3
+    assert all(len(output) == 2 for output in actual)
+
+
+def test_native_generate_batch_bounds_same_length_microbatches_and_preserves_order(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    prompts = [[(index % (config.vocab_size - 1)) + 1, 2, 3] for index in range(10)]
+    observed_batch_sizes = []
+    original_forward = runtime.forward
+
+    def record_forward(input_ids, *args, **kwargs):
+        observed_batch_sizes.append(int(input_ids.shape[0]))
+        return original_forward(input_ids, *args, **kwargs)
+
+    monkeypatch.setattr(runtime, "forward", record_forward)
+    with torch.inference_mode():
+        actual = runtime.generate_batch(
+            prompts, max_new_tokens=2, temperature=0, eos_token_ids=()
+        )
+    batched_sizes = list(observed_batch_sizes)
+    assert actual == [
+        runtime.generate(prompt, max_new_tokens=2, temperature=0, eos_token_ids=())
+        for prompt in prompts
+    ]
+    assert len(actual) == 10
+    assert batched_sizes
+    assert max(batched_sizes) <= 8
+    assert runtime.last_batch_generation["batch_groups"] == 1
+    assert runtime.last_batch_generation["microbatch_count"] == 2
+    assert runtime.last_batch_generation["microbatch_size_limit"] == 8
+    assert runtime.last_batch_generation["max_microbatch_size"] == 8
+
+
+def test_native_generate_batch_handles_eos_and_validates_prompts(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeEngineError, NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    variable_length_outputs = runtime.generate_batch(
+        [[1, 2], [3]], max_new_tokens=1, temperature=0, eos_token_ids=()
+    )
+    assert len(variable_length_outputs) == 2
+    assert runtime.last_batch_generation["batch_groups"] == 2
+    with pytest.raises(NativeEngineError, match="inside the checkpoint vocabulary"):
+        runtime.generate_batch([[1], [config.vocab_size]], max_new_tokens=1, temperature=0)
+
+    eos_id = 7
+    def eos_forward(input_ids, past_key_values=None, *, past_sequence_length=None, cancel_event=None):
+        batch = int(input_ids.shape[0])
+        logits = torch.full((batch, config.vocab_size), -100.0)
+        logits[:, eos_id] = 100.0
+        cache_length = int(input_ids.shape[1]) if past_key_values is None else int(past_key_values[0][0].shape[-2]) + int(input_ids.shape[1])
+        cache = tuple(
+            (
+                torch.zeros((batch, config.num_key_value_heads, cache_length, config.hidden_size // config.num_attention_heads)),
+                torch.zeros((batch, config.num_key_value_heads, cache_length, config.hidden_size // config.num_attention_heads)),
+            )
+            for _ in range(config.num_hidden_layers)
+        )
+        return logits, cache
+
+    monkeypatch.setattr(runtime, "forward", eos_forward)
+    outputs = runtime.generate_batch(
+        [[1, 2], [2, 1]], max_new_tokens=2, temperature=0, eos_token_ids=(eos_id,)
+    )
+    assert outputs == [[], []]
+    assert runtime.last_batch_generation["finished_sequences"] == 2
+
+
+def test_native_forward_supports_batched_prefill_and_incremental_decode() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    input_ids = torch.tensor([[1, 2, 3], [3, 2, 1]], dtype=torch.long)
+
+    with torch.inference_mode():
+        batch_logits, batch_cache = runtime.forward(input_ids)
+        single_runs = [runtime.forward(input_ids[row:row + 1]) for row in range(input_ids.shape[0])]
+
+    assert tuple(batch_logits.shape) == (2, config.vocab_size)
+    assert torch.allclose(batch_logits, torch.cat([item[0] for item in single_runs]), atol=2e-5, rtol=1e-4)
+    for layer_index, (batch_key, batch_value) in enumerate(batch_cache):
+        assert tuple(batch_key.shape[:3]) == (2, config.num_key_value_heads, input_ids.shape[1])
+        assert torch.allclose(batch_key[0:1], single_runs[0][1][layer_index][0], atol=1e-6, rtol=1e-5)
+        assert torch.allclose(batch_key[1:2], single_runs[1][1][layer_index][0], atol=1e-6, rtol=1e-5)
+        assert torch.allclose(batch_value[0:1], single_runs[0][1][layer_index][1], atol=1e-6, rtol=1e-5)
+        assert torch.allclose(batch_value[1:2], single_runs[1][1][layer_index][1], atol=1e-6, rtol=1e-5)
+
+    next_ids = torch.tensor([[4], [5]], dtype=torch.long)
+    with torch.inference_mode():
+        batch_next_logits, batch_next_cache = runtime.forward(
+            next_ids, batch_cache, past_sequence_length=input_ids.shape[1]
+        )
+        single_next = [
+            runtime.forward(
+                next_ids[row:row + 1],
+                single_runs[row][1],
+                past_sequence_length=input_ids.shape[1],
+            )
+            for row in range(next_ids.shape[0])
+        ]
+    assert tuple(batch_next_logits.shape) == (2, config.vocab_size)
+    assert torch.allclose(
+        batch_next_logits, torch.cat([item[0] for item in single_next]), atol=2e-5, rtol=1e-4
+    )
+    with pytest.raises(NativeEngineError, match="batch size must match"):
+        runtime.forward(torch.tensor([[6], [7], [1]], dtype=torch.long), batch_next_cache)
+
+
+def test_native_forward_rejects_zero_sized_batches() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeEngineError, NativeLlamaRuntime
+
+    runtime = NativeLlamaRuntime(
+        NativeLlamaConfig.from_mapping(_config()), _tiny_weights(torch), torch, torch.device("cpu")
+    )
+    with pytest.raises(NativeEngineError, match="batch must contain at least one"):
+        runtime.forward(torch.empty((0, 1), dtype=torch.long))
 
 
 def test_native_forward_and_incremental_kv_cache_run_without_transformers() -> None:
@@ -352,9 +810,9 @@ def test_mistral_sliding_window_bounds_cache_and_preserves_absolute_rope_positio
     observed_positions = []
     original_rope = runtime._apply_rope
 
-    def capture_rope(values, positions):
+    def capture_rope(values, positions, embeddings=None):
         observed_positions.append(positions.detach().cpu().tolist())
-        return original_rope(values, positions)
+        return original_rope(values, positions, embeddings)
 
     monkeypatch.setattr(runtime, "_apply_rope", capture_rope)
     prompt = torch.tensor([[1, 2, 3, 4, 5, 6, 7]], dtype=torch.long)
@@ -386,6 +844,42 @@ def test_mistral_sliding_window_bounds_cache_and_preserves_absolute_rope_positio
             next_cache,
             past_sequence_length=config.max_position_embeddings,
         )
+
+
+def test_native_forward_validates_input_tensor_shape_dtype_and_empty_sequences() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+
+    with pytest.raises(NativeEngineError, match="must be a tensor"):
+        runtime.forward([[1]])
+    with pytest.raises(NativeEngineError, match="one prompt sequence"):
+        runtime.forward(torch.tensor([1], dtype=torch.long))
+    with pytest.raises(NativeEngineError, match="at least one token"):
+        runtime.forward(torch.empty((1, 0), dtype=torch.long))
+    with pytest.raises(NativeEngineError, match="integer token-ID dtype"):
+        runtime.forward(torch.tensor([[1.0]], dtype=torch.float32))
+
+    with torch.inference_mode():
+        logits, _ = runtime.forward(torch.tensor([[1, 2]], dtype=torch.int32))
+    assert tuple(logits.shape) == (1, config.vocab_size)
+
+
+@pytest.mark.parametrize("token_ids", [[-1], [8], [True], ["1"]])
+def test_native_decoder_rejects_prompt_token_ids_outside_checkpoint_vocabulary(token_ids) -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config())
+    runtime = NativeLlamaRuntime(config, _tiny_weights(torch), torch, torch.device("cpu"))
+    with pytest.raises(NativeEngineError, match="Prompt token IDs must be integers inside"):
+        list(runtime.iter_generate(
+            token_ids,
+            max_new_tokens=1,
+            temperature=0,
+        ))
 
 
 def test_native_decoder_stops_before_emitting_eos_and_does_not_step_past_output_limit() -> None:
@@ -639,7 +1133,10 @@ def test_tiny_safetensors_checkpoint_generates_through_axiom_native_loop(
     assert result["decoder"] == "axiom-autoregressive-kv-cache"
     assert result["attention_backend"] in {
         "pytorch-scaled-dot-product-attention",
+        "pytorch-scaled-dot-product-attention-gqa",
+        "pytorch-scaled-dot-product-attention-expanded-gqa",
         "axiom-manual-matmul-attention",
+        "axiom-manual-matmul-attention-gqa",
     }
     assert result["prefill_ms"] >= 0
     assert result["decode_ms"] >= 0
@@ -708,6 +1205,115 @@ def test_device_selection_rejects_unavailable_or_invalid_explicit_backend(monkey
         _resolve_execution_device(fake_torch, "cuda")
     with pytest.raises(ValueError, match="Execution device must be one of"):
         _resolve_execution_device(fake_torch, "network")
+
+
+def test_process_peak_rss_is_reported_in_device_and_system_telemetry(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+    from axiom.core import engine
+
+    peaks = iter((8_192, 12_288, 16_384))
+    monkeypatch.setattr(engine, "_process_peak_rss_bytes", lambda: next(peaks))
+    fake_psutil = SimpleNamespace(
+        Process=lambda: SimpleNamespace(
+            memory_info=lambda: SimpleNamespace(rss=4_096),
+            num_threads=lambda: 1,
+            cpu_percent=lambda interval=None: 0.0,
+        ),
+        cpu_percent=lambda interval=None: 0.0,
+        virtual_memory=lambda: SimpleNamespace(
+            total=64 * 1024**3,
+            available=48 * 1024**3,
+            used=16 * 1024**3,
+            percent=25.0,
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+    monkeypatch.setattr(engine, "_device_capability_rows", lambda _torch=None: [])
+    monkeypatch.setattr(engine, "_LOADED_RUNTIME", None)
+    monkeypatch.setattr(engine, "_LOADED_ARCHITECTURE", None)
+
+    before = engine._device_memory_snapshot(None, None)
+    after = engine._device_memory_snapshot(None, None, baseline=before)
+    assert before["process_peak_rss_bytes"] == 8_192
+    assert after["process_peak_rss_bytes"] == 12_288
+    assert after["process_peak_rss_delta_bytes"] == 4_096
+
+    telemetry = engine.runtime_telemetry()
+    assert telemetry["process"]["peak_rss_bytes"] == 16_384
+    assert telemetry["privacy_scope"]["model_paths_included"] is False
+
+
+def test_auto_device_falls_back_when_accelerator_memory_plan_cannot_fit(monkeypatch, tmp_path: Path) -> None:
+    import sys
+    from types import SimpleNamespace
+    from axiom.core import engine
+    from axiom.core.engine import AxiomEngineError
+
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    fake_torch = SimpleNamespace(device=lambda name: name)
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(engine, "_LOADED_RUNTIME", None)
+    monkeypatch.setattr(engine, "_LOADED_ARCHITECTURE", None)
+    monkeypatch.setattr(engine, "_resolve_model_directory", lambda *_args: model_dir)
+    monkeypatch.setattr(engine, "_inspect_model_config", lambda _path: {
+        "config": _config(), "model_type": "llama", "architecture": "LlamaForCausalLM",
+    })
+    monkeypatch.setattr(engine, "_allowed_model_roots", lambda: (tmp_path.resolve(),))
+    monkeypatch.setattr(engine, "_device_capability_rows", lambda _torch=None: [
+        {"id": "cuda", "name": "NVIDIA CUDA", "available": True, "reason": "available", "memory_free_gib": 0.1, "memory_total_gib": 8.0},
+        {"id": "rocm", "name": "AMD ROCm", "available": False, "reason": "unavailable", "memory_free_gib": None, "memory_total_gib": None},
+        {"id": "mps", "name": "Apple Metal (MPS)", "available": False, "reason": "unavailable", "memory_free_gib": None, "memory_total_gib": None},
+        {"id": "xpu", "name": "Intel XPU", "available": False, "reason": "unavailable", "memory_free_gib": None, "memory_total_gib": None},
+        {"id": "cpu", "name": "CPU", "available": True, "reason": "available", "memory_free_gib": None, "memory_total_gib": None},
+    ])
+
+    class FakeModel:
+        config = SimpleNamespace(max_position_embeddings=128)
+        memory_mode = "disk_streaming"
+
+    planner_devices: list[str] = []
+    load_devices: list[str] = []
+
+    def fake_plan(_path, _inspected, _torch, device, device_selection, _adapter=None, _precision="auto"):
+        selected = str(device)
+        planner_devices.append(selected)
+        if selected == "cuda":
+            raise AxiomEngineError(
+                "Automatic memory planning could not find an estimated strategy that fits this device."
+            )
+        assert device_selection["selected"] == "cpu"
+        return "disk_streaming", {
+            "requested": "auto",
+            "selected": "disk_streaming",
+            "reason": "The CPU memory estimate fits.",
+            "estimates_are_advisory": True,
+        }
+
+    def fake_load(_path, _torch, device, **_kwargs):
+        load_devices.append(str(device))
+        return FakeModel(), object(), {
+            "architecture": "LlamaForCausalLM",
+            "model_type": "llama",
+            "adapter_directory_name": None,
+            "precision": "fp32",
+        }
+
+    monkeypatch.setattr(engine, "_choose_memory_mode", fake_plan)
+    monkeypatch.setattr("axiom.core.native_engine.load_native_runtime", fake_load)
+
+    _model, _tokenizer, _torch, device, details = engine._load_local_model(
+        str(model_dir), None, device_preference="auto", memory_mode="auto"
+    )
+
+    assert planner_devices == ["cuda", "cpu"]
+    assert load_devices == ["cpu"]
+    assert device == "cpu"
+    assert details["device_selection"]["selected"] == "cpu"
+    assert "memory planner" in details["device_selection"]["reason"]
+    assert details["memory_selection"]["selected"] == "disk_streaming"
+    assert details["memory_selection"]["fallback_from"] == "cuda"
 
 
 def test_auto_device_retries_cpu_after_accelerator_oom(monkeypatch, tmp_path: Path) -> None:
@@ -863,6 +1469,99 @@ def test_qwen3_native_loader_applies_query_key_rms_norm(tmp_path: Path) -> None:
     assert logits.shape == (1, config["vocab_size"])
     assert len(cache) == config["num_hidden_layers"]
     assert runtime.config.qk_norm is True
+
+
+@pytest.mark.parametrize("dtype_name", ["int64", "float64"])
+def test_native_loader_rejects_unsupported_embedding_weight_dtype(
+    tmp_path: Path, dtype_name: str
+) -> None:
+    torch = pytest.importorskip("torch")
+    safetensors_torch = pytest.importorskip("safetensors.torch")
+    from axiom.core.native_engine import NativeEngineError, NativeLlamaRuntime
+
+    root = tmp_path / "trusted"
+    model_dir = root / "invalid-embedding-dtype"
+    model_dir.mkdir(parents=True)
+    (model_dir / "config.json").write_text(json.dumps(_config()), encoding="utf-8")
+    (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+    weights = _tiny_weights(torch)
+    weights["model.embed_tokens.weight"] = weights["model.embed_tokens.weight"].to(
+        dtype=getattr(torch, dtype_name)
+    )
+    safetensors_torch.save_file(
+        {name: tensor.detach().cpu().contiguous() for name, tensor in weights.items()},
+        str(model_dir / "model.safetensors"),
+    )
+
+    with pytest.raises(NativeEngineError, match="Unsupported embedding weight dtype"):
+        NativeLlamaRuntime.from_directory(
+            model_dir, torch, torch.device("cpu"), trusted_roots=(root.resolve(),)
+        )
+
+
+@pytest.mark.parametrize(
+    "bias_name,shape",
+    [
+        ("model.layers.0.self_attn.q_proj.bias", (7,)),
+        ("model.layers.0.self_attn.k_proj.bias", (5,)),
+        ("model.layers.0.mlp.gate_proj.bias", (11,)),
+        ("lm_head.bias", (7,)),
+    ],
+)
+def test_native_loader_rejects_projection_bias_shape_mismatches(
+    tmp_path: Path, bias_name: str, shape: tuple[int, ...]
+) -> None:
+    torch = pytest.importorskip("torch")
+    safetensors_torch = pytest.importorskip("safetensors.torch")
+    from axiom.core.native_engine import NativeEngineError, NativeLlamaRuntime
+
+    root = tmp_path / "trusted"
+    model_dir = root / "bad-bias"
+    model_dir.mkdir(parents=True)
+    (model_dir / "config.json").write_text(json.dumps(_config()), encoding="utf-8")
+    (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+    weights = _tiny_weights(torch)
+    weights[bias_name] = torch.zeros(shape, dtype=torch.float32)
+    safetensors_torch.save_file(
+        {name: tensor.detach().cpu().contiguous() for name, tensor in weights.items()},
+        str(model_dir / "model.safetensors"),
+    )
+
+    with pytest.raises(NativeEngineError, match="shape inconsistent with config.json"):
+        NativeLlamaRuntime.from_directory(
+            model_dir, torch, torch.device("cpu"), trusted_roots=(root.resolve(),)
+        )
+
+
+def test_native_loader_accepts_qwen2_query_key_value_biases(tmp_path: Path) -> None:
+    torch = pytest.importorskip("torch")
+    safetensors_torch = pytest.importorskip("safetensors.torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    root = tmp_path / "trusted"
+    model_dir = root / "qwen2-with-biases"
+    model_dir.mkdir(parents=True)
+    config = _config(model_type="qwen2", architectures=["Qwen2ForCausalLM"])
+    (model_dir / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+    weights = _tiny_weights(torch)
+    weights["model.layers.0.self_attn.q_proj.bias"] = torch.zeros(8)
+    weights["model.layers.0.self_attn.k_proj.bias"] = torch.zeros(4)
+    weights["model.layers.0.self_attn.v_proj.bias"] = torch.zeros(4)
+    safetensors_torch.save_file(
+        {name: tensor.detach().cpu().contiguous() for name, tensor in weights.items()},
+        str(model_dir / "model.safetensors"),
+    )
+
+    runtime = NativeLlamaRuntime.from_directory(
+        model_dir, torch, torch.device("cpu"), trusted_roots=(root.resolve(),)
+    )
+    with torch.inference_mode():
+        logits, _ = runtime.forward(torch.tensor([[1, 2, 3]], dtype=torch.long))
+    assert tuple(logits.shape) == (1, config["vocab_size"])
+    assert runtime.weights["model.layers.0.self_attn.q_proj.bias"].shape == (8,)
+    assert runtime.weights["model.layers.0.self_attn.k_proj.bias"].shape == (4,)
+    assert runtime.weights["model.layers.0.self_attn.v_proj.bias"].shape == (4,)
 
 
 def test_native_loader_explicit_fp16_precision_casts_model_weights(tmp_path: Path) -> None:

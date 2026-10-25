@@ -204,7 +204,7 @@ def test_native_stream_smoke_requires_cooperative_cancel_wiring() -> None:
     client_source = (ROOT / "src" / "api" / "client.ts").read_text(encoding="utf-8")
     panel_source = (ROOT / "src" / "components" / "LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
     e2e_source = (ROOT / "e2e" / "axiom-engine.spec.ts").read_text(encoding="utf-8")
-    broken_engine = engine_source.replace("cancel_event=cancel_event", "cancel_event=None", 1)
+    broken_engine = engine_source.replace("cancel_event=cancel_event", "cancel_event=None").replace("cancel_event=cancel_event", "cancel_event=None")
     issues = release_smoke.engine_security_and_lifecycle_issues(
         broken_engine, native_source, api_source, client_source, panel_source, e2e_source
     )
@@ -235,7 +235,7 @@ def test_native_stop_sequences_are_integrated_and_regression_gated() -> None:
         engine_source, native_source, api_source, client_source, panel_source, e2e_source
     ) == []
 
-    broken_panel = panel_source.replace("stop_sequences: stopSequences,", "stop_sequence: stopSequences,", 1)
+    broken_panel = panel_source.replace("stop_sequences: stopSequences,", "stop_sequence: stopSequences,").replace("stop_sequences: stopSequences,", "stop_sequence: stopSequences,")
     issues = release_smoke.engine_security_and_lifecycle_issues(
         engine_source, native_source, api_source, client_source, broken_panel, e2e_source
     )

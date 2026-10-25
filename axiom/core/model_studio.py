@@ -402,15 +402,48 @@ def _download_gguf(repo_id: str, filename: str, destination: Path,
 
 def install_hf_gguf(repo_id: str, filename: str, model_name: str, register_ollama: bool = True,
                     on_log: Callable[[str], None] | None = None,
-                    on_progress: Callable[[int, int | None], None] | None = None) -> dict[str, Any]:
+                    on_progress: Callable[[int, int | None], None] | None = None,
+                    install_native: bool = False) -> dict[str, Any]:
+    """Download a public GGUF either to Model Studio storage or AXIOM's trusted native root."""
     repo = validate_repo_id(repo_id)
     file_name = validate_gguf_filename(filename)
+    if not isinstance(register_ollama, bool) or not isinstance(install_native, bool):
+        raise ValueError("GGUF installation targets must be boolean flags.")
+    if install_native and register_ollama:
+        raise ValueError("Choose direct AXIOM Native Engine installation or Ollama registration, not both.")
     model = validate_ollama_name(model_name) if register_ollama else _slug(model_name)
-    base = studio_home() / "gguf" / _slug(model)
-    base.mkdir(parents=True, exist_ok=True)
+    if install_native:
+        native_root = native_model_root().resolve()
+        base = native_root / _slug(model)
+        if base.is_symlink():
+            raise ModelStudioError("The native model destination must not be a symlink.")
+        base.mkdir(parents=True, exist_ok=True)
+        try:
+            resolved_base = base.resolve(strict=True)
+            resolved_base.relative_to(native_root)
+        except (OSError, ValueError):
+            raise ModelStudioError("The native model destination escaped AXIOM's trusted model root.") from None
+        if any(item.is_file() and item.suffix.lower() == ".gguf" for item in resolved_base.iterdir()):
+            raise ModelStudioError("This native model directory already contains a GGUF file; refusing to create an ambiguous checkpoint.")
+    else:
+        base = studio_home() / "gguf" / _slug(model)
+        base.mkdir(parents=True, exist_ok=True)
     target = base / file_name
     downloaded = _download_gguf(repo, file_name, target, on_progress)
-    result: dict[str, Any] = {"operation": "install_gguf", **downloaded, "model_name": model, "registered_with_ollama": False}
+    result: dict[str, Any] = {
+        "operation": "install_gguf",
+        **downloaded,
+        "model_name": model,
+        "registered_with_ollama": False,
+        "installed_for_native_engine": install_native,
+        "checkpoint_format": "gguf",
+    }
+    if install_native:
+        if on_log:
+            on_log(
+                f"Downloaded GGUF into AXIOM's trusted native model root at {target}. "
+                "AXIOM will validate its architecture/tokenizer and dequantize tensors to floating-point when loaded."
+            )
     if register_ollama:
         _require_loopback_ollama()
         executable = shutil.which("ollama")
@@ -815,7 +848,11 @@ def _worker(job_id: str) -> None:
         elif operation == "pull_native":
             result = pull_native_model(config["repo_id"], on_log=log, on_progress=progress)
         elif operation == "install_gguf":
-            result = install_hf_gguf(config["repo_id"], config["filename"], config["model_name"], config["register_ollama"], on_log=log, on_progress=progress)
+            result = install_hf_gguf(
+                config["repo_id"], config["filename"], config["model_name"],
+                config["register_ollama"], on_log=log, on_progress=progress,
+                install_native=config.get("install_native", False),
+            )
         elif operation == "convert_gguf":
             result = convert_local_model_to_gguf(config["source_dir"], config["llama_cpp_dir"], config["output_path"], config["outtype"], config["quantization"], on_log=log)
         else:
@@ -840,8 +877,13 @@ def start_job(config: dict[str, Any]) -> dict[str, Any]:
         repo = validate_repo_id(config.get("repo_id", ""))
         filename = validate_gguf_filename(config.get("filename", ""))
         register = config.get("register_ollama", True)
+        install_native = config.get("install_native", False)
         if not isinstance(register, bool):
             raise ValueError("register_ollama must be true or false.")
+        if not isinstance(install_native, bool):
+            raise ValueError("install_native must be true or false.")
+        if install_native and register:
+            raise ValueError("Direct native installation must disable register_ollama.")
         if register:
             name = validate_ollama_name(config.get("model_name", ""))
             _require_loopback_ollama()
@@ -852,7 +894,10 @@ def start_job(config: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(raw_name, str) or not raw_name.strip():
                 raise ValueError("Enter a local model label for the downloaded file.")
             name = _slug(raw_name)
-        clean = {"operation": operation, "repo_id": repo, "filename": filename, "model_name": name, "register_ollama": register}
+        clean = {
+            "operation": operation, "repo_id": repo, "filename": filename,
+            "model_name": name, "register_ollama": register, "install_native": install_native,
+        }
     elif operation == "convert_gguf":
         required = ("source_dir", "llama_cpp_dir", "output_path")
         if any(not isinstance(config.get(key), str) or not config[key].strip() for key in required):

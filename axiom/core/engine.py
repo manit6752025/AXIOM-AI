@@ -18,6 +18,7 @@ import math
 import os
 import re
 import shutil
+import sys
 import threading
 import time
 from datetime import UTC, datetime
@@ -217,6 +218,35 @@ def _reset_device_peak_memory(torch_module: Any | None, device: Any | None) -> b
         return False
 
 
+def _process_peak_rss_bytes() -> int | None:
+    """Return a process high-water RSS counter when the operating system exposes one.
+
+    Windows exposes peak working-set size through psutil. Unix resource usage
+    is reported in bytes on macOS and KiB on Linux and other supported Unix
+    platforms. Unsupported platforms deliberately return None.
+    """
+    try:
+        import psutil
+
+        info = psutil.Process().memory_info()
+        for attribute in ("peak_wset", "peak_rss", "peak_working_set_size"):
+            value = getattr(info, attribute, None)
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0:
+                return int(value)
+    except Exception:
+        _LOG.debug("Peak process RSS is unavailable through psutil.", exc_info=True)
+
+    try:
+        import resource
+
+        value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0:
+            return int(value) if sys.platform == "darwin" else int(value * 1024)
+    except Exception:
+        _LOG.debug("Peak process RSS is unavailable through resource usage.", exc_info=True)
+    return None
+
+
 def _device_memory_snapshot(
     torch_module: Any | None,
     device: Any | None,
@@ -235,6 +265,8 @@ def _device_memory_snapshot(
         "peak_increment_bytes": None,
         "process_rss_bytes": None,
         "process_rss_delta_bytes": None,
+        "process_peak_rss_bytes": _process_peak_rss_bytes(),
+        "process_peak_rss_delta_bytes": None,
         "peak_reset_supported": False,
         "device_allocator_metrics_supported": False,
     }
@@ -289,6 +321,10 @@ def _device_memory_snapshot(
         pass
     if baseline and isinstance(baseline.get("current_allocated_bytes"), int) and isinstance(result.get("peak_allocated_bytes"), int):
         result["peak_increment_bytes"] = max(0, result["peak_allocated_bytes"] - baseline["current_allocated_bytes"])
+    if baseline and isinstance(baseline.get("process_peak_rss_bytes"), int) and isinstance(result.get("process_peak_rss_bytes"), int):
+        result["process_peak_rss_delta_bytes"] = max(
+            0, result["process_peak_rss_bytes"] - baseline["process_peak_rss_bytes"]
+        )
     if baseline:
         result["peak_reset_supported"] = bool(baseline.get("peak_reset_supported"))
     return result
@@ -312,6 +348,19 @@ def runtime_status() -> dict[str, Any]:
             problems.append(f"{name} is not installed")
         elif versions[name] is not None and _version_key(versions[name]) < _version_key(minimum_versions[name]):
             problems.append(f"{name} {versions[name]} is too old (need >= {minimum_versions[name]})")
+    # GGUF stays optional: environments without gguf-py can still use
+    # safetensors checkpoints. GGUF is dequantized into floating-point compute
+    # tensors when enabled; source quantization does not provide low-bit kernels.
+    for name in ("gguf", "numpy"):
+        try:
+            packages[name] = importlib.util.find_spec(name) is not None
+        except (ImportError, ModuleNotFoundError, ValueError):
+            packages[name] = False
+        try:
+            versions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            versions[name] = None
+
     devices = _device_capability_rows()
     if packages["torch"] and not any(item["available"] for item in devices):
         problems.append("PyTorch is installed but no supported execution device could be initialized")
@@ -334,25 +383,34 @@ def runtime_status() -> dict[str, Any]:
         "loaded_precision": _LOADED_RUNTIME["details"].get("precision") if _LOADED_RUNTIME is not None else None,
         "devices": devices,
         "recommended_device": recommended_device,
-        "model_loading": "local_safetensors_only",
+        "model_loading": "local_safetensors_and_gguf_if_available",
         "execution_backend": "pytorch-native-axiom",
         "transformers_generation_used": False,
         "ollama_used": False,
         "remote_code": False,
         "supported_model_types": ["llama", "mistral", "qwen2", "qwen3"],
-        "supported_weights": ["safetensors"],
+        "supported_weights": (
+            ["safetensors", "gguf-dequantized-float"]
+            if packages["gguf"] and packages["numpy"] else
+            ["safetensors"]
+        ),
         "setup_note": (
-            "AXIOM Native Engine is ready for supported local Llama/Mistral/Qwen2/Qwen3 safetensors checkpoints."
+            "AXIOM Native Engine is ready for local Llama/Mistral/Qwen2/Qwen3 safetensors checkpoints"
+            + (
+                " and complete single-file or split-shard GGUF checkpoints (dequantized to floating-point; no low-bit kernels)."
+                if packages["gguf"] and packages["numpy"] else "."
+            )
             if ready else
             "AXIOM Native Engine setup required: " + "; ".join(problems)
             + ". Install with: python -m pip install -e '.[native-inference]'"
         ),
         "scope_note": (
             "AXIOM implements its own Llama/Mistral/Qwen2/Qwen3 forward pass, RMSNorm, RoPE, grouped-query attention, KV cache, "
-            "LoRA application and token-by-token decoder using PyTorch tensor operations. It supports full-weight, "
-            "CPU-staged layer streaming, and disk-resident safetensors layer streaming with CPU KV-cache offload. It does not call "
-            "Transformers model.generate or an Ollama server. Model Studio can pull compatible public checkpoints; quantized "
-            "checkpoint formats, additional architectures, and training remain separate capabilities."
+            "LoRA application and token-by-token decoder using PyTorch tensor operations. It supports full-weight, CPU-staged "
+            "layer streaming and disk-resident layer streaming with CPU KV-cache offload. GGUF files are dequantized to the chosen "
+            "floating-point compute dtype; this is not low-bit inference and can use much more memory than the source quantized file. "
+            "Single-file and metadata-validated split-shard GGUF are supported when gguf-py and NumPy are installed; EXL2/GPTQ/AWQ kernels, additional "
+            "architectures and training remain unsupported. It does not call Transformers model.generate or an Ollama server."
         ),
         "checked_at": datetime.now(UTC).isoformat(),
     }
@@ -374,6 +432,7 @@ def runtime_telemetry() -> dict[str, Any]:
     process: dict[str, Any] = {
         "pid": os.getpid(),
         "rss_bytes": None,
+        "peak_rss_bytes": _process_peak_rss_bytes(),
         "threads": None,
     }
     try:
@@ -600,11 +659,17 @@ def _trusted_directory_index(
 
             if depth > max_depth:
                 continue
-            model_config = "config.json" in filenames
+            has_config = "config.json" in filenames
             adapter_config = "adapter_config.json" in filenames
+            gguf_names = tuple(name for name in filenames if name.lower().endswith(".gguf"))
+            model_config = has_config or bool(gguf_names)
             if not model_config and not adapter_config:
                 continue
-            marker_names = (("config.json",) if model_config else ()) + (("adapter_config.json",) if adapter_config else ())
+            marker_names = (
+                (("config.json",) if has_config else ())
+                + (("adapter_config.json",) if adapter_config else ())
+                + gguf_names
+            )
             # HF cache metadata may be symlinked to blobs. Only accept targets
             # whose canonical path remains below this root.
             if any(not _trusted_file_entry(os.path.join(directory, marker), root_text) for marker in marker_names):
@@ -879,12 +944,22 @@ def discover_local_engine_assets() -> dict[str, Any]:
                 from axiom.core.native_engine import NativeLlamaConfig
 
                 native_config = NativeLlamaConfig.from_mapping(inspected["config"])
+                if inspected.get("checkpoint_format") == "gguf":
+                    if not inspected.get("tokenizer_source"):
+                        continue
+                    models.append({
+                        "path": discovered,
+                        "name": directory.name,
+                        "model_type": native_config.model_type,
+                        "architecture": inspected["architecture"],
+                        "weight_format": "GGUF (AXIOM dequantizes to floating point)",
+                        "ready_for_native_attempt": True,
+                    })
+                    continue
                 tokenizer_ok = any(_trusted_file_entry(str(directory / "tokenizer.json"), str(root)) for root in roots)
                 single_weights = any(_trusted_file_entry(str(directory / "model.safetensors"), str(root)) for root in roots)
                 indexed_weights = any(_trusted_file_entry(str(directory / "model.safetensors.index.json"), str(root)) for root in roots)
-                if not tokenizer_ok:
-                    continue
-                if not (single_weights or indexed_weights):
+                if not tokenizer_ok or not (single_weights or indexed_weights):
                     continue
                 models.append({
                     "path": discovered,
@@ -929,6 +1004,22 @@ def discover_local_engine_assets() -> dict[str, Any]:
 
 def _inspect_model_config(model_dir: Path) -> dict[str, Any]:
     config_path = model_dir / "config.json"
+    safetensors_present = (
+        (model_dir / "model.safetensors").is_file()
+        or (model_dir / "model.safetensors.index.json").is_file()
+    )
+    try:
+        gguf_present = any(
+            item.is_file() and item.suffix.lower() == ".gguf"
+            for item in model_dir.iterdir()
+        )
+    except OSError:
+        gguf_present = False
+    # The runtime prefers safetensors when they exist; otherwise GGUF metadata
+    # is authoritative even if a stale/foreign config.json sidecar is present.
+    if not safetensors_present and (gguf_present or not config_path.exists()):
+        from axiom.core.native_gguf import inspect_gguf_checkpoint
+        return inspect_gguf_checkpoint(model_dir, trusted_roots=_allowed_model_roots())
     try:
         resolved_config = config_path.resolve(strict=True)
         if (
@@ -944,7 +1035,12 @@ def _inspect_model_config(model_dir: Path) -> dict[str, Any]:
         raise ValueError("Local model config.json must contain a model_type string.")
     architectures = config.get("architectures", [])
     architecture = architectures[0] if isinstance(architectures, list) and architectures and isinstance(architectures[0], str) else config["model_type"]
-    return {"config": config, "model_type": config["model_type"], "architecture": architecture}
+    return {
+        "config": config,
+        "model_type": config["model_type"],
+        "architecture": architecture,
+        "checkpoint_format": "safetensors",
+    }
 
 
 def validate_generation(prompt: str, max_new_tokens: int, temperature: float) -> tuple[str, int, float]:
@@ -1056,12 +1152,47 @@ def _choose_memory_mode(
     """
     from axiom.core.native_engine import NativeLlamaConfig, _resolve_safetensor_files, _resolve_trusted_file
 
+    checkpoint_format = inspected.get("checkpoint_format", "safetensors")
+    device_type = str(getattr(device, "type", device)).split(":", 1)[0]
+    dtype_bytes = {"fp32": 4, "fp16": 2, "bf16": 2}.get(precision, 4)
+    checkpoint_source_bytes = 0
     try:
         config = NativeLlamaConfig.from_mapping(inspected["config"])
-        weight_files, _weight_map = _resolve_safetensor_files(model_dir, _allowed_model_roots())
-        weight_bytes = sum(int(path.stat().st_size) for path in weight_files)
-        if weight_bytes <= 0:
-            raise ValueError("the checkpoint weight file size is unavailable")
+        if checkpoint_format == "gguf":
+            from axiom.core.native_gguf import _find_files
+
+            weight_files = _find_files(model_dir, _allowed_model_roots())
+            checkpoint_source_bytes = sum(int(path.stat().st_size) for path in weight_files)
+            weight_elements = inspected.get("gguf_weight_elements")
+            if isinstance(weight_elements, bool) or not isinstance(weight_elements, int) or weight_elements <= 0:
+                raise ValueError("GGUF tensor element count is unavailable for safe memory planning")
+            # GGUF is loaded as floating-point tensors, not in its source
+            # quantization. Auto precision mirrors the native GGUF loader:
+            # FP32 on CPU, FP16 on supported accelerator devices.
+            if precision == "auto":
+                dtype_bytes = 4 if device_type == "cpu" else 2
+            weight_bytes = weight_elements * dtype_bytes
+        else:
+            weight_files, _weight_map = _resolve_safetensor_files(model_dir, _allowed_model_roots())
+            checkpoint_source_bytes = sum(int(path.stat().st_size) for path in weight_files)
+            weight_bytes = checkpoint_source_bytes
+            if precision == "auto":
+                try:
+                    from safetensors import safe_open
+                    for shard in weight_files:
+                        with safe_open(str(shard), framework="pt", device="cpu") as handle:
+                            if "model.embed_tokens.weight" not in handle.keys():
+                                continue
+                            dtype_name = handle.get_slice("model.embed_tokens.weight").get_dtype()
+                            dtype_bytes = {"F16": 2, "BF16": 2, "F32": 4}.get(str(dtype_name).upper(), 4)
+                            break
+                except Exception:
+                    # Header inspection is an optional precision improvement.
+                    # Keep the conservative FP32 estimate on format/driver errors.
+                    _LOG.debug("Could not inspect checkpoint dtype for memory planning.", exc_info=True)
+
+        if checkpoint_source_bytes <= 0 or weight_bytes <= 0:
+            raise ValueError("the checkpoint weight size is unavailable")
         adapter_weight_bytes = 0
         if adapter_dir is not None:
             adapter_file = _resolve_trusted_file(
@@ -1072,21 +1203,6 @@ def _choose_memory_mode(
             adapter_weight_bytes = int(adapter_file.stat().st_size)
             if adapter_weight_bytes <= 0:
                 raise ValueError("the LoRA adapter weight file is empty")
-        dtype_bytes = {"fp32": 4, "fp16": 2, "bf16": 2}.get(precision, 4)
-        try:
-            from safetensors import safe_open
-            for shard in weight_files:
-                with safe_open(str(shard), framework="pt", device="cpu") as handle:
-                    if "model.embed_tokens.weight" not in handle.keys():
-                        continue
-                    dtype_name = handle.get_slice("model.embed_tokens.weight").get_dtype()
-                    if precision == "auto":
-                        dtype_bytes = {"F16": 2, "BF16": 2, "F32": 4}.get(str(dtype_name).upper(), 4)
-                    break
-        except Exception:
-            # Header inspection is an optional precision improvement. Keep the
-            # conservative FP32 estimate if a driver/format cannot expose dtype.
-            _LOG.debug("Could not inspect checkpoint dtype for memory planning.", exc_info=True)
     except Exception as exc:
         raise AxiomEngineError(f"AXIOM could not safely estimate this checkpoint for automatic memory selection: {exc}") from None
 
@@ -1125,7 +1241,9 @@ def _choose_memory_mode(
         "requested": "auto",
         "selected": "full",
         "reason": "",
+        "checkpoint_format": checkpoint_format,
         "estimated_checkpoint_weight_bytes": weight_bytes,
+        "estimated_source_checkpoint_bytes": checkpoint_source_bytes,
         "estimated_adapter_weight_bytes": adapter_weight_bytes,
         "estimated_total_weight_bytes": total_weight_bytes,
         "estimated_non_layer_weight_bytes": non_layer_weight_bytes,
@@ -1237,7 +1355,57 @@ def _load_local_model(
         "estimates_are_advisory": True,
     }
     if requested_memory_mode == "auto":
-        memory_mode, memory_selection = _choose_memory_mode(base_dir, inspected, torch, device, device_selection, resolved_adapter, precision)
+        try:
+            memory_mode, memory_selection = _choose_memory_mode(
+                base_dir, inspected, torch, device, device_selection, resolved_adapter, precision
+            )
+        except AxiomEngineError as planning_error:
+            # If the accelerator is already estimated not to fit, do not wait
+            # for a real allocation failure before considering CPU. Explicit
+            # device choices remain strict, and malformed/unsupported checkpoints
+            # must not be disguised as a memory fallback.
+            device_type = str(getattr(device, "type", device)).split(":", 1)[0]
+            no_accelerator_fit = (
+                "could not find an estimated strategy that fits this device"
+                in str(planning_error).lower()
+            )
+            if (
+                device_preference.strip().lower() != "auto"
+                or device_type not in {"cuda", "mps", "xpu"}
+                or not no_accelerator_fit
+            ):
+                raise
+            cpu_device = torch.device("cpu")
+            cpu_selection = {
+                "requested": "auto",
+                "selected": "cpu",
+                "reason": (
+                    "The accelerator memory planner found no estimated fitting strategy; "
+                    "AXIOM is checking whether a CPU memory strategy fits."
+                ),
+            }
+            try:
+                memory_mode, memory_selection = _choose_memory_mode(
+                    base_dir, inspected, torch, cpu_device, cpu_selection, resolved_adapter, precision
+                )
+            except AxiomEngineError as cpu_planning_error:
+                raise AxiomEngineError(
+                    f"{planning_error} CPU fallback was also unavailable: {cpu_planning_error}"
+                ) from None
+            device = cpu_device
+            device_selection = {
+                "requested": "auto",
+                "selected": "cpu",
+                "reason": (
+                    "The accelerator memory estimate had no fitting strategy; "
+                    "CPU fallback was selected after its memory planner succeeded."
+                ),
+            }
+            memory_selection = {
+                **memory_selection,
+                "fallback_from": device_type,
+                "fallback_reason": "No estimated accelerator strategy fit; CPU memory planning succeeded.",
+            }
     key = (str(base_dir), str(resolved_adapter) if resolved_adapter else None, str(device), device_preference, memory_mode, requested_memory_mode, precision)
     if _LOADED_RUNTIME is not None and _LOADED_RUNTIME["key"] == key:
         return (
@@ -1703,7 +1871,7 @@ def generate_local_stream(
                 "device_memory": _device_memory_snapshot(
                     torch, device, selected_backend=selected_backend, baseline=device_memory_before
                 ),
-                "checkpoint_format": "safetensors",
+                "checkpoint_format": details.get("checkpoint_format", "safetensors"),
                 "decoder": model.last_generation.get("decoder", "axiom-autoregressive-kv-cache"),
                 "attention_backend": model.last_attention_backend,
                 "prefill_ms": model.last_generation.get("prefill_ms", 0.0),
@@ -1783,3 +1951,258 @@ def generate_local(
     if completed is None:
         raise AxiomEngineError("Native generation ended before a completion event was produced.")
     return completed
+
+
+def generate_local_batch(
+    model_path: str,
+    prompts: list[str],
+    *,
+    adapter_path: str | None = None,
+    max_new_tokens: int = 256,
+    temperature: float = 0.7,
+    top_p: float = 0.9,
+    top_k: int = 0,
+    min_p: float = 0.0,
+    repetition_penalty: float = 1.0,
+    seed: int | None = None,
+    stop_sequences: list[str] | tuple[str, ...] = (),
+    device_preference: str = "auto",
+    memory_mode: str = "auto",
+    precision: str = "auto",
+    cancel_event: threading.Event | None = None,
+    chat_messages: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Generate a bounded prompt batch with one AXIOM-owned runtime.
+
+    Prompts may be independent text items or multiple choices for one chat
+    context. The native runtime buckets by token length without padding.
+    """
+    if not isinstance(prompts, list) or not prompts:
+        raise ValueError("Batch generation requires at least one prompt.")
+    if len(prompts) > 128:
+        raise ValueError("Batch generation is limited to 128 prompts per request.")
+    normalized_prompts: list[str] = []
+    combined_chars = 0
+    for item in prompts:
+        valid_prompt, _token_limit, _temperature = validate_generation(item, max_new_tokens, temperature)
+        combined_chars += len(valid_prompt)
+        normalized_prompts.append(valid_prompt)
+
+    normalized_chat_messages: list[dict[str, str]] | None = None
+    if chat_messages is not None:
+        if not isinstance(chat_messages, list) or not 1 <= len(chat_messages) <= 128:
+            raise ValueError("Chat messages must contain between 1 and 128 entries.")
+        normalized_chat_messages = []
+        total_message_chars = 0
+        valid_roles = {"system", "user", "assistant"}
+        for item in chat_messages:
+            if (
+                not isinstance(item, dict)
+                or item.get("role") not in valid_roles
+                or not isinstance(item.get("content"), str)
+            ):
+                raise ValueError("Native chat messages support only system, user, and assistant roles with string content.")
+            role, content = item["role"], item["content"]
+            if not content.strip() or len(content) > _MAX_PROMPT_CHARS:
+                raise ValueError("Each chat message must contain non-blank text within the prompt limit.")
+            total_message_chars += len(content)
+            if total_message_chars > _MAX_CHAT_CHARS:
+                raise ValueError(f"Combined chat messages exceed the {_MAX_CHAT_CHARS:,}-character limit.")
+            normalized_chat_messages.append({"role": role, "content": content})
+        if not any(item["role"] == "user" for item in normalized_chat_messages):
+            raise ValueError("Native chat requests must contain at least one user message.")
+    elif combined_chars > _MAX_CHAT_CHARS:
+        raise ValueError(f"Combined batch prompts exceed the {_MAX_CHAT_CHARS:,}-character limit.")
+    top_p, top_k, repetition_penalty, seed = validate_sampling_parameters(
+        top_p, top_k, repetition_penalty, seed
+    )
+    min_p = validate_min_p(min_p)
+    stop_sequences = validate_stop_sequences(stop_sequences)
+    requested_started = time.perf_counter()
+
+    with _engine_request_lock(cancel_event):
+        model, tokenizer, torch, device, details = _load_local_model(
+            model_path, adapter_path, device_preference, memory_mode, precision
+        )
+        selected_backend = details.get("device_selection", {}).get("selected")
+        device_memory_before = _device_memory_snapshot(
+            torch, device, selected_backend=selected_backend
+        )
+        device_memory_before["peak_reset_supported"] = _reset_device_peak_memory(torch, device)
+        context_cap = max(
+            2,
+            min(model.config.max_position_embeddings, _MAX_INPUT_TOKENS + max_new_tokens),
+        )
+        effective_max_new_tokens = min(max_new_tokens, context_cap - 1)
+        input_limit = max(1, min(_MAX_INPUT_TOKENS, context_cap - effective_max_new_tokens))
+        prompt_ids_batch: list[list[int]] = []
+        prompt_formats: list[str] = []
+        context_rows: list[dict[str, Any]] = []
+        bos_id = model.config.bos_token_id
+        model_dir = Path(details.get("model_directory_path", model_path))
+
+        for prompt in normalized_prompts:
+            active_messages = list(normalized_chat_messages) if normalized_chat_messages is not None else None
+
+            def encode_context(messages: list[dict[str, str]] | None) -> tuple[list[int], str]:
+                formatted, source = _format_prompt_for_native_model(
+                    prompt,
+                    model_dir,
+                    details["model_type"],
+                    tokenizer,
+                    chat_messages=messages,
+                )
+                try:
+                    ids = list(tokenizer.encode(formatted, add_special_tokens=False).ids)
+                except Exception:
+                    raise ValueError("A batch prompt could not be tokenized by the local tokenizer.") from None
+                if details.get("add_bos_token") and bos_id is not None and (not ids or ids[0] != bos_id):
+                    ids.insert(0, bos_id)
+                if not ids:
+                    raise ValueError("Batch prompt tokenization returned no tokens.")
+                return ids, source
+
+            ids, prompt_format = encode_context(active_messages)
+            before = len(ids)
+            messages_dropped = 0
+            # Match single-chat context management: preserve system instructions
+            # and the newest user request by dropping the oldest non-system turn
+            # before cutting tokens from a still-oversized template.
+            while active_messages is not None and len(ids) > input_limit:
+                latest_user_index = max(
+                    (index for index, message in enumerate(active_messages) if message["role"] == "user"),
+                    default=-1,
+                )
+                drop_index = next(
+                    (
+                        index for index, message in enumerate(active_messages)
+                        if message["role"] != "system" and index != latest_user_index
+                    ),
+                    -1,
+                )
+                if drop_index < 0:
+                    break
+                del active_messages[drop_index]
+                messages_dropped += 1
+                ids, prompt_format = encode_context(active_messages)
+
+            tail_truncated = len(ids) > input_limit
+            truncated = messages_dropped > 0 or tail_truncated
+            if tail_truncated:
+                ids = ids[-input_limit:]
+                if details.get("add_bos_token") and bos_id is not None and ids:
+                    ids[0] = bos_id
+            prompt_ids_batch.append(ids)
+            prompt_formats.append(prompt_format)
+            context_row = {
+                "prompt_tokens_before_truncation": before,
+                "prompt_tokens_used": len(ids),
+                "token_truncation_applied": truncated,
+            }
+            if normalized_chat_messages is not None:
+                context_row["messages_dropped_to_fit_context"] = messages_dropped
+                context_row["system_prompt_may_be_truncated"] = (
+                    tail_truncated and any(
+                        message["role"] == "system" for message in normalized_chat_messages
+                    )
+                )
+            context_rows.append(context_row)
+        effective_max_new_tokens = min(
+            effective_max_new_tokens,
+            max(1, min(model.config.max_position_embeddings - len(ids) for ids in prompt_ids_batch)),
+        )
+
+        def should_stop(_row: int, generated_ids: list[int]) -> bool:
+            if not stop_sequences:
+                return False
+            try:
+                decoded = tokenizer.decode(generated_ids, skip_special_tokens=True)[:100_000]
+            except Exception:
+                raise AxiomEngineError("Generated batch tokens could not be decoded by the local tokenizer.") from None
+            return any(sequence in decoded for sequence in stop_sequences)
+
+        outputs = model.generate_batch(
+            prompt_ids_batch,
+            max_new_tokens=effective_max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            min_p=min_p,
+            repetition_penalty=repetition_penalty,
+            seed=seed,
+            eos_token_ids=model.config.eos_token_ids,
+            cancel_event=cancel_event,
+            stop_checker=should_stop if stop_sequences else None,
+        )
+        batch_metrics = dict(getattr(model, "last_batch_generation", {}))
+        sequence_reasons = batch_metrics.get("sequence_stop_reasons", [])
+        results: list[dict[str, Any]] = []
+        for index, generated_ids in enumerate(outputs):
+            try:
+                response = tokenizer.decode(generated_ids, skip_special_tokens=True)[:100_000]
+            except Exception:
+                raise AxiomEngineError("Generated batch response could not be decoded by the local tokenizer.") from None
+            stop_reason = (
+                sequence_reasons[index]
+                if isinstance(sequence_reasons, list) and index < len(sequence_reasons)
+                else "max_new_tokens"
+            )
+            if stop_sequences and response:
+                matches = [
+                    (response.find(sequence), sequence)
+                    for sequence in stop_sequences
+                    if sequence in response
+                ]
+                if matches:
+                    response = response[:min(position for position, _sequence in matches)]
+                    stop_reason = "stop_sequence"
+            results.append({
+                "index": index + 1,
+                "prompt_format": prompt_formats[index],
+                "context_management": context_rows[index],
+                "prompt_tokens": len(prompt_ids_batch[index]),
+                "completion_tokens": len(generated_ids),
+                "stop_reason": stop_reason,
+                "response": response,
+            })
+
+        return {
+            "engine": "axiom-native-engine",
+            "execution_backend": "pytorch-native-axiom",
+            "transformers_generation_used": False,
+            "ollama_used": False,
+            "model": details.get("model_directory_name") or "local-model",
+            "architecture": details["architecture"],
+            "model_type": details["model_type"],
+            "adapter": details.get("adapter_directory_name"),
+            "device": str(device),
+            "device_selection": details.get("device_selection"),
+            "precision": details.get("precision"),
+            "precision_selection": details.get("precision_selection"),
+            "memory_mode": getattr(model, "memory_mode", memory_mode),
+            "memory_selection": details.get("memory_selection"),
+            "memory_stats": dict(getattr(model, "memory_stats", {})),
+            "device_memory": _device_memory_snapshot(
+                torch, device, selected_backend=selected_backend, baseline=device_memory_before
+            ),
+            "checkpoint_format": details.get("checkpoint_format", "safetensors"),
+            "decoder": batch_metrics.get("decoder", "axiom-batched-autoregressive-kv-cache"),
+            "attention_backend": getattr(model, "last_attention_backend", "native"),
+            "sampling": {
+                "temperature": temperature,
+                "top_p": top_p,
+                "top_k": top_k,
+                "min_p": min_p,
+                "repetition_penalty": repetition_penalty,
+                "seed": seed,
+            },
+            "stop_sequences": list(stop_sequences),
+            "batch_size": len(results),
+            "batch_generation": batch_metrics,
+            "results": results,
+            "prompt_tokens": sum(result["prompt_tokens"] for result in results),
+            "completion_tokens": sum(result["completion_tokens"] for result in results),
+            "elapsed_ms": round((time.perf_counter() - requested_started) * 1000, 2),
+            "generated_at": datetime.now(UTC).isoformat(),
+            "local_only": True,
+        }

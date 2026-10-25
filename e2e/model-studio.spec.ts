@@ -60,3 +60,54 @@ test("Model Studio requires explicit consent before sending prompts to a remote 
   await expect(page.getByText("remote reply", { exact: true })).toBeVisible();
   expect(chatWasSent).toBe(true);
 });
+
+
+test("Model Studio installs GGUF directly into AXIOM Native Engine trusted storage", async ({ page }) => {
+  await ensureAuthenticated(page);
+  await page.route("**/api/models/studio/status", route => route.fulfill({ json: {
+    schema_version: 1, ollama_installed: false, ollama_endpoint: "http://127.0.0.1:11434",
+    download_limit_bytes: 21474836480, gguf_directory: "/local/models/gguf",
+    native_model_root: "/local/axiom/models", native_model_download_limit_bytes: 171798691840,
+    native_model_file_limit_bytes: 21474836480, native_pull_available: true,
+    catalogue: "Hugging Face public model API", network_search_is_explicit: true,
+  }}));
+  let submitted: Record<string, unknown> | null = null;
+  await page.route("**/api/models/studio/jobs**", async route => {
+    if (route.request().method() === "POST") {
+      submitted = route.request().postDataJSON() as Record<string, unknown>;
+      return route.fulfill({ status: 202, json: {
+        schema_version: 1, id: "c".repeat(32), status: "queued", operation: "install_gguf",
+        created_at: "2026-10-25T00:00:00Z", updated_at: "2026-10-25T00:00:00Z",
+        config: submitted, progress_bytes: 0, total_bytes: null, logs: ["Job queued."], error: null, result: null,
+      }});
+    }
+    return route.fulfill({ json: { jobs: [] }});
+  });
+  await page.route("**/api/models/studio/search**", route => route.fulfill({ json: {
+    provider: "huggingface", query: "tiny GGUF", count: 1, note: "metadata",
+    results: [{ id: "example/tiny-gguf", author: "example", downloads: 20, likes: 2,
+      pipeline_tag: "text-generation", last_modified: "2026-10-20", tags: ["gguf"], url: "https://huggingface.co/example/tiny-gguf" }],
+  }}));
+  await page.route("**/api/models/studio/files**", route => route.fulfill({ json: {
+    repo_id: "example/tiny-gguf", count: 1, url: "https://huggingface.co/example/tiny-gguf", note: "file",
+    files: [{ filename: "tiny-Q4_K_M.gguf", size_bytes: 1234, quantization: "Q4_K_M" }],
+  }}));
+
+  await page.goto("/?page=models");
+  await page.getByLabel("Model search").fill("tiny GGUF");
+  await page.getByRole("button", { name: "Search GGUF catalogue" }).click();
+  await page.getByRole("button", { name: "Choose GGUF file" }).click();
+  await page.getByLabel("Local model name").fill("axiom-tiny");
+  await page.getByLabel("Install directly into AXIOM Native Engine").check();
+  await expect(page.getByRole("button", { name: "Install for AXIOM Native Engine" })).toBeEnabled();
+  await page.getByRole("button", { name: "Install for AXIOM Native Engine" }).click();
+  await expect.poll(() => submitted).toMatchObject({
+    operation: "install_gguf",
+    repo_id: "example/tiny-gguf",
+    filename: "tiny-Q4_K_M.gguf",
+    model_name: "axiom-tiny",
+    register_ollama: false,
+    install_native: true,
+  });
+  await expect(page.getByRole("region", { name: "Model Studio job status" })).toContainText("QUEUED");
+});

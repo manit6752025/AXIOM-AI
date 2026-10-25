@@ -161,3 +161,97 @@ def test_unified_local_provider_lists_qwen3_native_models(monkeypatch):
     assert result["execution"] == "local"
     assert result["models"] == ["qwen3-local", "llama-local"]
     assert {item["model_type"] for item in result["model_details"]} == {"qwen3", "llama"}
+
+
+def test_install_gguf_directly_into_native_model_root(tmp_path, monkeypatch):
+    native_root = tmp_path / "trusted-native-models"
+    monkeypatch.setattr(studio, "native_model_root", lambda: native_root)
+
+    def fake_download(repo_id, filename, destination, on_progress=None):
+        assert repo_id == "example/tiny-gguf"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"gguf-fixture")
+        if on_progress:
+            on_progress(len(b"gguf-fixture"), len(b"gguf-fixture"))
+        return {"repo_id": repo_id, "filename": filename, "path": str(destination), "size_bytes": len(b"gguf-fixture")}
+
+    monkeypatch.setattr(studio, "_download_gguf", fake_download)
+    logs = []
+    result = studio.install_hf_gguf(
+        "example/tiny-gguf",
+        "tiny-Q4_K_M.gguf",
+        "AXIOM Tiny",
+        register_ollama=False,
+        on_log=logs.append,
+        install_native=True,
+    )
+
+    installed = native_root / "axiom-tiny" / "tiny-Q4_K_M.gguf"
+    assert installed.is_file()
+    assert installed.read_bytes() == b"gguf-fixture"
+    assert result["path"] == str(installed)
+    assert result["installed_for_native_engine"] is True
+    assert result["registered_with_ollama"] is False
+    assert result["checkpoint_format"] == "gguf"
+    assert any("trusted native model root" in message for message in logs)
+
+
+def test_install_gguf_native_target_rejects_conflicting_ollama_or_existing_checkpoint(tmp_path, monkeypatch):
+    native_root = tmp_path / "trusted-native-models"
+    monkeypatch.setattr(studio, "native_model_root", lambda: native_root)
+    with pytest.raises(ValueError, match="not both"):
+        studio.install_hf_gguf(
+            "example/tiny-gguf", "tiny.gguf", "tiny",
+            register_ollama=True, install_native=True,
+        )
+
+    target_dir = native_root / "tiny"
+    target_dir.mkdir(parents=True)
+    (target_dir / "previous.gguf").write_bytes(b"existing")
+    monkeypatch.setattr(studio, "_download_gguf", lambda *_args, **_kwargs: pytest.fail("must not overwrite/ambiguate an existing GGUF model"))
+    with pytest.raises(studio.ModelStudioError, match="already contains a GGUF file"):
+        studio.install_hf_gguf(
+            "example/tiny-gguf", "tiny.gguf", "tiny",
+            register_ollama=False, install_native=True,
+        )
+
+
+
+def test_cli_can_install_gguf_directly_for_native_engine(monkeypatch):
+    from typer.testing import CliRunner
+    from axiom.cli.model_studio import studio_app
+
+    observed = {}
+
+    def fake_install(repo_id, filename, model_name, register_ollama, **kwargs):
+        observed.update(
+            repo_id=repo_id,
+            filename=filename,
+            model_name=model_name,
+            register_ollama=register_ollama,
+            install_native=kwargs.get("install_native"),
+        )
+        return {
+            "path": "/trusted/models/tiny/model-Q4_K_M.gguf",
+            "model_name": model_name,
+            "registered_with_ollama": False,
+            "installed_for_native_engine": True,
+            "checkpoint_format": "gguf",
+        }
+
+    monkeypatch.setattr(studio, "install_hf_gguf", fake_install)
+    result = CliRunner().invoke(studio_app, [
+        "install-gguf", "example/tiny-gguf", "model-Q4_K_M.gguf",
+        "--name", "tiny", "--native",
+    ])
+
+    assert result.exit_code == 0, f"{result.output}\n{result.exception!r}"
+    assert observed == {
+        "repo_id": "example/tiny-gguf",
+        "filename": "model-Q4_K_M.gguf",
+        "model_name": "tiny",
+        "register_ollama": False,
+        "install_native": True,
+    }
+    assert "Installed for AXIOM Native Engine" in result.output
+    assert "axiom engine run --model-path" in result.output
