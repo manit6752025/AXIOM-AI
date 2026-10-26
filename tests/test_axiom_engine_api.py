@@ -620,6 +620,9 @@ def test_native_model_discovery_lists_local_metadata_without_loading_weights(tmp
         "model_type": "llama",
         "architecture": "LlamaForCausalLM",
         "weight_format": "safetensors",
+        "max_position_embeddings": 32,
+        "effective_max_position_embeddings": 32,
+        "rope_scaling_type": "default",
         "ready_for_native_attempt": True,
     }]
     assert payload["adapters"] == [{

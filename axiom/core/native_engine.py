@@ -1340,9 +1340,15 @@ class NativeLlamaRuntime:
             or not past_len + seq_len <= rope_sequence_length <= self.config.effective_max_position_embeddings
         ):
             raise NativeEngineError("RoPE context length must cover the current sequence and stay inside the configured/scaled context limit.")
-        rope_embeddings = self._rope_embeddings(
-            positions, self.dtype, sequence_length=rope_sequence_length
-        )
+        if (
+            rope_sequence_length is not None
+            and getattr(self.config, "rope_scaling_type", "default") == "dynamic"
+        ):
+            rope_embeddings = self._rope_embeddings(
+                positions, self.dtype, sequence_length=rope_sequence_length
+            )
+        else:
+            rope_embeddings = self._rope_embeddings(positions, self.dtype)
         key_start_position = past_len - stored_past_len
         cache, head_dim = [], c.hidden_size // c.num_attention_heads
         for i in range(c.num_hidden_layers):
@@ -1502,10 +1508,15 @@ class NativeLlamaRuntime:
                         self.config.effective_max_position_embeddings,
                         len(prompt_token_ids) + max_new_tokens,
                     )
+                    rope_kwargs = (
+                        {"rope_sequence_length": rope_sequence_length}
+                        if getattr(self.config, "rope_scaling_type", "default") == "dynamic"
+                        else {}
+                    )
                     logits, cache = self.forward(
                         tokens,
                         cancel_event=cancel_event,
-                        rope_sequence_length=rope_sequence_length,
+                        **rope_kwargs,
                     )
                     absolute_sequence_length = len(prompt_token_ids)
                     prefill_ms = (time.perf_counter() - prefill_started) * 1000
@@ -1590,7 +1601,7 @@ class NativeLlamaRuntime:
                                 cache,
                                 past_sequence_length=absolute_sequence_length,
                                 cancel_event=cancel_event,
-                                rope_sequence_length=rope_sequence_length,
+                                **rope_kwargs,
                             )
                             absolute_sequence_length += 1
                         except NativeGenerationCancelled:
@@ -1840,10 +1851,15 @@ class NativeLlamaRuntime:
                 if cancel_event is not None and cancel_event.is_set():
                     stop_reason = "cancelled"
                     return generated
+                rope_kwargs = (
+                    {"rope_sequence_length": rope_sequence_length}
+                    if getattr(self.config, "rope_scaling_type", "default") == "dynamic"
+                    else {}
+                )
                 logits, cache = self.forward(
                     tokens,
                     cancel_event=cancel_event,
-                    rope_sequence_length=rope_sequence_length,
+                    **rope_kwargs,
                 )
                 for step in range(max_new_tokens):
                     if cancel_event is not None and cancel_event.is_set():
@@ -1920,7 +1936,7 @@ class NativeLlamaRuntime:
                             cache,
                             past_sequence_length=prompt_length + step,
                             cancel_event=cancel_event,
-                            rope_sequence_length=rope_sequence_length,
+                            **rope_kwargs,
                         )
         finally:
             self.last_batch_generation = {

@@ -794,8 +794,8 @@ def estimate_native_quantization(
     native_config = NativeLlamaConfig.from_mapping(model_config)
     if context_length > native_config.effective_max_position_embeddings:
         raise ValueError(
-            f"Context length {context_length} exceeds this checkpoint's supported/scaled limit "
-            f"of {native_config.effective_max_position_embeddings} tokens."
+            f"Context length {context_length} exceeds this checkpoint's limit "
+            f"of {native_config.effective_max_position_embeddings} tokens (including supported RoPE scaling).
         )
 
     hidden = native_config.hidden_size
@@ -1533,7 +1533,9 @@ def _load_local_model(
         "precision_selection": {"requested": precision, "selected": native_details.get("precision", precision)},
         "config": {
             "max_position_embeddings": model.config.max_position_embeddings,
-            "effective_max_position_embeddings": model.config.effective_max_position_embeddings,
+            "effective_max_position_embeddings": getattr(
+                model.config, "effective_max_position_embeddings", model.config.max_position_embeddings
+            ),
         },
     }
     _LOADED_RUNTIME = {
@@ -1729,7 +1731,10 @@ def generate_local_stream(
         selected_backend = details.get("device_selection", {}).get("selected")
         device_memory_before = _device_memory_snapshot(torch, device, selected_backend=selected_backend)
         device_memory_before["peak_reset_supported"] = _reset_device_peak_memory(torch, device)
-        context_cap = max(2, min(model.config.effective_max_position_embeddings, _MAX_INPUT_TOKENS + max_new_tokens))
+        context_cap = max(2, min(
+            getattr(model.config, "effective_max_position_embeddings", model.config.max_position_embeddings),
+            _MAX_INPUT_TOKENS + max_new_tokens,
+        ))
         effective_max_new_tokens = min(max_new_tokens, context_cap - 1)
         input_limit = max(1, min(_MAX_INPUT_TOKENS, context_cap - effective_max_new_tokens))
         original_message_count = len(chat_messages or [])
@@ -2313,7 +2318,10 @@ def generate_local_batch(
         device_memory_before["peak_reset_supported"] = _reset_device_peak_memory(torch, device)
         context_cap = max(
             2,
-            min(model.config.effective_max_position_embeddings, _MAX_INPUT_TOKENS + max_new_tokens),
+            min(
+                getattr(model.config, "effective_max_position_embeddings", model.config.max_position_embeddings),
+                _MAX_INPUT_TOKENS + max_new_tokens,
+            ),
         )
         effective_max_new_tokens = min(max_new_tokens, context_cap - 1)
         input_limit = max(1, min(_MAX_INPUT_TOKENS, context_cap - effective_max_new_tokens))
@@ -2391,7 +2399,10 @@ def generate_local_batch(
             context_rows.append(context_row)
         effective_max_new_tokens = min(
             effective_max_new_tokens,
-            max(1, min(model.config.effective_max_position_embeddings - len(ids) for ids in prompt_ids_batch)),
+            max(1, min(
+                getattr(model.config, "effective_max_position_embeddings", model.config.max_position_embeddings) - len(ids)
+                for ids in prompt_ids_batch
+            )),
         )
 
         def should_stop(_row: int, generated_ids: list[int]) -> bool:
