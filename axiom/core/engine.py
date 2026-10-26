@@ -973,6 +973,9 @@ def discover_local_engine_assets() -> dict[str, Any]:
                         "model_type": native_config.model_type,
                         "architecture": inspected["architecture"],
                         "weight_format": "GGUF (AXIOM dequantizes to floating point)",
+                        "max_position_embeddings": native_config.max_position_embeddings,
+                        "effective_max_position_embeddings": native_config.effective_max_position_embeddings,
+                        "rope_scaling_type": native_config.rope_scaling_type,
                         "ready_for_native_attempt": True,
                     })
                     continue
@@ -987,6 +990,9 @@ def discover_local_engine_assets() -> dict[str, Any]:
                     "model_type": native_config.model_type,
                     "architecture": inspected["architecture"],
                     "weight_format": "safetensors" if single_weights else "sharded safetensors",
+                    "max_position_embeddings": native_config.max_position_embeddings,
+                    "effective_max_position_embeddings": native_config.effective_max_position_embeddings,
+                    "rope_scaling_type": native_config.rope_scaling_type,
                     "ready_for_native_attempt": True,
                 })
             except (ValueError, OSError, RuntimeError):
