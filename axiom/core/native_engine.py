@@ -1136,7 +1136,13 @@ class NativeLlamaRuntime:
         variance = hidden.float().pow(2).mean(dim=-1, keepdim=True)
         return hidden * self.torch.rsqrt(variance + self.config.rms_norm_eps).to(dtype=hidden.dtype) * weight
 
-    def _rope_embeddings(self, positions: Any, dtype: Any) -> tuple[Any, Any]:
+    def _rope_embeddings(
+        self,
+        positions: Any,
+        dtype: Any,
+        *,
+        sequence_length: int | None = None,
+    ) -> tuple[Any, Any]:
         """Compute the rotary cosine/sine tables once for one forward sequence."""
         torch = self.torch
         dim = self.config.hidden_size // self.config.num_attention_heads
@@ -1151,7 +1157,11 @@ class NativeLlamaRuntime:
             # Dynamic NTK leaves the pretrained frequencies unchanged up to the
             # original context, then increases theta as context grows. Keep this
             # update deterministic for a given absolute position range.
-            sequence_length = int(positions.max().item()) + 1 if positions.numel() else 0
+            sequence_length = (
+                sequence_length
+                if sequence_length is not None
+                else int(positions.max().item()) + 1 if positions.numel() else 0
+            )
             if sequence_length > self.config.max_position_embeddings:
                 scale = (
                     self.config.rope_scaling_factor * sequence_length
@@ -1292,6 +1302,7 @@ class NativeLlamaRuntime:
         *,
         past_sequence_length: int | None = None,
         cancel_event: threading.Event | None = None,
+        rope_sequence_length: int | None = None,
     ) -> tuple[Any, tuple[Any, ...]]:
         torch, c = self.torch, self.config
         if not torch.is_tensor(input_ids):
@@ -1323,7 +1334,15 @@ class NativeLlamaRuntime:
             raise NativeEngineError("Generation would exceed the checkpoint's configured/scaled maximum context length.")
         hidden = torch.nn.functional.embedding(input_ids, self.weights["model.embed_tokens.weight"])
         positions = torch.arange(past_len, past_len + seq_len, device=self.device)
-        rope_embeddings = self._rope_embeddings(positions, self.dtype)
+        if rope_sequence_length is not None and (
+            isinstance(rope_sequence_length, bool)
+            or not isinstance(rope_sequence_length, int)
+            or not past_len + seq_len <= rope_sequence_length <= self.config.effective_max_position_embeddings
+        ):
+            raise NativeEngineError("RoPE context length must cover the current sequence and stay inside the configured/scaled context limit.")
+        rope_embeddings = self._rope_embeddings(
+            positions, self.dtype, sequence_length=rope_sequence_length
+        )
         key_start_position = past_len - stored_past_len
         cache, head_dim = [], c.hidden_size // c.num_attention_heads
         for i in range(c.num_hidden_layers):
@@ -1479,7 +1498,15 @@ class NativeLlamaRuntime:
                     return
                 prefill_started = time.perf_counter()
                 try:
-                    logits, cache = self.forward(tokens, cancel_event=cancel_event)
+                    rope_sequence_length = min(
+                        self.config.effective_max_position_embeddings,
+                        len(prompt_token_ids) + max_new_tokens,
+                    )
+                    logits, cache = self.forward(
+                        tokens,
+                        cancel_event=cancel_event,
+                        rope_sequence_length=rope_sequence_length,
+                    )
                     absolute_sequence_length = len(prompt_token_ids)
                     prefill_ms = (time.perf_counter() - prefill_started) * 1000
                     self.live_generation.update({
@@ -1563,6 +1590,7 @@ class NativeLlamaRuntime:
                                 cache,
                                 past_sequence_length=absolute_sequence_length,
                                 cancel_event=cancel_event,
+                                rope_sequence_length=rope_sequence_length,
                             )
                             absolute_sequence_length += 1
                         except NativeGenerationCancelled:
