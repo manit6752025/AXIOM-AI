@@ -71,13 +71,16 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
         estimated_parameter_count: 1200, parameter_count_method: "analytic config estimate",
       },
       request: { context_length: 16, batch_size: 1, ram_budget_gib: 8, vram_budget_gib: 4 },
-      assumptions: { safety_margin_percent: 20, uncertainty_range_percent: { low: -15, high: 25 } },
+      assumptions: {
+        safety_margin_percent: 20, uncertainty_range_percent: { low: -15, high: 25 },
+        kv_cache_context_length: 16, kv_prefill_temporary_context_length: 0,
+      },
       candidates: [
-        { format: "int4", nominal_weight_bits: 4, estimated_weight_gib: 0.0000005, estimated_kv_cache_gib: 0.0000002, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000003, estimated_range_gib: [0.00000255, 0.00000375], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: false, native_support_note: "Sizing only." },
-        { format: "int8", nominal_weight_bits: 8, estimated_weight_gib: 0.000001, estimated_kv_cache_gib: 0.0000002, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.0000035, estimated_range_gib: [0.000002975, 0.000004375], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: false, native_support_note: "Sizing only." },
-        { format: "bf16", nominal_weight_bits: 16, estimated_weight_gib: 0.0000013, estimated_kv_cache_gib: 0.0000002, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000004, estimated_range_gib: [0.0000034, 0.000005], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: true, native_support_note: null },
-        { format: "fp16", nominal_weight_bits: 16, estimated_weight_gib: 0.0000013, estimated_kv_cache_gib: 0.0000002, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000004, estimated_range_gib: [0.0000034, 0.000005], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: true, native_support_note: null },
-        { format: "fp32", nominal_weight_bits: 32, estimated_weight_gib: 0.0000025, estimated_kv_cache_gib: 0.0000004, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000006, estimated_range_gib: [0.0000051, 0.0000075], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: true, native_support_note: null },
+        { format: "int4", nominal_weight_bits: 4, estimated_weight_gib: 0.0000005, estimated_kv_cache_gib: 0.0000002, estimated_kv_prefill_temporary_gib: 0, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000003, estimated_range_gib: [0.00000255, 0.00000375], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: false, native_support_note: "Sizing only." },
+        { format: "int8", nominal_weight_bits: 8, estimated_weight_gib: 0.000001, estimated_kv_cache_gib: 0.0000002, estimated_kv_prefill_temporary_gib: 0, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.0000035, estimated_range_gib: [0.000002975, 0.000004375], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: false, native_support_note: "Sizing only." },
+        { format: "bf16", nominal_weight_bits: 16, estimated_weight_gib: 0.0000013, estimated_kv_cache_gib: 0.0000002, estimated_kv_prefill_temporary_gib: 0, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000004, estimated_range_gib: [0.0000034, 0.000005], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: true, native_support_note: null },
+        { format: "fp16", nominal_weight_bits: 16, estimated_weight_gib: 0.0000013, estimated_kv_cache_gib: 0.0000002, estimated_kv_prefill_temporary_gib: 0, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000004, estimated_range_gib: [0.0000034, 0.000005], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: true, native_support_note: null },
+        { format: "fp32", nominal_weight_bits: 32, estimated_weight_gib: 0.0000025, estimated_kv_cache_gib: 0.0000004, estimated_kv_prefill_temporary_gib: 0, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000006, estimated_range_gib: [0.0000051, 0.0000075], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: true, native_support_note: null },
       ],
       recommendation: {
         format: "bf16", status: "fits_budget",
@@ -173,6 +176,9 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await engine.getByRole("button", { name: "Estimate memory fit" }).click();
   const memoryEstimate = engine.getByRole("region", { name: "Quantization estimate results" });
   await expect(memoryEstimate).toContainText("Budget-based planning recommendation: BF16.");
+  await expect(memoryEstimate).toContainText("KV-cache estimate uses 16 retained-context tokens.");
+  await expect(memoryEstimate.getByRole("article", { name: "bf16 memory candidate" })).toContainText("Prefill temporary");
+  await expect(memoryEstimate).toContainText("0 retained-context tokens");
   await expect(memoryEstimate).toContainText("3.15 KiB estimated");
   await expect(memoryEstimate.getByRole("article", { name: "int4 memory candidate" })).toContainText("Sizing only");
   await engine.getByLabel("Select discovered LoRA adapter").selectOption("/runs/my-lora-adapter");
