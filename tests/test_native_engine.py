@@ -1718,6 +1718,73 @@ def test_mistral_sliding_window_memory_estimate_bounds_retained_cache_and_accoun
     assert selection["estimated_kv_cache_bytes"] < unbounded_cache_bytes
 
 
+def test_mistral_estimator_bounds_retained_kv_cache_and_reports_prefill_temporary(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from axiom.core import engine as engine_module
+
+    model_dir = tmp_path / "mistral-model"
+    model_dir.mkdir()
+    config = _config(
+        model_type="mistral",
+        architectures=["MistralForCausalLM"],
+        sliding_window=3,
+        max_position_embeddings=32,
+    )
+    monkeypatch.setattr(engine_module, "_resolve_model_directory", lambda *_args: model_dir)
+    monkeypatch.setattr(engine_module, "_inspect_model_config", lambda *_args: {
+        "config": config,
+        "architecture": "MistralForCausalLM",
+    })
+
+    report = engine_module.estimate_native_quantization(
+        str(model_dir), context_length=24, batch_size=2
+    )
+    candidate = next(item for item in report["candidates"] if item["format"] == "bf16")
+    config_obj = NativeLlamaConfig.from_mapping(config)
+    head_dim = config_obj.hidden_size // config_obj.num_attention_heads
+    gib = 1024**3
+    expected_cache = (
+        2
+        * config_obj.num_hidden_layers
+        * config_obj.num_key_value_heads
+        * head_dim
+        * 3
+        * 2
+        * 2
+    )
+    expected_prefill = 2 * config_obj.num_key_value_heads * head_dim * 24 * 2 * 2
+
+    assert report["assumptions"]["kv_cache_context_length"] == 3
+    assert report["assumptions"]["kv_prefill_temporary_context_length"] == 24
+    assert candidate["estimated_kv_cache_gib"] == round(expected_cache / gib, 9)
+    assert candidate["estimated_kv_prefill_temporary_gib"] == round(expected_prefill / gib, 9)
+
+
+def test_non_sliding_estimator_does_not_double_count_prefill_kv(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from axiom.core import engine as engine_module
+
+    model_dir = tmp_path / "llama-model"
+    model_dir.mkdir()
+    config = _config(max_position_embeddings=32)
+    monkeypatch.setattr(engine_module, "_resolve_model_directory", lambda *_args: model_dir)
+    monkeypatch.setattr(engine_module, "_inspect_model_config", lambda *_args: {
+        "config": config,
+        "architecture": "LlamaForCausalLM",
+    })
+
+    report = engine_module.estimate_native_quantization(
+        str(model_dir), context_length=24, batch_size=2
+    )
+    candidate = next(item for item in report["candidates"] if item["format"] == "bf16")
+
+    assert report["assumptions"]["kv_cache_context_length"] == 24
+    assert report["assumptions"]["kv_prefill_temporary_context_length"] == 0
+    assert candidate["estimated_kv_prefill_temporary_gib"] == 0.0
+
+
 def test_auto_memory_planner_selects_full_mode_when_cpu_ram_is_sufficient(tmp_path: Path, monkeypatch) -> None:
     from types import SimpleNamespace
 
