@@ -200,6 +200,7 @@ export type AxiomQuantizationCandidate = {
   nominal_weight_bits: number;
   estimated_weight_gib: number;
   estimated_kv_cache_gib: number;
+  estimated_kv_prefill_temporary_gib: number;
   estimated_workspace_gib: number;
   estimated_total_gib: number;
   estimated_range_gib: [number, number];
@@ -218,7 +219,12 @@ export type AxiomQuantizationEstimate = {
     context_length: number; batch_size: number;
     ram_budget_gib: number | null; vram_budget_gib: number | null;
   };
-  assumptions: Record<string, unknown>;
+  assumptions: Record<string, unknown> & {
+    kv_cache_context_length?: number;
+    kv_prefill_temporary_context_length?: number;
+    kv_cache_formula?: string;
+    kv_prefill_temporary_formula?: string;
+  };
   candidates: AxiomQuantizationCandidate[];
   recommendation: {
     format: "bf16" | "fp16" | "fp32" | null;
