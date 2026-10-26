@@ -292,6 +292,9 @@ export type AxiomQuantizationEstimate = {
 export type AxiomEngineModel = {
   path: string; name: string; model_type: "llama" | "mistral" | "qwen2" | "qwen3";
   architecture: string; weight_format: string; ready_for_native_attempt: boolean;
+  max_position_embeddings?: number;
+  effective_max_position_embeddings?: number;
+  rope_scaling_type?: string;
 };
 export type AxiomEngineAdapter = {
   path: string; name: string; weight_format: string;
