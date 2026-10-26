@@ -792,10 +792,10 @@ def estimate_native_quantization(
     model_config = inspected["config"]
     from axiom.core.native_engine import NativeLlamaConfig
     native_config = NativeLlamaConfig.from_mapping(model_config)
-    if context_length > native_config.max_position_embeddings:
+    if context_length > native_config.effective_max_position_embeddings:
         raise ValueError(
-            f"Context length {context_length} exceeds this checkpoint's limit "
-            f"of {native_config.max_position_embeddings} tokens."
+            f"Context length {context_length} exceeds this checkpoint's supported/scaled limit "
+            f"of {native_config.effective_max_position_embeddings} tokens."
         )
 
     hidden = native_config.hidden_size
@@ -1227,7 +1227,7 @@ def _choose_memory_mode(
         raise AxiomEngineError(f"AXIOM could not safely estimate this checkpoint for automatic memory selection: {exc}") from None
 
     gib = 1024 ** 3
-    context = min(config.max_position_embeddings, _MAX_INPUT_TOKENS + _MAX_NEW_TOKENS)
+    context = min(config.effective_max_position_embeddings, _MAX_INPUT_TOKENS + _MAX_NEW_TOKENS)
     # The retained Mistral KV cache is bounded by sliding_window, but prefill
     # still materializes K/V for the full prompt while the active layer runs.
     # Budget both: persistent cache uses the bounded length; peak estimates add
@@ -1525,7 +1525,10 @@ def _load_local_model(
         "device_selection": device_selection,
         "memory_selection": memory_selection,
         "precision_selection": {"requested": precision, "selected": native_details.get("precision", precision)},
-        "config": {"max_position_embeddings": model.config.max_position_embeddings},
+        "config": {
+            "max_position_embeddings": model.config.max_position_embeddings,
+            "effective_max_position_embeddings": model.config.effective_max_position_embeddings,
+        },
     }
     _LOADED_RUNTIME = {
         "key": key,
@@ -1719,7 +1722,7 @@ def generate_local_stream(
         selected_backend = details.get("device_selection", {}).get("selected")
         device_memory_before = _device_memory_snapshot(torch, device, selected_backend=selected_backend)
         device_memory_before["peak_reset_supported"] = _reset_device_peak_memory(torch, device)
-        context_cap = max(2, min(model.config.max_position_embeddings, _MAX_INPUT_TOKENS + max_new_tokens))
+        context_cap = max(2, min(model.config.effective_max_position_embeddings, _MAX_INPUT_TOKENS + max_new_tokens))
         effective_max_new_tokens = min(max_new_tokens, context_cap - 1)
         input_limit = max(1, min(_MAX_INPUT_TOKENS, context_cap - effective_max_new_tokens))
         original_message_count = len(chat_messages or [])
@@ -2204,7 +2207,7 @@ def generate_local_batch(
         device_memory_before["peak_reset_supported"] = _reset_device_peak_memory(torch, device)
         context_cap = max(
             2,
-            min(model.config.max_position_embeddings, _MAX_INPUT_TOKENS + max_new_tokens),
+            min(model.config.effective_max_position_embeddings, _MAX_INPUT_TOKENS + max_new_tokens),
         )
         effective_max_new_tokens = min(max_new_tokens, context_cap - 1)
         input_limit = max(1, min(_MAX_INPUT_TOKENS, context_cap - effective_max_new_tokens))
@@ -2282,7 +2285,7 @@ def generate_local_batch(
             context_rows.append(context_row)
         effective_max_new_tokens = min(
             effective_max_new_tokens,
-            max(1, min(model.config.max_position_embeddings - len(ids) for ids in prompt_ids_batch)),
+            max(1, min(model.config.effective_max_position_embeddings - len(ids) for ids in prompt_ids_batch)),
         )
 
         def should_stop(_row: int, generated_ids: list[int]) -> bool:
