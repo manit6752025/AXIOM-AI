@@ -283,27 +283,51 @@ def engine_generate(request: GenerateRequest) -> dict[str, Any]:
 
 
 @router.post("/benchmark")
-def engine_benchmark(request: NativeBenchmarkRequest) -> dict[str, Any]:
-    """Run a bounded native-only benchmark without returning or storing model output."""
+async def engine_benchmark(
+    request: NativeBenchmarkRequest,
+    raw_request: Request,
+) -> dict[str, Any]:
+    """Run a bounded native-only benchmark with client-disconnect cancellation."""
+    cancel_event = Event()
+    worker = asyncio.create_task(asyncio.to_thread(
+        benchmark_local,
+        request.model_path,
+        request.prompt,
+        adapter_path=request.adapter_path,
+        warmup_runs=request.warmup_runs,
+        iterations=request.iterations,
+        max_new_tokens=request.max_new_tokens,
+        temperature=request.temperature,
+        top_p=request.top_p,
+        top_k=request.top_k,
+        min_p=request.min_p,
+        repetition_penalty=request.repetition_penalty,
+        seed=request.seed,
+        stop_sequences=request.stop_sequences,
+        device_preference=request.device,
+        memory_mode=request.memory_mode,
+        precision=request.precision,
+        cancel_event=cancel_event,
+    ))
+    while not worker.done():
+        if await raw_request.is_disconnected():
+            cancel_event.set()
+
+            def consume_background_result(task: asyncio.Task[Any]) -> None:
+                if not task.cancelled():
+                    try:
+                        task.exception()
+                    except Exception:
+                        pass
+
+            worker.add_done_callback(consume_background_result)
+            raise HTTPException(
+                status_code=499,
+                detail="Native benchmark cancelled because the client disconnected.",
+            )
+        await asyncio.sleep(0.05)
     try:
-        return benchmark_local(
-            request.model_path,
-            request.prompt,
-            adapter_path=request.adapter_path,
-            warmup_runs=request.warmup_runs,
-            iterations=request.iterations,
-            max_new_tokens=request.max_new_tokens,
-            temperature=request.temperature,
-            top_p=request.top_p,
-            top_k=request.top_k,
-            min_p=request.min_p,
-            repetition_penalty=request.repetition_penalty,
-            seed=request.seed,
-            stop_sequences=request.stop_sequences,
-            device_preference=request.device,
-            memory_mode=request.memory_mode,
-            precision=request.precision,
-        )
+        return await worker
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     except AxiomEngineError as exc:
