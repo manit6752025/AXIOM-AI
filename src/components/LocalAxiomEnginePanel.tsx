@@ -416,8 +416,8 @@ export default function LocalAxiomEnginePanel() {
     <div className="surface-head">
       <div><p className="surface-eyebrow">AXIOM ENGINE · DIRECT LOCAL INFERENCE</p><h2>AXIOM Local Engine</h2></div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button type="button" className="button secondary-button" onClick={() => void refresh()} disabled={loading || running || unloading}><RefreshCcw size={14} /> {loading ? "Checking" : "Check engine"}</button>
-        {status?.loaded && <button type="button" className="button secondary-button" onClick={() => void unload()} disabled={loading || running || unloading}><Unplug size={14} /> {unloading ? "Unloading…" : "Unload model"}</button>}
+        <button type="button" className="button secondary-button" onClick={() => void refresh()} disabled={loading || running || benchmarking || unloading}><RefreshCcw size={14} /> {loading ? "Checking" : "Check engine"}</button>
+        {status?.loaded && <button type="button" className="button secondary-button" onClick={() => void unload()} disabled={loading || running || benchmarking || unloading}><Unplug size={14} /> {unloading ? "Unloading…" : "Unload model"}</button>}
       </div>
     </div>
     <p>AXIOM Native Engine implements its own PyTorch Llama/Mistral/Qwen2/Qwen3 forward pass, KV-cache decode, attention, sampling, and supported LoRA application. It loads floating-point safetensors checkpoints and can ingest single-file or complete split-shard dense Llama/Mistral/Qwen2/Qwen3 GGUF checkpoints through gguf-py, dequantizing GGUF tensors to floating-point for AXIOM's own runtime. That means GGUF source quantization does not provide low-bit execution or low-bit memory usage. Model Studio can pull compatible public Hugging Face safetensors checkpoints directly into AXIOM. Malformed or incomplete GGUF shard sets, EXL2/GPTQ/AWQ low-bit kernels, multimodal architectures, and vLLM-style continuous-batching serving remain unsupported.</p>
@@ -548,9 +548,23 @@ export default function LocalAxiomEnginePanel() {
         <textarea aria-label="Stop sequences" value={stopSequencesText} onChange={(event) => setStopSequencesText(event.target.value)} rows={3} maxLength={4112} placeholder={"One exact stop string per line, e.g.\n<END>\n###"} />
         <small>AXIOM stops at the first full match, holds back partial matches across tokens, and excludes the stop text from the answer. Maximum 16 strings, 256 characters each.</small>
       </label>
+      <section className="panel-surface" aria-label="Native benchmark controls" style={{ padding: 12, marginBottom: 14 }}>
+        <div className="surface-head">
+          <div><p className="surface-eyebrow">AXIOM ENGINE · MEASURED PERFORMANCE</p><h3>Native inference benchmark</h3></div>
+        </div>
+        <p className="quiet-note">Measure real local inference on this model and device. Warm-ups are excluded from the measured statistics; the benchmark uses the current prompt and sampling settings, caps each run at 128 generated tokens, and never returns or stores the generated text.</p>
+        <div className="two-column-grid">
+          <label className="field"><span className="field-label-row"><span>Benchmark warm-up runs</span></span><input aria-label="Benchmark warm-up runs" type="number" min={0} max={2} step={1} value={benchmarkWarmupRuns} onChange={(event) => setBenchmarkWarmupRuns(event.target.value)} /><small>0–2 runs excluded from the results.</small></label>
+          <label className="field"><span className="field-label-row"><span>Measured benchmark runs</span></span><input aria-label="Measured benchmark runs" type="number" min={1} max={5} step={1} value={benchmarkIterations} onChange={(event) => setBenchmarkIterations(event.target.value)} /><small>1–5 measured generations; this is bounded to protect local resources.</small></label>
+        </div>
+        <button type="button" className="button secondary-button" onClick={() => void runBenchmark()} disabled={!status?.ready || loading || running || benchmarking || unloading || !modelPath.trim() || !prompt.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}>
+          <Activity size={14} /> {benchmarking ? "Benchmarking locally…" : "Benchmark native engine"}
+        </button>
+        {benchmarkError && <div className="inline-alert warning" role="alert">{benchmarkError}</div>}
+      </section>
       <div className="integration-form-actions">
-        <button type="submit" className="button primary-button" disabled={!status?.ready || loading || running || !modelPath.trim() || !prompt.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}><Play size={15} /> {running ? "Generating locally…" : "Run with AXIOM Engine"}</button>
-        <button type="button" className="button secondary-button" onClick={() => void runBatch()} disabled={!status?.ready || loading || running || !modelPath.trim() || !batchPromptsText.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}>{running ? "Batch running…" : "Run native batch"}</button>
+        <button type="submit" className="button primary-button" disabled={!status?.ready || loading || running || benchmarking || !modelPath.trim() || !prompt.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}><Play size={15} /> {running ? "Generating locally…" : "Run with AXIOM Engine"}</button>
+        <button type="button" className="button secondary-button" onClick={() => void runBatch()} disabled={!status?.ready || loading || running || benchmarking || !modelPath.trim() || !batchPromptsText.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}>{running ? "Batch running…" : "Run native batch"}</button>
         {running && <button type="button" className="button secondary-button" onClick={() => activeStreamRef.current?.abort()}><Unplug size={14} /> Stop generation</button>}
         {result && <span className="quiet-note"><Activity size={14} /> {result.completion_tokens} tokens · {result.elapsed_ms} ms wall time · {result.prefill_ms} ms prefill · {result.decode_ms} ms decode · {result.generation_tokens_per_second} tok/s</span>}
         {!result && streamTokenCount > 0 && <span className="quiet-note"><Activity size={14} /> {streamTokenCount} token(s) streamed</span>}
@@ -569,6 +583,26 @@ export default function LocalAxiomEnginePanel() {
           <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", font: "inherit", margin: 0 }}>{item.response}</pre>
         </article>)}
       </div>
+    </section>}
+    {benchmarkResult && <section className="panel-surface" aria-label="Native benchmark results" style={{ padding: 14, marginTop: 14 }}>
+      <div className="surface-head">
+        <div><p className="surface-eyebrow">AXIOM ENGINE · MEASURED RUNS</p><h3>{benchmarkResult.model} · {benchmarkResult.architecture ?? "Native model"}</h3></div>
+        <span className="status-pill">COMPLETE</span>
+      </div>
+      <p className="quiet-note">{benchmarkResult.iterations_completed} measured run(s) · {benchmarkResult.warmup_runs_completed} warm-up(s) excluded · {benchmarkResult.device ?? "device not reported"} · {benchmarkResult.precision ?? "precision not reported"} · {benchmarkResult.memory_mode.replaceAll("_", " ")}</p>
+      <div className="two-column-grid">
+        <article className="surface"><p className="surface-eyebrow">Median latency</p><h3>{benchmarkResult.metrics.median_elapsed_ms.toFixed(2)} ms</h3><p className="quiet-note">p95: {benchmarkResult.metrics.p95_elapsed_ms.toFixed(2)} ms · measured wall time: {benchmarkResult.metrics.measured_wall_time_ms.toFixed(2)} ms</p></article>
+        <article className="surface"><p className="surface-eyebrow">Generation throughput</p><h3>{benchmarkResult.metrics.aggregate_tokens_per_second.toFixed(2)} tokens/s</h3><p className="quiet-note">Median run: {benchmarkResult.metrics.median_generation_tokens_per_second.toFixed(2)} tokens/s · {benchmarkResult.metrics.completion_tokens.toLocaleString()} measured output tokens</p></article>
+        <article className="surface"><p className="surface-eyebrow">Prefill / time to first token</p><h3>{benchmarkResult.metrics.median_prefill_ms.toFixed(2)} ms</h3><p className="quiet-note">Median time to first token: {benchmarkResult.metrics.median_time_to_first_token_ms.toFixed(2)} ms</p></article>
+        <article className="surface"><p className="surface-eyebrow">Cached decode</p><h3>{benchmarkResult.metrics.median_decode_ms.toFixed(2)} ms</h3><p className="quiet-note">{benchmarkResult.metrics.prompt_tokens.toLocaleString()} total prompt tokens measured</p></article>
+      </div>
+      <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+        {benchmarkResult.runs.map((item) => <article key={item.iteration} className="panel-surface" style={{ padding: 10 }}>
+          <strong>Run {item.iteration}</strong>
+          <p className="quiet-note">{item.elapsed_ms.toFixed(2)} ms wall · {item.prefill_ms.toFixed(2)} ms prefill · {item.decode_ms.toFixed(2)} ms decode · {item.completion_tokens} token(s) · {item.generation_tokens_per_second.toFixed(2)} tokens/s · {item.stop_reason}</p>
+        </article>)}
+      </div>
+      <p className="quiet-note">{benchmarkResult.scope_note} No prompts or generated responses are displayed or retained.</p>
     </section>}
     <section className="surface axiom-quantization-planner" aria-label="Memory and quantization planner">
       <div className="surface-head">
