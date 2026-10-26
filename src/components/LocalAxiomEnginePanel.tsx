@@ -541,6 +541,7 @@ export default function LocalAxiomEnginePanel() {
           </div>
         </div>
         <p className="quiet-note">{quantizationPlan.scope_note}</p>
+        {typeof quantizationPlan.assumptions.kv_cache_context_length === "number" && typeof quantizationPlan.assumptions.kv_prefill_temporary_context_length === "number" && <p className="quiet-note">KV-cache estimate uses {quantizationPlan.assumptions.kv_cache_context_length.toLocaleString()} retained-context tokens. Additional per-layer prefill temporary memory uses {quantizationPlan.assumptions.kv_prefill_temporary_context_length.toLocaleString()} tokens where a sliding-window model needs a full-context prefill; ordinary non-sliding models do not pay this extra cache charge.</p>}
         <p className="quiet-note">
           <strong>{quantizationPlan.recommendation.format
             ? `Budget-based planning recommendation: ${quantizationPlan.recommendation.format.toUpperCase()}.`
@@ -552,7 +553,7 @@ export default function LocalAxiomEnginePanel() {
             <h4>{candidate.format.toUpperCase()}</h4>
             <p><strong>{formatEstimatedMemory(candidate.estimated_total_gib)} estimated</strong></p>
             <p className="quiet-note">Uncertainty range {formatEstimatedMemory(candidate.estimated_range_gib[0])}–{formatEstimatedMemory(candidate.estimated_range_gib[1])}</p>
-            <p className="quiet-note">Weights {formatEstimatedMemory(candidate.estimated_weight_gib)} · KV cache {formatEstimatedMemory(candidate.estimated_kv_cache_gib)} · Workspace {formatEstimatedMemory(candidate.estimated_workspace_gib)}</p>
+            <p className="quiet-note">Weights {formatEstimatedMemory(candidate.estimated_weight_gib)} · KV cache {formatEstimatedMemory(candidate.estimated_kv_cache_gib)} · Prefill temporary {formatEstimatedMemory(candidate.estimated_kv_prefill_temporary_gib)} · Workspace {formatEstimatedMemory(candidate.estimated_workspace_gib)}</p>
             {candidate.fits_ram_budget !== null && <p>RAM budget: {candidate.fits_ram_budget ? "Estimated fit" : "Over estimated budget"}</p>}
             {candidate.fits_vram_budget !== null && <p>VRAM budget: {candidate.fits_vram_budget ? "Estimated fit" : "Over estimated budget"}</p>}
             <p>{candidate.native_checkpoint_supported ? "Floating-point format supported by native loader (actual load still required)." : "Sizing only — native loader does not support this quantized format."}</p>
