@@ -1208,6 +1208,11 @@ def _choose_memory_mode(
 
     gib = 1024 ** 3
     context = min(config.max_position_embeddings, _MAX_INPUT_TOKENS + _MAX_NEW_TOKENS)
+    # The retained Mistral KV cache is bounded by sliding_window, but prefill
+    # still materializes K/V for the full prompt while the active layer runs.
+    # Budget both: persistent cache uses the bounded length; peak estimates add
+    # one full-context K/V temporary rather than pretending every layer retains it.
+    kv_cache_context = min(context, config.sliding_window) if config.sliding_window else context
     head_dim = config.hidden_size // config.num_attention_heads
     embedding_bytes = config.vocab_size * config.hidden_size * dtype_bytes
     head_bytes = 0 if config.tie_word_embeddings else embedding_bytes
@@ -1215,16 +1220,16 @@ def _choose_memory_mode(
     resident_non_layer = embedding_bytes + head_bytes + norm_bytes
     resident_with_adapter = resident_non_layer + adapter_weight_bytes
     total_weight_bytes = weight_bytes + adapter_weight_bytes
-    kv_total = 2 * config.num_hidden_layers * config.num_key_value_heads * head_dim * context * dtype_bytes
-    kv_per_layer = 2 * config.num_key_value_heads * head_dim * context * dtype_bytes
+    kv_total = 2 * config.num_hidden_layers * config.num_key_value_heads * head_dim * kv_cache_context * dtype_bytes
+    kv_prefill_per_layer = 2 * config.num_key_value_heads * head_dim * context * dtype_bytes
     workspace = max(context * config.intermediate_size * dtype_bytes * 2, config.hidden_size * context * dtype_bytes * 4)
     non_layer_weight_bytes = resident_with_adapter
     layer_bytes = max(0, weight_bytes - resident_non_layer) / max(1, config.num_hidden_layers)
     active_layer_bytes = int(layer_bytes * 1.25)
-    full_required = int((total_weight_bytes + kv_total + workspace) * 1.25)
-    cpu_layer_required = int((total_weight_bytes + kv_total + workspace) * 1.15)
-    disk_cpu_required = int((resident_with_adapter + active_layer_bytes + kv_total + workspace) * 1.30)
-    streamed_device_required = int((resident_with_adapter + active_layer_bytes + kv_per_layer + workspace) * 1.25)
+    full_required = int((total_weight_bytes + kv_total + kv_prefill_per_layer + workspace) * 1.25)
+    cpu_layer_required = int((total_weight_bytes + kv_total + kv_prefill_per_layer + workspace) * 1.15)
+    disk_cpu_required = int((resident_with_adapter + active_layer_bytes + kv_total + kv_prefill_per_layer + workspace) * 1.30)
+    streamed_device_required = int((resident_with_adapter + active_layer_bytes + kv_prefill_per_layer + workspace) * 1.25)
     system_available = _available_system_memory_bytes()
     try:
         disk_free = int(shutil.disk_usage(model_dir).free)
@@ -1248,6 +1253,8 @@ def _choose_memory_mode(
         "estimated_total_weight_bytes": total_weight_bytes,
         "estimated_non_layer_weight_bytes": non_layer_weight_bytes,
         "estimated_kv_cache_bytes": kv_total,
+        "estimated_kv_cache_context_tokens": kv_cache_context,
+        "estimated_kv_prefill_temporary_bytes": kv_prefill_per_layer,
         "estimated_context_tokens": context,
         "estimated_dtype_bytes": dtype_bytes,
         "estimated_full_execution_bytes": full_required,
