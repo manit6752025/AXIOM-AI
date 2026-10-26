@@ -287,6 +287,56 @@ def test_engine_route_benchmark_cli_outputs_measurements_without_response_text(m
     assert '"median": 15.0' in result.output
     assert "Representative benchmark input." not in result.output
 
+def test_native_engine_benchmark_cli_forwards_bounded_options_and_prints_no_text(
+    tmp_path: Path, monkeypatch
+) -> None:
+    model = tmp_path / "tiny-model"
+    model.mkdir()
+    captured = {}
+
+    def fake_benchmark(model_path, prompt, **kwargs):
+        captured.update(model_path=model_path, prompt=prompt, **kwargs)
+        return {
+            "schema_version": 1,
+            "model": "tiny-model",
+            "architecture": "LlamaForCausalLM",
+            "device": "cpu",
+            "precision": "fp32",
+            "memory_mode": "full",
+            "warmup_runs_completed": 1,
+            "iterations_completed": 2,
+            "metrics": {
+                "median_elapsed_ms": 12.0, "p95_elapsed_ms": 14.0,
+                "median_prefill_ms": 3.0, "median_decode_ms": 8.0,
+                "median_generation_tokens_per_second": 20.0,
+                "aggregate_tokens_per_second": 19.0,
+            },
+            "runs": [{
+                "iteration": 1, "elapsed_ms": 12.0, "prefill_ms": 3.0,
+                "decode_ms": 8.0, "completion_tokens": 10,
+                "generation_tokens_per_second": 20.0,
+            }],
+            "scope_note": "Measured local run; no output text is returned.",
+        }
+
+    monkeypatch.setattr(engine_cli, "benchmark_local", fake_benchmark)
+    result = runner.invoke(engine_app, [
+        "benchmark", "--model-path", str(model), "--prompt", "SENSITIVE_BENCH_PROMPT",
+        "--warmup-runs", "1", "--iterations", "2", "--max-new-tokens", "8", "--json",
+    ])
+    assert result.exit_code == 0, result.output
+    assert "median_elapsed_ms" in result.output
+    assert "SENSITIVE_BENCH_PROMPT" not in result.output
+    assert captured["model_path"] == str(model)
+    assert captured["prompt"] == "SENSITIVE_BENCH_PROMPT"
+    assert captured["warmup_runs"] == 1
+    assert captured["iterations"] == 2
+    assert captured["max_new_tokens"] == 8
+    assert captured["device_preference"] == "auto"
+    assert captured["memory_mode"] == "auto"
+    assert captured["precision"] == "auto"
+
+
 def test_engine_estimate_cli_compares_formats_against_budgets(tmp_path: Path, monkeypatch) -> None:
     root = tmp_path / "trusted-models"
     model = root / "tiny-llama"
