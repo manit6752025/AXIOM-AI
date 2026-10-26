@@ -345,9 +345,12 @@ def test_quantization_estimator_compares_formats_against_memory_budgets(tmp_path
     assert report["schema_version"] == 1
     assert report["model"]["name"] == "tiny-llama"
     assert report["request"]["context_length"] == 16
+    assert report["assumptions"]["kv_cache_context_length"] == 16
+    assert report["assumptions"]["kv_prefill_temporary_context_length"] == 0
     candidates = {item["format"]: item for item in report["candidates"]}
     assert set(candidates) == {"int4", "int8", "bf16", "fp16", "fp32"}
     assert candidates["int4"]["estimated_total_gib"] > 0
+    assert all(item["estimated_kv_prefill_temporary_gib"] == 0 for item in candidates.values())
     assert candidates["int4"]["estimated_total_gib"] < candidates["int8"]["estimated_total_gib"]
     assert candidates["int8"]["estimated_total_gib"] < candidates["fp16"]["estimated_total_gib"]
     assert report["recommendation"]["format"] == "bf16"
