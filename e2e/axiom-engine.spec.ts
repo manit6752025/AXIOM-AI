@@ -115,9 +115,15 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
         prompt_tokens: 10, aggregate_tokens_per_second: 19,
       },
       runs: [
-        { iteration: 1, elapsed_ms: 18, prefill_ms: 7, decode_ms: 10, time_to_first_token_ms: 7, generation_tokens_per_second: 22, prompt_tokens: 5, completion_tokens: 10, stop_reason: "max_new_tokens" },
-        { iteration: 2, elapsed_ms: 26, prefill_ms: 9, decode_ms: 14, time_to_first_token_ms: 9, generation_tokens_per_second: 20, prompt_tokens: 5, completion_tokens: 10, stop_reason: "max_new_tokens" },
+        { iteration: 1, elapsed_ms: 18, prefill_ms: 7, decode_ms: 10, time_to_first_token_ms: 7, generation_tokens_per_second: 22, prompt_tokens: 5, completion_tokens: 10, stop_reason: "max_new_tokens", memory_stats: { layer_weight_tensors_staged: 1, layer_weight_bytes_staged: 1048576, layer_weight_bytes_returned_to_cpu: 0, layer_weight_bytes_released: 1048576, disk_layer_weight_loads: 0, disk_layer_weight_bytes_read: 0, kv_cache_layer_offloads: 1, kv_cache_bytes_offloaded: 524288 } },
+        { iteration: 2, elapsed_ms: 26, prefill_ms: 9, decode_ms: 14, time_to_first_token_ms: 9, generation_tokens_per_second: 20, prompt_tokens: 5, completion_tokens: 10, stop_reason: "max_new_tokens", memory_stats: { layer_weight_tensors_staged: 2, layer_weight_bytes_staged: 2097152, layer_weight_bytes_returned_to_cpu: 0, layer_weight_bytes_released: 2097152, disk_layer_weight_loads: 1, disk_layer_weight_bytes_read: 3145728, kv_cache_layer_offloads: 2, kv_cache_bytes_offloaded: 1048576 } },
       ],
+      memory_stats: {
+        layer_weight_tensors_staged: 3, layer_weight_bytes_staged: 3145728,
+        layer_weight_bytes_returned_to_cpu: 0, layer_weight_bytes_released: 3145728,
+        disk_layer_weight_loads: 1, disk_layer_weight_bytes_read: 3145728,
+        kv_cache_layer_offloads: 3, kv_cache_bytes_offloaded: 1572864,
+      },
       device_memory: null, memory_selection: null,
       scope_note: "Measured local AXIOM inference. No prompts or generated responses are returned.",
       privacy: { prompt_returned: false, response_returned: false, results_persisted: false, cloud_provider_used: false },
@@ -243,6 +249,9 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(nativeBenchmark).toContainText("2 measured run(s)");
   await expect(nativeBenchmark).toContainText("19.00 tokens/s");
   await expect(nativeBenchmark).toContainText("Run 2");
+  const transferTelemetry = nativeBenchmark.getByRole("region", { name: "Layer streaming and KV transfer telemetry" });
+  await expect(transferTelemetry).toContainText("KV cache offloaded");
+  await expect(transferTelemetry).toContainText("3.0 MiB");
   await expect(nativeBenchmark).not.toContainText("Say hello.");
 
   await engine.getByLabel("AXIOM Native batch prompts").fill("First batch prompt\nSecond batch prompt");

@@ -611,6 +611,18 @@ export default function LocalAxiomEnginePanel() {
           <p className="quiet-note">{item.elapsed_ms.toFixed(2)} ms wall · {item.prefill_ms.toFixed(2)} ms prefill · {item.decode_ms.toFixed(2)} ms decode · {item.completion_tokens} token(s) · {item.generation_tokens_per_second.toFixed(2)} tokens/s · {item.stop_reason}</p>
         </article>)}
       </div>
+      {(benchmarkResult.memory_stats.layer_weight_bytes_staged > 0
+        || benchmarkResult.memory_stats.disk_layer_weight_bytes_read > 0
+        || benchmarkResult.memory_stats.kv_cache_bytes_offloaded > 0) && <section className="surface" aria-label="Layer streaming and KV transfer telemetry" style={{ padding: 12, marginTop: 12 }}>
+        <p className="surface-eyebrow">MEMORY TRANSFER TELEMETRY</p>
+        <div className="two-column-grid">
+          <article><p className="quiet-note">Layer weights staged</p><strong>{formatMemoryBytes(benchmarkResult.memory_stats.layer_weight_bytes_staged)}</strong><p className="quiet-note">{benchmarkResult.memory_stats.layer_weight_tensors_staged.toLocaleString()} tensor(s)</p></article>
+          <article><p className="quiet-note">Disk layer reads</p><strong>{benchmarkResult.memory_stats.disk_layer_weight_loads.toLocaleString()}</strong><p className="quiet-note">{formatMemoryBytes(benchmarkResult.memory_stats.disk_layer_weight_bytes_read)} read from disk</p></article>
+          <article><p className="quiet-note">KV cache offloaded</p><strong>{formatMemoryBytes(benchmarkResult.memory_stats.kv_cache_bytes_offloaded)}</strong><p className="quiet-note">{benchmarkResult.memory_stats.kv_cache_layer_offloads.toLocaleString()} layer offload(s)</p></article>
+          <article><p className="quiet-note">Layer weights released</p><strong>{formatMemoryBytes(benchmarkResult.memory_stats.layer_weight_bytes_released)}</strong><p className="quiet-note">{formatMemoryBytes(benchmarkResult.memory_stats.layer_weight_bytes_returned_to_cpu)} returned to CPU</p></article>
+        </div>
+        <p className="quiet-note">Counters are summed across measured runs only; excluded warm-ups do not contribute.</p>
+      </section>}
       <p className="quiet-note">{benchmarkResult.scope_note} No prompts or generated responses are displayed or retained.</p>
     </section>}
     <section className="surface axiom-quantization-planner" aria-label="Memory and quantization planner">

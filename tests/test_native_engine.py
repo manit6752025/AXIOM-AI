@@ -1971,6 +1971,16 @@ def test_native_benchmark_excludes_warmups_and_never_returns_prompt_or_response(
             "response": "PRIVATE_GENERATED_RESPONSE",
             "device_memory": {"peak_allocated_bytes": 1234},
             "memory_selection": {"selected": "full"},
+            "memory_stats": {
+                "layer_weight_tensors_staged": [99, 1, 2, 3][measured_run],
+                "layer_weight_bytes_staged": [999, 100, 200, 300][measured_run],
+                "layer_weight_bytes_returned_to_cpu": [999, 20, 40, 60][measured_run],
+                "layer_weight_bytes_released": [999, 30, 60, 90][measured_run],
+                "disk_layer_weight_loads": [99, 1, 2, 3][measured_run],
+                "disk_layer_weight_bytes_read": [999, 40, 80, 120][measured_run],
+                "kv_cache_layer_offloads": [99, 1, 2, 3][measured_run],
+                "kv_cache_bytes_offloaded": [999, 50, 100, 150][measured_run],
+            },
         }
 
     monkeypatch.setattr(engine_module, "generate_local", fake_generate)
@@ -1994,6 +2004,15 @@ def test_native_benchmark_excludes_warmups_and_never_returns_prompt_or_response(
     assert report["metrics"]["prompt_tokens"] == 15
     assert report["metrics"]["aggregate_tokens_per_second"] == 200.0
     assert [item["completion_tokens"] for item in report["runs"]] == [2, 4, 6]
+    assert report["runs"][0]["memory_stats"]["layer_weight_bytes_staged"] == 100
+    assert report["memory_stats"]["layer_weight_tensors_staged"] == 6
+    assert report["memory_stats"]["layer_weight_bytes_staged"] == 600
+    assert report["memory_stats"]["layer_weight_bytes_returned_to_cpu"] == 120
+    assert report["memory_stats"]["layer_weight_bytes_released"] == 180
+    assert report["memory_stats"]["disk_layer_weight_loads"] == 6
+    assert report["memory_stats"]["disk_layer_weight_bytes_read"] == 240
+    assert report["memory_stats"]["kv_cache_layer_offloads"] == 6
+    assert report["memory_stats"]["kv_cache_bytes_offloaded"] == 300
     serialized = json.dumps(report)
     assert "PRIVATE_BENCHMARK_PROMPT" not in serialized
     assert "PRIVATE_GENERATED_RESPONSE" not in serialized

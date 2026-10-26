@@ -345,6 +345,16 @@ def engine_benchmark(
             f"{item['generation_tokens_per_second']:.2f}",
         )
     console.print(table)
+    transfer = report.get("memory_stats", {})
+    if isinstance(transfer, dict):
+        console.print(
+            "Measured transfer totals: "
+            f"layer weights staged {transfer.get('layer_weight_bytes_staged', 0)} bytes; "
+            f"disk layer reads {transfer.get('disk_layer_weight_bytes_read', 0)} bytes "
+            f"across {transfer.get('disk_layer_weight_loads', 0)} read(s); "
+            f"KV cache offloaded {transfer.get('kv_cache_bytes_offloaded', 0)} bytes "
+            f"across {transfer.get('kv_cache_layer_offloads', 0)} layer(s)."
+        )
     console.print(report["scope_note"])
 
 

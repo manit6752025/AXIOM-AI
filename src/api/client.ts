@@ -205,6 +205,7 @@ export type AxiomEngineBenchmarkRun = {
   prompt_tokens: number;
   completion_tokens: number;
   stop_reason: string;
+  memory_stats: Record<string, number>;
 };
 export type AxiomEngineBenchmark = {
   schema_version: number;
@@ -240,6 +241,7 @@ export type AxiomEngineBenchmark = {
     aggregate_tokens_per_second: number;
   };
   runs: AxiomEngineBenchmarkRun[];
+  memory_stats: Record<string, number>;
   device_memory: Record<string, unknown> | null;
   memory_selection: Record<string, unknown> | null;
   scope_note: string;

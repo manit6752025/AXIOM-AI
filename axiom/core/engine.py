@@ -2137,6 +2137,7 @@ def benchmark_local(
     measured: list[dict[str, Any]] = []
     warmups_completed = 0
     last_outcome: dict[str, Any] | None = None
+    memory_stat_keys = ["layer_weight_tensors_staged","layer_weight_bytes_staged","layer_weight_bytes_returned_to_cpu","layer_weight_bytes_released","disk_layer_weight_loads","disk_layer_weight_bytes_read","kv_cache_layer_offloads","kv_cache_bytes_offloaded"]
     with _engine_request_lock(cancel_event):
         for index in range(warmup_runs + iterations):
             if cancel_event is not None and cancel_event.is_set():
@@ -2165,8 +2166,19 @@ def benchmark_local(
             if index < warmup_runs:
                 warmups_completed += 1
                 continue
+            raw_memory_stats = outcome.get("memory_stats")
+            raw_memory_stats = raw_memory_stats if isinstance(raw_memory_stats, dict) else {}
+            memory_stats = {
+                key: int(raw_memory_stats[key])
+                if isinstance(raw_memory_stats.get(key), int)
+                and not isinstance(raw_memory_stats.get(key), bool)
+                and raw_memory_stats[key] >= 0
+                else 0
+                for key in memory_stat_keys
+            }
             measured.append({
                 "iteration": len(measured) + 1,
+                "memory_stats": memory_stats,
                 "elapsed_ms": float(outcome.get("elapsed_ms", 0.0)),
                 "prefill_ms": float(outcome.get("prefill_ms", 0.0)),
                 "decode_ms": float(outcome.get("decode_ms", 0.0)),
@@ -2190,6 +2202,10 @@ def benchmark_local(
     measured_wall_ms = sum(item["elapsed_ms"] for item in measured)
     completion_tokens = sum(item["completion_tokens"] for item in measured)
     prompt_tokens = sum(item["prompt_tokens"] for item in measured)
+    aggregate_memory_stats = {
+        key: sum(item["memory_stats"][key] for item in measured)
+        for key in memory_stat_keys
+    }
     return {
         "schema_version": 1,
         "engine": "axiom-native-engine",
@@ -2224,6 +2240,7 @@ def benchmark_local(
             "aggregate_tokens_per_second": round(completion_tokens * 1000 / measured_wall_ms, 2) if measured_wall_ms > 0 else 0.0,
         },
         "runs": measured,
+        "memory_stats": aggregate_memory_stats,
         "device_memory": last_outcome.get("device_memory"),
         "memory_selection": last_outcome.get("memory_selection"),
         "scope_note": (
