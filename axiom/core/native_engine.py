@@ -95,6 +95,10 @@ class NativeLlamaConfig:
     rope_original_max_position_embeddings: int | None = None
     rope_low_freq_factor: float | None = None
     rope_high_freq_factor: float | None = None
+    rope_attention_factor: float = 1.0
+    rope_beta_fast: float = 32.0
+    rope_beta_slow: float = 1.0
+    rope_truncate: bool = True
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "NativeLlamaConfig":
@@ -165,6 +169,10 @@ class NativeLlamaConfig:
         rope_original: int | None = None
         rope_low: float | None = None
         rope_high: float | None = None
+        rope_attention_factor = 1.0
+        rope_beta_fast = 32.0
+        rope_beta_slow = 1.0
+        rope_truncate = True
         if rope is not None:
             if not isinstance(rope, dict):
                 raise NativeEngineError("This RoPE scaling configuration is not implemented by AXIOM Native Engine.")
@@ -204,6 +212,63 @@ class NativeLlamaConfig:
                     raise NativeEngineError("Llama 3 RoPE scaling requires valid original context and low/high frequency factors.")
                 rope_original = raw_original
                 rope_low, rope_high = float(raw_low), float(raw_high)
+            elif rope_type == "yarn":
+                raw_original = rope.get("original_max_position_embeddings")
+                raw_fast = rope.get("beta_fast", 32.0)
+                raw_slow = rope.get("beta_slow", 1.0)
+                raw_attention = rope.get("attention_factor")
+                raw_mscale, raw_mscale_all = rope.get("mscale"), rope.get("mscale_all_dim")
+                raw_truncate = rope.get("truncate", True)
+                if (
+                    isinstance(raw_original, bool)
+                    or not isinstance(raw_original, int)
+                    or not 1 <= raw_original <= max_positions
+                    or isinstance(raw_fast, bool)
+                    or not isinstance(raw_fast, (int, float))
+                    or not math.isfinite(float(raw_fast))
+                    or isinstance(raw_slow, bool)
+                    or not isinstance(raw_slow, (int, float))
+                    or not math.isfinite(float(raw_slow))
+                    or float(raw_fast) <= 0
+                    or float(raw_slow) <= 0
+                    or float(raw_fast) <= float(raw_slow)
+                    or not isinstance(raw_truncate, bool)
+                ):
+                    raise NativeEngineError("YaRN RoPE scaling requires a valid original context, beta_fast greater than beta_slow, and a boolean truncate flag.")
+                if raw_attention is not None and (
+                    isinstance(raw_attention, bool)
+                    or not isinstance(raw_attention, (int, float))
+                    or not math.isfinite(float(raw_attention))
+                    or float(raw_attention) <= 0
+                ):
+                    raise NativeEngineError("YaRN attention_factor must be a finite positive number.")
+                if (raw_mscale is None) != (raw_mscale_all is None):
+                    raise NativeEngineError("YaRN mscale and mscale_all_dim must be supplied together.")
+                if raw_mscale is not None and (
+                    isinstance(raw_mscale, bool)
+                    or not isinstance(raw_mscale, (int, float))
+                    or not math.isfinite(float(raw_mscale))
+                    or float(raw_mscale) <= 0
+                    or isinstance(raw_mscale_all, bool)
+                    or not isinstance(raw_mscale_all, (int, float))
+                    or not math.isfinite(float(raw_mscale_all))
+                    or float(raw_mscale_all) <= 0
+                ):
+                    raise NativeEngineError("YaRN mscale values must be finite positive numbers.")
+                rope_original = raw_original
+                rope_beta_fast = float(raw_fast)
+                rope_beta_slow = float(raw_slow)
+                rope_truncate = raw_truncate
+                if raw_attention is not None:
+                    rope_attention_factor = float(raw_attention)
+                elif raw_mscale is not None:
+                    rope_attention_factor = (
+                        (0.1 * float(raw_mscale) * math.log(rope_factor) + 1.0)
+                        / (0.1 * float(raw_mscale_all) * math.log(rope_factor) + 1.0)
+                        if rope_factor > 1.0 else 1.0
+                    )
+                else:
+                    rope_attention_factor = 1.0 + 0.1 * math.log(rope_factor) if rope_factor > 1.0 else 1.0
             else:
                 raise NativeEngineError("This RoPE scaling configuration is not implemented by AXIOM Native Engine.")
         sliding = value.get("sliding_window") if model_type == "mistral" else None
@@ -234,6 +299,10 @@ class NativeLlamaConfig:
             rope_original_max_position_embeddings=rope_original,
             rope_low_freq_factor=rope_low,
             rope_high_freq_factor=rope_high,
+            rope_attention_factor=rope_attention_factor,
+            rope_beta_fast=rope_beta_fast,
+            rope_beta_slow=rope_beta_slow,
+            rope_truncate=rope_truncate,
         )
 
 def _within_trusted_roots(path: Path, trusted_roots: tuple[Path, ...]) -> bool:
@@ -1076,10 +1145,43 @@ class NativeLlamaRuntime:
                 inv_freq,
                 torch.where(wavelength > low_wavelength, scaled_inv_freq, smooth_inv_freq),
             )
+        elif self.config.rope_scaling_type == "yarn":
+            # YaRN blends the original frequencies with linearly interpolated
+            # frequencies over the correction range defined by beta_slow/fast.
+            dim_pairs = dim // 2
+            original = float(self.config.rope_original_max_position_embeddings)
+            base = self.config.rope_theta
+
+            def correction_dimension(rotations: float) -> float:
+                return (
+                    dim * math.log(original / (rotations * 2.0 * math.pi))
+                    / (2.0 * math.log(base))
+                )
+
+            low = correction_dimension(self.config.rope_beta_fast)
+            high = correction_dimension(self.config.rope_beta_slow)
+            if self.config.rope_truncate:
+                low, high = math.floor(low), math.ceil(high)
+            low, high = max(low, 0.0), min(high, float(dim - 1))
+            if high <= low:
+                high = low + 0.001
+            ramp = (
+                (torch.arange(dim_pairs, device=self.device, dtype=torch.float32) - low)
+                / (high - low)
+            ).clamp(0.0, 1.0)
+            inv_freq_extrapolation_factor = 1.0 - ramp
+            inv_freq = (
+                (inv_freq / self.config.rope_scaling_factor) * (1.0 - inv_freq_extrapolation_factor)
+                + inv_freq * inv_freq_extrapolation_factor
+            )
         frequencies = torch.einsum("i,j->ij", scaled_positions, inv_freq)
         embedding = torch.cat((frequencies, frequencies), dim=-1)
-        cos = embedding.cos().to(dtype=dtype)[None, None, :, :]
-        sin = embedding.sin().to(dtype=dtype)[None, None, :, :]
+        cos_values, sin_values = embedding.cos(), embedding.sin()
+        if self.config.rope_scaling_type == "yarn":
+            cos_values = cos_values * self.config.rope_attention_factor
+            sin_values = sin_values * self.config.rope_attention_factor
+        cos = cos_values.to(dtype=dtype)[None, None, :, :]
+        sin = sin_values.to(dtype=dtype)[None, None, :, :]
         return cos, sin
 
     def _apply_rope(
