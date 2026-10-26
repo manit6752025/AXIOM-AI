@@ -195,6 +195,61 @@ export type RuntimeTraceReport = {
   max_retained: number;
   privacy: { prompt_bodies_stored: false; response_bodies_stored: false; disk_persistence: false };
 };
+export type AxiomEngineBenchmarkRun = {
+  iteration: number;
+  elapsed_ms: number;
+  prefill_ms: number;
+  decode_ms: number;
+  time_to_first_token_ms: number;
+  generation_tokens_per_second: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  stop_reason: string;
+};
+export type AxiomEngineBenchmark = {
+  schema_version: number;
+  engine: string;
+  model: string;
+  architecture: string | null;
+  model_type: string | null;
+  device: string | null;
+  precision: string | null;
+  memory_mode: string;
+  checkpoint_format: string;
+  warmup_runs_requested: number;
+  warmup_runs_completed: number;
+  warmups_excluded: boolean;
+  iterations_requested: number;
+  iterations_completed: number;
+  max_new_tokens: number;
+  sampling: {
+    temperature: number; top_p: number; top_k: number; min_p: number;
+    repetition_penalty: number; seed: number | null;
+  };
+  metrics: {
+    total_wall_time_ms: number;
+    measured_wall_time_ms: number;
+    median_elapsed_ms: number;
+    p95_elapsed_ms: number;
+    median_prefill_ms: number;
+    median_decode_ms: number;
+    median_time_to_first_token_ms: number;
+    median_generation_tokens_per_second: number;
+    completion_tokens: number;
+    prompt_tokens: number;
+    aggregate_tokens_per_second: number;
+  };
+  runs: AxiomEngineBenchmarkRun[];
+  device_memory: Record<string, unknown> | null;
+  memory_selection: Record<string, unknown> | null;
+  scope_note: string;
+  privacy: {
+    prompt_returned: false; response_returned: false;
+    results_persisted: false; cloud_provider_used: false;
+  };
+  generated_at: string;
+};
+
 export type AxiomQuantizationCandidate = {
   format: "int4" | "int8" | "bf16" | "fp16" | "fp32";
   nominal_weight_bits: number;
@@ -1611,6 +1666,16 @@ export const axiomApi = {
   }) => requestJson<AxiomQuantizationEstimate>("/api/engine/quantization/estimate", {
     method: "POST", body: JSON.stringify(input),
   }),
+  benchmarkAxiomEngine: (input: {
+    model_path: string; adapter_path?: string; prompt: string;
+    warmup_runs: number; iterations: number; max_new_tokens: number; temperature: number;
+    top_p: number; top_k: number; min_p: number; repetition_penalty: number; seed: number | null;
+    stop_sequences: string[]; device: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu";
+    memory_mode: "auto" | "full" | "layer_streaming" | "disk_streaming";
+    precision: "auto" | "fp32" | "fp16" | "bf16";
+  }) => requestJson<AxiomEngineBenchmark>("/api/engine/benchmark", {
+    method: "POST", body: JSON.stringify(input),
+  }, 300_000),
   axiomEngineStatus: () => requestJson<AxiomEngineStatus>("/api/engine/status"),
   engineBackends: (profile: EngineFabricProfile = "balanced") => requestJson<EngineFabricReport>("/api/engine/backends?" + new URLSearchParams({ profile })),
   engineBackendChat: (input: { backend_id: EngineFabricChatResult["backend_id"]; model: string; messages: Array<{ role: "system" | "user" | "assistant"; content: string }>; max_new_tokens: number; temperature: number; top_p: number; top_k: number; min_p: number; repetition_penalty: number; seed: number | null; stop_sequences: string[] }) =>
