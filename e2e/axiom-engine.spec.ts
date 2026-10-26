@@ -178,7 +178,7 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(memoryEstimate).toContainText("Budget-based planning recommendation: BF16.");
   await expect(memoryEstimate).toContainText("KV-cache estimate uses 16 retained-context tokens.");
   await expect(memoryEstimate.getByRole("article", { name: "bf16 memory candidate" })).toContainText("Prefill temporary");
-  await expect(memoryEstimate).toContainText("0 retained-context tokens");
+  await expect(memoryEstimate).toContainText("Additional per-layer prefill temporary memory uses 0 tokens");
   await expect(memoryEstimate).toContainText("3.15 KiB estimated");
   await expect(memoryEstimate.getByRole("article", { name: "int4 memory candidate" })).toContainText("Sizing only");
   await engine.getByLabel("Select discovered LoRA adapter").selectOption("/runs/my-lora-adapter");
