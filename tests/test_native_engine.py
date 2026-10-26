@@ -1635,6 +1635,83 @@ def test_disk_streaming_reads_layer_weights_on_demand_and_matches_full_forward(t
     assert streamed.memory_stats["kv_cache_layer_offloads"] == config["num_hidden_layers"]
 
 
+def test_native_benchmark_excludes_warmups_and_never_returns_prompt_or_response(monkeypatch) -> None:
+    from axiom.core import engine as engine_module
+
+    calls = []
+
+    def fake_generate(model_path, prompt, **kwargs):
+        calls.append({"model_path": model_path, "prompt": prompt, **kwargs})
+        measured_run = len(calls) - 1
+        elapsed = [999.0, 10.0, 20.0, 30.0][measured_run]
+        return {
+            "model": "tiny-model",
+            "architecture": "LlamaForCausalLM",
+            "model_type": "llama",
+            "device": "cpu",
+            "precision": "fp32",
+            "memory_mode": "full",
+            "checkpoint_format": "safetensors",
+            "elapsed_ms": elapsed,
+            "prefill_ms": elapsed / 4,
+            "decode_ms": elapsed / 2,
+            "time_to_first_token_ms": elapsed / 10,
+            "generation_tokens_per_second": [1.0, 200.0, 250.0, 300.0][measured_run],
+            "prompt_tokens": 5,
+            "completion_tokens": [99, 2, 4, 6][measured_run],
+            "stop_reason": "max_new_tokens",
+            "response": "PRIVATE_GENERATED_RESPONSE",
+            "device_memory": {"peak_allocated_bytes": 1234},
+            "memory_selection": {"selected": "full"},
+        }
+
+    monkeypatch.setattr(engine_module, "generate_local", fake_generate)
+    report = engine_module.benchmark_local(
+        "/trusted/tiny-model",
+        "PRIVATE_BENCHMARK_PROMPT",
+        warmup_runs=1,
+        iterations=3,
+        max_new_tokens=8,
+    )
+
+    assert len(calls) == 4
+    assert all(call["prompt"] == "PRIVATE_BENCHMARK_PROMPT" for call in calls)
+    assert all(call["_lock_held"] is True for call in calls)
+    assert report["warmup_runs_requested"] == report["warmup_runs_completed"] == 1
+    assert report["warmups_excluded"] is True
+    assert report["iterations_requested"] == report["iterations_completed"] == 3
+    assert report["metrics"]["median_elapsed_ms"] == 20.0
+    assert report["metrics"]["p95_elapsed_ms"] == 30.0
+    assert report["metrics"]["completion_tokens"] == 12
+    assert report["metrics"]["prompt_tokens"] == 15
+    assert report["metrics"]["aggregate_tokens_per_second"] == 200.0
+    assert [item["completion_tokens"] for item in report["runs"]] == [2, 4, 6]
+    serialized = json.dumps(report)
+    assert "PRIVATE_BENCHMARK_PROMPT" not in serialized
+    assert "PRIVATE_GENERATED_RESPONSE" not in serialized
+    assert "/trusted/tiny-model" not in serialized
+    assert report["privacy"] == {
+        "prompt_returned": False,
+        "response_returned": False,
+        "results_persisted": False,
+        "cloud_provider_used": False,
+    }
+
+
+def test_native_benchmark_rejects_unbounded_work_before_generation(monkeypatch) -> None:
+    from axiom.core import engine as engine_module
+
+    monkeypatch.setattr(
+        engine_module,
+        "generate_local",
+        lambda *_args, **_kwargs: pytest.fail("generation must not start for invalid benchmark bounds"),
+    )
+    with pytest.raises(ValueError, match="Measured iterations"):
+        engine_module.benchmark_local("model", "hello", iterations=6)
+    with pytest.raises(ValueError, match="output length"):
+        engine_module.benchmark_local("model", "hello", max_new_tokens=129)
+
+
 def _planner_fixture(tmp_path: Path, monkeypatch, *, system_memory: int | None):
     from types import SimpleNamespace
     import shutil
