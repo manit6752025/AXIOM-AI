@@ -283,6 +283,51 @@ def test_native_config_supports_llama3_rope_scaling_formula() -> None:
     assert torch.allclose(actual_sin[0, 0], embedding.sin(), atol=1e-6, rtol=1e-5)
 
 
+def test_dynamic_ntk_rope_scaling_extends_context_and_matches_frequency_formula() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config(
+        max_position_embeddings=8,
+        rope_theta=10_000.0,
+        rope_scaling={"rope_type": "dynamic", "factor": 2.0},
+    ))
+    assert config.rope_scaling_type == "dynamic"
+    assert config.max_position_embeddings == 8
+    assert config.effective_max_position_embeddings == 16
+
+    runtime = NativeLlamaRuntime(
+        config, _tiny_weights(torch), torch, torch.device("cpu")
+    )
+    positions = torch.arange(12)
+    actual_cos, actual_sin = runtime._rope_embeddings(positions, torch.float32)
+
+    dim = config.hidden_size // config.num_attention_heads
+    scale = (
+        config.rope_scaling_factor * len(positions) / config.max_position_embeddings
+        - (config.rope_scaling_factor - 1.0)
+    )
+    dynamic_theta = config.rope_theta * scale ** (dim / (dim - 2))
+    inverse_frequencies = 1.0 / (
+        dynamic_theta
+        ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim)
+    )
+    frequencies = torch.einsum(
+        "i,j->ij", positions.to(torch.float32), inverse_frequencies
+    )
+    embedding = torch.cat((frequencies, frequencies), dim=-1)
+    assert torch.allclose(actual_cos[0, 0], embedding.cos(), atol=1e-6, rtol=1e-5)
+    assert torch.allclose(actual_sin[0, 0], embedding.sin(), atol=1e-6, rtol=1e-5)
+
+    input_ids = torch.tensor([[1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5]], dtype=torch.long)
+    with torch.inference_mode():
+        logits, cache = runtime.forward(input_ids)
+    assert tuple(logits.shape) == (1, config.vocab_size)
+    assert tuple(cache[0][0].shape)[-2] == len(input_ids[0])
+    with pytest.raises(NativeEngineError, match="maximum context length"):
+        runtime.forward(torch.ones((1, 17), dtype=torch.long))
+
+
 def test_native_config_supports_yarn_rope_scaling_formula() -> None:
     torch = pytest.importorskip("torch")
     from axiom.core.native_engine import NativeLlamaRuntime
