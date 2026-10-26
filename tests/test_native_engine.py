@@ -1433,6 +1433,177 @@ def test_auto_device_falls_back_when_accelerator_memory_plan_cannot_fit(monkeypa
     assert details["memory_selection"]["fallback_from"] == "cuda"
 
 
+def test_native_stream_retries_cpu_on_auto_accelerator_oom_before_first_token(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from axiom.core import engine
+
+    calls: list[str] = []
+
+    class TokenizerFixture:
+        def encode(self, _prompt, add_special_tokens=False):
+            return SimpleNamespace(ids=[1, 2])
+
+        def decode(self, token_ids, skip_special_tokens=True):
+            return "generated" if list(token_ids) == [7] else ""
+
+    class RuntimeFixture:
+        config = SimpleNamespace(
+            max_position_embeddings=32,
+            effective_max_position_embeddings=32,
+            bos_token_id=None,
+            eos_token_ids=(),
+        )
+        last_attention_backend = "fixture-attention"
+        memory_mode = "full"
+        memory_stats = {}
+
+        def __init__(self, device: str):
+            self.device = device
+            self.last_generation = {}
+
+        def iter_generate(self, _prompt_ids, **_kwargs):
+            try:
+                if self.device == "cuda":
+                    raise RuntimeError("CUDA out of memory in test fixture")
+                yield 7
+            finally:
+                self.last_generation.update({
+                    "decoder": "axiom-autoregressive-kv-cache",
+                    "prompt_tokens": 2,
+                    "completion_tokens": 1 if self.device == "cpu" else 0,
+                    "prefill_ms": 1.0,
+                    "decode_ms": 1.0,
+                    "time_to_first_token_ms": 1.0,
+                    "generation_tokens_per_second": 100.0,
+                    "stop_reason": "max_new_tokens",
+                })
+
+    def fake_load(_model_path, _adapter_path, device_preference, _memory_mode, _precision):
+        calls.append(device_preference)
+        selected_device = "cuda" if device_preference == "auto" else "cpu"
+        runtime = RuntimeFixture(selected_device)
+        details = {
+            "model_directory_path": "/trusted/fixture",
+            "model_directory_name": "fixture",
+            "adapter_directory_name": None,
+            "architecture": "LlamaForCausalLM",
+            "model_type": "llama",
+            "add_bos_token": False,
+            "device_selection": {
+                "requested": device_preference,
+                "selected": selected_device,
+                "reason": "test fixture",
+            },
+            "precision_selection": {"requested": "auto", "selected": "fp32"},
+            "precision": "fp32",
+            "checkpoint_format": "safetensors",
+        }
+        return runtime, TokenizerFixture(), None, SimpleNamespace(type=selected_device), details
+
+    monkeypatch.setattr(engine, "_load_local_model", fake_load)
+    monkeypatch.setattr(engine, "_device_memory_snapshot", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(engine, "_reset_device_peak_memory", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(engine, "_clear_device_cache", lambda *_args, **_kwargs: None)
+
+    events = list(engine.generate_local_stream(
+        "/trusted/fixture", "question", max_new_tokens=2, temperature=0,
+        device_preference="auto",
+    ))
+    token_events = [event for event in events if event["type"] == "token"]
+    completion = events[-1]["result"]
+
+    assert calls == ["auto", "cpu"]
+    assert len(token_events) == 1
+    assert completion["response"] == "generated"
+    assert completion["device"] == "cpu"
+    assert completion["device_selection"]["requested"] == "auto"
+    assert completion["device_selection"]["selected"] == "cpu"
+    assert completion["device_selection"]["fallback_from"] == "cuda"
+    assert completion["device_fallback"] == {
+        "fallback_from": "cuda",
+        "selected": "cpu",
+        "reason": completion["device_selection"]["reason"],
+    }
+
+
+def test_native_stream_does_not_retry_on_cpu_after_partial_output(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from axiom.core import engine
+    from axiom.core.engine import AxiomEngineError
+
+    calls: list[str] = []
+
+    class TokenizerFixture:
+        def encode(self, _prompt, add_special_tokens=False):
+            return SimpleNamespace(ids=[1])
+
+        def decode(self, token_ids, skip_special_tokens=True):
+            return "partial" if list(token_ids) == [7] else ""
+
+    class RuntimeFixture:
+        config = SimpleNamespace(
+            max_position_embeddings=32,
+            effective_max_position_embeddings=32,
+            bos_token_id=None,
+            eos_token_ids=(),
+        )
+        last_attention_backend = "fixture-attention"
+        memory_mode = "full"
+        memory_stats = {}
+
+        def __init__(self):
+            self.last_generation = {}
+
+        def iter_generate(self, _prompt_ids, **_kwargs):
+            try:
+                yield 7
+                raise RuntimeError("CUDA out of memory after first token")
+            finally:
+                self.last_generation.update({
+                    "decoder": "axiom-autoregressive-kv-cache",
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "prefill_ms": 1.0,
+                    "decode_ms": 1.0,
+                    "time_to_first_token_ms": 1.0,
+                    "generation_tokens_per_second": 100.0,
+                    "stop_reason": "max_new_tokens",
+                })
+
+    def fake_load(_model_path, _adapter_path, device_preference, _memory_mode, _precision):
+        calls.append(device_preference)
+        runtime = RuntimeFixture()
+        details = {
+            "model_directory_path": "/trusted/fixture",
+            "model_directory_name": "fixture",
+            "adapter_directory_name": None,
+            "architecture": "LlamaForCausalLM",
+            "model_type": "llama",
+            "add_bos_token": False,
+            "device_selection": {"requested": "auto", "selected": "cuda", "reason": "test fixture"},
+            "precision_selection": {"requested": "auto", "selected": "fp32"},
+            "precision": "fp32",
+            "checkpoint_format": "safetensors",
+        }
+        return runtime, TokenizerFixture(), None, SimpleNamespace(type="cuda"), details
+
+    monkeypatch.setattr(engine, "_load_local_model", fake_load)
+    monkeypatch.setattr(engine, "_device_memory_snapshot", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(engine, "_reset_device_peak_memory", lambda *_args, **_kwargs: False)
+
+    stream = engine.generate_local_stream(
+        "/trusted/fixture", "question", max_new_tokens=2, temperature=0,
+        device_preference="auto",
+    )
+    first_event = next(stream)
+    assert first_event == {"type": "token", "response": "partial", "completion_tokens": 1}
+    with pytest.raises(AxiomEngineError, match="only before any output token is emitted"):
+        next(stream)
+    assert calls == ["auto"]
+
+
 def test_auto_device_retries_cpu_after_accelerator_oom(monkeypatch, tmp_path: Path) -> None:
     import sys
     from types import SimpleNamespace
