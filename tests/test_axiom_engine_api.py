@@ -35,6 +35,37 @@ def test_engine_request_accepts_absolute_paths_only_inside_explicit_roots(tmp_pa
     assert request.model_path == str(model.resolve())
 
 
+def test_model_discovery_reports_dynamic_ntk_effective_context_for_runtime_gui(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "models"
+    model = root / "dynamic-llama"
+    model.mkdir(parents=True)
+    config = {
+        "model_type": "llama",
+        "architectures": ["LlamaForCausalLM"],
+        "hidden_size": 8,
+        "intermediate_size": 12,
+        "num_hidden_layers": 1,
+        "num_attention_heads": 2,
+        "num_key_value_heads": 1,
+        "vocab_size": 8,
+        "max_position_embeddings": 8,
+        "rope_theta": 10000.0,
+        "rope_scaling": {"rope_type": "dynamic", "factor": 2.0},
+    }
+    (model / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    (model / "tokenizer.json").write_text("{}", encoding="utf-8")
+    (model / "model.safetensors").write_bytes(b"metadata-only-fixture")
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(root))
+
+    response = _client().get("/api/engine/models")
+    assert response.status_code == 200, response.text
+    report = response.json()
+    selected = next(item for item in report["models"] if item["name"] == "dynamic-llama")
+    assert selected["max_position_embeddings"] == 8
+    assert selected["effective_max_position_embeddings"] == 16
+    assert selected["rope_scaling_type"] == "dynamic"
+
+
 def test_native_benchmark_api_forwards_bounded_local_options_without_response_payload(
     tmp_path, monkeypatch
 ) -> None:
