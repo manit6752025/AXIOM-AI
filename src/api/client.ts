@@ -1673,8 +1673,8 @@ export const axiomApi = {
     stop_sequences: string[]; device: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu";
     memory_mode: "auto" | "full" | "layer_streaming" | "disk_streaming";
     precision: "auto" | "fp32" | "fp16" | "bf16";
-  }) => requestJson<AxiomEngineBenchmark>("/api/engine/benchmark", {
-    method: "POST", body: JSON.stringify(input),
+  }, signal?: AbortSignal) => requestJson<AxiomEngineBenchmark>("/api/engine/benchmark", {
+    method: "POST", body: JSON.stringify(input), signal,
   }, 300_000),
   axiomEngineStatus: () => requestJson<AxiomEngineStatus>("/api/engine/status"),
   engineBackends: (profile: EngineFabricProfile = "balanced") => requestJson<EngineFabricReport>("/api/engine/backends?" + new URLSearchParams({ profile })),
