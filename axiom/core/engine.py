@@ -1961,6 +1961,7 @@ def generate_local(
     device_preference: str = "auto",
     memory_mode: str = "auto",
     precision: str = "auto",
+    cancel_event: threading.Event | None = None,
     _lock_held: bool = False,
 ) -> dict[str, Any]:
     """Generate a complete local response through the streaming decoder."""
@@ -1981,6 +1982,7 @@ def generate_local(
         device_preference=device_preference,
         memory_mode=memory_mode,
         precision=precision,
+        cancel_event=cancel_event,
         _lock_held=_lock_held,
     ):
         if event.get("type") == "complete" and isinstance(event.get("result"), dict):
@@ -2010,6 +2012,7 @@ def benchmark_local(
     device_preference: str = "auto",
     memory_mode: str = "auto",
     precision: str = "auto",
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Run bounded local benchmarks and discard all generated text."""
     if isinstance(warmup_runs, bool) or not isinstance(warmup_runs, int) or not 0 <= warmup_runs <= 2:
@@ -2031,8 +2034,10 @@ def benchmark_local(
     measured: list[dict[str, Any]] = []
     warmups_completed = 0
     last_outcome: dict[str, Any] | None = None
-    with _engine_request_lock():
+    with _engine_request_lock(cancel_event):
         for index in range(warmup_runs + iterations):
+            if cancel_event is not None and cancel_event.is_set():
+                raise AxiomEngineError("Native benchmark was cancelled.")
             outcome = generate_local(
                 model_path,
                 valid_prompt,
@@ -2048,8 +2053,11 @@ def benchmark_local(
                 device_preference=device_preference,
                 memory_mode=memory_mode,
                 precision=precision,
+                cancel_event=cancel_event,
                 _lock_held=True,
             )
+            if cancel_event is not None and cancel_event.is_set():
+                raise AxiomEngineError("Native benchmark was cancelled.")
             last_outcome = outcome
             if index < warmup_runs:
                 warmups_completed += 1
