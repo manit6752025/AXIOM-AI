@@ -89,6 +89,41 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
       scope_note: "Planning estimates only. They do not inspect tensor contents, measure physical memory, or predict model quality/speed.",
     } });
   });
+  await page.route("**/api/engine/benchmark", async (route) => {
+    const requestBody = route.request().postDataJSON() as Record<string, unknown>;
+    expect(requestBody.prompt).toBe("Say hello.");
+    expect(requestBody.warmup_runs).toBe(1);
+    expect(requestBody.iterations).toBe(2);
+    expect(requestBody.max_new_tokens).toBe(128);
+    expect(requestBody.top_p).toBe(0.8);
+    expect(requestBody.top_k).toBe(4);
+    expect(requestBody.min_p).toBe(0.05);
+    expect(requestBody.seed).toBe(42);
+    expect(requestBody.stop_sequences).toEqual(["<END>", "###"]);
+    await route.fulfill({ json: {
+      schema_version: 1, engine: "axiom-native-engine", model: "llama-test",
+      architecture: "LlamaForCausalLM", model_type: "llama", device: "cpu",
+      precision: "fp32", memory_mode: "full", checkpoint_format: "safetensors",
+      warmup_runs_requested: 1, warmup_runs_completed: 1, warmups_excluded: true,
+      iterations_requested: 2, iterations_completed: 2, max_new_tokens: 128,
+      sampling: { temperature: 0.7, top_p: 0.8, top_k: 4, min_p: 0.05, repetition_penalty: 1.1, seed: 42 },
+      metrics: {
+        total_wall_time_ms: 88, measured_wall_time_ms: 44,
+        median_elapsed_ms: 22, p95_elapsed_ms: 26, median_prefill_ms: 8,
+        median_decode_ms: 12, median_time_to_first_token_ms: 8,
+        median_generation_tokens_per_second: 21, completion_tokens: 20,
+        prompt_tokens: 10, aggregate_tokens_per_second: 19,
+      },
+      runs: [
+        { iteration: 1, elapsed_ms: 18, prefill_ms: 7, decode_ms: 10, time_to_first_token_ms: 7, generation_tokens_per_second: 22, prompt_tokens: 5, completion_tokens: 10, stop_reason: "max_new_tokens" },
+        { iteration: 2, elapsed_ms: 26, prefill_ms: 9, decode_ms: 14, time_to_first_token_ms: 9, generation_tokens_per_second: 20, prompt_tokens: 5, completion_tokens: 10, stop_reason: "max_new_tokens" },
+      ],
+      device_memory: null, memory_selection: null,
+      scope_note: "Measured local AXIOM inference. No prompts or generated responses are returned.",
+      privacy: { prompt_returned: false, response_returned: false, results_persisted: false, cloud_provider_used: false },
+      generated_at: "2026-10-26T00:00:00Z",
+    } });
+  });
   await page.route("**/api/engine/generate/stream", (route) => {
     engineLoaded = true;
     const requestBody = route.request().postDataJSON() as Record<string, unknown>;
@@ -200,6 +235,15 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(engine).toContainText("Finish: stop sequence · Stop sequences: 2 · Attention: pytorch-scaled-dot-product-attention · Sampling: temperature 0.7 · top-p 0.8 · top-k 4 · min-p 0.05 · repetition penalty 1.1 · seed 42");
   await expect(engine).toContainText("LlamaForCausalLM");
   await expect(engine.getByRole("button", { name: "Unload model" })).toBeVisible();
+
+  await engine.getByLabel("Benchmark warm-up runs").fill("1");
+  await engine.getByLabel("Measured benchmark runs").fill("2");
+  await engine.getByRole("button", { name: "Benchmark native engine" }).click();
+  const nativeBenchmark = engine.getByRole("region", { name: "Native benchmark results" });
+  await expect(nativeBenchmark).toContainText("2 measured run(s)");
+  await expect(nativeBenchmark).toContainText("19.00 tokens/s");
+  await expect(nativeBenchmark).toContainText("Run 2");
+  await expect(nativeBenchmark).not.toContainText("Say hello.");
 
   await engine.getByLabel("AXIOM Native batch prompts").fill("First batch prompt\nSecond batch prompt");
   await engine.getByRole("button", { name: "Run native batch" }).click();
