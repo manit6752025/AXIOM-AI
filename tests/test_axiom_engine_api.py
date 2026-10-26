@@ -79,6 +79,7 @@ def test_native_benchmark_api_forwards_bounded_local_options_without_response_pa
     assert response.status_code == 200, response.text
     assert response.json()["warmups_excluded"] is True
     assert "response" not in response.json()
+    assert isinstance(captured.pop("cancel_event"), Event)
     assert captured == {
         "model_path": str(model.resolve()),
         "prompt": "private benchmark prompt",
