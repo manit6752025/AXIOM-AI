@@ -1815,6 +1815,39 @@ def test_native_benchmark_excludes_warmups_and_never_returns_prompt_or_response(
     }
 
 
+def test_native_benchmark_cancellation_stops_before_next_measured_run(monkeypatch) -> None:
+    from threading import Event
+
+    from axiom.core import engine as engine_module
+
+    cancel_event = Event()
+    calls = []
+
+    def fake_generate(_model_path, _prompt, **kwargs):
+        calls.append(kwargs)
+        assert kwargs["cancel_event"] is cancel_event
+        cancel_event.set()
+        return {
+            "elapsed_ms": 12.0,
+            "prefill_ms": 3.0,
+            "decode_ms": 8.0,
+            "time_to_first_token_ms": 3.0,
+            "generation_tokens_per_second": 20.0,
+            "prompt_tokens": 4,
+            "completion_tokens": 8,
+            "stop_reason": "cancelled",
+        }
+
+    monkeypatch.setattr(engine_module, "generate_local", fake_generate)
+    with pytest.raises(engine_module.AxiomEngineError, match="Native benchmark was cancelled"):
+        engine_module.benchmark_local(
+            "/trusted/model", "private prompt",
+            warmup_runs=0, iterations=3, cancel_event=cancel_event,
+        )
+
+    assert len(calls) == 1
+
+
 def test_native_benchmark_rejects_unbounded_work_before_generation(monkeypatch) -> None:
     from axiom.core import engine as engine_module
 
