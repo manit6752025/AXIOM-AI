@@ -1698,6 +1698,7 @@ def generate_local_stream(
     cannot replace or unload the model while its KV cache is active. Closing
     the iterator closes the native token iterator and releases that lock.
     """
+    global _LOADED_RUNTIME, _LOADED_ARCHITECTURE
     prompt, max_new_tokens, temperature = validate_generation(prompt, max_new_tokens, temperature)
     if chat_messages is not None:
         if not isinstance(chat_messages, list) or not 1 <= len(chat_messages) <= 128:
@@ -1937,6 +1938,97 @@ def generate_local_stream(
                 "local_only": True,
             }
             yield {"type": "complete", "result": result}
+        except (RuntimeError, OSError, MemoryError) as exc:
+            error_text = str(exc).casefold()
+            out_of_memory = isinstance(exc, MemoryError) or "out of memory" in error_text
+            device_type = str(getattr(device, "type", device)).split(":", 1)[0].casefold()
+            may_retry_on_cpu = (
+                out_of_memory
+                and not generated_ids
+                and (cancel_event is None or not cancel_event.is_set())
+                and isinstance(device_preference, str)
+                and device_preference.strip().casefold() == "auto"
+                and device_type in {"cuda", "mps", "xpu"}
+            )
+            if may_retry_on_cpu:
+                _LOG.warning(
+                    "AXIOM Native Engine hit accelerator OOM before the first output token; "
+                    "releasing the failed runtime and retrying this request on CPU."
+                )
+                close_iterator = getattr(iterator, "close", None)
+                if callable(close_iterator):
+                    try:
+                        close_iterator()
+                    except (RuntimeError, ValueError):
+                        _LOG.debug("OOM-failed native iterator was already closed.", exc_info=True)
+                iterator = None
+                model = None
+                tokenizer = None
+                _LOADED_RUNTIME = None
+                _LOADED_ARCHITECTURE = None
+                gc.collect()
+                _clear_device_cache(torch, device)
+                fallback_reason = (
+                    f"The {device_type.upper()} backend ran out of memory before output began; "
+                    "AXIOM retried this request on CPU."
+                )
+                fallback_iterator = generate_local_stream(
+                    model_path,
+                    prompt,
+                    adapter_path=adapter_path,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    min_p=min_p,
+                    repetition_penalty=repetition_penalty,
+                    seed=seed,
+                    stop_sequences=stop_sequences,
+                    include_token_events=include_token_events,
+                    cancel_event=cancel_event,
+                    device_preference="cpu",
+                    memory_mode=memory_mode,
+                    chat_messages=chat_messages,
+                    precision=precision,
+                    _lock_held=True,
+                )
+                try:
+                    for fallback_event in fallback_iterator:
+                        if fallback_event.get("type") == "complete" and isinstance(fallback_event.get("result"), dict):
+                            fallback_result = fallback_event["result"]
+                            selection = fallback_result.get("device_selection")
+                            if isinstance(selection, dict):
+                                fallback_result["device_selection"] = {
+                                    **selection,
+                                    "requested": "auto",
+                                    "selected": "cpu",
+                                    "reason": fallback_reason,
+                                    "fallback_from": device_type,
+                                    "fallback_reason": "Accelerator OOM occurred before any token was emitted.",
+                                }
+                            fallback_result["device_fallback"] = {
+                                "fallback_from": device_type,
+                                "selected": "cpu",
+                                "reason": fallback_reason,
+                            }
+                            fallback_event["result"] = fallback_result
+                        yield fallback_event
+                finally:
+                    close_fallback = getattr(fallback_iterator, "close", None)
+                    if callable(close_fallback):
+                        close_fallback()
+                return
+            if out_of_memory:
+                raise AxiomEngineError(
+                    "AXIOM Native Engine ran out of memory during inference. "
+                    "Automatic CPU retry is available only before any output token is emitted; "
+                    "use a smaller model/context or select CPU explicitly."
+                ) from None
+            _LOG.debug("AXIOM Native Engine token generation failed.", exc_info=True)
+            raise AxiomEngineError(
+                "AXIOM Native Engine generation failed. The prompt/context may exceed memory, "
+                "or the checkpoint may be incompatible with the implemented architecture."
+            ) from None
         except (ValueError, GeneratorExit):
             raise
         except Exception:
