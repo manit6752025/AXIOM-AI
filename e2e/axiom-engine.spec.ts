@@ -203,7 +203,7 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(engine.getByText("ENGINE READY")).toBeVisible();
 
   await engine.getByLabel("Select discovered native model").selectOption("/models/llama-test");
-  await expect(engine.getByLabel("Local Llama / Mistral model directory")).toHaveValue("/models/llama-test");
+  await expect(engine.getByLabel("Local native model directory")).toHaveValue("/models/llama-test");
   await engine.getByLabel("Planner context length").fill("16");
   await engine.getByLabel("Planner batch size").fill("1");
   await engine.getByLabel("RAM budget GiB", { exact: true }).fill("8");
