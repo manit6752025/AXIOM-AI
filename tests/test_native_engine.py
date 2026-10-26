@@ -1660,6 +1660,64 @@ def _planner_fixture(tmp_path: Path, monkeypatch, *, system_memory: int | None):
     return engine_module, model_dir, {"config": _config()}
 
 
+def test_mistral_sliding_window_memory_estimate_bounds_retained_cache_and_accounts_for_prefill(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from types import SimpleNamespace
+
+    from axiom.core import engine as engine_module
+    from axiom.core.native_engine import NativeLlamaConfig
+
+    module, model_dir, inspected = _planner_fixture(
+        tmp_path, monkeypatch, system_memory=8 * 1024**3
+    )
+    inspected["config"] = _config(
+        model_type="mistral",
+        architectures=["MistralForCausalLM"],
+        sliding_window=3,
+        max_position_embeddings=128,
+    )
+    mode, selection = module._choose_memory_mode(
+        model_dir,
+        inspected,
+        object(),
+        SimpleNamespace(type="cpu"),
+        {"selected": "cpu"},
+    )
+
+    config = NativeLlamaConfig.from_mapping(inspected["config"])
+    context = selection["estimated_context_tokens"]
+    cache_context = min(context, config.sliding_window)
+    dtype_bytes = selection["estimated_dtype_bytes"]
+    head_dim = config.hidden_size // config.num_attention_heads
+    expected_cache_bytes = (
+        2
+        * config.num_hidden_layers
+        * config.num_key_value_heads
+        * head_dim
+        * cache_context
+        * dtype_bytes
+    )
+    expected_prefill_bytes = (
+        2 * config.num_key_value_heads * head_dim * context * dtype_bytes
+    )
+    unbounded_cache_bytes = (
+        2
+        * config.num_hidden_layers
+        * config.num_key_value_heads
+        * head_dim
+        * context
+        * dtype_bytes
+    )
+
+    assert mode == "full"
+    assert context > cache_context
+    assert selection["estimated_kv_cache_context_tokens"] == cache_context
+    assert selection["estimated_kv_cache_bytes"] == expected_cache_bytes
+    assert selection["estimated_kv_prefill_temporary_bytes"] == expected_prefill_bytes
+    assert selection["estimated_kv_cache_bytes"] < unbounded_cache_bytes
+
+
 def test_auto_memory_planner_selects_full_mode_when_cpu_ram_is_sufficient(tmp_path: Path, monkeypatch) -> None:
     from types import SimpleNamespace
 
