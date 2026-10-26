@@ -8,7 +8,7 @@ Transformers model generation or an Ollama service.
 from __future__ import annotations
 
 import gc
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from functools import lru_cache
 import importlib.metadata
 import importlib.util
@@ -18,6 +18,7 @@ import math
 import os
 import re
 import shutil
+import statistics
 import sys
 import threading
 import time
@@ -1680,6 +1681,7 @@ def generate_local_stream(
     memory_mode: str = "auto",
     chat_messages: list[dict[str, str]] | None = None,
     precision: str = "auto",
+    _lock_held: bool = False,
 ) -> Iterator[dict[str, Any]]:
     """Yield cumulative decoded text updates and one final metrics event.
 
@@ -1712,7 +1714,7 @@ def generate_local_stream(
     top_p, top_k, repetition_penalty, seed = validate_sampling_parameters(top_p, top_k, repetition_penalty, seed)
     min_p = validate_min_p(min_p)
     stop_sequences = validate_stop_sequences(stop_sequences)
-    with _engine_request_lock(cancel_event):
+    with (nullcontext() if _lock_held else _engine_request_lock(cancel_event)):
         model, tokenizer, torch, device, details = _load_local_model(model_path, adapter_path, device_preference, memory_mode, precision)
         selected_backend = details.get("device_selection", {}).get("selected")
         device_memory_before = _device_memory_snapshot(torch, device, selected_backend=selected_backend)
@@ -1956,6 +1958,7 @@ def generate_local(
     device_preference: str = "auto",
     memory_mode: str = "auto",
     precision: str = "auto",
+    _lock_held: bool = False,
 ) -> dict[str, Any]:
     """Generate a complete local response through the streaming decoder."""
     completed: dict[str, Any] | None = None
@@ -1975,6 +1978,7 @@ def generate_local(
         device_preference=device_preference,
         memory_mode=memory_mode,
         precision=precision,
+        _lock_held=_lock_held,
     ):
         if event.get("type") == "complete" and isinstance(event.get("result"), dict):
             completed = event["result"]
@@ -1982,6 +1986,145 @@ def generate_local(
         raise AxiomEngineError("Native generation ended before a completion event was produced.")
     return completed
 
+
+
+
+def benchmark_local(
+    model_path: str,
+    prompt: str,
+    *,
+    adapter_path: str | None = None,
+    warmup_runs: int = 1,
+    iterations: int = 3,
+    max_new_tokens: int = 64,
+    temperature: float = 0.0,
+    top_p: float = 0.9,
+    top_k: int = 0,
+    min_p: float = 0.0,
+    repetition_penalty: float = 1.0,
+    seed: int | None = None,
+    stop_sequences: list[str] | tuple[str, ...] = (),
+    device_preference: str = "auto",
+    memory_mode: str = "auto",
+    precision: str = "auto",
+) -> dict[str, Any]:
+    """Run bounded local benchmarks and discard all generated text."""
+    if isinstance(warmup_runs, bool) or not isinstance(warmup_runs, int) or not 0 <= warmup_runs <= 2:
+        raise ValueError("Warm-up runs must be an integer from 0 through 2.")
+    if isinstance(iterations, bool) or not isinstance(iterations, int) or not 1 <= iterations <= 5:
+        raise ValueError("Measured iterations must be an integer from 1 through 5.")
+    if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens <= 128:
+        raise ValueError("Benchmark output length must be an integer from 1 through 128 tokens.")
+    valid_prompt, max_new_tokens, temperature = validate_generation(
+        prompt, max_new_tokens, temperature
+    )
+    top_p, top_k, repetition_penalty, seed = validate_sampling_parameters(
+        top_p, top_k, repetition_penalty, seed
+    )
+    min_p = validate_min_p(min_p)
+    stops = validate_stop_sequences(stop_sequences)
+
+    started = time.perf_counter()
+    measured: list[dict[str, Any]] = []
+    warmups_completed = 0
+    last_outcome: dict[str, Any] | None = None
+    with _engine_request_lock():
+        for index in range(warmup_runs + iterations):
+            outcome = generate_local(
+                model_path,
+                valid_prompt,
+                adapter_path=adapter_path,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                min_p=min_p,
+                repetition_penalty=repetition_penalty,
+                seed=seed,
+                stop_sequences=stops,
+                device_preference=device_preference,
+                memory_mode=memory_mode,
+                precision=precision,
+                _lock_held=True,
+            )
+            last_outcome = outcome
+            if index < warmup_runs:
+                warmups_completed += 1
+                continue
+            measured.append({
+                "iteration": len(measured) + 1,
+                "elapsed_ms": float(outcome.get("elapsed_ms", 0.0)),
+                "prefill_ms": float(outcome.get("prefill_ms", 0.0)),
+                "decode_ms": float(outcome.get("decode_ms", 0.0)),
+                "time_to_first_token_ms": float(outcome.get("time_to_first_token_ms", 0.0)),
+                "generation_tokens_per_second": float(outcome.get("generation_tokens_per_second", 0.0)),
+                "prompt_tokens": int(outcome.get("prompt_tokens", 0)),
+                "completion_tokens": int(outcome.get("completion_tokens", 0)),
+                "stop_reason": str(outcome.get("stop_reason", "unknown")),
+            })
+
+    if last_outcome is None or not measured:
+        raise AxiomEngineError("Native benchmark ended before a measured run was completed.")
+    total_wall_ms = round((time.perf_counter() - started) * 1000, 2)
+
+    def metric_median(key: str) -> float:
+        values = [item[key] for item in measured if math.isfinite(item[key]) and item[key] >= 0]
+        return round(float(statistics.median(values)), 2) if values else 0.0
+
+    wall_times = sorted(item["elapsed_ms"] for item in measured)
+    p95_wall_ms = round(wall_times[min(len(wall_times) - 1, math.ceil(0.95 * len(wall_times)) - 1)], 2)
+    measured_wall_ms = sum(item["elapsed_ms"] for item in measured)
+    completion_tokens = sum(item["completion_tokens"] for item in measured)
+    prompt_tokens = sum(item["prompt_tokens"] for item in measured)
+    return {
+        "schema_version": 1,
+        "engine": "axiom-native-engine",
+        "model": last_outcome.get("model", "local-model"),
+        "architecture": last_outcome.get("architecture"),
+        "model_type": last_outcome.get("model_type"),
+        "device": last_outcome.get("device"),
+        "precision": last_outcome.get("precision"),
+        "memory_mode": last_outcome.get("memory_mode", memory_mode),
+        "checkpoint_format": last_outcome.get("checkpoint_format", "safetensors"),
+        "warmup_runs_requested": warmup_runs,
+        "warmup_runs_completed": warmups_completed,
+        "warmups_excluded": True,
+        "iterations_requested": iterations,
+        "iterations_completed": len(measured),
+        "max_new_tokens": max_new_tokens,
+        "sampling": {
+            "temperature": temperature, "top_p": top_p, "top_k": top_k,
+            "min_p": min_p, "repetition_penalty": repetition_penalty, "seed": seed,
+        },
+        "metrics": {
+            "total_wall_time_ms": total_wall_ms,
+            "measured_wall_time_ms": round(measured_wall_ms, 2),
+            "median_elapsed_ms": metric_median("elapsed_ms"),
+            "p95_elapsed_ms": p95_wall_ms,
+            "median_prefill_ms": metric_median("prefill_ms"),
+            "median_decode_ms": metric_median("decode_ms"),
+            "median_time_to_first_token_ms": metric_median("time_to_first_token_ms"),
+            "median_generation_tokens_per_second": metric_median("generation_tokens_per_second"),
+            "completion_tokens": completion_tokens,
+            "prompt_tokens": prompt_tokens,
+            "aggregate_tokens_per_second": round(completion_tokens * 1000 / measured_wall_ms, 2) if measured_wall_ms > 0 else 0.0,
+        },
+        "runs": measured,
+        "device_memory": last_outcome.get("device_memory"),
+        "memory_selection": last_outcome.get("memory_selection"),
+        "scope_note": (
+            "Measured local AXIOM inference only. Warm-ups are excluded from measured statistics. "
+            "Prompts, generated responses and model paths are not returned or persisted. "
+            "Latency and throughput are specific to the observed machine, model and workload."
+        ),
+        "privacy": {
+            "prompt_returned": False,
+            "response_returned": False,
+            "results_persisted": False,
+            "cloud_provider_used": False,
+        },
+        "generated_at": datetime.now(UTC).isoformat(),
+    }
 
 def generate_local_batch(
     model_path: str,
