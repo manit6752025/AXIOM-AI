@@ -46,6 +46,7 @@ export default function LocalAxiomEnginePanel() {
   const [streamResponse, setStreamResponse] = useState("");
   const [streamTokenCount, setStreamTokenCount] = useState(0);
   const activeStreamRef = useRef<AbortController | null>(null);
+  const benchmarkAbortRef = useRef<AbortController | null>(null);
   const streamTokenCountRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -368,6 +369,8 @@ export default function LocalAxiomEnginePanel() {
       return;
     }
 
+    const controller = new AbortController();
+    benchmarkAbortRef.current = controller;
     setBenchmarking(true);
     try {
       const report = await axiomApi.benchmarkAxiomEngine({
@@ -387,12 +390,15 @@ export default function LocalAxiomEnginePanel() {
         device: devicePreference,
         memory_mode: memoryMode,
         precision,
-      });
+      }, controller.signal);
       setBenchmarkResult(report);
       void refresh();
     } catch (cause) {
-      setBenchmarkError(cause instanceof Error ? cause.message : "AXIOM Native Engine benchmark failed.");
+      setBenchmarkError(controller.signal.aborted
+        ? "Benchmark cancelled; AXIOM has been asked to stop the native generation loop."
+        : cause instanceof Error ? cause.message : "AXIOM Native Engine benchmark failed.");
     } finally {
+      if (benchmarkAbortRef.current === controller) benchmarkAbortRef.current = null;
       setBenchmarking(false);
     }
   };
@@ -557,9 +563,12 @@ export default function LocalAxiomEnginePanel() {
           <label className="field"><span className="field-label-row"><span>Benchmark warm-up runs</span></span><input aria-label="Benchmark warm-up runs" type="number" min={0} max={2} step={1} value={benchmarkWarmupRuns} onChange={(event) => setBenchmarkWarmupRuns(event.target.value)} /><small>0–2 runs excluded from the results.</small></label>
           <label className="field"><span className="field-label-row"><span>Measured benchmark runs</span></span><input aria-label="Measured benchmark runs" type="number" min={1} max={5} step={1} value={benchmarkIterations} onChange={(event) => setBenchmarkIterations(event.target.value)} /><small>1–5 measured generations; this is bounded to protect local resources.</small></label>
         </div>
-        <button type="button" className="button secondary-button" onClick={() => void runBenchmark()} disabled={!status?.ready || loading || running || benchmarking || unloading || !modelPath.trim() || !prompt.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}>
-          <Activity size={14} /> {benchmarking ? "Benchmarking locally…" : "Benchmark native engine"}
-        </button>
+        <div className="integration-form-actions">
+          <button type="button" className="button secondary-button" onClick={() => void runBenchmark()} disabled={!status?.ready || loading || running || benchmarking || unloading || !modelPath.trim() || !prompt.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}>
+            <Activity size={14} /> {benchmarking ? "Benchmarking locally…" : "Benchmark native engine"}
+          </button>
+          {benchmarking && <button type="button" className="button secondary-button" onClick={() => benchmarkAbortRef.current?.abort()}><Unplug size={14} /> Stop benchmark</button>}
+        </div>
         {benchmarkError && <div className="inline-alert warning" role="alert">{benchmarkError}</div>}
       </section>
       <div className="integration-form-actions">
