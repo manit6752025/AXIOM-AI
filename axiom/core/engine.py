@@ -795,7 +795,7 @@ def estimate_native_quantization(
     if context_length > native_config.effective_max_position_embeddings:
         raise ValueError(
             f"Context length {context_length} exceeds this checkpoint's limit "
-            f"of {native_config.effective_max_position_embeddings} tokens (including supported RoPE scaling).
+            f"of {native_config.effective_max_position_embeddings} tokens (including supported RoPE scaling)."
         )
 
     hidden = native_config.hidden_size
