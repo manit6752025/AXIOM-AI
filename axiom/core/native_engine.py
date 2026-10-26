@@ -213,6 +213,8 @@ class NativeLlamaConfig:
                 rope_original = raw_original
                 rope_low, rope_high = float(raw_low), float(raw_high)
             elif rope_type == "yarn":
+                if not 1.0 <= rope_factor <= 128.0:
+                    raise NativeEngineError("YaRN RoPE scaling factor must be between 1 and 128.")
                 raw_original = rope.get("original_max_position_embeddings")
                 raw_fast = rope.get("beta_fast", 32.0)
                 raw_slow = rope.get("beta_slow", 1.0)
