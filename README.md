@@ -32,7 +32,7 @@ Most AI projects fail early for boring reasons: the model does not fit, the data
 | Validate and clean JSONL datasets | Training plans you can save and compare | Local text generation with the AXIOM Engine or Ollama |
 | Diagnose your workspace | Agent-specific optimization profiles | Score predictions and gate regressions |
 
-AXIOM is in beta. Plans are estimates, and real results depend on your model, data, and hardware.
+AXIOM is still in beta. Plans are estimates, and real results depend on your model, data, and hardware.
 
 ## Quick start
 
