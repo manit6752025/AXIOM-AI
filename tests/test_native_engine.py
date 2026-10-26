@@ -1499,7 +1499,7 @@ def test_native_stream_retries_cpu_on_auto_accelerator_oom_before_first_token(mo
             "precision": "fp32",
             "checkpoint_format": "safetensors",
         }
-        return runtime, TokenizerFixture(), None, SimpleNamespace(type=selected_device), details
+        return runtime, TokenizerFixture(), None, selected_device, details
 
     monkeypatch.setattr(engine, "_load_local_model", fake_load)
     monkeypatch.setattr(engine, "_device_memory_snapshot", lambda *_args, **_kwargs: {})
@@ -1587,7 +1587,7 @@ def test_native_stream_does_not_retry_on_cpu_after_partial_output(monkeypatch) -
             "precision": "fp32",
             "checkpoint_format": "safetensors",
         }
-        return runtime, TokenizerFixture(), None, SimpleNamespace(type="cuda"), details
+        return runtime, TokenizerFixture(), None, "cuda", details
 
     monkeypatch.setattr(engine, "_load_local_model", fake_load)
     monkeypatch.setattr(engine, "_device_memory_snapshot", lambda *_args, **_kwargs: {})
