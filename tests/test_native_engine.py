@@ -321,9 +321,29 @@ def test_dynamic_ntk_rope_scaling_extends_context_and_matches_frequency_formula(
 
     input_ids = torch.tensor([[1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5]], dtype=torch.long)
     with torch.inference_mode():
-        logits, cache = runtime.forward(input_ids)
+        logits, cache = runtime.forward(input_ids, rope_sequence_length=12)
+        prefill_logits, prefix_cache = runtime.forward(
+            input_ids[:, :8], rope_sequence_length=12
+        )
+        cached_logits, cached_cache = runtime.forward(
+            input_ids[:, 8:],
+            prefix_cache,
+            past_sequence_length=8,
+            rope_sequence_length=12,
+        )
     assert tuple(logits.shape) == (1, config.vocab_size)
     assert tuple(cache[0][0].shape)[-2] == len(input_ids[0])
+    assert torch.allclose(cached_logits, logits, atol=1e-5, rtol=1e-4)
+    assert all(torch.allclose(left[0], right[0], atol=1e-5, rtol=1e-4) and torch.allclose(left[1], right[1], atol=1e-5, rtol=1e-4) for left, right in zip(cache, cached_cache))
+    prompt_ids = [1, 2, 3, 4, 5, 6, 7]
+    with torch.inference_mode():
+        batched_tokens = runtime.generate_batch(
+            [prompt_ids], max_new_tokens=3, temperature=0, eos_token_ids=()
+        )
+        serial_tokens = runtime.generate(
+            prompt_ids, max_new_tokens=3, temperature=0, eos_token_ids=()
+        )
+    assert batched_tokens == [serial_tokens]
     with pytest.raises(NativeEngineError, match="maximum context length"):
         runtime.forward(torch.ones((1, 17), dtype=torch.long))
 
