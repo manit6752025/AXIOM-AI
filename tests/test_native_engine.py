@@ -282,6 +282,72 @@ def test_native_config_supports_llama3_rope_scaling_formula() -> None:
     assert torch.allclose(actual_sin[0, 0], embedding.sin(), atol=1e-6, rtol=1e-5)
 
 
+def test_native_config_supports_yarn_rope_scaling_formula() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config(
+        rope_scaling={
+            "rope_type": "yarn",
+            "factor": 2.0,
+            "original_max_position_embeddings": 16,
+            "beta_fast": 32.0,
+            "beta_slow": 1.0,
+            "attention_factor": 1.25,
+            "truncate": True,
+        }
+    ))
+    assert config.rope_scaling_type == "yarn"
+    assert config.rope_scaling_factor == 2.0
+    assert config.rope_attention_factor == 1.25
+    assert config.rope_beta_fast == 32.0
+    assert config.rope_beta_slow == 1.0
+    assert config.rope_truncate is True
+
+    runtime = NativeLlamaRuntime(
+        config, _tiny_weights(torch), torch, torch.device("cpu")
+    )
+    positions = torch.arange(4)
+    actual_cos, actual_sin = runtime._rope_embeddings(positions, torch.float32)
+
+    dim = config.hidden_size // config.num_attention_heads
+    inverse_frequencies = 1.0 / (
+        config.rope_theta
+        ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim)
+    )
+
+    def correction_dimension(rotations: float) -> float:
+        return (
+            dim * math.log(
+                config.rope_original_max_position_embeddings
+                / (rotations * 2.0 * math.pi)
+            )
+            / (2.0 * math.log(config.rope_theta))
+        )
+
+    low = math.floor(correction_dimension(config.rope_beta_fast))
+    high = math.ceil(correction_dimension(config.rope_beta_slow))
+    low, high = max(low, 0), min(high, dim - 1)
+    if high <= low:
+        high += 0.001
+    ramp = (
+        (torch.arange(dim // 2, dtype=torch.float32) - low) / (high - low)
+    ).clamp(0.0, 1.0)
+    extrapolation_factor = 1.0 - ramp
+    expected_inverse = (
+        (inverse_frequencies / config.rope_scaling_factor) * (1.0 - extrapolation_factor)
+        + inverse_frequencies * extrapolation_factor
+    )
+    frequencies = torch.einsum(
+        "i,j->ij", positions.to(torch.float32), expected_inverse
+    )
+    embedding = torch.cat((frequencies, frequencies), dim=-1)
+    expected_cos = embedding.cos() * config.rope_attention_factor
+    expected_sin = embedding.sin() * config.rope_attention_factor
+    assert torch.allclose(actual_cos[0, 0], expected_cos, atol=1e-6, rtol=1e-5)
+    assert torch.allclose(actual_sin[0, 0], expected_sin, atol=1e-6, rtol=1e-5)
+
+
 @pytest.mark.parametrize(
     "overrides,detail",
     [
