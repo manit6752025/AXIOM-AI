@@ -160,6 +160,7 @@ def engine_estimate(
     table.add_column("Format", style="cyan")
     table.add_column("Weights")
     table.add_column("KV cache")
+    table.add_column("Prefill temp")
     table.add_column("Workspace")
     table.add_column("Total")
     table.add_column("Estimated range")
@@ -176,6 +177,7 @@ def engine_estimate(
             candidate["format"],
             f"{candidate['estimated_weight_gib']:.6f} GiB",
             f"{candidate['estimated_kv_cache_gib']:.6f} GiB",
+            f"{candidate['estimated_kv_prefill_temporary_gib']:.6f} GiB",
             f"{candidate['estimated_workspace_gib']:.6f} GiB",
             f"{candidate['estimated_total_gib']:.6f} GiB",
             f"{low:.6f}–{high:.6f} GiB",
