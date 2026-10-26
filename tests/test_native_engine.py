@@ -417,6 +417,8 @@ def test_native_config_rejects_malformed_token_and_rope_metadata(overrides, deta
         ({"rope_scaling": {"rope_type": "yarn", "factor": 2.0, "original_max_position_embeddings": 16, "beta_fast": 1.0, "beta_slow": 32.0}}, "YaRN RoPE scaling requires"),
         ({"rope_scaling": {"rope_type": "yarn", "factor": 2.0, "original_max_position_embeddings": 16, "attention_factor": 0}}, "YaRN attention_factor"),
         ({"rope_scaling": {"rope_type": "yarn", "factor": 129.0, "original_max_position_embeddings": 16}}, "YaRN RoPE scaling factor"),
+        ({"rope_scaling": {"rope_type": "dynamic", "factor": 129.0}}, "Dynamic NTK RoPE scaling factor"),
+        ({"rope_scaling": {"rope_type": "dynamic", "factor": 2.0}, "hidden_size": 4, "num_attention_heads": 2}, "head dimension greater than 2"),
         ({"rope_scaling": {"rope_type": "default", "factor": True}}, "RoPE scaling"),
         ({"model_type": "llama", "architectures": ["Qwen3ForCausalLM"]}, "does not match"),
         ({"num_attention_heads": 3, "hidden_size": 12, "num_key_value_heads": 2}, "num_key_value_heads"),
