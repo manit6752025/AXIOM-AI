@@ -805,6 +805,16 @@ def estimate_native_quantization(
     layers = native_config.num_hidden_layers
     vocab = native_config.vocab_size
     kv_width = kv_heads * head_dim
+    kv_cache_context = (
+        min(context_length, native_config.sliding_window)
+        if native_config.sliding_window
+        else context_length
+    )
+    kv_prefill_context = (
+        context_length
+        if native_config.sliding_window and context_length > native_config.sliding_window
+        else 0
+    )
 
     embedding_params = vocab * hidden
     lm_head_params = 0 if native_config.tie_word_embeddings else vocab * hidden
@@ -835,8 +845,13 @@ def estimate_native_quantization(
     candidate_results: list[dict[str, Any]] = []
     for name, bits, bytes_per_parameter, storage_overhead, kv_bytes, native_supported, reason in candidates:
         weight_bytes = estimated_parameters * bytes_per_parameter * storage_overhead
-        kv_bytes_total = 2 * layers * kv_heads * head_dim * context_length * batch_size * kv_bytes
-        unbuffered_total = weight_bytes + kv_bytes_total + workspace_bytes
+        kv_bytes_total = 2 * layers * kv_heads * head_dim * kv_cache_context * batch_size * kv_bytes
+        kv_prefill_temporary_bytes = (
+            2 * kv_heads * head_dim * kv_prefill_context * batch_size * kv_bytes
+        )
+        unbuffered_total = (
+            weight_bytes + kv_bytes_total + kv_prefill_temporary_bytes + workspace_bytes
+        )
         total_bytes = unbuffered_total * 1.20
         total_gib = total_bytes / gib
         uncertainty_low = total_gib * 0.85
@@ -848,6 +863,7 @@ def estimate_native_quantization(
             # not collapse all candidate formats to 0.000 GiB.
             "estimated_weight_gib": round(weight_bytes / gib, 9),
             "estimated_kv_cache_gib": round(kv_bytes_total / gib, 9),
+            "estimated_kv_prefill_temporary_gib": round(kv_prefill_temporary_bytes / gib, 9),
             "estimated_workspace_gib": round(workspace_bytes / gib, 9),
             "estimated_total_gib": round(total_gib, 9),
             "estimated_range_gib": [round(uncertainty_low, 9), round(uncertainty_high, 9)],
@@ -899,7 +915,10 @@ def estimate_native_quantization(
                 "int8": "1 byte/parameter plus 5% scales/metadata",
                 "int4": "0.5 bytes/parameter plus 15% scales/metadata",
             },
-            "kv_cache_formula": "2 × layers × KV heads × head dimension × context × batch × KV element bytes",
+            "kv_cache_context_length": kv_cache_context,
+            "kv_prefill_temporary_context_length": kv_prefill_context,
+            "kv_cache_formula": "2 × layers × KV heads × head dimension × retained cache context × batch × KV element bytes; Mistral retained context is bounded by sliding_window",
+            "kv_prefill_temporary_formula": "For Mistral prefill beyond sliding_window: 2 × KV heads × head dimension × full prefill context × batch × KV element bytes for the active layer",
             "kv_cache_precision": "FP32 candidate uses 4-byte cache elements; all other candidates assume 2-byte cache elements",
             "workspace_formula": "max(batch × context × intermediate × 4, batch × attention heads × context² × 4)",
             "safety_margin_percent": 20,
@@ -1221,7 +1240,11 @@ def _choose_memory_mode(
     resident_with_adapter = resident_non_layer + adapter_weight_bytes
     total_weight_bytes = weight_bytes + adapter_weight_bytes
     kv_total = 2 * config.num_hidden_layers * config.num_key_value_heads * head_dim * kv_cache_context * dtype_bytes
-    kv_prefill_per_layer = 2 * config.num_key_value_heads * head_dim * context * dtype_bytes
+    kv_prefill_per_layer = (
+        2 * config.num_key_value_heads * head_dim * context * dtype_bytes
+        if config.sliding_window and context > config.sliding_window
+        else 0
+    )
     workspace = max(context * config.intermediate_size * dtype_bytes * 2, config.hidden_size * context * dtype_bytes * 4)
     non_layer_weight_bytes = resident_with_adapter
     layer_bytes = max(0, weight_bytes - resident_non_layer) / max(1, config.num_hidden_layers)
