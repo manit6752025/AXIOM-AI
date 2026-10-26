@@ -100,6 +100,19 @@ class NativeLlamaConfig:
     rope_beta_slow: float = 1.0
     rope_truncate: bool = True
 
+    @property
+    def effective_max_position_embeddings(self) -> int:
+        """Return the inference context limit after supported context extension."""
+        if self.rope_scaling_type == "dynamic":
+            return min(
+                1_000_000,
+                max(
+                    self.max_position_embeddings,
+                    int(self.max_position_embeddings * self.rope_scaling_factor),
+                ),
+            )
+        return self.max_position_embeddings
+
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "NativeLlamaConfig":
         model_type = value.get("model_type")
@@ -212,6 +225,11 @@ class NativeLlamaConfig:
                     raise NativeEngineError("Llama 3 RoPE scaling requires valid original context and low/high frequency factors.")
                 rope_original = raw_original
                 rope_low, rope_high = float(raw_low), float(raw_high)
+            elif rope_type == "dynamic":
+                if not 1.0 <= rope_factor <= 128.0:
+                    raise NativeEngineError("Dynamic NTK RoPE scaling factor must be between 1 and 128.")
+                if hidden // heads <= 2:
+                    raise NativeEngineError("Dynamic NTK RoPE scaling requires an attention head dimension greater than 2.")
             elif rope_type == "yarn":
                 if not 1.0 <= rope_factor <= 128.0:
                     raise NativeEngineError("YaRN RoPE scaling factor must be between 1 and 128.")
@@ -1129,6 +1147,25 @@ class NativeLlamaRuntime:
         scaled_positions = positions.to(dtype=torch.float32)
         if self.config.rope_scaling_type == "linear":
             scaled_positions = scaled_positions / self.config.rope_scaling_factor
+        elif self.config.rope_scaling_type == "dynamic":
+            # Dynamic NTK leaves the pretrained frequencies unchanged up to the
+            # original context, then increases theta as context grows. Keep this
+            # update deterministic for a given absolute position range.
+            sequence_length = int(positions.max().item()) + 1 if positions.numel() else 0
+            if sequence_length > self.config.max_position_embeddings:
+                scale = (
+                    self.config.rope_scaling_factor * sequence_length
+                    / self.config.max_position_embeddings
+                    - (self.config.rope_scaling_factor - 1.0)
+                )
+                dynamic_theta = self.config.rope_theta * scale ** (dim / (dim - 2))
+                inv_freq = 1.0 / (
+                    dynamic_theta
+                    ** (
+                        torch.arange(0, dim, 2, device=self.device, dtype=torch.float32)
+                        / dim
+                    )
+                )
         elif self.config.rope_scaling_type == "llama3":
             # Match Llama 3's wavelength-dependent frequency interpolation:
             # preserve high frequencies, scale low frequencies, and smooth the
@@ -1282,8 +1319,8 @@ class NativeLlamaRuntime:
             or past_len < stored_past_len
         ):
             raise NativeEngineError("Native KV cache position is inconsistent with the cached sequence.")
-        if past_len + seq_len > self.config.max_position_embeddings:
-            raise NativeEngineError("Generation would exceed the checkpoint's configured maximum context length.")
+        if past_len + seq_len > self.config.effective_max_position_embeddings:
+            raise NativeEngineError("Generation would exceed the checkpoint's configured/scaled maximum context length.")
         hidden = torch.nn.functional.embedding(input_ids, self.weights["model.embed_tokens.weight"])
         positions = torch.arange(past_len, past_len + seq_len, device=self.device)
         rope_embeddings = self._rope_embeddings(positions, self.dtype)
@@ -1635,7 +1672,7 @@ class NativeLlamaRuntime:
             raise NativeEngineError("Native batch prompt token IDs must be integers inside the checkpoint vocabulary.")
         if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens <= 2048:
             raise NativeEngineError("Native generation token limit must be between 1 and 2048.")
-        if any(len(prompt) + max_new_tokens > self.config.max_position_embeddings for prompt in prompt_token_ids):
+        if any(len(prompt) + max_new_tokens > self.config.effective_max_position_embeddings for prompt in prompt_token_ids):
             raise NativeEngineError("Batch generation would exceed the checkpoint's configured maximum context length.")
         if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or not math.isfinite(float(temperature)) or not 0 <= float(temperature) <= 2:
             raise NativeEngineError("Native generation temperature must be a finite number between 0 and 2.")
