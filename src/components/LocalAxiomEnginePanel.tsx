@@ -15,7 +15,7 @@ const formatEstimatedMemory = (gib: number): string => {
   return `${(gib * 1024 ** 3).toFixed(0)} bytes`;
 };
 
-import { axiomApi, type AxiomEngineAdapterCompatibility, type AxiomEngineAssets, type AxiomEngineBatchResult, type AxiomEngineLiveTelemetry, type AxiomEngineResult, type AxiomEngineStatus, type AxiomEngineStreamEvent, type AxiomEngineSystemTelemetry, type AxiomQuantizationEstimate } from "../api/client";
+import { axiomApi, type AxiomEngineAdapterCompatibility, type AxiomEngineAssets, type AxiomEngineBatchResult, type AxiomEngineBenchmark, type AxiomEngineLiveTelemetry, type AxiomEngineResult, type AxiomEngineStatus, type AxiomEngineStreamEvent, type AxiomEngineSystemTelemetry, type AxiomQuantizationEstimate } from "../api/client";
 
 export default function LocalAxiomEnginePanel() {
   const [status, setStatus] = useState<AxiomEngineStatus | null>(null);
@@ -59,6 +59,11 @@ export default function LocalAxiomEnginePanel() {
   const [quantizationPlan, setQuantizationPlan] = useState<AxiomQuantizationEstimate | null>(null);
   const [planningQuantization, setPlanningQuantization] = useState(false);
   const [quantizationError, setQuantizationError] = useState("");
+  const [benchmarkWarmupRuns, setBenchmarkWarmupRuns] = useState("1");
+  const [benchmarkIterations, setBenchmarkIterations] = useState("3");
+  const [benchmarking, setBenchmarking] = useState(false);
+  const [benchmarkResult, setBenchmarkResult] = useState<AxiomEngineBenchmark | null>(null);
+  const [benchmarkError, setBenchmarkError] = useState("");
 
   const refresh = async () => {
     setLoading(true);
@@ -327,6 +332,68 @@ export default function LocalAxiomEnginePanel() {
     } finally {
       if (activeStreamRef.current === controller) activeStreamRef.current = null;
       setRunning(false);
+    }
+  };
+
+  const runBenchmark = async () => {
+    setBenchmarkError("");
+    setBenchmarkResult(null);
+    if (!modelPath.trim()) { setBenchmarkError("Choose a discovered native model before benchmarking."); return; }
+    if (!prompt.trim()) { setBenchmarkError("Enter a prompt before benchmarking."); return; }
+    const warmups = Number(benchmarkWarmupRuns);
+    const iterations = Number(benchmarkIterations);
+    const requestedTokens = Number(maxNewTokens);
+    const tokenLimit = Math.min(requestedTokens, 128);
+    const temp = Number(temperature);
+    const p = Number(topP);
+    const k = Number(topK);
+    const minPValue = Number(minP);
+    const repeatPenalty = Number(repetitionPenalty);
+    const seedValue = seed.trim() === "" ? null : Number(seed);
+    const stopSequences = stopSequencesText.split("\n").map((value) => value.replace(/\r$/, "")).filter((value) => value.length > 0);
+    if (!Number.isInteger(warmups) || warmups < 0 || warmups > 2) { setBenchmarkError("Warm-up runs must be an integer from 0 through 2."); return; }
+    if (!Number.isInteger(iterations) || iterations < 1 || iterations > 5) { setBenchmarkError("Measured iterations must be an integer from 1 through 5."); return; }
+    if (!Number.isInteger(requestedTokens) || requestedTokens < 1 || requestedTokens > 2048) { setBenchmarkError("Maximum generated tokens must be between 1 and 2048."); return; }
+    if (!Number.isFinite(temp) || temp < 0 || temp > 2) { setBenchmarkError("Temperature must be between 0 and 2."); return; }
+    if (!Number.isFinite(p) || p <= 0 || p > 1) { setBenchmarkError("Top-p must be greater than 0 and at most 1."); return; }
+    if (!Number.isInteger(k) || k < 0 || k > 100000) { setBenchmarkError("Top-k must be an integer from 0 through 100000."); return; }
+    if (!Number.isFinite(minPValue) || minPValue < 0 || minPValue > 1) { setBenchmarkError("Min-p must be between 0 and 1."); return; }
+    if (!Number.isFinite(repeatPenalty) || repeatPenalty < 0.1 || repeatPenalty > 5) { setBenchmarkError("Repetition penalty must be between 0.1 and 5."); return; }
+    if (seed.trim() !== "" && (!Number.isSafeInteger(seedValue) || seedValue! < 0 || seedValue! > Number.MAX_SAFE_INTEGER)) {
+      setBenchmarkError("Seed must be a whole number from 0 through 9007199254740991, or blank.");
+      return;
+    }
+    if (stopSequences.length > 16 || stopSequences.some((value) => !value.trim() || value.length > 256)) {
+      setBenchmarkError("Use at most 16 non-blank stop sequences, each no longer than 256 characters.");
+      return;
+    }
+
+    setBenchmarking(true);
+    try {
+      const report = await axiomApi.benchmarkAxiomEngine({
+        model_path: modelPath.trim(),
+        adapter_path: adapterPath.trim() || undefined,
+        prompt,
+        warmup_runs: warmups,
+        iterations,
+        max_new_tokens: tokenLimit,
+        temperature: temp,
+        top_p: p,
+        top_k: k,
+        min_p: minPValue,
+        repetition_penalty: repeatPenalty,
+        seed: seedValue,
+        stop_sequences: stopSequences,
+        device: devicePreference,
+        memory_mode: memoryMode,
+        precision,
+      });
+      setBenchmarkResult(report);
+      void refresh();
+    } catch (cause) {
+      setBenchmarkError(cause instanceof Error ? cause.message : "AXIOM Native Engine benchmark failed.");
+    } finally {
+      setBenchmarking(false);
     }
   };
 
