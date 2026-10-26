@@ -26,6 +26,27 @@ def test_status():
     assert "Working tree" in result.stdout
 
 
+def test_doctor_strict_treats_workspace_warnings_as_failures(tmp_path: Path):
+    default_result = runner.invoke(app, ["doctor", "--workspace", str(tmp_path)])
+    strict_result = runner.invoke(app, ["doctor", "--strict", "--workspace", str(tmp_path)])
+
+    assert default_result.exit_code == 0, default_result.stdout
+    assert strict_result.exit_code == 1, strict_result.stdout
+    assert "Strict mode" in strict_result.stdout
+
+
+def test_doctor_strict_json_keeps_diagnostics_machine_readable(tmp_path: Path):
+    result = runner.invoke(
+        app,
+        ["doctor", "--strict", "--workspace", str(tmp_path), "--json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["workspace"]["summary"]["warnings"] > 0
+
+
 def test_summary_json_describes_the_current_directory(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 

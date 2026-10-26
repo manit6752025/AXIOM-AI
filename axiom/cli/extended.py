@@ -139,6 +139,7 @@ def register(app, model_app, dataset_app) -> None:
     def doctor(
         json_output: bool = typer.Option(False, "--json", help="Emit stable machine-readable diagnostics."),
         workspace: str | None = typer.Option(None, "--workspace", help="Workspace directory to inspect."),
+        strict: bool = typer.Option(False, "--strict", help="Treat workspace warnings as failures, including the command exit status in JSON mode."),
     ) -> None:
         """Inspect the current workspace, Python dependencies, and common tools."""
         try:
@@ -154,7 +155,7 @@ def register(app, model_app, dataset_app) -> None:
         payload = {"schema_version": 1, "version": AXIOM_VERSION, "workspace": report, "tools": tool_checks}
         if json_output:
             typer.echo(json.dumps(payload, indent=2, sort_keys=True))
-            if report["summary"]["failed"]:
+            if report["summary"]["failed"] or (strict and report["summary"]["warnings"]):
                 raise typer.Exit(code=1)
             return
 
@@ -170,7 +171,9 @@ def register(app, model_app, dataset_app) -> None:
             typer.echo(f"[{marker:<4}] Tool {item['name']}: {item['path'] or 'not found'}")
         summary = report["summary"]
         typer.echo(f"Doctor complete: {summary['passed']} passed, {summary['warnings']} warning(s), {summary['failed']} failed")
-        if summary["failed"]:
+        if strict and summary["warnings"] and not summary["failed"]:
+            typer.echo("Strict mode: workspace warnings are treated as failures.")
+        if summary["failed"] or (strict and summary["warnings"]):
             raise typer.Exit(code=1)
 
     @app.command("info")
