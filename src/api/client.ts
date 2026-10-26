@@ -195,11 +195,69 @@ export type RuntimeTraceReport = {
   max_retained: number;
   privacy: { prompt_bodies_stored: false; response_bodies_stored: false; disk_persistence: false };
 };
+export type AxiomEngineBenchmarkRun = {
+  iteration: number;
+  elapsed_ms: number;
+  prefill_ms: number;
+  decode_ms: number;
+  time_to_first_token_ms: number;
+  generation_tokens_per_second: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  stop_reason: string;
+  memory_stats: Record<string, number>;
+};
+export type AxiomEngineBenchmark = {
+  schema_version: number;
+  engine: string;
+  model: string;
+  architecture: string | null;
+  model_type: string | null;
+  device: string | null;
+  precision: string | null;
+  memory_mode: string;
+  checkpoint_format: string;
+  warmup_runs_requested: number;
+  warmup_runs_completed: number;
+  warmups_excluded: boolean;
+  iterations_requested: number;
+  iterations_completed: number;
+  max_new_tokens: number;
+  sampling: {
+    temperature: number; top_p: number; top_k: number; min_p: number;
+    repetition_penalty: number; seed: number | null;
+  };
+  metrics: {
+    total_wall_time_ms: number;
+    measured_wall_time_ms: number;
+    median_elapsed_ms: number;
+    p95_elapsed_ms: number;
+    median_prefill_ms: number;
+    median_decode_ms: number;
+    median_time_to_first_token_ms: number;
+    median_generation_tokens_per_second: number;
+    completion_tokens: number;
+    prompt_tokens: number;
+    aggregate_tokens_per_second: number;
+  };
+  runs: AxiomEngineBenchmarkRun[];
+  memory_stats: Record<string, number>;
+  device_memory: Record<string, unknown> | null;
+  memory_selection: Record<string, unknown> | null;
+  scope_note: string;
+  privacy: {
+    prompt_returned: false; response_returned: false;
+    results_persisted: false; cloud_provider_used: false;
+  };
+  generated_at: string;
+};
+
 export type AxiomQuantizationCandidate = {
   format: "int4" | "int8" | "bf16" | "fp16" | "fp32";
   nominal_weight_bits: number;
   estimated_weight_gib: number;
   estimated_kv_cache_gib: number;
+  estimated_kv_prefill_temporary_gib: number;
   estimated_workspace_gib: number;
   estimated_total_gib: number;
   estimated_range_gib: [number, number];
@@ -218,7 +276,12 @@ export type AxiomQuantizationEstimate = {
     context_length: number; batch_size: number;
     ram_budget_gib: number | null; vram_budget_gib: number | null;
   };
-  assumptions: Record<string, unknown>;
+  assumptions: Record<string, unknown> & {
+    kv_cache_context_length?: number;
+    kv_prefill_temporary_context_length?: number;
+    kv_cache_formula?: string;
+    kv_prefill_temporary_formula?: string;
+  };
   candidates: AxiomQuantizationCandidate[];
   recommendation: {
     format: "bf16" | "fp16" | "fp32" | null;
@@ -231,6 +294,9 @@ export type AxiomQuantizationEstimate = {
 export type AxiomEngineModel = {
   path: string; name: string; model_type: "llama" | "mistral" | "qwen2" | "qwen3";
   architecture: string; weight_format: string; ready_for_native_attempt: boolean;
+  max_position_embeddings?: number;
+  effective_max_position_embeddings?: number;
+  rope_scaling_type?: string;
 };
 export type AxiomEngineAdapter = {
   path: string; name: string; weight_format: string;
@@ -336,7 +402,10 @@ export type AxiomEngineResult = {
   engine: "axiom-native-engine"; execution_backend: "pytorch-native-axiom";
   transformers_generation_used: false; ollama_used: false;
   model: string; architecture: string; model_type: "llama" | "mistral" | "qwen2" | "qwen3"; prompt_format?: string; context_management?: { chat_history_supplied: boolean; original_message_count: number; original_message_characters: number; messages_dropped_to_fit_context: number; prompt_tokens_before_token_truncation: number; prompt_tokens_used: number; token_truncation_applied: boolean; system_prompt_may_be_truncated: boolean };
-  adapter: string | null; device: string; device_selection?: { requested: string; selected: string; reason: string }; precision?: string; precision_selection?: { requested: string; selected: string }; memory_selection?: AxiomEngineMemorySelection; memory_mode?: "full" | "layer_streaming" | "disk_streaming"; memory_stats?: AxiomEngineMemoryStats; device_memory?: AxiomEngineDeviceMemory; checkpoint_format: "safetensors" | "gguf";
+  adapter: string | null; device: string;
+  device_selection?: { requested: string; selected: string; reason: string; fallback_from?: string; fallback_reason?: string };
+  device_fallback?: { fallback_from: string; selected: string; reason: string };
+  precision?: string; precision_selection?: { requested: string; selected: string }; memory_selection?: AxiomEngineMemorySelection; memory_mode?: "full" | "layer_streaming" | "disk_streaming"; memory_stats?: AxiomEngineMemoryStats; device_memory?: AxiomEngineDeviceMemory; checkpoint_format: "safetensors" | "gguf";
   decoder: "axiom-autoregressive-kv-cache"; attention_backend: string;
   prefill_ms: number; decode_ms: number; time_to_first_token_ms: number; generation_tokens_per_second: number;
   sampling: AxiomEngineSampling; stop_sequences: string[];
@@ -1605,6 +1674,16 @@ export const axiomApi = {
   }) => requestJson<AxiomQuantizationEstimate>("/api/engine/quantization/estimate", {
     method: "POST", body: JSON.stringify(input),
   }),
+  benchmarkAxiomEngine: (input: {
+    model_path: string; adapter_path?: string; prompt: string;
+    warmup_runs: number; iterations: number; max_new_tokens: number; temperature: number;
+    top_p: number; top_k: number; min_p: number; repetition_penalty: number; seed: number | null;
+    stop_sequences: string[]; device: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu";
+    memory_mode: "auto" | "full" | "layer_streaming" | "disk_streaming";
+    precision: "auto" | "fp32" | "fp16" | "bf16";
+  }, signal?: AbortSignal) => requestJson<AxiomEngineBenchmark>("/api/engine/benchmark", {
+    method: "POST", body: JSON.stringify(input), signal,
+  }, 300_000),
   axiomEngineStatus: () => requestJson<AxiomEngineStatus>("/api/engine/status"),
   engineBackends: (profile: EngineFabricProfile = "balanced") => requestJson<EngineFabricReport>("/api/engine/backends?" + new URLSearchParams({ profile })),
   engineBackendChat: (input: { backend_id: EngineFabricChatResult["backend_id"]; model: string; messages: Array<{ role: "system" | "user" | "assistant"; content: string }>; max_new_tokens: number; temperature: number; top_p: number; top_k: number; min_p: number; repetition_penalty: number; seed: number | null; stop_sequences: string[] }) =>

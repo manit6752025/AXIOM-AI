@@ -95,6 +95,23 @@ class NativeLlamaConfig:
     rope_original_max_position_embeddings: int | None = None
     rope_low_freq_factor: float | None = None
     rope_high_freq_factor: float | None = None
+    rope_attention_factor: float = 1.0
+    rope_beta_fast: float = 32.0
+    rope_beta_slow: float = 1.0
+    rope_truncate: bool = True
+
+    @property
+    def effective_max_position_embeddings(self) -> int:
+        """Return the inference context limit after supported context extension."""
+        if self.rope_scaling_type == "dynamic":
+            return min(
+                1_000_000,
+                max(
+                    self.max_position_embeddings,
+                    int(self.max_position_embeddings * self.rope_scaling_factor),
+                ),
+            )
+        return self.max_position_embeddings
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "NativeLlamaConfig":
@@ -165,6 +182,10 @@ class NativeLlamaConfig:
         rope_original: int | None = None
         rope_low: float | None = None
         rope_high: float | None = None
+        rope_attention_factor = 1.0
+        rope_beta_fast = 32.0
+        rope_beta_slow = 1.0
+        rope_truncate = True
         if rope is not None:
             if not isinstance(rope, dict):
                 raise NativeEngineError("This RoPE scaling configuration is not implemented by AXIOM Native Engine.")
@@ -204,6 +225,70 @@ class NativeLlamaConfig:
                     raise NativeEngineError("Llama 3 RoPE scaling requires valid original context and low/high frequency factors.")
                 rope_original = raw_original
                 rope_low, rope_high = float(raw_low), float(raw_high)
+            elif rope_type == "dynamic":
+                if not 1.0 <= rope_factor <= 128.0:
+                    raise NativeEngineError("Dynamic NTK RoPE scaling factor must be between 1 and 128.")
+                if hidden // heads <= 2:
+                    raise NativeEngineError("Dynamic NTK RoPE scaling requires an attention head dimension greater than 2.")
+            elif rope_type == "yarn":
+                if not 1.0 <= rope_factor <= 128.0:
+                    raise NativeEngineError("YaRN RoPE scaling factor must be between 1 and 128.")
+                raw_original = rope.get("original_max_position_embeddings")
+                raw_fast = rope.get("beta_fast", 32.0)
+                raw_slow = rope.get("beta_slow", 1.0)
+                raw_attention = rope.get("attention_factor")
+                raw_mscale, raw_mscale_all = rope.get("mscale"), rope.get("mscale_all_dim")
+                raw_truncate = rope.get("truncate", True)
+                if (
+                    isinstance(raw_original, bool)
+                    or not isinstance(raw_original, int)
+                    or not 1 <= raw_original <= max_positions
+                    or isinstance(raw_fast, bool)
+                    or not isinstance(raw_fast, (int, float))
+                    or not math.isfinite(float(raw_fast))
+                    or isinstance(raw_slow, bool)
+                    or not isinstance(raw_slow, (int, float))
+                    or not math.isfinite(float(raw_slow))
+                    or float(raw_fast) <= 0
+                    or float(raw_slow) <= 0
+                    or float(raw_fast) <= float(raw_slow)
+                    or not isinstance(raw_truncate, bool)
+                ):
+                    raise NativeEngineError("YaRN RoPE scaling requires a valid original context, beta_fast greater than beta_slow, and a boolean truncate flag.")
+                if raw_attention is not None and (
+                    isinstance(raw_attention, bool)
+                    or not isinstance(raw_attention, (int, float))
+                    or not math.isfinite(float(raw_attention))
+                    or float(raw_attention) <= 0
+                ):
+                    raise NativeEngineError("YaRN attention_factor must be a finite positive number.")
+                if (raw_mscale is None) != (raw_mscale_all is None):
+                    raise NativeEngineError("YaRN mscale and mscale_all_dim must be supplied together.")
+                if raw_mscale is not None and (
+                    isinstance(raw_mscale, bool)
+                    or not isinstance(raw_mscale, (int, float))
+                    or not math.isfinite(float(raw_mscale))
+                    or float(raw_mscale) <= 0
+                    or isinstance(raw_mscale_all, bool)
+                    or not isinstance(raw_mscale_all, (int, float))
+                    or not math.isfinite(float(raw_mscale_all))
+                    or float(raw_mscale_all) <= 0
+                ):
+                    raise NativeEngineError("YaRN mscale values must be finite positive numbers.")
+                rope_original = raw_original
+                rope_beta_fast = float(raw_fast)
+                rope_beta_slow = float(raw_slow)
+                rope_truncate = raw_truncate
+                if raw_attention is not None:
+                    rope_attention_factor = float(raw_attention)
+                elif raw_mscale is not None:
+                    rope_attention_factor = (
+                        (0.1 * float(raw_mscale) * math.log(rope_factor) + 1.0)
+                        / (0.1 * float(raw_mscale_all) * math.log(rope_factor) + 1.0)
+                        if rope_factor > 1.0 else 1.0
+                    )
+                else:
+                    rope_attention_factor = 1.0 + 0.1 * math.log(rope_factor) if rope_factor > 1.0 else 1.0
             else:
                 raise NativeEngineError("This RoPE scaling configuration is not implemented by AXIOM Native Engine.")
         sliding = value.get("sliding_window") if model_type == "mistral" else None
@@ -234,6 +319,10 @@ class NativeLlamaConfig:
             rope_original_max_position_embeddings=rope_original,
             rope_low_freq_factor=rope_low,
             rope_high_freq_factor=rope_high,
+            rope_attention_factor=rope_attention_factor,
+            rope_beta_fast=rope_beta_fast,
+            rope_beta_slow=rope_beta_slow,
+            rope_truncate=rope_truncate,
         )
 
 def _within_trusted_roots(path: Path, trusted_roots: tuple[Path, ...]) -> bool:
@@ -1047,7 +1136,13 @@ class NativeLlamaRuntime:
         variance = hidden.float().pow(2).mean(dim=-1, keepdim=True)
         return hidden * self.torch.rsqrt(variance + self.config.rms_norm_eps).to(dtype=hidden.dtype) * weight
 
-    def _rope_embeddings(self, positions: Any, dtype: Any) -> tuple[Any, Any]:
+    def _rope_embeddings(
+        self,
+        positions: Any,
+        dtype: Any,
+        *,
+        sequence_length: int | None = None,
+    ) -> tuple[Any, Any]:
         """Compute the rotary cosine/sine tables once for one forward sequence."""
         torch = self.torch
         dim = self.config.hidden_size // self.config.num_attention_heads
@@ -1058,6 +1153,29 @@ class NativeLlamaRuntime:
         scaled_positions = positions.to(dtype=torch.float32)
         if self.config.rope_scaling_type == "linear":
             scaled_positions = scaled_positions / self.config.rope_scaling_factor
+        elif self.config.rope_scaling_type == "dynamic":
+            # Dynamic NTK leaves the pretrained frequencies unchanged up to the
+            # original context, then increases theta as context grows. Keep this
+            # update deterministic for a given absolute position range.
+            sequence_length = (
+                sequence_length
+                if sequence_length is not None
+                else int(positions.max().item()) + 1 if positions.numel() else 0
+            )
+            if sequence_length > self.config.max_position_embeddings:
+                scale = (
+                    self.config.rope_scaling_factor * sequence_length
+                    / self.config.max_position_embeddings
+                    - (self.config.rope_scaling_factor - 1.0)
+                )
+                dynamic_theta = self.config.rope_theta * scale ** (dim / (dim - 2))
+                inv_freq = 1.0 / (
+                    dynamic_theta
+                    ** (
+                        torch.arange(0, dim, 2, device=self.device, dtype=torch.float32)
+                        / dim
+                    )
+                )
         elif self.config.rope_scaling_type == "llama3":
             # Match Llama 3's wavelength-dependent frequency interpolation:
             # preserve high frequencies, scale low frequencies, and smooth the
@@ -1076,10 +1194,43 @@ class NativeLlamaRuntime:
                 inv_freq,
                 torch.where(wavelength > low_wavelength, scaled_inv_freq, smooth_inv_freq),
             )
+        elif self.config.rope_scaling_type == "yarn":
+            # YaRN blends the original frequencies with linearly interpolated
+            # frequencies over the correction range defined by beta_slow/fast.
+            dim_pairs = dim // 2
+            original = float(self.config.rope_original_max_position_embeddings)
+            base = self.config.rope_theta
+
+            def correction_dimension(rotations: float) -> float:
+                return (
+                    dim * math.log(original / (rotations * 2.0 * math.pi))
+                    / (2.0 * math.log(base))
+                )
+
+            low = correction_dimension(self.config.rope_beta_fast)
+            high = correction_dimension(self.config.rope_beta_slow)
+            if self.config.rope_truncate:
+                low, high = math.floor(low), math.ceil(high)
+            low, high = max(low, 0.0), min(high, float(dim - 1))
+            if high <= low:
+                high = low + 0.001
+            ramp = (
+                (torch.arange(dim_pairs, device=self.device, dtype=torch.float32) - low)
+                / (high - low)
+            ).clamp(0.0, 1.0)
+            inv_freq_extrapolation_factor = 1.0 - ramp
+            inv_freq = (
+                (inv_freq / self.config.rope_scaling_factor) * (1.0 - inv_freq_extrapolation_factor)
+                + inv_freq * inv_freq_extrapolation_factor
+            )
         frequencies = torch.einsum("i,j->ij", scaled_positions, inv_freq)
         embedding = torch.cat((frequencies, frequencies), dim=-1)
-        cos = embedding.cos().to(dtype=dtype)[None, None, :, :]
-        sin = embedding.sin().to(dtype=dtype)[None, None, :, :]
+        cos_values, sin_values = embedding.cos(), embedding.sin()
+        if self.config.rope_scaling_type == "yarn":
+            cos_values = cos_values * self.config.rope_attention_factor
+            sin_values = sin_values * self.config.rope_attention_factor
+        cos = cos_values.to(dtype=dtype)[None, None, :, :]
+        sin = sin_values.to(dtype=dtype)[None, None, :, :]
         return cos, sin
 
     def _apply_rope(
@@ -1151,6 +1302,7 @@ class NativeLlamaRuntime:
         *,
         past_sequence_length: int | None = None,
         cancel_event: threading.Event | None = None,
+        rope_sequence_length: int | None = None,
     ) -> tuple[Any, tuple[Any, ...]]:
         torch, c = self.torch, self.config
         if not torch.is_tensor(input_ids):
@@ -1178,11 +1330,25 @@ class NativeLlamaRuntime:
             or past_len < stored_past_len
         ):
             raise NativeEngineError("Native KV cache position is inconsistent with the cached sequence.")
-        if past_len + seq_len > self.config.max_position_embeddings:
-            raise NativeEngineError("Generation would exceed the checkpoint's configured maximum context length.")
+        if past_len + seq_len > self.config.effective_max_position_embeddings:
+            raise NativeEngineError("Generation would exceed the checkpoint's configured/scaled maximum context length.")
         hidden = torch.nn.functional.embedding(input_ids, self.weights["model.embed_tokens.weight"])
         positions = torch.arange(past_len, past_len + seq_len, device=self.device)
-        rope_embeddings = self._rope_embeddings(positions, self.dtype)
+        if rope_sequence_length is not None and (
+            isinstance(rope_sequence_length, bool)
+            or not isinstance(rope_sequence_length, int)
+            or not past_len + seq_len <= rope_sequence_length <= self.config.effective_max_position_embeddings
+        ):
+            raise NativeEngineError("RoPE context length must cover the current sequence and stay inside the configured/scaled context limit.")
+        if (
+            rope_sequence_length is not None
+            and getattr(self.config, "rope_scaling_type", "default") == "dynamic"
+        ):
+            rope_embeddings = self._rope_embeddings(
+                positions, self.dtype, sequence_length=rope_sequence_length
+            )
+        else:
+            rope_embeddings = self._rope_embeddings(positions, self.dtype)
         key_start_position = past_len - stored_past_len
         cache, head_dim = [], c.hidden_size // c.num_attention_heads
         for i in range(c.num_hidden_layers):
@@ -1338,7 +1504,20 @@ class NativeLlamaRuntime:
                     return
                 prefill_started = time.perf_counter()
                 try:
-                    logits, cache = self.forward(tokens, cancel_event=cancel_event)
+                    rope_sequence_length = min(
+                        self.config.effective_max_position_embeddings,
+                        len(prompt_token_ids) + max_new_tokens,
+                    )
+                    rope_kwargs = (
+                        {"rope_sequence_length": rope_sequence_length}
+                        if getattr(self.config, "rope_scaling_type", "default") == "dynamic"
+                        else {}
+                    )
+                    logits, cache = self.forward(
+                        tokens,
+                        cancel_event=cancel_event,
+                        **rope_kwargs,
+                    )
                     absolute_sequence_length = len(prompt_token_ids)
                     prefill_ms = (time.perf_counter() - prefill_started) * 1000
                     self.live_generation.update({
@@ -1422,6 +1601,7 @@ class NativeLlamaRuntime:
                                 cache,
                                 past_sequence_length=absolute_sequence_length,
                                 cancel_event=cancel_event,
+                                **rope_kwargs,
                             )
                             absolute_sequence_length += 1
                         except NativeGenerationCancelled:
@@ -1531,7 +1711,7 @@ class NativeLlamaRuntime:
             raise NativeEngineError("Native batch prompt token IDs must be integers inside the checkpoint vocabulary.")
         if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens <= 2048:
             raise NativeEngineError("Native generation token limit must be between 1 and 2048.")
-        if any(len(prompt) + max_new_tokens > self.config.max_position_embeddings for prompt in prompt_token_ids):
+        if any(len(prompt) + max_new_tokens > self.config.effective_max_position_embeddings for prompt in prompt_token_ids):
             raise NativeEngineError("Batch generation would exceed the checkpoint's configured maximum context length.")
         if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or not math.isfinite(float(temperature)) or not 0 <= float(temperature) <= 2:
             raise NativeEngineError("Native generation temperature must be a finite number between 0 and 2.")
@@ -1637,6 +1817,10 @@ class NativeLlamaRuntime:
             except (RuntimeError, TypeError, AttributeError):
                 raise NativeEngineError("Seeded sampling is not supported by the selected tensor device.") from None
         batch_size = len(prompt_token_ids)
+        rope_sequence_length = min(
+            self.config.effective_max_position_embeddings,
+            max(len(prompt) for prompt in prompt_token_ids) + max_new_tokens,
+        )
         eos = set(self.config.eos_token_ids if eos_token_ids is None else eos_token_ids)
         generated: list[list[int]] = [[] for _ in prompt_token_ids]
         finished = [False] * batch_size
@@ -1667,7 +1851,16 @@ class NativeLlamaRuntime:
                 if cancel_event is not None and cancel_event.is_set():
                     stop_reason = "cancelled"
                     return generated
-                logits, cache = self.forward(tokens, cancel_event=cancel_event)
+                rope_kwargs = (
+                    {"rope_sequence_length": rope_sequence_length}
+                    if getattr(self.config, "rope_scaling_type", "default") == "dynamic"
+                    else {}
+                )
+                logits, cache = self.forward(
+                    tokens,
+                    cancel_event=cancel_event,
+                    **rope_kwargs,
+                )
                 for step in range(max_new_tokens):
                     if cancel_event is not None and cancel_event.is_set():
                         stop_reason = "cancelled"
@@ -1743,6 +1936,7 @@ class NativeLlamaRuntime:
                             cache,
                             past_sequence_length=prompt_length + step,
                             cancel_event=cancel_event,
+                            **rope_kwargs,
                         )
         finally:
             self.last_batch_generation = {

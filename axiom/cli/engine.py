@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from axiom.core.engine import AxiomEngineError, discover_local_engine_assets, estimate_native_quantization, generate_local, generate_local_batch, generate_local_stream, runtime_status, runtime_telemetry
+from axiom.core.engine import AxiomEngineError, benchmark_local, discover_local_engine_assets, estimate_native_quantization, generate_local, generate_local_batch, generate_local_stream, runtime_status, runtime_telemetry
 from axiom.core import model_studio
 from axiom.core.engine_fabric import EngineFabricError, discover_engine_backends, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
 
@@ -160,6 +160,7 @@ def engine_estimate(
     table.add_column("Format", style="cyan")
     table.add_column("Weights")
     table.add_column("KV cache")
+    table.add_column("Prefill temp")
     table.add_column("Workspace")
     table.add_column("Total")
     table.add_column("Estimated range")
@@ -176,6 +177,7 @@ def engine_estimate(
             candidate["format"],
             f"{candidate['estimated_weight_gib']:.6f} GiB",
             f"{candidate['estimated_kv_cache_gib']:.6f} GiB",
+            f"{candidate['estimated_kv_prefill_temporary_gib']:.6f} GiB",
             f"{candidate['estimated_workspace_gib']:.6f} GiB",
             f"{candidate['estimated_total_gib']:.6f} GiB",
             f"{low:.6f}–{high:.6f} GiB",
@@ -259,6 +261,102 @@ def engine_pull(
         return
     console.print("\n[green]Installed for AXIOM Native Engine:[/green] " + result["path"])
     console.print("[dim]Run it with:[/dim] axiom engine run --model-path " + repr(result["path"]) + " --prompt \"Hello.\"")
+
+@engine_app.command("benchmark")
+def engine_benchmark(
+    model_path: Path = typer.Option(
+        ...,
+        "--model-path",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        help="Existing local checkpoint directory under an AXIOM trusted model root.",
+    ),
+    prompt: str = typer.Option(..., "--prompt", help="Local benchmark prompt. It is not returned in benchmark output."),
+    adapter_path: Path | None = typer.Option(None, "--adapter-path", exists=True, file_okay=False, dir_okay=True, help="Optional local native-compatible LoRA adapter directory."),
+    warmup_runs: int = typer.Option(1, "--warmup-runs", min=0, max=2, help="Excluded warm-up generations (0–2)."),
+    iterations: int = typer.Option(3, "--iterations", min=1, max=5, help="Measured generations (1–5)."),
+    max_new_tokens: int = typer.Option(64, "--max-new-tokens", min=1, max=128, help="Per-run output cap (1–128 tokens)."),
+    temperature: float = typer.Option(0.0, "--temperature", min=0, max=2, help="Sampling temperature."),
+    top_p: float = typer.Option(0.9, "--top-p", min=0.000001, max=1, help="Nucleus sampling threshold (0, 1]."),
+    top_k: int = typer.Option(0, "--top-k", min=0, max=100_000, help="Candidate token limit; 0 disables top-k."),
+    min_p: float = typer.Option(0.0, "--min-p", min=0, max=1, help="Relative probability cutoff."),
+    repetition_penalty: float = typer.Option(1.0, "--repeat-penalty", min=0.1, max=5, help="Penalty for previously seen tokens."),
+    seed: int | None = typer.Option(None, "--seed", min=0, max=9_223_372_036_854_775_807, help="Optional reproducible sampling seed."),
+    stop_sequences: list[str] = typer.Option([], "--stop-sequence", help="Exact stop string; repeat for multiple strings."),
+    device: str = typer.Option("auto", "--device", help="Execution backend: auto, cpu, cuda, rocm, mps, or xpu."),
+    memory_mode: str = typer.Option("auto", "--memory-mode", help="Memory strategy: auto, full, layer_streaming, or disk_streaming."),
+    precision: str = typer.Option("auto", "--precision", help="Compute dtype: auto, fp32, fp16, or bf16."),
+    json_output: bool = typer.Option(False, "--json", help="Print benchmark metrics as machine-readable JSON."),
+) -> None:
+    """Measure bounded AXIOM-native inference locally; generated text is discarded."""
+    try:
+        report = benchmark_local(
+            str(model_path),
+            prompt,
+            adapter_path=str(adapter_path) if adapter_path is not None else None,
+            warmup_runs=warmup_runs,
+            iterations=iterations,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            min_p=min_p,
+            repetition_penalty=repetition_penalty,
+            seed=seed,
+            stop_sequences=stop_sequences,
+            device_preference=device,
+            memory_mode=memory_mode,
+            precision=precision,
+        )
+    except (ValueError, AxiomEngineError) as exc:
+        _fail(str(exc))
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
+        return
+
+    metrics = report["metrics"]
+    console.print(Panel.fit(
+        f"Model: {report['model']} · {report.get('architecture') or 'unknown architecture'}\n"
+        f"Device: {report.get('device') or 'unknown'} · Precision: {report.get('precision') or 'unknown'} · "
+        f"Memory mode: {report.get('memory_mode') or memory_mode}\n"
+        f"Measured runs: {report['iterations_completed']} · Excluded warm-ups: {report['warmup_runs_completed']}\n"
+        f"Median latency: {metrics['median_elapsed_ms']} ms · p95 latency: {metrics['p95_elapsed_ms']} ms\n"
+        f"Median prefill: {metrics['median_prefill_ms']} ms · median decode: {metrics['median_decode_ms']} ms\n"
+        f"Median generation throughput: {metrics['median_generation_tokens_per_second']} tokens/s · "
+        f"Aggregate throughput: {metrics['aggregate_tokens_per_second']} tokens/s",
+        title="AXIOM NATIVE ENGINE · BENCHMARK",
+    ))
+    table = Table(title="Measured iterations (no generated text)")
+    table.add_column("Run", style="cyan")
+    table.add_column("Elapsed")
+    table.add_column("Prefill")
+    table.add_column("Decode")
+    table.add_column("Tokens")
+    table.add_column("Tokens/s")
+    for item in report["runs"]:
+        table.add_row(
+            str(item["iteration"]),
+            f"{item['elapsed_ms']:.2f} ms",
+            f"{item['prefill_ms']:.2f} ms",
+            f"{item['decode_ms']:.2f} ms",
+            str(item["completion_tokens"]),
+            f"{item['generation_tokens_per_second']:.2f}",
+        )
+    console.print(table)
+    transfer = report.get("memory_stats", {})
+    if isinstance(transfer, dict):
+        console.print(
+            "Measured transfer totals: "
+            f"layer weights staged {transfer.get('layer_weight_bytes_staged', 0)} bytes; "
+            f"disk layer reads {transfer.get('disk_layer_weight_bytes_read', 0)} bytes "
+            f"across {transfer.get('disk_layer_weight_loads', 0)} read(s); "
+            f"KV cache offloaded {transfer.get('kv_cache_bytes_offloaded', 0)} bytes "
+            f"across {transfer.get('kv_cache_layer_offloads', 0)} layer(s)."
+        )
+    console.print(report["scope_note"])
+
 
 @engine_app.command("run")
 def engine_run(

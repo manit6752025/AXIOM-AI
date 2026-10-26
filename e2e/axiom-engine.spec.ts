@@ -71,19 +71,63 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
         estimated_parameter_count: 1200, parameter_count_method: "analytic config estimate",
       },
       request: { context_length: 16, batch_size: 1, ram_budget_gib: 8, vram_budget_gib: 4 },
-      assumptions: { safety_margin_percent: 20, uncertainty_range_percent: { low: -15, high: 25 } },
+      assumptions: {
+        safety_margin_percent: 20, uncertainty_range_percent: { low: -15, high: 25 },
+        kv_cache_context_length: 16, kv_prefill_temporary_context_length: 0,
+      },
       candidates: [
-        { format: "int4", nominal_weight_bits: 4, estimated_weight_gib: 0.0000005, estimated_kv_cache_gib: 0.0000002, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000003, estimated_range_gib: [0.00000255, 0.00000375], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: false, native_support_note: "Sizing only." },
-        { format: "int8", nominal_weight_bits: 8, estimated_weight_gib: 0.000001, estimated_kv_cache_gib: 0.0000002, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.0000035, estimated_range_gib: [0.000002975, 0.000004375], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: false, native_support_note: "Sizing only." },
-        { format: "bf16", nominal_weight_bits: 16, estimated_weight_gib: 0.0000013, estimated_kv_cache_gib: 0.0000002, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000004, estimated_range_gib: [0.0000034, 0.000005], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: true, native_support_note: null },
-        { format: "fp16", nominal_weight_bits: 16, estimated_weight_gib: 0.0000013, estimated_kv_cache_gib: 0.0000002, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000004, estimated_range_gib: [0.0000034, 0.000005], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: true, native_support_note: null },
-        { format: "fp32", nominal_weight_bits: 32, estimated_weight_gib: 0.0000025, estimated_kv_cache_gib: 0.0000004, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000006, estimated_range_gib: [0.0000051, 0.0000075], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: true, native_support_note: null },
+        { format: "int4", nominal_weight_bits: 4, estimated_weight_gib: 0.0000005, estimated_kv_cache_gib: 0.0000002, estimated_kv_prefill_temporary_gib: 0, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000003, estimated_range_gib: [0.00000255, 0.00000375], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: false, native_support_note: "Sizing only." },
+        { format: "int8", nominal_weight_bits: 8, estimated_weight_gib: 0.000001, estimated_kv_cache_gib: 0.0000002, estimated_kv_prefill_temporary_gib: 0, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.0000035, estimated_range_gib: [0.000002975, 0.000004375], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: false, native_support_note: "Sizing only." },
+        { format: "bf16", nominal_weight_bits: 16, estimated_weight_gib: 0.0000013, estimated_kv_cache_gib: 0.0000002, estimated_kv_prefill_temporary_gib: 0, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000004, estimated_range_gib: [0.0000034, 0.000005], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: true, native_support_note: null },
+        { format: "fp16", nominal_weight_bits: 16, estimated_weight_gib: 0.0000013, estimated_kv_cache_gib: 0.0000002, estimated_kv_prefill_temporary_gib: 0, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000004, estimated_range_gib: [0.0000034, 0.000005], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: true, native_support_note: null },
+        { format: "fp32", nominal_weight_bits: 32, estimated_weight_gib: 0.0000025, estimated_kv_cache_gib: 0.0000004, estimated_kv_prefill_temporary_gib: 0, estimated_workspace_gib: 0.000001, estimated_total_gib: 0.000006, estimated_range_gib: [0.0000051, 0.0000075], fits_ram_budget: true, fits_vram_budget: true, native_checkpoint_supported: true, native_support_note: null },
       ],
       recommendation: {
         format: "bf16", status: "fits_budget",
         note: "Lowest estimated-memory native format that fits every supplied budget. This is a planning suggestion, not a conversion and not a guarantee that the checkpoint's stored dtype or device kernels are compatible.",
       },
       scope_note: "Planning estimates only. They do not inspect tensor contents, measure physical memory, or predict model quality/speed.",
+    } });
+  });
+  await page.route("**/api/engine/benchmark", async (route) => {
+    const requestBody = route.request().postDataJSON() as Record<string, unknown>;
+    expect(requestBody.prompt).toBe("Say hello.");
+    expect(requestBody.warmup_runs).toBe(1);
+    expect(requestBody.iterations).toBe(2);
+    expect(requestBody.max_new_tokens).toBe(128);
+    expect(requestBody.top_p).toBe(0.8);
+    expect(requestBody.top_k).toBe(4);
+    expect(requestBody.min_p).toBe(0.05);
+    expect(requestBody.seed).toBe(42);
+    expect(requestBody.stop_sequences).toEqual(["<END>", "###"]);
+    await route.fulfill({ json: {
+      schema_version: 1, engine: "axiom-native-engine", model: "llama-test",
+      architecture: "LlamaForCausalLM", model_type: "llama", device: "cpu",
+      precision: "fp32", memory_mode: "full", checkpoint_format: "safetensors",
+      warmup_runs_requested: 1, warmup_runs_completed: 1, warmups_excluded: true,
+      iterations_requested: 2, iterations_completed: 2, max_new_tokens: 128,
+      sampling: { temperature: 0.7, top_p: 0.8, top_k: 4, min_p: 0.05, repetition_penalty: 1.1, seed: 42 },
+      metrics: {
+        total_wall_time_ms: 88, measured_wall_time_ms: 44,
+        median_elapsed_ms: 22, p95_elapsed_ms: 26, median_prefill_ms: 8,
+        median_decode_ms: 12, median_time_to_first_token_ms: 8,
+        median_generation_tokens_per_second: 21, completion_tokens: 20,
+        prompt_tokens: 10, aggregate_tokens_per_second: 19,
+      },
+      runs: [
+        { iteration: 1, elapsed_ms: 18, prefill_ms: 7, decode_ms: 10, time_to_first_token_ms: 7, generation_tokens_per_second: 22, prompt_tokens: 5, completion_tokens: 10, stop_reason: "max_new_tokens", memory_stats: { layer_weight_tensors_staged: 1, layer_weight_bytes_staged: 1048576, layer_weight_bytes_returned_to_cpu: 0, layer_weight_bytes_released: 1048576, disk_layer_weight_loads: 0, disk_layer_weight_bytes_read: 0, kv_cache_layer_offloads: 1, kv_cache_bytes_offloaded: 524288 } },
+        { iteration: 2, elapsed_ms: 26, prefill_ms: 9, decode_ms: 14, time_to_first_token_ms: 9, generation_tokens_per_second: 20, prompt_tokens: 5, completion_tokens: 10, stop_reason: "max_new_tokens", memory_stats: { layer_weight_tensors_staged: 2, layer_weight_bytes_staged: 2097152, layer_weight_bytes_returned_to_cpu: 0, layer_weight_bytes_released: 2097152, disk_layer_weight_loads: 1, disk_layer_weight_bytes_read: 3145728, kv_cache_layer_offloads: 2, kv_cache_bytes_offloaded: 1048576 } },
+      ],
+      memory_stats: {
+        layer_weight_tensors_staged: 3, layer_weight_bytes_staged: 3145728,
+        layer_weight_bytes_returned_to_cpu: 0, layer_weight_bytes_released: 3145728,
+        disk_layer_weight_loads: 1, disk_layer_weight_bytes_read: 3145728,
+        kv_cache_layer_offloads: 3, kv_cache_bytes_offloaded: 1572864,
+      },
+      device_memory: null, memory_selection: null,
+      scope_note: "Measured local AXIOM inference. No prompts or generated responses are returned.",
+      privacy: { prompt_returned: false, response_returned: false, results_persisted: false, cloud_provider_used: false },
+      generated_at: "2026-10-26T00:00:00Z",
     } });
   });
   await page.route("**/api/engine/generate/stream", (route) => {
@@ -165,7 +209,7 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(engine.getByText("ENGINE READY")).toBeVisible();
 
   await engine.getByLabel("Select discovered native model").selectOption("/models/llama-test");
-  await expect(engine.getByLabel("Local Llama / Mistral model directory")).toHaveValue("/models/llama-test");
+  await expect(engine.getByLabel("Local native model directory")).toHaveValue("/models/llama-test");
   await engine.getByLabel("Planner context length").fill("16");
   await engine.getByLabel("Planner batch size").fill("1");
   await engine.getByLabel("RAM budget GiB", { exact: true }).fill("8");
@@ -173,6 +217,9 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await engine.getByRole("button", { name: "Estimate memory fit" }).click();
   const memoryEstimate = engine.getByRole("region", { name: "Quantization estimate results" });
   await expect(memoryEstimate).toContainText("Budget-based planning recommendation: BF16.");
+  await expect(memoryEstimate).toContainText("KV-cache estimate uses 16 retained-context tokens.");
+  await expect(memoryEstimate.getByRole("article", { name: "bf16 memory candidate" })).toContainText("Prefill temporary");
+  await expect(memoryEstimate).toContainText("Additional per-layer prefill temporary memory uses 0 tokens");
   await expect(memoryEstimate).toContainText("3.15 KiB estimated");
   await expect(memoryEstimate.getByRole("article", { name: "int4 memory candidate" })).toContainText("Sizing only");
   await engine.getByLabel("Select discovered LoRA adapter").selectOption("/runs/my-lora-adapter");
@@ -194,6 +241,18 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(engine).toContainText("Finish: stop sequence · Stop sequences: 2 · Attention: pytorch-scaled-dot-product-attention · Sampling: temperature 0.7 · top-p 0.8 · top-k 4 · min-p 0.05 · repetition penalty 1.1 · seed 42");
   await expect(engine).toContainText("LlamaForCausalLM");
   await expect(engine.getByRole("button", { name: "Unload model" })).toBeVisible();
+
+  await engine.getByLabel("Benchmark warm-up runs").fill("1");
+  await engine.getByLabel("Measured benchmark runs").fill("2");
+  await engine.getByRole("button", { name: "Benchmark native engine" }).click();
+  const nativeBenchmark = engine.getByRole("region", { name: "Native benchmark results" });
+  await expect(nativeBenchmark).toContainText("2 measured run(s)");
+  await expect(nativeBenchmark).toContainText("19.00 tokens/s");
+  await expect(nativeBenchmark).toContainText("Run 2");
+  const transferTelemetry = nativeBenchmark.getByRole("region", { name: "Layer streaming and KV transfer telemetry" });
+  await expect(transferTelemetry).toContainText("KV cache offloaded");
+  await expect(transferTelemetry).toContainText("3.0 MiB");
+  await expect(nativeBenchmark).not.toContainText("Say hello.");
 
   await engine.getByLabel("AXIOM Native batch prompts").fill("First batch prompt\nSecond batch prompt");
   await engine.getByRole("button", { name: "Run native batch" }).click();

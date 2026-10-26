@@ -15,7 +15,7 @@ const formatEstimatedMemory = (gib: number): string => {
   return `${(gib * 1024 ** 3).toFixed(0)} bytes`;
 };
 
-import { axiomApi, type AxiomEngineAdapterCompatibility, type AxiomEngineAssets, type AxiomEngineBatchResult, type AxiomEngineLiveTelemetry, type AxiomEngineResult, type AxiomEngineStatus, type AxiomEngineStreamEvent, type AxiomEngineSystemTelemetry, type AxiomQuantizationEstimate } from "../api/client";
+import { axiomApi, type AxiomEngineAdapterCompatibility, type AxiomEngineAssets, type AxiomEngineBatchResult, type AxiomEngineBenchmark, type AxiomEngineLiveTelemetry, type AxiomEngineResult, type AxiomEngineStatus, type AxiomEngineStreamEvent, type AxiomEngineSystemTelemetry, type AxiomQuantizationEstimate } from "../api/client";
 
 export default function LocalAxiomEnginePanel() {
   const [status, setStatus] = useState<AxiomEngineStatus | null>(null);
@@ -46,6 +46,7 @@ export default function LocalAxiomEnginePanel() {
   const [streamResponse, setStreamResponse] = useState("");
   const [streamTokenCount, setStreamTokenCount] = useState(0);
   const activeStreamRef = useRef<AbortController | null>(null);
+  const benchmarkAbortRef = useRef<AbortController | null>(null);
   const streamTokenCountRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -59,6 +60,11 @@ export default function LocalAxiomEnginePanel() {
   const [quantizationPlan, setQuantizationPlan] = useState<AxiomQuantizationEstimate | null>(null);
   const [planningQuantization, setPlanningQuantization] = useState(false);
   const [quantizationError, setQuantizationError] = useState("");
+  const [benchmarkWarmupRuns, setBenchmarkWarmupRuns] = useState("1");
+  const [benchmarkIterations, setBenchmarkIterations] = useState("3");
+  const [benchmarking, setBenchmarking] = useState(false);
+  const [benchmarkResult, setBenchmarkResult] = useState<AxiomEngineBenchmark | null>(null);
+  const [benchmarkError, setBenchmarkError] = useState("");
 
   const refresh = async () => {
     setLoading(true);
@@ -330,6 +336,73 @@ export default function LocalAxiomEnginePanel() {
     }
   };
 
+  const runBenchmark = async () => {
+    setBenchmarkError("");
+    setBenchmarkResult(null);
+    if (!modelPath.trim()) { setBenchmarkError("Choose a discovered native model before benchmarking."); return; }
+    if (!prompt.trim()) { setBenchmarkError("Enter a prompt before benchmarking."); return; }
+    const warmups = Number(benchmarkWarmupRuns);
+    const iterations = Number(benchmarkIterations);
+    const requestedTokens = Number(maxNewTokens);
+    const tokenLimit = Math.min(requestedTokens, 128);
+    const temp = Number(temperature);
+    const p = Number(topP);
+    const k = Number(topK);
+    const minPValue = Number(minP);
+    const repeatPenalty = Number(repetitionPenalty);
+    const seedValue = seed.trim() === "" ? null : Number(seed);
+    const stopSequences = stopSequencesText.split("\n").map((value) => value.replace(/\r$/, "")).filter((value) => value.length > 0);
+    if (!Number.isInteger(warmups) || warmups < 0 || warmups > 2) { setBenchmarkError("Warm-up runs must be an integer from 0 through 2."); return; }
+    if (!Number.isInteger(iterations) || iterations < 1 || iterations > 5) { setBenchmarkError("Measured iterations must be an integer from 1 through 5."); return; }
+    if (!Number.isInteger(requestedTokens) || requestedTokens < 1 || requestedTokens > 2048) { setBenchmarkError("Maximum generated tokens must be between 1 and 2048."); return; }
+    if (!Number.isFinite(temp) || temp < 0 || temp > 2) { setBenchmarkError("Temperature must be between 0 and 2."); return; }
+    if (!Number.isFinite(p) || p <= 0 || p > 1) { setBenchmarkError("Top-p must be greater than 0 and at most 1."); return; }
+    if (!Number.isInteger(k) || k < 0 || k > 100000) { setBenchmarkError("Top-k must be an integer from 0 through 100000."); return; }
+    if (!Number.isFinite(minPValue) || minPValue < 0 || minPValue > 1) { setBenchmarkError("Min-p must be between 0 and 1."); return; }
+    if (!Number.isFinite(repeatPenalty) || repeatPenalty < 0.1 || repeatPenalty > 5) { setBenchmarkError("Repetition penalty must be between 0.1 and 5."); return; }
+    if (seed.trim() !== "" && (!Number.isSafeInteger(seedValue) || seedValue! < 0 || seedValue! > Number.MAX_SAFE_INTEGER)) {
+      setBenchmarkError("Seed must be a whole number from 0 through 9007199254740991, or blank.");
+      return;
+    }
+    if (stopSequences.length > 16 || stopSequences.some((value) => !value.trim() || value.length > 256)) {
+      setBenchmarkError("Use at most 16 non-blank stop sequences, each no longer than 256 characters.");
+      return;
+    }
+
+    const controller = new AbortController();
+    benchmarkAbortRef.current = controller;
+    setBenchmarking(true);
+    try {
+      const report = await axiomApi.benchmarkAxiomEngine({
+        model_path: modelPath.trim(),
+        adapter_path: adapterPath.trim() || undefined,
+        prompt,
+        warmup_runs: warmups,
+        iterations,
+        max_new_tokens: tokenLimit,
+        temperature: temp,
+        top_p: p,
+        top_k: k,
+        min_p: minPValue,
+        repetition_penalty: repeatPenalty,
+        seed: seedValue,
+        stop_sequences: stopSequences,
+        device: devicePreference,
+        memory_mode: memoryMode,
+        precision,
+      }, controller.signal);
+      setBenchmarkResult(report);
+      void refresh();
+    } catch (cause) {
+      setBenchmarkError(controller.signal.aborted
+        ? "Benchmark cancelled; AXIOM has been asked to stop the native generation loop."
+        : cause instanceof Error ? cause.message : "AXIOM Native Engine benchmark failed.");
+    } finally {
+      if (benchmarkAbortRef.current === controller) benchmarkAbortRef.current = null;
+      setBenchmarking(false);
+    }
+  };
+
   const telemetryMetrics = result ? {
     stage: "complete",
     prompt_tokens: result.prompt_tokens,
@@ -349,8 +422,8 @@ export default function LocalAxiomEnginePanel() {
     <div className="surface-head">
       <div><p className="surface-eyebrow">AXIOM ENGINE · DIRECT LOCAL INFERENCE</p><h2>AXIOM Local Engine</h2></div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button type="button" className="button secondary-button" onClick={() => void refresh()} disabled={loading || running || unloading}><RefreshCcw size={14} /> {loading ? "Checking" : "Check engine"}</button>
-        {status?.loaded && <button type="button" className="button secondary-button" onClick={() => void unload()} disabled={loading || running || unloading}><Unplug size={14} /> {unloading ? "Unloading…" : "Unload model"}</button>}
+        <button type="button" className="button secondary-button" onClick={() => void refresh()} disabled={loading || running || benchmarking || unloading}><RefreshCcw size={14} /> {loading ? "Checking" : "Check engine"}</button>
+        {status?.loaded && <button type="button" className="button secondary-button" onClick={() => void unload()} disabled={loading || running || benchmarking || unloading}><Unplug size={14} /> {unloading ? "Unloading…" : "Unload model"}</button>}
       </div>
     </div>
     <p>AXIOM Native Engine implements its own PyTorch Llama/Mistral/Qwen2/Qwen3 forward pass, KV-cache decode, attention, sampling, and supported LoRA application. It loads floating-point safetensors checkpoints and can ingest single-file or complete split-shard dense Llama/Mistral/Qwen2/Qwen3 GGUF checkpoints through gguf-py, dequantizing GGUF tensors to floating-point for AXIOM's own runtime. That means GGUF source quantization does not provide low-bit execution or low-bit memory usage. Model Studio can pull compatible public Hugging Face safetensors checkpoints directly into AXIOM. Malformed or incomplete GGUF shard sets, EXL2/GPTQ/AWQ low-bit kernels, multimodal architectures, and vLLM-style continuous-batching serving remain unsupported.</p>
@@ -388,14 +461,14 @@ export default function LocalAxiomEnginePanel() {
         <span className="field-label-row"><span>Discovered native model</span><span>{assets?.models.length ?? 0} found</span></span>
         <select aria-label="Select discovered native model" value={selectedModelPath} onChange={(event) => { setSelectedModelPath(event.target.value); if (event.target.value) setModelPath(event.target.value); setAdapterCompatibility(null); }}>
           <option value="">{assets?.models.length ? "Choose a discovered model or enter a path below" : "No supported local models discovered"}</option>
-          {(assets?.models ?? []).map((model) => <option key={model.path} value={model.path}>{model.name} · {model.model_type} · {model.weight_format}</option>)}
+          {(assets?.models ?? []).map((model) => <option key={model.path} value={model.path}>{model.name} · {model.model_type} · {model.weight_format}{model.effective_max_position_embeddings ? ` · ${model.effective_max_position_embeddings.toLocaleString()} context` : ""}{model.rope_scaling_type && model.rope_scaling_type !== "default" ? ` · RoPE ${model.rope_scaling_type}` : ""}</option>)}
         </select>
         <small>{assets?.scope_note ?? "Model discovery is unavailable; the API still accepts validated paths under trusted roots."}</small>
       </label>
       <label className="field">
-        <span className="field-label-row"><span>Local Llama / Mistral model directory</span></span>
+        <span className="field-label-row"><span>Local native model directory</span></span>
         <input value={modelPath} onChange={(event) => { setModelPath(event.target.value); if (event.target.value !== selectedModelPath) setSelectedModelPath(""); setAdapterCompatibility(null); }} required maxLength={4096} placeholder="/home/user/models/my-llama-model" autoComplete="off" />
-        <small>Existing directory with config.json, tokenizer.json and model.safetensors (or its shard index), or a directory containing a complete single-file or metadata-validated split GGUF checkpoint. GGUF tensors are dequantized to floating-point; source Q4/Q5/Q8 quantization does not mean low-bit execution or memory usage. Malformed or incomplete GGUF shard sets, EXL2/GPTQ/AWQ kernels and pickle .bin weights are not supported. Paths must match a directory discovered under a trusted root; set AXIOM_MODEL_ROOTS for additional locations.</small>
+        <small>Use a supported Llama, Mistral, Qwen2 or Qwen3 text checkpoint with config.json, tokenizer.json and model.safetensors (or its shard index), or a complete single-file / metadata-validated split GGUF checkpoint. Discovery shows the effective native context limit and any configured RoPE scaling. GGUF tensors are dequantized to floating-point; source Q4/Q5/Q8 quantization does not mean low-bit execution or memory usage. Malformed/incomplete GGUF shards, EXL2/GPTQ/AWQ kernels and pickle .bin weights are not supported. Paths must match a directory discovered under a trusted root; set AXIOM_MODEL_ROOTS for additional locations.</small>
       </label>
       <label className="field">
         <span className="field-label-row"><span>Discovered LoRA adapter (optional)</span><span>{assets?.adapters.length ?? 0} found</span></span>
@@ -481,9 +554,26 @@ export default function LocalAxiomEnginePanel() {
         <textarea aria-label="Stop sequences" value={stopSequencesText} onChange={(event) => setStopSequencesText(event.target.value)} rows={3} maxLength={4112} placeholder={"One exact stop string per line, e.g.\n<END>\n###"} />
         <small>AXIOM stops at the first full match, holds back partial matches across tokens, and excludes the stop text from the answer. Maximum 16 strings, 256 characters each.</small>
       </label>
+      <section className="panel-surface" aria-label="Native benchmark controls" style={{ padding: 12, marginBottom: 14 }}>
+        <div className="surface-head">
+          <div><p className="surface-eyebrow">AXIOM ENGINE · MEASURED PERFORMANCE</p><h3>Native inference benchmark</h3></div>
+        </div>
+        <p className="quiet-note">Measure real local inference on this model and device. Warm-ups are excluded from the measured statistics; the benchmark uses the current prompt and sampling settings, caps each run at 128 generated tokens, and never returns or stores the generated text.</p>
+        <div className="two-column-grid">
+          <label className="field"><span className="field-label-row"><span>Benchmark warm-up runs</span></span><input aria-label="Benchmark warm-up runs" type="number" min={0} max={2} step={1} value={benchmarkWarmupRuns} onChange={(event) => setBenchmarkWarmupRuns(event.target.value)} /><small>0–2 runs excluded from the results.</small></label>
+          <label className="field"><span className="field-label-row"><span>Measured benchmark runs</span></span><input aria-label="Measured benchmark runs" type="number" min={1} max={5} step={1} value={benchmarkIterations} onChange={(event) => setBenchmarkIterations(event.target.value)} /><small>1–5 measured generations; this is bounded to protect local resources.</small></label>
+        </div>
+        <div className="integration-form-actions">
+          <button type="button" className="button secondary-button" onClick={() => void runBenchmark()} disabled={!status?.ready || loading || running || benchmarking || unloading || !modelPath.trim() || !prompt.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}>
+            <Activity size={14} /> {benchmarking ? "Benchmarking locally…" : "Benchmark native engine"}
+          </button>
+          {benchmarking && <button type="button" className="button secondary-button" onClick={() => benchmarkAbortRef.current?.abort()}><Unplug size={14} /> Stop benchmark</button>}
+        </div>
+        {benchmarkError && <div className="inline-alert warning" role="alert">{benchmarkError}</div>}
+      </section>
       <div className="integration-form-actions">
-        <button type="submit" className="button primary-button" disabled={!status?.ready || loading || running || !modelPath.trim() || !prompt.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}><Play size={15} /> {running ? "Generating locally…" : "Run with AXIOM Engine"}</button>
-        <button type="button" className="button secondary-button" onClick={() => void runBatch()} disabled={!status?.ready || loading || running || !modelPath.trim() || !batchPromptsText.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}>{running ? "Batch running…" : "Run native batch"}</button>
+        <button type="submit" className="button primary-button" disabled={!status?.ready || loading || running || benchmarking || !modelPath.trim() || !prompt.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}><Play size={15} /> {running ? "Generating locally…" : "Run with AXIOM Engine"}</button>
+        <button type="button" className="button secondary-button" onClick={() => void runBatch()} disabled={!status?.ready || loading || running || benchmarking || !modelPath.trim() || !batchPromptsText.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}>{running ? "Batch running…" : "Run native batch"}</button>
         {running && <button type="button" className="button secondary-button" onClick={() => activeStreamRef.current?.abort()}><Unplug size={14} /> Stop generation</button>}
         {result && <span className="quiet-note"><Activity size={14} /> {result.completion_tokens} tokens · {result.elapsed_ms} ms wall time · {result.prefill_ms} ms prefill · {result.decode_ms} ms decode · {result.generation_tokens_per_second} tok/s</span>}
         {!result && streamTokenCount > 0 && <span className="quiet-note"><Activity size={14} /> {streamTokenCount} token(s) streamed</span>}
@@ -502,6 +592,38 @@ export default function LocalAxiomEnginePanel() {
           <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", font: "inherit", margin: 0 }}>{item.response}</pre>
         </article>)}
       </div>
+    </section>}
+    {benchmarkResult && <section className="panel-surface" aria-label="Native benchmark results" style={{ padding: 14, marginTop: 14 }}>
+      <div className="surface-head">
+        <div><p className="surface-eyebrow">AXIOM ENGINE · MEASURED RUNS</p><h3>{benchmarkResult.model} · {benchmarkResult.architecture ?? "Native model"}</h3></div>
+        <span className="status-pill">COMPLETE</span>
+      </div>
+      <p className="quiet-note">{benchmarkResult.iterations_completed} measured run(s) · {benchmarkResult.warmup_runs_completed} warm-up(s) excluded · {benchmarkResult.device ?? "device not reported"} · {benchmarkResult.precision ?? "precision not reported"} · {benchmarkResult.memory_mode.replaceAll("_", " ")}</p>
+      <div className="two-column-grid">
+        <article className="surface"><p className="surface-eyebrow">Median latency</p><h3>{benchmarkResult.metrics.median_elapsed_ms.toFixed(2)} ms</h3><p className="quiet-note">p95: {benchmarkResult.metrics.p95_elapsed_ms.toFixed(2)} ms · measured wall time: {benchmarkResult.metrics.measured_wall_time_ms.toFixed(2)} ms</p></article>
+        <article className="surface"><p className="surface-eyebrow">Generation throughput</p><h3>{benchmarkResult.metrics.aggregate_tokens_per_second.toFixed(2)} tokens/s</h3><p className="quiet-note">Median run: {benchmarkResult.metrics.median_generation_tokens_per_second.toFixed(2)} tokens/s · {benchmarkResult.metrics.completion_tokens.toLocaleString()} measured output tokens</p></article>
+        <article className="surface"><p className="surface-eyebrow">Prefill / time to first token</p><h3>{benchmarkResult.metrics.median_prefill_ms.toFixed(2)} ms</h3><p className="quiet-note">Median time to first token: {benchmarkResult.metrics.median_time_to_first_token_ms.toFixed(2)} ms</p></article>
+        <article className="surface"><p className="surface-eyebrow">Cached decode</p><h3>{benchmarkResult.metrics.median_decode_ms.toFixed(2)} ms</h3><p className="quiet-note">{benchmarkResult.metrics.prompt_tokens.toLocaleString()} total prompt tokens measured</p></article>
+      </div>
+      <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+        {benchmarkResult.runs.map((item) => <article key={item.iteration} className="panel-surface" style={{ padding: 10 }}>
+          <strong>Run {item.iteration}</strong>
+          <p className="quiet-note">{item.elapsed_ms.toFixed(2)} ms wall · {item.prefill_ms.toFixed(2)} ms prefill · {item.decode_ms.toFixed(2)} ms decode · {item.completion_tokens} token(s) · {item.generation_tokens_per_second.toFixed(2)} tokens/s · {item.stop_reason}</p>
+        </article>)}
+      </div>
+      {(benchmarkResult.memory_stats.layer_weight_bytes_staged > 0
+        || benchmarkResult.memory_stats.disk_layer_weight_bytes_read > 0
+        || benchmarkResult.memory_stats.kv_cache_bytes_offloaded > 0) && <section className="surface" aria-label="Layer streaming and KV transfer telemetry" style={{ padding: 12, marginTop: 12 }}>
+        <p className="surface-eyebrow">MEMORY TRANSFER TELEMETRY</p>
+        <div className="two-column-grid">
+          <article><p className="quiet-note">Layer weights staged</p><strong>{formatMemoryBytes(benchmarkResult.memory_stats.layer_weight_bytes_staged)}</strong><p className="quiet-note">{benchmarkResult.memory_stats.layer_weight_tensors_staged.toLocaleString()} tensor(s)</p></article>
+          <article><p className="quiet-note">Disk layer reads</p><strong>{benchmarkResult.memory_stats.disk_layer_weight_loads.toLocaleString()}</strong><p className="quiet-note">{formatMemoryBytes(benchmarkResult.memory_stats.disk_layer_weight_bytes_read)} read from disk</p></article>
+          <article><p className="quiet-note">KV cache offloaded</p><strong>{formatMemoryBytes(benchmarkResult.memory_stats.kv_cache_bytes_offloaded)}</strong><p className="quiet-note">{benchmarkResult.memory_stats.kv_cache_layer_offloads.toLocaleString()} layer offload(s)</p></article>
+          <article><p className="quiet-note">Layer weights released</p><strong>{formatMemoryBytes(benchmarkResult.memory_stats.layer_weight_bytes_released)}</strong><p className="quiet-note">{formatMemoryBytes(benchmarkResult.memory_stats.layer_weight_bytes_returned_to_cpu)} returned to CPU</p></article>
+        </div>
+        <p className="quiet-note">Counters are summed across measured runs only; excluded warm-ups do not contribute.</p>
+      </section>}
+      <p className="quiet-note">{benchmarkResult.scope_note} No prompts or generated responses are displayed or retained.</p>
     </section>}
     <section className="surface axiom-quantization-planner" aria-label="Memory and quantization planner">
       <div className="surface-head">
@@ -541,6 +663,7 @@ export default function LocalAxiomEnginePanel() {
           </div>
         </div>
         <p className="quiet-note">{quantizationPlan.scope_note}</p>
+        {typeof quantizationPlan.assumptions.kv_cache_context_length === "number" && typeof quantizationPlan.assumptions.kv_prefill_temporary_context_length === "number" && <p className="quiet-note">KV-cache estimate uses {quantizationPlan.assumptions.kv_cache_context_length.toLocaleString()} retained-context tokens. Additional per-layer prefill temporary memory uses {quantizationPlan.assumptions.kv_prefill_temporary_context_length.toLocaleString()} tokens where a sliding-window model needs a full-context prefill; ordinary non-sliding models do not pay this extra cache charge.</p>}
         <p className="quiet-note">
           <strong>{quantizationPlan.recommendation.format
             ? `Budget-based planning recommendation: ${quantizationPlan.recommendation.format.toUpperCase()}.`
@@ -552,7 +675,7 @@ export default function LocalAxiomEnginePanel() {
             <h4>{candidate.format.toUpperCase()}</h4>
             <p><strong>{formatEstimatedMemory(candidate.estimated_total_gib)} estimated</strong></p>
             <p className="quiet-note">Uncertainty range {formatEstimatedMemory(candidate.estimated_range_gib[0])}–{formatEstimatedMemory(candidate.estimated_range_gib[1])}</p>
-            <p className="quiet-note">Weights {formatEstimatedMemory(candidate.estimated_weight_gib)} · KV cache {formatEstimatedMemory(candidate.estimated_kv_cache_gib)} · Workspace {formatEstimatedMemory(candidate.estimated_workspace_gib)}</p>
+            <p className="quiet-note">Weights {formatEstimatedMemory(candidate.estimated_weight_gib)} · KV cache {formatEstimatedMemory(candidate.estimated_kv_cache_gib)} · Prefill temporary {formatEstimatedMemory(candidate.estimated_kv_prefill_temporary_gib)} · Workspace {formatEstimatedMemory(candidate.estimated_workspace_gib)}</p>
             {candidate.fits_ram_budget !== null && <p>RAM budget: {candidate.fits_ram_budget ? "Estimated fit" : "Over estimated budget"}</p>}
             {candidate.fits_vram_budget !== null && <p>VRAM budget: {candidate.fits_vram_budget ? "Estimated fit" : "Over estimated budget"}</p>}
             <p>{candidate.native_checkpoint_supported ? "Floating-point format supported by native loader (actual load still required)." : "Sizing only — native loader does not support this quantized format."}</p>
@@ -567,6 +690,7 @@ export default function LocalAxiomEnginePanel() {
         <p className="surface-eyebrow">{result ? `GENERATED ON THIS MACHINE · ${result.architecture}` : running ? "STREAMING TOKEN OUTPUT · LOCAL ONLY" : "PARTIAL LOCAL OUTPUT"}</p>
         <h3>{result ? `${result.model}${result.adapter ? ` + ${result.adapter}` : ""}` : (assets?.models.find((model) => model.path === modelPath)?.name || "AXIOM Native Engine")}</h3>
         {result?.device_selection && <p className="quiet-note">Execution device: {result.device_selection.selected}. {result.device_selection.reason}</p>}
+        {result?.device_fallback && <p className="quiet-note">Automatic memory fallback: {result.device_fallback.fallback_from.toUpperCase()} → {result.device_fallback.selected.toUpperCase()}. {result.device_fallback.reason}</p>}
         {result?.precision && <p className="quiet-note">Compute precision: requested {result.precision_selection?.requested ?? precision} · selected {result.precision}</p>}
         {result?.memory_mode && <p className="quiet-note">Memory strategy: {result.memory_mode.replaceAll("_", " ")}{result.memory_stats ? (result.memory_mode === "disk_streaming" ? " · Disk layer tensors read: " + result.memory_stats.disk_layer_weight_loads + " · Bytes read: " + (result.memory_stats.disk_layer_weight_bytes_read / (1024 ** 2)).toFixed(1) + " MiB · Layer bytes released: " + (result.memory_stats.layer_weight_bytes_released / (1024 ** 2)).toFixed(1) + " MiB" : " · Layer weight bytes staged: " + (result.memory_stats.layer_weight_bytes_staged / (1024 ** 2)).toFixed(1) + " MiB · Returned to CPU: " + (result.memory_stats.layer_weight_bytes_returned_to_cpu / (1024 ** 2)).toFixed(1) + " MiB") + " · KV-cache bytes offloaded: " + (result.memory_stats.kv_cache_bytes_offloaded / (1024 ** 2)).toFixed(1) + " MiB" : ""}</p>}
         {result?.prompt_format && <p className="quiet-note">Prompt formatting: {result.prompt_format === "tokenizer-config-template" ? "checkpoint chat template" : result.prompt_format === "qwen2-chatml-fallback" ? "Qwen2 ChatML fallback" : result.prompt_format === "qwen3-chatml-fallback" ? "Qwen3 ChatML fallback" : "raw completion"}</p>}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -282,6 +283,137 @@ def test_native_config_supports_llama3_rope_scaling_formula() -> None:
     assert torch.allclose(actual_sin[0, 0], embedding.sin(), atol=1e-6, rtol=1e-5)
 
 
+def test_dynamic_ntk_rope_scaling_extends_context_and_matches_frequency_formula() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config(
+        max_position_embeddings=8,
+        rope_theta=10_000.0,
+        rope_scaling={"rope_type": "dynamic", "factor": 2.0},
+    ))
+    assert config.rope_scaling_type == "dynamic"
+    assert config.max_position_embeddings == 8
+    assert config.effective_max_position_embeddings == 16
+
+    runtime = NativeLlamaRuntime(
+        config, _tiny_weights(torch), torch, torch.device("cpu")
+    )
+    positions = torch.arange(12)
+    actual_cos, actual_sin = runtime._rope_embeddings(positions, torch.float32)
+
+    dim = config.hidden_size // config.num_attention_heads
+    scale = (
+        config.rope_scaling_factor * len(positions) / config.max_position_embeddings
+        - (config.rope_scaling_factor - 1.0)
+    )
+    dynamic_theta = config.rope_theta * scale ** (dim / (dim - 2))
+    inverse_frequencies = 1.0 / (
+        dynamic_theta
+        ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim)
+    )
+    frequencies = torch.einsum(
+        "i,j->ij", positions.to(torch.float32), inverse_frequencies
+    )
+    embedding = torch.cat((frequencies, frequencies), dim=-1)
+    assert torch.allclose(actual_cos[0, 0], embedding.cos(), atol=1e-6, rtol=1e-5)
+    assert torch.allclose(actual_sin[0, 0], embedding.sin(), atol=1e-6, rtol=1e-5)
+
+    input_ids = torch.tensor([[1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5]], dtype=torch.long)
+    with torch.inference_mode():
+        logits, cache = runtime.forward(input_ids, rope_sequence_length=12)
+        prefill_logits, prefix_cache = runtime.forward(
+            input_ids[:, :8], rope_sequence_length=12
+        )
+        cached_logits, cached_cache = runtime.forward(
+            input_ids[:, 8:],
+            prefix_cache,
+            past_sequence_length=8,
+            rope_sequence_length=12,
+        )
+    assert tuple(logits.shape) == (1, config.vocab_size)
+    assert tuple(cache[0][0].shape)[-2] == len(input_ids[0])
+    assert torch.allclose(cached_logits, logits, atol=1e-5, rtol=1e-4)
+    assert all(torch.allclose(left[0], right[0], atol=1e-5, rtol=1e-4) and torch.allclose(left[1], right[1], atol=1e-5, rtol=1e-4) for left, right in zip(cache, cached_cache))
+    prompt_ids = [1, 2, 3, 4, 5, 6, 7]
+    with torch.inference_mode():
+        batched_tokens = runtime.generate_batch(
+            [prompt_ids], max_new_tokens=3, temperature=0, eos_token_ids=()
+        )
+        serial_tokens = runtime.generate(
+            prompt_ids, max_new_tokens=3, temperature=0, eos_token_ids=()
+        )
+    assert batched_tokens == [serial_tokens]
+    with pytest.raises(NativeEngineError, match="maximum context length"):
+        runtime.forward(torch.ones((1, 17), dtype=torch.long))
+
+
+def test_native_config_supports_yarn_rope_scaling_formula() -> None:
+    torch = pytest.importorskip("torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    config = NativeLlamaConfig.from_mapping(_config(
+        rope_scaling={
+            "rope_type": "yarn",
+            "factor": 2.0,
+            "original_max_position_embeddings": 16,
+            "beta_fast": 32.0,
+            "beta_slow": 1.0,
+            "attention_factor": 1.25,
+            "truncate": True,
+        }
+    ))
+    assert config.rope_scaling_type == "yarn"
+    assert config.rope_scaling_factor == 2.0
+    assert config.rope_attention_factor == 1.25
+    assert config.rope_beta_fast == 32.0
+    assert config.rope_beta_slow == 1.0
+    assert config.rope_truncate is True
+
+    runtime = NativeLlamaRuntime(
+        config, _tiny_weights(torch), torch, torch.device("cpu")
+    )
+    positions = torch.arange(4)
+    actual_cos, actual_sin = runtime._rope_embeddings(positions, torch.float32)
+
+    dim = config.hidden_size // config.num_attention_heads
+    inverse_frequencies = 1.0 / (
+        config.rope_theta
+        ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim)
+    )
+
+    def correction_dimension(rotations: float) -> float:
+        return (
+            dim * math.log(
+                config.rope_original_max_position_embeddings
+                / (rotations * 2.0 * math.pi)
+            )
+            / (2.0 * math.log(config.rope_theta))
+        )
+
+    low = math.floor(correction_dimension(config.rope_beta_fast))
+    high = math.ceil(correction_dimension(config.rope_beta_slow))
+    low, high = max(low, 0), min(high, dim - 1)
+    if high <= low:
+        high += 0.001
+    ramp = (
+        (torch.arange(dim // 2, dtype=torch.float32) - low) / (high - low)
+    ).clamp(0.0, 1.0)
+    extrapolation_factor = 1.0 - ramp
+    expected_inverse = (
+        (inverse_frequencies / config.rope_scaling_factor) * (1.0 - extrapolation_factor)
+        + inverse_frequencies * extrapolation_factor
+    )
+    frequencies = torch.einsum(
+        "i,j->ij", positions.to(torch.float32), expected_inverse
+    )
+    embedding = torch.cat((frequencies, frequencies), dim=-1)
+    expected_cos = embedding.cos() * config.rope_attention_factor
+    expected_sin = embedding.sin() * config.rope_attention_factor
+    assert torch.allclose(actual_cos[0, 0], expected_cos, atol=1e-6, rtol=1e-5)
+    assert torch.allclose(actual_sin[0, 0], expected_sin, atol=1e-6, rtol=1e-5)
+
+
 @pytest.mark.parametrize(
     "overrides,detail",
     [
@@ -302,6 +434,11 @@ def test_native_config_rejects_malformed_token_and_rope_metadata(overrides, deta
         ({"model_type": "gemma3"}, "supports llama, mistral, qwen2, and qwen3"),
         ({"hidden_size": 7}, "even-sized attention heads"),
         ({"rope_scaling": {"rope_type": "yarn", "factor": 2.0}}, "RoPE scaling"),
+        ({"rope_scaling": {"rope_type": "yarn", "factor": 2.0, "original_max_position_embeddings": 16, "beta_fast": 1.0, "beta_slow": 32.0}}, "YaRN RoPE scaling requires"),
+        ({"rope_scaling": {"rope_type": "yarn", "factor": 2.0, "original_max_position_embeddings": 16, "attention_factor": 0}}, "YaRN attention_factor"),
+        ({"rope_scaling": {"rope_type": "yarn", "factor": 129.0, "original_max_position_embeddings": 16}}, "YaRN RoPE scaling factor"),
+        ({"rope_scaling": {"rope_type": "dynamic", "factor": 129.0}}, "Dynamic NTK RoPE scaling factor"),
+        ({"rope_scaling": {"rope_type": "dynamic", "factor": 2.0}, "hidden_size": 4, "num_attention_heads": 2}, "head dimension greater than 2"),
         ({"rope_scaling": {"rope_type": "default", "factor": True}}, "RoPE scaling"),
         ({"model_type": "llama", "architectures": ["Qwen3ForCausalLM"]}, "does not match"),
         ({"num_attention_heads": 3, "hidden_size": 12, "num_key_value_heads": 2}, "num_key_value_heads"),
@@ -1316,6 +1453,177 @@ def test_auto_device_falls_back_when_accelerator_memory_plan_cannot_fit(monkeypa
     assert details["memory_selection"]["fallback_from"] == "cuda"
 
 
+def test_native_stream_retries_cpu_on_auto_accelerator_oom_before_first_token(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from axiom.core import engine
+
+    calls: list[str] = []
+
+    class TokenizerFixture:
+        def encode(self, _prompt, add_special_tokens=False):
+            return SimpleNamespace(ids=[1, 2])
+
+        def decode(self, token_ids, skip_special_tokens=True):
+            return "generated" if list(token_ids) == [7] else ""
+
+    class RuntimeFixture:
+        config = SimpleNamespace(
+            max_position_embeddings=32,
+            effective_max_position_embeddings=32,
+            bos_token_id=None,
+            eos_token_ids=(),
+        )
+        last_attention_backend = "fixture-attention"
+        memory_mode = "full"
+        memory_stats = {}
+
+        def __init__(self, device: str):
+            self.device = device
+            self.last_generation = {}
+
+        def iter_generate(self, _prompt_ids, **_kwargs):
+            try:
+                if self.device == "cuda":
+                    raise RuntimeError("CUDA out of memory in test fixture")
+                yield 7
+            finally:
+                self.last_generation.update({
+                    "decoder": "axiom-autoregressive-kv-cache",
+                    "prompt_tokens": 2,
+                    "completion_tokens": 1 if self.device == "cpu" else 0,
+                    "prefill_ms": 1.0,
+                    "decode_ms": 1.0,
+                    "time_to_first_token_ms": 1.0,
+                    "generation_tokens_per_second": 100.0,
+                    "stop_reason": "max_new_tokens",
+                })
+
+    def fake_load(_model_path, _adapter_path, device_preference, _memory_mode, _precision):
+        calls.append(device_preference)
+        selected_device = "cuda" if device_preference == "auto" else "cpu"
+        runtime = RuntimeFixture(selected_device)
+        details = {
+            "model_directory_path": "/trusted/fixture",
+            "model_directory_name": "fixture",
+            "adapter_directory_name": None,
+            "architecture": "LlamaForCausalLM",
+            "model_type": "llama",
+            "add_bos_token": False,
+            "device_selection": {
+                "requested": device_preference,
+                "selected": selected_device,
+                "reason": "test fixture",
+            },
+            "precision_selection": {"requested": "auto", "selected": "fp32"},
+            "precision": "fp32",
+            "checkpoint_format": "safetensors",
+        }
+        return runtime, TokenizerFixture(), None, selected_device, details
+
+    monkeypatch.setattr(engine, "_load_local_model", fake_load)
+    monkeypatch.setattr(engine, "_device_memory_snapshot", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(engine, "_reset_device_peak_memory", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(engine, "_clear_device_cache", lambda *_args, **_kwargs: None)
+
+    events = list(engine.generate_local_stream(
+        "/trusted/fixture", "question", max_new_tokens=2, temperature=0,
+        device_preference="auto",
+    ))
+    token_events = [event for event in events if event["type"] == "token"]
+    completion = events[-1]["result"]
+
+    assert calls == ["auto", "cpu"]
+    assert len(token_events) == 1
+    assert completion["response"] == "generated"
+    assert completion["device"] == "cpu"
+    assert completion["device_selection"]["requested"] == "auto"
+    assert completion["device_selection"]["selected"] == "cpu"
+    assert completion["device_selection"]["fallback_from"] == "cuda"
+    assert completion["device_fallback"] == {
+        "fallback_from": "cuda",
+        "selected": "cpu",
+        "reason": completion["device_selection"]["reason"],
+    }
+
+
+def test_native_stream_does_not_retry_on_cpu_after_partial_output(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from axiom.core import engine
+    from axiom.core.engine import AxiomEngineError
+
+    calls: list[str] = []
+
+    class TokenizerFixture:
+        def encode(self, _prompt, add_special_tokens=False):
+            return SimpleNamespace(ids=[1])
+
+        def decode(self, token_ids, skip_special_tokens=True):
+            return "partial" if list(token_ids) == [7] else ""
+
+    class RuntimeFixture:
+        config = SimpleNamespace(
+            max_position_embeddings=32,
+            effective_max_position_embeddings=32,
+            bos_token_id=None,
+            eos_token_ids=(),
+        )
+        last_attention_backend = "fixture-attention"
+        memory_mode = "full"
+        memory_stats = {}
+
+        def __init__(self):
+            self.last_generation = {}
+
+        def iter_generate(self, _prompt_ids, **_kwargs):
+            try:
+                yield 7
+                raise RuntimeError("CUDA out of memory after first token")
+            finally:
+                self.last_generation.update({
+                    "decoder": "axiom-autoregressive-kv-cache",
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "prefill_ms": 1.0,
+                    "decode_ms": 1.0,
+                    "time_to_first_token_ms": 1.0,
+                    "generation_tokens_per_second": 100.0,
+                    "stop_reason": "max_new_tokens",
+                })
+
+    def fake_load(_model_path, _adapter_path, device_preference, _memory_mode, _precision):
+        calls.append(device_preference)
+        runtime = RuntimeFixture()
+        details = {
+            "model_directory_path": "/trusted/fixture",
+            "model_directory_name": "fixture",
+            "adapter_directory_name": None,
+            "architecture": "LlamaForCausalLM",
+            "model_type": "llama",
+            "add_bos_token": False,
+            "device_selection": {"requested": "auto", "selected": "cuda", "reason": "test fixture"},
+            "precision_selection": {"requested": "auto", "selected": "fp32"},
+            "precision": "fp32",
+            "checkpoint_format": "safetensors",
+        }
+        return runtime, TokenizerFixture(), None, "cuda", details
+
+    monkeypatch.setattr(engine, "_load_local_model", fake_load)
+    monkeypatch.setattr(engine, "_device_memory_snapshot", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(engine, "_reset_device_peak_memory", lambda *_args, **_kwargs: False)
+
+    stream = engine.generate_local_stream(
+        "/trusted/fixture", "question", max_new_tokens=2, temperature=0,
+        device_preference="auto",
+    )
+    first_event = next(stream)
+    assert first_event == {"type": "token", "response": "partial", "completion_tokens": 1}
+    with pytest.raises(AxiomEngineError, match="only before any output token is emitted"):
+        next(stream)
+    assert calls == ["auto"]
+
+
 def test_auto_device_retries_cpu_after_accelerator_oom(monkeypatch, tmp_path: Path) -> None:
     import sys
     from types import SimpleNamespace
@@ -1635,6 +1943,135 @@ def test_disk_streaming_reads_layer_weights_on_demand_and_matches_full_forward(t
     assert streamed.memory_stats["kv_cache_layer_offloads"] == config["num_hidden_layers"]
 
 
+def test_native_benchmark_excludes_warmups_and_never_returns_prompt_or_response(monkeypatch) -> None:
+    from axiom.core import engine as engine_module
+
+    calls = []
+
+    def fake_generate(model_path, prompt, **kwargs):
+        calls.append({"model_path": model_path, "prompt": prompt, **kwargs})
+        measured_run = len(calls) - 1
+        elapsed = [999.0, 10.0, 20.0, 30.0][measured_run]
+        return {
+            "model": "tiny-model",
+            "architecture": "LlamaForCausalLM",
+            "model_type": "llama",
+            "device": "cpu",
+            "precision": "fp32",
+            "memory_mode": "full",
+            "checkpoint_format": "safetensors",
+            "elapsed_ms": elapsed,
+            "prefill_ms": elapsed / 4,
+            "decode_ms": elapsed / 2,
+            "time_to_first_token_ms": elapsed / 10,
+            "generation_tokens_per_second": [1.0, 200.0, 250.0, 300.0][measured_run],
+            "prompt_tokens": 5,
+            "completion_tokens": [99, 2, 4, 6][measured_run],
+            "stop_reason": "max_new_tokens",
+            "response": "PRIVATE_GENERATED_RESPONSE",
+            "device_memory": {"peak_allocated_bytes": 1234},
+            "memory_selection": {"selected": "full"},
+            "memory_stats": {
+                "layer_weight_tensors_staged": [99, 1, 2, 3][measured_run],
+                "layer_weight_bytes_staged": [999, 100, 200, 300][measured_run],
+                "layer_weight_bytes_returned_to_cpu": [999, 20, 40, 60][measured_run],
+                "layer_weight_bytes_released": [999, 30, 60, 90][measured_run],
+                "disk_layer_weight_loads": [99, 1, 2, 3][measured_run],
+                "disk_layer_weight_bytes_read": [999, 40, 80, 120][measured_run],
+                "kv_cache_layer_offloads": [99, 1, 2, 3][measured_run],
+                "kv_cache_bytes_offloaded": [999, 50, 100, 150][measured_run],
+            },
+        }
+
+    monkeypatch.setattr(engine_module, "generate_local", fake_generate)
+    report = engine_module.benchmark_local(
+        "/trusted/tiny-model",
+        "PRIVATE_BENCHMARK_PROMPT",
+        warmup_runs=1,
+        iterations=3,
+        max_new_tokens=8,
+    )
+
+    assert len(calls) == 4
+    assert all(call["prompt"] == "PRIVATE_BENCHMARK_PROMPT" for call in calls)
+    assert all(call["_lock_held"] is True for call in calls)
+    assert report["warmup_runs_requested"] == report["warmup_runs_completed"] == 1
+    assert report["warmups_excluded"] is True
+    assert report["iterations_requested"] == report["iterations_completed"] == 3
+    assert report["metrics"]["median_elapsed_ms"] == 20.0
+    assert report["metrics"]["p95_elapsed_ms"] == 30.0
+    assert report["metrics"]["completion_tokens"] == 12
+    assert report["metrics"]["prompt_tokens"] == 15
+    assert report["metrics"]["aggregate_tokens_per_second"] == 200.0
+    assert [item["completion_tokens"] for item in report["runs"]] == [2, 4, 6]
+    assert report["runs"][0]["memory_stats"]["layer_weight_bytes_staged"] == 100
+    assert report["memory_stats"]["layer_weight_tensors_staged"] == 6
+    assert report["memory_stats"]["layer_weight_bytes_staged"] == 600
+    assert report["memory_stats"]["layer_weight_bytes_returned_to_cpu"] == 120
+    assert report["memory_stats"]["layer_weight_bytes_released"] == 180
+    assert report["memory_stats"]["disk_layer_weight_loads"] == 6
+    assert report["memory_stats"]["disk_layer_weight_bytes_read"] == 240
+    assert report["memory_stats"]["kv_cache_layer_offloads"] == 6
+    assert report["memory_stats"]["kv_cache_bytes_offloaded"] == 300
+    serialized = json.dumps(report)
+    assert "PRIVATE_BENCHMARK_PROMPT" not in serialized
+    assert "PRIVATE_GENERATED_RESPONSE" not in serialized
+    assert "/trusted/tiny-model" not in serialized
+    assert report["privacy"] == {
+        "prompt_returned": False,
+        "response_returned": False,
+        "results_persisted": False,
+        "cloud_provider_used": False,
+    }
+
+
+def test_native_benchmark_cancellation_stops_before_next_measured_run(monkeypatch) -> None:
+    from threading import Event
+
+    from axiom.core import engine as engine_module
+
+    cancel_event = Event()
+    calls = []
+
+    def fake_generate(_model_path, _prompt, **kwargs):
+        calls.append(kwargs)
+        assert kwargs["cancel_event"] is cancel_event
+        cancel_event.set()
+        return {
+            "elapsed_ms": 12.0,
+            "prefill_ms": 3.0,
+            "decode_ms": 8.0,
+            "time_to_first_token_ms": 3.0,
+            "generation_tokens_per_second": 20.0,
+            "prompt_tokens": 4,
+            "completion_tokens": 8,
+            "stop_reason": "cancelled",
+        }
+
+    monkeypatch.setattr(engine_module, "generate_local", fake_generate)
+    with pytest.raises(engine_module.AxiomEngineError, match="Native benchmark was cancelled"):
+        engine_module.benchmark_local(
+            "/trusted/model", "private prompt",
+            warmup_runs=0, iterations=3, cancel_event=cancel_event,
+        )
+
+    assert len(calls) == 1
+
+
+def test_native_benchmark_rejects_unbounded_work_before_generation(monkeypatch) -> None:
+    from axiom.core import engine as engine_module
+
+    monkeypatch.setattr(
+        engine_module,
+        "generate_local",
+        lambda *_args, **_kwargs: pytest.fail("generation must not start for invalid benchmark bounds"),
+    )
+    with pytest.raises(ValueError, match="Measured iterations"):
+        engine_module.benchmark_local("model", "hello", iterations=6)
+    with pytest.raises(ValueError, match="output length"):
+        engine_module.benchmark_local("model", "hello", max_new_tokens=129)
+
+
 def _planner_fixture(tmp_path: Path, monkeypatch, *, system_memory: int | None):
     from types import SimpleNamespace
     import shutil
@@ -1658,6 +2095,131 @@ def _planner_fixture(tmp_path: Path, monkeypatch, *, system_memory: int | None):
     )
     monkeypatch.setattr(shutil, "disk_usage", lambda _path: SimpleNamespace(free=10 * 1024**3))
     return engine_module, model_dir, {"config": _config()}
+
+
+def test_mistral_sliding_window_memory_estimate_bounds_retained_cache_and_accounts_for_prefill(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from types import SimpleNamespace
+
+    from axiom.core import engine as engine_module
+    from axiom.core.native_engine import NativeLlamaConfig
+
+    module, model_dir, inspected = _planner_fixture(
+        tmp_path, monkeypatch, system_memory=8 * 1024**3
+    )
+    inspected["config"] = _config(
+        model_type="mistral",
+        architectures=["MistralForCausalLM"],
+        sliding_window=3,
+        max_position_embeddings=128,
+    )
+    mode, selection = module._choose_memory_mode(
+        model_dir,
+        inspected,
+        object(),
+        SimpleNamespace(type="cpu"),
+        {"selected": "cpu"},
+    )
+
+    config = NativeLlamaConfig.from_mapping(inspected["config"])
+    context = selection["estimated_context_tokens"]
+    cache_context = min(context, config.sliding_window)
+    dtype_bytes = selection["estimated_dtype_bytes"]
+    head_dim = config.hidden_size // config.num_attention_heads
+    expected_cache_bytes = (
+        2
+        * config.num_hidden_layers
+        * config.num_key_value_heads
+        * head_dim
+        * cache_context
+        * dtype_bytes
+    )
+    expected_prefill_bytes = (
+        2 * config.num_key_value_heads * head_dim * context * dtype_bytes
+    )
+    unbounded_cache_bytes = (
+        2
+        * config.num_hidden_layers
+        * config.num_key_value_heads
+        * head_dim
+        * context
+        * dtype_bytes
+    )
+
+    assert mode == "full"
+    assert context > cache_context
+    assert selection["estimated_kv_cache_context_tokens"] == cache_context
+    assert selection["estimated_kv_cache_bytes"] == expected_cache_bytes
+    assert selection["estimated_kv_prefill_temporary_bytes"] == expected_prefill_bytes
+    assert selection["estimated_kv_cache_bytes"] < unbounded_cache_bytes
+
+
+def test_mistral_estimator_bounds_retained_kv_cache_and_reports_prefill_temporary(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from axiom.core import engine as engine_module
+
+    model_dir = tmp_path / "mistral-model"
+    model_dir.mkdir()
+    config = _config(
+        model_type="mistral",
+        architectures=["MistralForCausalLM"],
+        sliding_window=3,
+        max_position_embeddings=32,
+    )
+    monkeypatch.setattr(engine_module, "_resolve_model_directory", lambda *_args: model_dir)
+    monkeypatch.setattr(engine_module, "_inspect_model_config", lambda *_args: {
+        "config": config,
+        "architecture": "MistralForCausalLM",
+    })
+
+    report = engine_module.estimate_native_quantization(
+        str(model_dir), context_length=24, batch_size=2
+    )
+    candidate = next(item for item in report["candidates"] if item["format"] == "bf16")
+    config_obj = NativeLlamaConfig.from_mapping(config)
+    head_dim = config_obj.hidden_size // config_obj.num_attention_heads
+    gib = 1024**3
+    expected_cache = (
+        2
+        * config_obj.num_hidden_layers
+        * config_obj.num_key_value_heads
+        * head_dim
+        * 3
+        * 2
+        * 2
+    )
+    expected_prefill = 2 * config_obj.num_key_value_heads * head_dim * 24 * 2 * 2
+
+    assert report["assumptions"]["kv_cache_context_length"] == 3
+    assert report["assumptions"]["kv_prefill_temporary_context_length"] == 24
+    assert candidate["estimated_kv_cache_gib"] == round(expected_cache / gib, 9)
+    assert candidate["estimated_kv_prefill_temporary_gib"] == round(expected_prefill / gib, 9)
+
+
+def test_non_sliding_estimator_does_not_double_count_prefill_kv(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from axiom.core import engine as engine_module
+
+    model_dir = tmp_path / "llama-model"
+    model_dir.mkdir()
+    config = _config(max_position_embeddings=32)
+    monkeypatch.setattr(engine_module, "_resolve_model_directory", lambda *_args: model_dir)
+    monkeypatch.setattr(engine_module, "_inspect_model_config", lambda *_args: {
+        "config": config,
+        "architecture": "LlamaForCausalLM",
+    })
+
+    report = engine_module.estimate_native_quantization(
+        str(model_dir), context_length=24, batch_size=2
+    )
+    candidate = next(item for item in report["candidates"] if item["format"] == "bf16")
+
+    assert report["assumptions"]["kv_cache_context_length"] == 24
+    assert report["assumptions"]["kv_prefill_temporary_context_length"] == 0
+    assert candidate["estimated_kv_prefill_temporary_gib"] == 0.0
 
 
 def test_auto_memory_planner_selects_full_mode_when_cpu_ram_is_sufficient(tmp_path: Path, monkeypatch) -> None:

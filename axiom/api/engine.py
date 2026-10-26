@@ -16,6 +16,7 @@ from axiom.core.engine_fabric import EngineFabricError, discover_engine_backends
 
 from axiom.core.engine import (
     AxiomEngineError,
+    benchmark_local,
     check_local_adapter_compatibility,
     discover_local_engine_assets,
     estimate_native_quantization,
@@ -98,6 +99,13 @@ class GenerateRequest(BaseModel):
         if not value.strip():
             raise ValueError("Prompt must contain at least one non-whitespace character.")
         return value
+
+
+
+class NativeBenchmarkRequest(GenerateRequest):
+    warmup_runs: int = Field(default=1, ge=0, le=2)
+    iterations: int = Field(default=3, ge=1, le=5)
+    max_new_tokens: int = Field(default=64, ge=1, le=128)
 
 
 class BatchGenerateRequest(BaseModel):
@@ -268,6 +276,58 @@ def engine_generate(request: GenerateRequest) -> dict[str, Any]:
             memory_mode=request.memory_mode,
             precision=request.precision,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except AxiomEngineError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+@router.post("/benchmark")
+async def engine_benchmark(
+    request: NativeBenchmarkRequest,
+    raw_request: Request,
+) -> dict[str, Any]:
+    """Run a bounded native-only benchmark with client-disconnect cancellation."""
+    cancel_event = Event()
+    worker = asyncio.create_task(asyncio.to_thread(
+        benchmark_local,
+        request.model_path,
+        request.prompt,
+        adapter_path=request.adapter_path,
+        warmup_runs=request.warmup_runs,
+        iterations=request.iterations,
+        max_new_tokens=request.max_new_tokens,
+        temperature=request.temperature,
+        top_p=request.top_p,
+        top_k=request.top_k,
+        min_p=request.min_p,
+        repetition_penalty=request.repetition_penalty,
+        seed=request.seed,
+        stop_sequences=request.stop_sequences,
+        device_preference=request.device,
+        memory_mode=request.memory_mode,
+        precision=request.precision,
+        cancel_event=cancel_event,
+    ))
+    while not worker.done():
+        if await raw_request.is_disconnected():
+            cancel_event.set()
+
+            def consume_background_result(task: asyncio.Task[Any]) -> None:
+                if not task.cancelled():
+                    try:
+                        task.exception()
+                    except Exception:
+                        pass
+
+            worker.add_done_callback(consume_background_result)
+            raise HTTPException(
+                status_code=499,
+                detail="Native benchmark cancelled because the client disconnected.",
+            )
+        await asyncio.sleep(0.05)
+    try:
+        return await worker
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     except AxiomEngineError as exc:

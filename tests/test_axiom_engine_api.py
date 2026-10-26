@@ -35,6 +35,120 @@ def test_engine_request_accepts_absolute_paths_only_inside_explicit_roots(tmp_pa
     assert request.model_path == str(model.resolve())
 
 
+def test_model_discovery_reports_dynamic_ntk_effective_context_for_runtime_gui(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "models"
+    model = root / "dynamic-llama"
+    model.mkdir(parents=True)
+    config = {
+        "model_type": "llama",
+        "architectures": ["LlamaForCausalLM"],
+        "hidden_size": 8,
+        "intermediate_size": 12,
+        "num_hidden_layers": 1,
+        "num_attention_heads": 2,
+        "num_key_value_heads": 1,
+        "vocab_size": 8,
+        "max_position_embeddings": 8,
+        "rope_theta": 10000.0,
+        "rope_scaling": {"rope_type": "dynamic", "factor": 2.0},
+    }
+    (model / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    (model / "tokenizer.json").write_text("{}", encoding="utf-8")
+    (model / "model.safetensors").write_bytes(b"metadata-only-fixture")
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(root))
+
+    response = _client().get("/api/engine/models")
+    assert response.status_code == 200, response.text
+    report = response.json()
+    selected = next(item for item in report["models"] if item["name"] == "dynamic-llama")
+    assert selected["max_position_embeddings"] == 8
+    assert selected["effective_max_position_embeddings"] == 16
+    assert selected["rope_scaling_type"] == "dynamic"
+
+
+def test_native_benchmark_api_forwards_bounded_local_options_without_response_payload(
+    tmp_path, monkeypatch
+) -> None:
+    root = tmp_path / "models"
+    model = root / "tiny"
+    model.mkdir(parents=True)
+    (model / "config.json").write_text('{"model_type":"llama"}', encoding="utf-8")
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(root))
+    captured = {}
+
+    def fake_benchmark(model_path, prompt, **kwargs):
+        captured.update(model_path=model_path, prompt=prompt, **kwargs)
+        return {
+            "schema_version": 1,
+            "iterations_completed": 2,
+            "warmups_excluded": True,
+            "metrics": {"median_elapsed_ms": 12.0},
+            "privacy": {
+                "prompt_returned": False, "response_returned": False,
+                "results_persisted": False, "cloud_provider_used": False,
+            },
+        }
+
+    monkeypatch.setattr(engine_api, "benchmark_local", fake_benchmark)
+    response = _client().post("/api/engine/benchmark", json={
+        "model_path": str(model),
+        "prompt": "private benchmark prompt",
+        "warmup_runs": 1,
+        "iterations": 2,
+        "max_new_tokens": 8,
+        "temperature": 0,
+        "top_p": 0.8,
+        "top_k": 4,
+        "min_p": 0.1,
+        "repetition_penalty": 1.1,
+        "seed": 42,
+        "stop_sequences": ["END"],
+        "device": "cpu",
+        "memory_mode": "layer_streaming",
+        "precision": "bf16",
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["warmups_excluded"] is True
+    assert "response" not in response.json()
+    assert isinstance(captured.pop("cancel_event"), Event)
+    assert captured == {
+        "model_path": str(model.resolve()),
+        "prompt": "private benchmark prompt",
+        "adapter_path": None,
+        "warmup_runs": 1,
+        "iterations": 2,
+        "max_new_tokens": 8,
+        "temperature": 0,
+        "top_p": 0.8,
+        "top_k": 4,
+        "min_p": 0.1,
+        "repetition_penalty": 1.1,
+        "seed": 42,
+        "stop_sequences": ["END"],
+        "device_preference": "cpu",
+        "memory_mode": "layer_streaming",
+        "precision": "bf16",
+    }
+
+
+def test_native_benchmark_api_rejects_iterations_or_output_over_the_limit(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "models"
+    model = root / "tiny"
+    model.mkdir(parents=True)
+    (model / "config.json").write_text('{"model_type":"llama"}', encoding="utf-8")
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(root))
+    monkeypatch.setattr(
+        engine_api,
+        "benchmark_local",
+        lambda *_args, **_kwargs: pytest.fail("invalid benchmark must be rejected before execution"),
+    )
+    for invalid in ({"iterations": 6}, {"max_new_tokens": 129}, {"warmup_runs": 3}):
+        response = _client().post("/api/engine/benchmark", json={
+            "model_path": str(model), "prompt": "hello", **invalid,
+        })
+        assert response.status_code == 422, response.text
+
+
 def test_batch_generate_request_validates_size_prompt_limits_and_sampling(tmp_path, monkeypatch) -> None:
     root = tmp_path / "models"
     model = root / "tiny"
@@ -345,9 +459,12 @@ def test_quantization_estimator_compares_formats_against_memory_budgets(tmp_path
     assert report["schema_version"] == 1
     assert report["model"]["name"] == "tiny-llama"
     assert report["request"]["context_length"] == 16
+    assert report["assumptions"]["kv_cache_context_length"] == 16
+    assert report["assumptions"]["kv_prefill_temporary_context_length"] == 0
     candidates = {item["format"]: item for item in report["candidates"]}
     assert set(candidates) == {"int4", "int8", "bf16", "fp16", "fp32"}
     assert candidates["int4"]["estimated_total_gib"] > 0
+    assert all(item["estimated_kv_prefill_temporary_gib"] == 0 for item in candidates.values())
     assert candidates["int4"]["estimated_total_gib"] < candidates["int8"]["estimated_total_gib"]
     assert candidates["int8"]["estimated_total_gib"] < candidates["fp16"]["estimated_total_gib"]
     assert report["recommendation"]["format"] == "bf16"
@@ -503,6 +620,9 @@ def test_native_model_discovery_lists_local_metadata_without_loading_weights(tmp
         "model_type": "llama",
         "architecture": "LlamaForCausalLM",
         "weight_format": "safetensors",
+        "max_position_embeddings": 32,
+        "effective_max_position_embeddings": 32,
+        "rope_scaling_type": "default",
         "ready_for_native_attempt": True,
     }]
     assert payload["adapters"] == [{

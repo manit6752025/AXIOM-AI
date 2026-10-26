@@ -8,7 +8,7 @@ Transformers model generation or an Ollama service.
 from __future__ import annotations
 
 import gc
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from functools import lru_cache
 import importlib.metadata
 import importlib.util
@@ -18,6 +18,7 @@ import math
 import os
 import re
 import shutil
+import statistics
 import sys
 import threading
 import time
@@ -791,10 +792,10 @@ def estimate_native_quantization(
     model_config = inspected["config"]
     from axiom.core.native_engine import NativeLlamaConfig
     native_config = NativeLlamaConfig.from_mapping(model_config)
-    if context_length > native_config.max_position_embeddings:
+    if context_length > native_config.effective_max_position_embeddings:
         raise ValueError(
             f"Context length {context_length} exceeds this checkpoint's limit "
-            f"of {native_config.max_position_embeddings} tokens."
+            f"of {native_config.effective_max_position_embeddings} tokens (including supported RoPE scaling)."
         )
 
     hidden = native_config.hidden_size
@@ -805,6 +806,16 @@ def estimate_native_quantization(
     layers = native_config.num_hidden_layers
     vocab = native_config.vocab_size
     kv_width = kv_heads * head_dim
+    kv_cache_context = (
+        min(context_length, native_config.sliding_window)
+        if native_config.sliding_window
+        else context_length
+    )
+    kv_prefill_context = (
+        context_length
+        if native_config.sliding_window and context_length > native_config.sliding_window
+        else 0
+    )
 
     embedding_params = vocab * hidden
     lm_head_params = 0 if native_config.tie_word_embeddings else vocab * hidden
@@ -835,8 +846,13 @@ def estimate_native_quantization(
     candidate_results: list[dict[str, Any]] = []
     for name, bits, bytes_per_parameter, storage_overhead, kv_bytes, native_supported, reason in candidates:
         weight_bytes = estimated_parameters * bytes_per_parameter * storage_overhead
-        kv_bytes_total = 2 * layers * kv_heads * head_dim * context_length * batch_size * kv_bytes
-        unbuffered_total = weight_bytes + kv_bytes_total + workspace_bytes
+        kv_bytes_total = 2 * layers * kv_heads * head_dim * kv_cache_context * batch_size * kv_bytes
+        kv_prefill_temporary_bytes = (
+            2 * kv_heads * head_dim * kv_prefill_context * batch_size * kv_bytes
+        )
+        unbuffered_total = (
+            weight_bytes + kv_bytes_total + kv_prefill_temporary_bytes + workspace_bytes
+        )
         total_bytes = unbuffered_total * 1.20
         total_gib = total_bytes / gib
         uncertainty_low = total_gib * 0.85
@@ -848,6 +864,7 @@ def estimate_native_quantization(
             # not collapse all candidate formats to 0.000 GiB.
             "estimated_weight_gib": round(weight_bytes / gib, 9),
             "estimated_kv_cache_gib": round(kv_bytes_total / gib, 9),
+            "estimated_kv_prefill_temporary_gib": round(kv_prefill_temporary_bytes / gib, 9),
             "estimated_workspace_gib": round(workspace_bytes / gib, 9),
             "estimated_total_gib": round(total_gib, 9),
             "estimated_range_gib": [round(uncertainty_low, 9), round(uncertainty_high, 9)],
@@ -899,7 +916,10 @@ def estimate_native_quantization(
                 "int8": "1 byte/parameter plus 5% scales/metadata",
                 "int4": "0.5 bytes/parameter plus 15% scales/metadata",
             },
-            "kv_cache_formula": "2 × layers × KV heads × head dimension × context × batch × KV element bytes",
+            "kv_cache_context_length": kv_cache_context,
+            "kv_prefill_temporary_context_length": kv_prefill_context,
+            "kv_cache_formula": "2 × layers × KV heads × head dimension × retained cache context × batch × KV element bytes; Mistral retained context is bounded by sliding_window",
+            "kv_prefill_temporary_formula": "For Mistral prefill beyond sliding_window: 2 × KV heads × head dimension × full prefill context × batch × KV element bytes for the active layer",
             "kv_cache_precision": "FP32 candidate uses 4-byte cache elements; all other candidates assume 2-byte cache elements",
             "workspace_formula": "max(batch × context × intermediate × 4, batch × attention heads × context² × 4)",
             "safety_margin_percent": 20,
@@ -953,6 +973,9 @@ def discover_local_engine_assets() -> dict[str, Any]:
                         "model_type": native_config.model_type,
                         "architecture": inspected["architecture"],
                         "weight_format": "GGUF (AXIOM dequantizes to floating point)",
+                        "max_position_embeddings": native_config.max_position_embeddings,
+                        "effective_max_position_embeddings": native_config.effective_max_position_embeddings,
+                        "rope_scaling_type": native_config.rope_scaling_type,
                         "ready_for_native_attempt": True,
                     })
                     continue
@@ -967,6 +990,9 @@ def discover_local_engine_assets() -> dict[str, Any]:
                     "model_type": native_config.model_type,
                     "architecture": inspected["architecture"],
                     "weight_format": "safetensors" if single_weights else "sharded safetensors",
+                    "max_position_embeddings": native_config.max_position_embeddings,
+                    "effective_max_position_embeddings": native_config.effective_max_position_embeddings,
+                    "rope_scaling_type": native_config.rope_scaling_type,
                     "ready_for_native_attempt": True,
                 })
             except (ValueError, OSError, RuntimeError):
@@ -1207,7 +1233,12 @@ def _choose_memory_mode(
         raise AxiomEngineError(f"AXIOM could not safely estimate this checkpoint for automatic memory selection: {exc}") from None
 
     gib = 1024 ** 3
-    context = min(config.max_position_embeddings, _MAX_INPUT_TOKENS + _MAX_NEW_TOKENS)
+    context = min(config.effective_max_position_embeddings, _MAX_INPUT_TOKENS + _MAX_NEW_TOKENS)
+    # The retained Mistral KV cache is bounded by sliding_window, but prefill
+    # still materializes K/V for the full prompt while the active layer runs.
+    # Budget both: persistent cache uses the bounded length; peak estimates add
+    # one full-context K/V temporary rather than pretending every layer retains it.
+    kv_cache_context = min(context, config.sliding_window) if config.sliding_window else context
     head_dim = config.hidden_size // config.num_attention_heads
     embedding_bytes = config.vocab_size * config.hidden_size * dtype_bytes
     head_bytes = 0 if config.tie_word_embeddings else embedding_bytes
@@ -1215,16 +1246,20 @@ def _choose_memory_mode(
     resident_non_layer = embedding_bytes + head_bytes + norm_bytes
     resident_with_adapter = resident_non_layer + adapter_weight_bytes
     total_weight_bytes = weight_bytes + adapter_weight_bytes
-    kv_total = 2 * config.num_hidden_layers * config.num_key_value_heads * head_dim * context * dtype_bytes
-    kv_per_layer = 2 * config.num_key_value_heads * head_dim * context * dtype_bytes
+    kv_total = 2 * config.num_hidden_layers * config.num_key_value_heads * head_dim * kv_cache_context * dtype_bytes
+    kv_prefill_per_layer = (
+        2 * config.num_key_value_heads * head_dim * context * dtype_bytes
+        if config.sliding_window and context > config.sliding_window
+        else 0
+    )
     workspace = max(context * config.intermediate_size * dtype_bytes * 2, config.hidden_size * context * dtype_bytes * 4)
     non_layer_weight_bytes = resident_with_adapter
     layer_bytes = max(0, weight_bytes - resident_non_layer) / max(1, config.num_hidden_layers)
     active_layer_bytes = int(layer_bytes * 1.25)
-    full_required = int((total_weight_bytes + kv_total + workspace) * 1.25)
-    cpu_layer_required = int((total_weight_bytes + kv_total + workspace) * 1.15)
-    disk_cpu_required = int((resident_with_adapter + active_layer_bytes + kv_total + workspace) * 1.30)
-    streamed_device_required = int((resident_with_adapter + active_layer_bytes + kv_per_layer + workspace) * 1.25)
+    full_required = int((total_weight_bytes + kv_total + kv_prefill_per_layer + workspace) * 1.25)
+    cpu_layer_required = int((total_weight_bytes + kv_total + kv_prefill_per_layer + workspace) * 1.15)
+    disk_cpu_required = int((resident_with_adapter + active_layer_bytes + kv_total + kv_prefill_per_layer + workspace) * 1.30)
+    streamed_device_required = int((resident_with_adapter + active_layer_bytes + kv_prefill_per_layer + workspace) * 1.25)
     system_available = _available_system_memory_bytes()
     try:
         disk_free = int(shutil.disk_usage(model_dir).free)
@@ -1248,6 +1283,8 @@ def _choose_memory_mode(
         "estimated_total_weight_bytes": total_weight_bytes,
         "estimated_non_layer_weight_bytes": non_layer_weight_bytes,
         "estimated_kv_cache_bytes": kv_total,
+        "estimated_kv_cache_context_tokens": kv_cache_context,
+        "estimated_kv_prefill_temporary_bytes": kv_prefill_per_layer,
         "estimated_context_tokens": context,
         "estimated_dtype_bytes": dtype_bytes,
         "estimated_full_execution_bytes": full_required,
@@ -1494,7 +1531,12 @@ def _load_local_model(
         "device_selection": device_selection,
         "memory_selection": memory_selection,
         "precision_selection": {"requested": precision, "selected": native_details.get("precision", precision)},
-        "config": {"max_position_embeddings": model.config.max_position_embeddings},
+        "config": {
+            "max_position_embeddings": model.config.max_position_embeddings,
+            "effective_max_position_embeddings": getattr(
+                model.config, "effective_max_position_embeddings", model.config.max_position_embeddings
+            ),
+        },
     }
     _LOADED_RUNTIME = {
         "key": key,
@@ -1650,6 +1692,7 @@ def generate_local_stream(
     memory_mode: str = "auto",
     chat_messages: list[dict[str, str]] | None = None,
     precision: str = "auto",
+    _lock_held: bool = False,
 ) -> Iterator[dict[str, Any]]:
     """Yield cumulative decoded text updates and one final metrics event.
 
@@ -1657,6 +1700,7 @@ def generate_local_stream(
     cannot replace or unload the model while its KV cache is active. Closing
     the iterator closes the native token iterator and releases that lock.
     """
+    global _LOADED_RUNTIME, _LOADED_ARCHITECTURE
     prompt, max_new_tokens, temperature = validate_generation(prompt, max_new_tokens, temperature)
     if chat_messages is not None:
         if not isinstance(chat_messages, list) or not 1 <= len(chat_messages) <= 128:
@@ -1682,12 +1726,15 @@ def generate_local_stream(
     top_p, top_k, repetition_penalty, seed = validate_sampling_parameters(top_p, top_k, repetition_penalty, seed)
     min_p = validate_min_p(min_p)
     stop_sequences = validate_stop_sequences(stop_sequences)
-    with _engine_request_lock(cancel_event):
+    with (nullcontext() if _lock_held else _engine_request_lock(cancel_event)):
         model, tokenizer, torch, device, details = _load_local_model(model_path, adapter_path, device_preference, memory_mode, precision)
         selected_backend = details.get("device_selection", {}).get("selected")
         device_memory_before = _device_memory_snapshot(torch, device, selected_backend=selected_backend)
         device_memory_before["peak_reset_supported"] = _reset_device_peak_memory(torch, device)
-        context_cap = max(2, min(model.config.max_position_embeddings, _MAX_INPUT_TOKENS + max_new_tokens))
+        context_cap = max(2, min(
+            getattr(model.config, "effective_max_position_embeddings", model.config.max_position_embeddings),
+            _MAX_INPUT_TOKENS + max_new_tokens,
+        ))
         effective_max_new_tokens = min(max_new_tokens, context_cap - 1)
         input_limit = max(1, min(_MAX_INPUT_TOKENS, context_cap - effective_max_new_tokens))
         original_message_count = len(chat_messages or [])
@@ -1896,6 +1943,97 @@ def generate_local_stream(
                 "local_only": True,
             }
             yield {"type": "complete", "result": result}
+        except (RuntimeError, OSError, MemoryError) as exc:
+            error_text = str(exc).casefold()
+            out_of_memory = isinstance(exc, MemoryError) or "out of memory" in error_text
+            device_type = str(getattr(device, "type", device)).split(":", 1)[0].casefold()
+            may_retry_on_cpu = (
+                out_of_memory
+                and not generated_ids
+                and (cancel_event is None or not cancel_event.is_set())
+                and isinstance(device_preference, str)
+                and device_preference.strip().casefold() == "auto"
+                and device_type in {"cuda", "mps", "xpu"}
+            )
+            if may_retry_on_cpu:
+                _LOG.warning(
+                    "AXIOM Native Engine hit accelerator OOM before the first output token; "
+                    "releasing the failed runtime and retrying this request on CPU."
+                )
+                close_iterator = getattr(iterator, "close", None)
+                if callable(close_iterator):
+                    try:
+                        close_iterator()
+                    except (RuntimeError, ValueError):
+                        _LOG.debug("OOM-failed native iterator was already closed.", exc_info=True)
+                iterator = None
+                model = None
+                tokenizer = None
+                _LOADED_RUNTIME = None
+                _LOADED_ARCHITECTURE = None
+                gc.collect()
+                _clear_device_cache(torch, device)
+                fallback_reason = (
+                    f"The {device_type.upper()} backend ran out of memory before output began; "
+                    "AXIOM retried this request on CPU."
+                )
+                fallback_iterator = generate_local_stream(
+                    model_path,
+                    prompt,
+                    adapter_path=adapter_path,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    min_p=min_p,
+                    repetition_penalty=repetition_penalty,
+                    seed=seed,
+                    stop_sequences=stop_sequences,
+                    include_token_events=include_token_events,
+                    cancel_event=cancel_event,
+                    device_preference="cpu",
+                    memory_mode=memory_mode,
+                    chat_messages=chat_messages,
+                    precision=precision,
+                    _lock_held=True,
+                )
+                try:
+                    for fallback_event in fallback_iterator:
+                        if fallback_event.get("type") == "complete" and isinstance(fallback_event.get("result"), dict):
+                            fallback_result = fallback_event["result"]
+                            selection = fallback_result.get("device_selection")
+                            if isinstance(selection, dict):
+                                fallback_result["device_selection"] = {
+                                    **selection,
+                                    "requested": "auto",
+                                    "selected": "cpu",
+                                    "reason": fallback_reason,
+                                    "fallback_from": device_type,
+                                    "fallback_reason": "Accelerator OOM occurred before any token was emitted.",
+                                }
+                            fallback_result["device_fallback"] = {
+                                "fallback_from": device_type,
+                                "selected": "cpu",
+                                "reason": fallback_reason,
+                            }
+                            fallback_event["result"] = fallback_result
+                        yield fallback_event
+                finally:
+                    close_fallback = getattr(fallback_iterator, "close", None)
+                    if callable(close_fallback):
+                        close_fallback()
+                return
+            if out_of_memory:
+                raise AxiomEngineError(
+                    "AXIOM Native Engine ran out of memory during inference. "
+                    "Automatic CPU retry is available only before any output token is emitted; "
+                    "use a smaller model/context or select CPU explicitly."
+                ) from None
+            _LOG.debug("AXIOM Native Engine token generation failed.", exc_info=True)
+            raise AxiomEngineError(
+                "AXIOM Native Engine generation failed. The prompt/context may exceed memory, "
+                "or the checkpoint may be incompatible with the implemented architecture."
+            ) from None
         except (ValueError, GeneratorExit):
             raise
         except Exception:
@@ -1926,6 +2064,8 @@ def generate_local(
     device_preference: str = "auto",
     memory_mode: str = "auto",
     precision: str = "auto",
+    cancel_event: threading.Event | None = None,
+    _lock_held: bool = False,
 ) -> dict[str, Any]:
     """Generate a complete local response through the streaming decoder."""
     completed: dict[str, Any] | None = None
@@ -1945,6 +2085,8 @@ def generate_local(
         device_preference=device_preference,
         memory_mode=memory_mode,
         precision=precision,
+        cancel_event=cancel_event,
+        _lock_held=_lock_held,
     ):
         if event.get("type") == "complete" and isinstance(event.get("result"), dict):
             completed = event["result"]
@@ -1952,6 +2094,168 @@ def generate_local(
         raise AxiomEngineError("Native generation ended before a completion event was produced.")
     return completed
 
+
+
+
+def benchmark_local(
+    model_path: str,
+    prompt: str,
+    *,
+    adapter_path: str | None = None,
+    warmup_runs: int = 1,
+    iterations: int = 3,
+    max_new_tokens: int = 64,
+    temperature: float = 0.0,
+    top_p: float = 0.9,
+    top_k: int = 0,
+    min_p: float = 0.0,
+    repetition_penalty: float = 1.0,
+    seed: int | None = None,
+    stop_sequences: list[str] | tuple[str, ...] = (),
+    device_preference: str = "auto",
+    memory_mode: str = "auto",
+    precision: str = "auto",
+    cancel_event: threading.Event | None = None,
+) -> dict[str, Any]:
+    """Run bounded local benchmarks and discard all generated text."""
+    if isinstance(warmup_runs, bool) or not isinstance(warmup_runs, int) or not 0 <= warmup_runs <= 2:
+        raise ValueError("Warm-up runs must be an integer from 0 through 2.")
+    if isinstance(iterations, bool) or not isinstance(iterations, int) or not 1 <= iterations <= 5:
+        raise ValueError("Measured iterations must be an integer from 1 through 5.")
+    if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens <= 128:
+        raise ValueError("Benchmark output length must be an integer from 1 through 128 tokens.")
+    valid_prompt, max_new_tokens, temperature = validate_generation(
+        prompt, max_new_tokens, temperature
+    )
+    top_p, top_k, repetition_penalty, seed = validate_sampling_parameters(
+        top_p, top_k, repetition_penalty, seed
+    )
+    min_p = validate_min_p(min_p)
+    stops = validate_stop_sequences(stop_sequences)
+
+    started = time.perf_counter()
+    measured: list[dict[str, Any]] = []
+    warmups_completed = 0
+    last_outcome: dict[str, Any] | None = None
+    memory_stat_keys = ["layer_weight_tensors_staged","layer_weight_bytes_staged","layer_weight_bytes_returned_to_cpu","layer_weight_bytes_released","disk_layer_weight_loads","disk_layer_weight_bytes_read","kv_cache_layer_offloads","kv_cache_bytes_offloaded"]
+    with _engine_request_lock(cancel_event):
+        for index in range(warmup_runs + iterations):
+            if cancel_event is not None and cancel_event.is_set():
+                raise AxiomEngineError("Native benchmark was cancelled.")
+            outcome = generate_local(
+                model_path,
+                valid_prompt,
+                adapter_path=adapter_path,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                min_p=min_p,
+                repetition_penalty=repetition_penalty,
+                seed=seed,
+                stop_sequences=stops,
+                device_preference=device_preference,
+                memory_mode=memory_mode,
+                precision=precision,
+                cancel_event=cancel_event,
+                _lock_held=True,
+            )
+            if cancel_event is not None and cancel_event.is_set():
+                raise AxiomEngineError("Native benchmark was cancelled.")
+            last_outcome = outcome
+            if index < warmup_runs:
+                warmups_completed += 1
+                continue
+            raw_memory_stats = outcome.get("memory_stats")
+            raw_memory_stats = raw_memory_stats if isinstance(raw_memory_stats, dict) else {}
+            memory_stats = {
+                key: int(raw_memory_stats[key])
+                if isinstance(raw_memory_stats.get(key), int)
+                and not isinstance(raw_memory_stats.get(key), bool)
+                and raw_memory_stats[key] >= 0
+                else 0
+                for key in memory_stat_keys
+            }
+            measured.append({
+                "iteration": len(measured) + 1,
+                "memory_stats": memory_stats,
+                "elapsed_ms": float(outcome.get("elapsed_ms", 0.0)),
+                "prefill_ms": float(outcome.get("prefill_ms", 0.0)),
+                "decode_ms": float(outcome.get("decode_ms", 0.0)),
+                "time_to_first_token_ms": float(outcome.get("time_to_first_token_ms", 0.0)),
+                "generation_tokens_per_second": float(outcome.get("generation_tokens_per_second", 0.0)),
+                "prompt_tokens": int(outcome.get("prompt_tokens", 0)),
+                "completion_tokens": int(outcome.get("completion_tokens", 0)),
+                "stop_reason": str(outcome.get("stop_reason", "unknown")),
+            })
+
+    if last_outcome is None or not measured:
+        raise AxiomEngineError("Native benchmark ended before a measured run was completed.")
+    total_wall_ms = round((time.perf_counter() - started) * 1000, 2)
+
+    def metric_median(key: str) -> float:
+        values = [item[key] for item in measured if math.isfinite(item[key]) and item[key] >= 0]
+        return round(float(statistics.median(values)), 2) if values else 0.0
+
+    wall_times = sorted(item["elapsed_ms"] for item in measured)
+    p95_wall_ms = round(wall_times[min(len(wall_times) - 1, math.ceil(0.95 * len(wall_times)) - 1)], 2)
+    measured_wall_ms = sum(item["elapsed_ms"] for item in measured)
+    completion_tokens = sum(item["completion_tokens"] for item in measured)
+    prompt_tokens = sum(item["prompt_tokens"] for item in measured)
+    aggregate_memory_stats = {
+        key: sum(item["memory_stats"][key] for item in measured)
+        for key in memory_stat_keys
+    }
+    return {
+        "schema_version": 1,
+        "engine": "axiom-native-engine",
+        "model": last_outcome.get("model", "local-model"),
+        "architecture": last_outcome.get("architecture"),
+        "model_type": last_outcome.get("model_type"),
+        "device": last_outcome.get("device"),
+        "precision": last_outcome.get("precision"),
+        "memory_mode": last_outcome.get("memory_mode", memory_mode),
+        "checkpoint_format": last_outcome.get("checkpoint_format", "safetensors"),
+        "warmup_runs_requested": warmup_runs,
+        "warmup_runs_completed": warmups_completed,
+        "warmups_excluded": True,
+        "iterations_requested": iterations,
+        "iterations_completed": len(measured),
+        "max_new_tokens": max_new_tokens,
+        "sampling": {
+            "temperature": temperature, "top_p": top_p, "top_k": top_k,
+            "min_p": min_p, "repetition_penalty": repetition_penalty, "seed": seed,
+        },
+        "metrics": {
+            "total_wall_time_ms": total_wall_ms,
+            "measured_wall_time_ms": round(measured_wall_ms, 2),
+            "median_elapsed_ms": metric_median("elapsed_ms"),
+            "p95_elapsed_ms": p95_wall_ms,
+            "median_prefill_ms": metric_median("prefill_ms"),
+            "median_decode_ms": metric_median("decode_ms"),
+            "median_time_to_first_token_ms": metric_median("time_to_first_token_ms"),
+            "median_generation_tokens_per_second": metric_median("generation_tokens_per_second"),
+            "completion_tokens": completion_tokens,
+            "prompt_tokens": prompt_tokens,
+            "aggregate_tokens_per_second": round(completion_tokens * 1000 / measured_wall_ms, 2) if measured_wall_ms > 0 else 0.0,
+        },
+        "runs": measured,
+        "memory_stats": aggregate_memory_stats,
+        "device_memory": last_outcome.get("device_memory"),
+        "memory_selection": last_outcome.get("memory_selection"),
+        "scope_note": (
+            "Measured local AXIOM inference only. Warm-ups are excluded from measured statistics. "
+            "Prompts, generated responses and model paths are not returned or persisted. "
+            "Latency and throughput are specific to the observed machine, model and workload."
+        ),
+        "privacy": {
+            "prompt_returned": False,
+            "response_returned": False,
+            "results_persisted": False,
+            "cloud_provider_used": False,
+        },
+        "generated_at": datetime.now(UTC).isoformat(),
+    }
 
 def generate_local_batch(
     model_path: str,
@@ -2031,7 +2335,10 @@ def generate_local_batch(
         device_memory_before["peak_reset_supported"] = _reset_device_peak_memory(torch, device)
         context_cap = max(
             2,
-            min(model.config.max_position_embeddings, _MAX_INPUT_TOKENS + max_new_tokens),
+            min(
+                getattr(model.config, "effective_max_position_embeddings", model.config.max_position_embeddings),
+                _MAX_INPUT_TOKENS + max_new_tokens,
+            ),
         )
         effective_max_new_tokens = min(max_new_tokens, context_cap - 1)
         input_limit = max(1, min(_MAX_INPUT_TOKENS, context_cap - effective_max_new_tokens))
@@ -2109,7 +2416,10 @@ def generate_local_batch(
             context_rows.append(context_row)
         effective_max_new_tokens = min(
             effective_max_new_tokens,
-            max(1, min(model.config.max_position_embeddings - len(ids) for ids in prompt_ids_batch)),
+            max(1, min(
+                getattr(model.config, "effective_max_position_embeddings", model.config.max_position_embeddings) - len(ids)
+                for ids in prompt_ids_batch
+            )),
         )
 
         def should_stop(_row: int, generated_ids: list[int]) -> bool:
