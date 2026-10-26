@@ -127,7 +127,7 @@ feature exists or a delivery-date promise.
 - [R093 · Implemented; tests passing] Add bounded in-memory runtime request traces with request IDs, metadata-only records, export, and explicit clear controls.
 - [R094 · Implemented; tests passing] Add explicit model unload and cache cleanup, plus one-model-at-a-time cache replacement; framework allocator release remains best-effort.
 - [R095 · In progress; validation pending] Add adapter compatibility checks for CPU, CUDA, ROCm, Metal/MPS, and Intel XPU; metadata/tensor-shape preflight and per-device availability reporting are wired, but real execution on each device and the release test gate remain to be validated.
-- [R096 · In progress; validation pending] Retry CPU after recognized accelerator out-of-memory failures in auto mode and report the selected backend/reason; broader device-driver recovery remains to be validated.
+- [R096 · In progress; validation pending] Auto mode already replans to CPU when accelerator memory estimates do not fit and retries CPU when native checkpoint loading runs out of memory. Native inference now also retries on CPU after an auto-selected CUDA/MPS/XPU OOM only if no token has been emitted, clears the failed runtime/cache, and reports the fallback device/reason; it deliberately refuses to replay after partial output. Regression tests cover pre-output retry and no retry after partial output, but the suite has not yet been executed; broader device-driver recovery and physical-device validation remain.
 
 ### 09 · Agent profiles, MCP, and security
 
