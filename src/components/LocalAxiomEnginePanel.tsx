@@ -461,14 +461,14 @@ export default function LocalAxiomEnginePanel() {
         <span className="field-label-row"><span>Discovered native model</span><span>{assets?.models.length ?? 0} found</span></span>
         <select aria-label="Select discovered native model" value={selectedModelPath} onChange={(event) => { setSelectedModelPath(event.target.value); if (event.target.value) setModelPath(event.target.value); setAdapterCompatibility(null); }}>
           <option value="">{assets?.models.length ? "Choose a discovered model or enter a path below" : "No supported local models discovered"}</option>
-          {(assets?.models ?? []).map((model) => <option key={model.path} value={model.path}>{model.name} · {model.model_type} · {model.weight_format}</option>)}
+          {(assets?.models ?? []).map((model) => <option key={model.path} value={model.path}>{model.name} · {model.model_type} · {model.weight_format}{model.effective_max_position_embeddings ? ` · ${model.effective_max_position_embeddings.toLocaleString()} context` : ""}{model.rope_scaling_type && model.rope_scaling_type !== "default" ? ` · RoPE ${model.rope_scaling_type}` : ""}</option>)}
         </select>
         <small>{assets?.scope_note ?? "Model discovery is unavailable; the API still accepts validated paths under trusted roots."}</small>
       </label>
       <label className="field">
-        <span className="field-label-row"><span>Local Llama / Mistral model directory</span></span>
+        <span className="field-label-row"><span>Local native model directory</span></span>
         <input value={modelPath} onChange={(event) => { setModelPath(event.target.value); if (event.target.value !== selectedModelPath) setSelectedModelPath(""); setAdapterCompatibility(null); }} required maxLength={4096} placeholder="/home/user/models/my-llama-model" autoComplete="off" />
-        <small>Existing directory with config.json, tokenizer.json and model.safetensors (or its shard index), or a directory containing a complete single-file or metadata-validated split GGUF checkpoint. GGUF tensors are dequantized to floating-point; source Q4/Q5/Q8 quantization does not mean low-bit execution or memory usage. Malformed or incomplete GGUF shard sets, EXL2/GPTQ/AWQ kernels and pickle .bin weights are not supported. Paths must match a directory discovered under a trusted root; set AXIOM_MODEL_ROOTS for additional locations.</small>
+        <small>Use a supported Llama, Mistral, Qwen2 or Qwen3 text checkpoint with config.json, tokenizer.json and model.safetensors (or its shard index), or a complete single-file / metadata-validated split GGUF checkpoint. Discovery shows the effective native context limit and any configured RoPE scaling. GGUF tensors are dequantized to floating-point; source Q4/Q5/Q8 quantization does not mean low-bit execution or memory usage. Malformed/incomplete GGUF shards, EXL2/GPTQ/AWQ kernels and pickle .bin weights are not supported. Paths must match a directory discovered under a trusted root; set AXIOM_MODEL_ROOTS for additional locations.</small>
       </label>
       <label className="field">
         <span className="field-label-row"><span>Discovered LoRA adapter (optional)</span><span>{assets?.adapters.length ?? 0} found</span></span>
