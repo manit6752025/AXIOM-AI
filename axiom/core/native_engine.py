@@ -1806,6 +1806,10 @@ class NativeLlamaRuntime:
             except (RuntimeError, TypeError, AttributeError):
                 raise NativeEngineError("Seeded sampling is not supported by the selected tensor device.") from None
         batch_size = len(prompt_token_ids)
+        rope_sequence_length = min(
+            self.config.effective_max_position_embeddings,
+            max(len(prompt) for prompt in prompt_token_ids) + max_new_tokens,
+        )
         eos = set(self.config.eos_token_ids if eos_token_ids is None else eos_token_ids)
         generated: list[list[int]] = [[] for _ in prompt_token_ids]
         finished = [False] * batch_size
@@ -1836,7 +1840,11 @@ class NativeLlamaRuntime:
                 if cancel_event is not None and cancel_event.is_set():
                     stop_reason = "cancelled"
                     return generated
-                logits, cache = self.forward(tokens, cancel_event=cancel_event)
+                logits, cache = self.forward(
+                    tokens,
+                    cancel_event=cancel_event,
+                    rope_sequence_length=rope_sequence_length,
+                )
                 for step in range(max_new_tokens):
                     if cancel_event is not None and cancel_event.is_set():
                         stop_reason = "cancelled"
@@ -1912,6 +1920,7 @@ class NativeLlamaRuntime:
                             cache,
                             past_sequence_length=prompt_length + step,
                             cancel_event=cancel_event,
+                            rope_sequence_length=rope_sequence_length,
                         )
         finally:
             self.last_batch_generation = {
