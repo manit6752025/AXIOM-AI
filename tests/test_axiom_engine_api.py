@@ -35,6 +35,88 @@ def test_engine_request_accepts_absolute_paths_only_inside_explicit_roots(tmp_pa
     assert request.model_path == str(model.resolve())
 
 
+def test_native_benchmark_api_forwards_bounded_local_options_without_response_payload(
+    tmp_path, monkeypatch
+) -> None:
+    root = tmp_path / "models"
+    model = root / "tiny"
+    model.mkdir(parents=True)
+    (model / "config.json").write_text('{"model_type":"llama"}', encoding="utf-8")
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(root))
+    captured = {}
+
+    def fake_benchmark(model_path, prompt, **kwargs):
+        captured.update(model_path=model_path, prompt=prompt, **kwargs)
+        return {
+            "schema_version": 1,
+            "iterations_completed": 2,
+            "warmups_excluded": True,
+            "metrics": {"median_elapsed_ms": 12.0},
+            "privacy": {
+                "prompt_returned": False, "response_returned": False,
+                "results_persisted": False, "cloud_provider_used": False,
+            },
+        }
+
+    monkeypatch.setattr(engine_api, "benchmark_local", fake_benchmark)
+    response = _client().post("/api/engine/benchmark", json={
+        "model_path": str(model),
+        "prompt": "private benchmark prompt",
+        "warmup_runs": 1,
+        "iterations": 2,
+        "max_new_tokens": 8,
+        "temperature": 0,
+        "top_p": 0.8,
+        "top_k": 4,
+        "min_p": 0.1,
+        "repetition_penalty": 1.1,
+        "seed": 42,
+        "stop_sequences": ["END"],
+        "device": "cpu",
+        "memory_mode": "layer_streaming",
+        "precision": "bf16",
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["warmups_excluded"] is True
+    assert "response" not in response.json()
+    assert captured == {
+        "model_path": str(model.resolve()),
+        "prompt": "private benchmark prompt",
+        "adapter_path": None,
+        "warmup_runs": 1,
+        "iterations": 2,
+        "max_new_tokens": 8,
+        "temperature": 0,
+        "top_p": 0.8,
+        "top_k": 4,
+        "min_p": 0.1,
+        "repetition_penalty": 1.1,
+        "seed": 42,
+        "stop_sequences": ["END"],
+        "device_preference": "cpu",
+        "memory_mode": "layer_streaming",
+        "precision": "bf16",
+    }
+
+
+def test_native_benchmark_api_rejects_iterations_or_output_over_the_limit(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "models"
+    model = root / "tiny"
+    model.mkdir(parents=True)
+    (model / "config.json").write_text('{"model_type":"llama"}', encoding="utf-8")
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(root))
+    monkeypatch.setattr(
+        engine_api,
+        "benchmark_local",
+        lambda *_args, **_kwargs: pytest.fail("invalid benchmark must be rejected before execution"),
+    )
+    for invalid in ({"iterations": 6}, {"max_new_tokens": 129}, {"warmup_runs": 3}):
+        response = _client().post("/api/engine/benchmark", json={
+            "model_path": str(model), "prompt": "hello", **invalid,
+        })
+        assert response.status_code == 422, response.text
+
+
 def test_batch_generate_request_validates_size_prompt_limits_and_sampling(tmp_path, monkeypatch) -> None:
     root = tmp_path / "models"
     model = root / "tiny"
