@@ -113,6 +113,93 @@ jobs:
               raise SystemExit("Could not update __version__ in axiom/version.py")
           runtime_path.write_text(runtime, encoding="utf-8")
 
+          release_workflow_path = Path(".github/workflows/release-assets.yml")
+          release_workflow = release_workflow_path.read_text(encoding="utf-8")
+          release_workflow, count = re.subn(
+              r'(?m)^( *default: *)"v[0-9]+[.][0-9]+[.][0-9]+(?:-(?:beta|b)[.][0-9]+)?" *$',
+              lambda m: m.group(1) + f'"v{version}"',
+              release_workflow,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("Could not update workflow_dispatch tag default in release-assets.yml")
+          release_workflow_path.write_text(release_workflow, encoding="utf-8")
+
+          if readme_path.exists():
+              readme = readme_path.read_text(encoding="utf-8")
+              readme, count = re.subn(
+                  r"(https://img\.shields\.io/badge/version-v)\d+\.\d+\.\d+(?:--(?:beta|b)\.\d+)?",
+                  lambda m: m.group(1) + version.replace("-", "--", 1), readme, count=1,
+              )
+              if count:
+                  readme_path.write_text(readme, encoding="utf-8")
+          print(version)
+          PYVERSION
+          )"
+          echo "package_tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          git add pyproject.toml axiom/version.py README.md .github/workflows/release-assets.yml
+          git commit -m "chore: prepare verified weekly build v${VERSION}"
+
+      - name: Record integration commit
+        id: integration
+        shell: bash
+        run: echo "integration_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Install Python and frontend dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[test]'
+          npm ci
+
+      - name: Static release contract
+        run: python scripts/release_smoke.py
+
+      - name: Full Python test suite
+        run: python -m pytest -q
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript, production UI build, and package copy
+        run: npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Full browser acceptance suite
+        run: npm run e2e
+
+      - name: Publish verified integration to latest/nightly
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:refs/heads/latest/nightly
+
+  publish-release:
+    name: Build all existing packages and publish verified release
+    needs: integrate-and-verify
+    uses: ./.github/workflows/release-assets.yml
+    permissions:
+      contents: write
+    with:
+      tag: ${{ needs.integrate-and-verify.outputs.package_tag }}
+      source_ref: latest/nightly
+      release_tag: ${{ needs.integrate-and-verify.outputs.release_tag }}
+      main_sha: ${{ needs.integrate-and-verify.outputs.main_sha }}
+      development_sha: ${{ needs.integrate-and-verify.outputs.development_sha }}
+      integration_sha: ${{ needs.integrate-and-verify.outputs.integration_sha }}
+      verification_summary: "Verified on the combined main + latest/development source: release smoke contract, full pytest suite, ESLint, production TypeScript/Vite build with web UI packaging, and full Playwright browser acceptance suite all passed before the release workflow was called."
+,
+              lambda m: m.group(1) + f'"v{version}"',
+              release_workflow,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("Could not update workflow_dispatch tag default in release-assets.yml")
+          release_workflow_path.write_text(release_workflow, encoding="utf-8")
+
           readme_path = Path("README.md")
           if readme_path.exists():
               readme = readme_path.read_text(encoding="utf-8")
