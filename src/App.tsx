@@ -335,8 +335,8 @@ const pageMeta: Record<
   },
   roadmap: {
     label: "Roadmap",
-    kicker: "DELIVERY STATUS / R001–R120",
-    description: "Read the source roadmap, inspect unchecked work, and verify the 120-item scope without guessing status.",
+    kicker: "DELIVERY STATUS / R001–R140",
+    description: "Read the source roadmap, inspect unchecked work, and verify the 140-item scope without guessing status.",
   },
   modules: {
     label: "Module Explorer",
@@ -3421,7 +3421,7 @@ function ModulesPage({ setPage }: { setPage: (page: Page) => void }) {
     { id: "project", title: "Project and configuration tools", description: "Initialize and validate local project structure, inspect config mappings, and review environment summaries.", scope: "CLI foundations", availability: "CLI surface", tone: "neutral", icon: FileCode2, command: "axiom project --help" },
     { id: "session", title: "Interactive CLI session tools", description: "Inspect the local CLI session-command family; the browser deliberately does not launch shell processes.", scope: "CLI foundations", availability: "CLI surface", tone: "neutral", icon: TerminalSquare, command: "axiom session --help" },
     { id: "api", title: "HTTP API reference", description: "Open the running service's OpenAPI explorer to inspect the endpoints actually exposed by this build.", scope: "Developer API", availability: "API docs", tone: "neutral", icon: Network, href: "/api/docs" },
-    { id: "roadmap", title: "120-item product roadmap", description: "Inspect delivery labels from ROADMAP.md, search backlog items, and check ID/status integrity.", scope: "Governance", availability: "Source audit", tone: "neutral", icon: FileCode2, page: "roadmap", command: "axiom roadmap audit --json" },
+    { id: "roadmap", title: "140-item product roadmap", description: "Inspect delivery labels from ROADMAP.md, search backlog items, and check ID/status integrity.", scope: "Governance", availability: "Source audit", tone: "neutral", icon: FileCode2, page: "roadmap", command: "axiom roadmap audit --json" },
   ];
   const queryTerms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const filtered = entries.filter((entry) => {
