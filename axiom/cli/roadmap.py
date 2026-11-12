@@ -11,7 +11,7 @@ from rich.table import Table
 from axiom.core.roadmap import audit_roadmap
 
 console = Console()
-roadmap_app = typer.Typer(help="Inspect the 120-item AXIOM product roadmap.", no_args_is_help=True)
+roadmap_app = typer.Typer(help="Inspect the 140-item AXIOM product roadmap.", no_args_is_help=True)
 
 
 @roadmap_app.command("audit")
@@ -44,7 +44,7 @@ def audit(
     table.add_row("In progress / validation pending", str(summary["in_progress"]))
     table.add_row("Planned", str(summary["planned"]))
     console.print(table)
-    console.print(f"Scope integrity: {'PASS' if report['integrity']['ok'] else 'FAIL'} · {report['total']}/120 items parsed")
+    console.print(f"Scope integrity: {'PASS' if report['integrity']['ok'] else 'FAIL'} · {report['total']}/140 items parsed")
     if not report["integrity"]["ok"]:
         console.print_json(json.dumps(report["integrity"], indent=2))
         raise typer.Exit(code=1)
