@@ -49,6 +49,25 @@ supports LoRA, not QLoRA, and the generic planner may suggest a QLoRA fallback.
 Hardware status `warn` means only the generic estimate predicts a fit; actual
 loading was not tested. The estimate also cannot verify Apple MPS or CPU fit.
 
+The separately permissioned `axiom_dataset_clean_preview` reports bounded
+keep/remove counts and a proposed output path for a workspace-relative JSONL
+file. It returns no row values and writes no file. A partial scan includes its
+truncation reason and its counts cover only the scanned portion; overlong rows are reported as unclassified because the
+cleaner may still keep them. CR-only line endings and invalid UTF-8 are flagged
+because the preview cannot promise matching cleaner results for those inputs.
+The preview is advisory because the source can change between calls; re-preview
+immediately before the separately permissioned `axiom_dataset_clean` write
+action. That action only accepts workspace-relative paths, writes a new
+`.jsonl` file, requires an existing parent directory, and refuses to overwrite
+an existing output. It repeats the preview and enforces the same byte, row, and
+line limits while writing. Review the counts and proposed destination with the
+user. Both paths use descriptor-relative access where the OS supports it and
+checked workspace-relative paths elsewhere, including Windows. On systems
+without descriptor-relative filesystem operations, concurrent changes to a
+parent directory can race the path checks; the fallback is scoped against
+static traversal and refuses existing outputs, but does not pin directory
+handles against another process changing the workspace at the same time.
+
 ### CLI
 
 AXIOM can also integrate with local agent binaries.

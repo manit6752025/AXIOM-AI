@@ -6,12 +6,22 @@ from pathlib import Path
 from mcp.server import MCPServer
 
 from axiom.core.hardware import detect_hardware
+from axiom.core.mcp_paths import (
+    open_mcp_workspace_file,
+    open_mcp_workspace_output_parent,
+)
 from axiom.core.tool_permissions import ToolPermissionStore
 from axiom.core.training_preflight import run_training_preflight
 from axiom.daemon import local_summary
 from axiom.daemon_api import MAX_LISTED_FILES, list_workspace_files
 from axiom.datasets.cleaner import clean_jsonl
+from axiom.datasets.cleaning_preview import preview_jsonl_cleaning
 from axiom.datasets.inspector import inspect_dataset
+from axiom.datasets.profiler import (
+    DEFAULT_MAX_BYTES,
+    DEFAULT_MAX_LINE_BYTES,
+    DEFAULT_MAX_ROWS,
+)
 from axiom.models.inspector import inspect_model
 from axiom.models.registry import ModelRegistry
 from axiom.runtime.supercompress import compress_context, redacted_base_url
@@ -26,12 +36,30 @@ mcp = MCPServer(
         "for a bounded local workspace briefing. "
         "Use axiom_workspace_assets to find local model and dataset paths when allowed. "
         "Use axiom_training_preflight for bounded, non-executing checks before local LoRA training. "
-        "Use AXIOM tools to inspect models, inspect and clean datasets, "
-        "inspect hardware, create training plans, and check optional "
-        "AI runtime integrations. MCP tool access is denied by default and must "
+        "Use AXIOM tools to inspect models, datasets, and hardware; preview dataset cleaning "
+        "and show the counts and proposed output path before writing a new copy. "
+        "Re-preview immediately before cleaning because previews are advisory. "
+        "Create training plans and check optional AI runtime integrations. "
+        "MCP tool access is denied by default and must "
         "be explicitly granted in an AXIOM tool profile."
     ),
 )
+
+
+def _validate_cleaning_limits(
+    max_bytes: int,
+    max_rows: int,
+    max_line_bytes: int,
+) -> None:
+    if (
+        type(max_bytes) is not int
+        or not 1 <= max_bytes <= 256 * 1024 * 1024
+        or type(max_rows) is not int
+        or not 1 <= max_rows <= 500_000
+        or type(max_line_bytes) is not int
+        or not 1 <= max_line_bytes <= 8 * 1024 * 1024
+    ):
+        raise ValueError("Cleaning limits exceed the supported bounded scan range.")
 
 
 @mcp.tool()
@@ -226,36 +254,182 @@ def axiom_dataset_inspect(path: str) -> dict:
 
 
 @mcp.tool()
+def axiom_dataset_clean_preview(
+    path: str,
+    output: str | None = None,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+    max_rows: int = DEFAULT_MAX_ROWS,
+    max_line_bytes: int = DEFAULT_MAX_LINE_BYTES,
+) -> dict:
+    """Preview bounded JSONL cleaning counts without returning row values or writing files."""
+    ToolPermissionStore().require("axiom_dataset_clean_preview")
+    if output is not None and (not isinstance(output, str) or not output.strip()):
+        raise ValueError("Output path cannot be empty.")
+    root = Path.cwd().resolve(strict=True)
+    source, source_stream = open_mcp_workspace_file(path, root)
+    if source.suffix.lower() != ".jsonl":
+        source_stream.close()
+        raise ValueError("Cleaning previews currently support .jsonl files.")
+    try:
+        _validate_cleaning_limits(max_bytes, max_rows, max_line_bytes)
+    except ValueError:
+        source_stream.close()
+        raise
+
+    relative_output = (
+        output
+        if output
+        else source.relative_to(root).with_name(f"{source.stem}.cleaned.jsonl").as_posix()
+    )
+    if not relative_output.lower().endswith(".jsonl"):
+        source_stream.close()
+        raise ValueError("Proposed cleaned output paths must end in .jsonl.")
+    try:
+        output_path, output_parent_fd, output_name, output_available = (
+            open_mcp_workspace_output_parent(relative_output, root)
+        )
+    except (OSError, ValueError):
+        source_stream.close()
+        raise
+    try:
+        with source_stream:
+            source_stat = os.fstat(source_stream.fileno())
+            if not output_available:
+                output_stat = (
+                    os.stat(
+                        output_name,
+                        dir_fd=output_parent_fd,
+                        follow_symlinks=False,
+                    )
+                    if output_parent_fd is not None
+                    else os.stat(output_path, follow_symlinks=False)
+                )
+                if (output_stat.st_ino, output_stat.st_dev) == (
+                    source_stat.st_ino,
+                    source_stat.st_dev,
+                ):
+                    raise ValueError("Output path must differ from the source dataset.")
+            preview = preview_jsonl_cleaning(
+                source_stream,
+                file_name=source.name,
+                file_size_bytes=source_stat.st_size,
+                max_bytes=max_bytes,
+                max_rows=max_rows,
+                max_line_bytes=max_line_bytes,
+            )
+    except (OSError, ValueError):
+        if output_parent_fd is not None:
+            os.close(output_parent_fd)
+        raise ValueError("The dataset cleaning preview could not be created safely.") from None
+    if output_parent_fd is not None:
+        os.close(output_parent_fd)
+
+    preview["path"] = source.relative_to(root).as_posix()
+    preview["proposed_output_path"] = output_path.relative_to(root).as_posix()
+    preview["proposed_output_available"] = output_available
+    if not output_available:
+        preview["warnings"].append(
+            "The proposed output already exists; choose a new path because the cleaner will not overwrite it."
+        )
+    preview["source_modified"] = False
+    preview["dataset_values_returned"] = False
+    return preview
+
+
+@mcp.tool()
 def axiom_dataset_clean(
     path: str,
     output: str | None = None,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+    max_rows: int = DEFAULT_MAX_ROWS,
+    max_line_bytes: int = DEFAULT_MAX_LINE_BYTES,
 ) -> dict:
-    """Clean a JSONL dataset without modifying the original."""
+    """Write a cleaned JSONL copy to a new workspace-relative path."""
     ToolPermissionStore().require("axiom_dataset_clean")
     if not isinstance(path, str) or not path.strip():
         raise ValueError("Dataset path cannot be empty.")
     if output is not None and (not isinstance(output, str) or not output.strip()):
         raise ValueError("Output path cannot be empty.")
+    _validate_cleaning_limits(max_bytes, max_rows, max_line_bytes)
 
-    source = Path(path)
-
-    if not source.is_file():
-        raise ValueError(f"Dataset not found: {source}")
+    root = Path.cwd().resolve(strict=True)
+    source, source_stream = open_mcp_workspace_file(path, root)
     if source.suffix.lower() != ".jsonl":
+        source_stream.close()
         raise ValueError("Cleaning currently supports .jsonl files.")
 
-    destination = (
-        Path(output) if output else source.with_name(f"{source.stem}.cleaned.jsonl")
+    relative_output = (
+        output
+        if output
+        else source.relative_to(root).with_name(f"{source.stem}.cleaned.jsonl").as_posix()
     )
+    try:
+        destination, output_parent_fd, output_name, output_available = (
+            open_mcp_workspace_output_parent(relative_output, root)
+        )
+    except (OSError, ValueError):
+        source_stream.close()
+        raise
+    if destination.suffix.lower() != ".jsonl":
+        source_stream.close()
+        if output_parent_fd is not None:
+            os.close(output_parent_fd)
+        raise ValueError("Cleaned output paths must end in .jsonl.")
+    if not output_available:
+        source_stream.close()
+        if output_parent_fd is not None:
+            os.close(output_parent_fd)
+        raise ValueError("Choose a new output path; existing files are never overwritten.")
 
-    result = clean_jsonl(
-        source,
-        destination,
-    )
+    try:
+        source_stat = os.fstat(source_stream.fileno())
+        clean_preview = preview_jsonl_cleaning(
+            source_stream,
+            file_name=source.name,
+            file_size_bytes=source_stat.st_size,
+            max_bytes=max_bytes,
+            max_rows=max_rows,
+            max_line_bytes=max_line_bytes,
+        )
+    except (OSError, ValueError):
+        source_stream.close()
+        if output_parent_fd is not None:
+            os.close(output_parent_fd)
+        raise ValueError("The dataset could not be previewed within the cleaning limits.") from None
+    if clean_preview["truncated"] or not clean_preview["cleaner_semantics_match"]:
+        source_stream.close()
+        if output_parent_fd is not None:
+            os.close(output_parent_fd)
+        raise ValueError(
+            "Cleaning requires a complete preview with matching cleaner semantics; "
+            "raise the limits or correct the dataset first."
+        )
+
+    try:
+        source_stream.seek(0)
+        result = clean_jsonl(
+            source,
+            destination,
+            overwrite=False,
+            source_stream=source_stream,
+            output_parent_fd=output_parent_fd,
+            output_name=output_name if output_parent_fd is not None else None,
+            max_bytes=max_bytes,
+            max_rows=max_rows,
+            max_line_bytes=max_line_bytes,
+        )
+    except (OSError, ValueError):
+        source_stream.close()
+        raise ValueError(
+            "The cleaned dataset could not be written within the bounded preview limits."
+        ) from None
+    finally:
+        if output_parent_fd is not None:
+            os.close(output_parent_fd)
 
     return {
-        "source": str(result.source),
-        "output": str(result.output),
+        "source": result.source.relative_to(root).as_posix(),
+        "output": result.output.relative_to(root).as_posix(),
         "total_lines": result.total_lines,
         "kept": result.kept,
         "removed_invalid": result.removed_invalid,
