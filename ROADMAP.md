@@ -179,7 +179,7 @@ feature exists or a delivery-date promise.
 - [R136 · Planned] Add software bill of materials generation and dependency vulnerability reports with export.
 - [R137 · Planned] Add versioned, default-deny plugin manifests and permission validation.
 - [R138 · Planned] Add workspace backup and restore with manifests, checksums, and safe path validation.
-- [R139 · Planned] Add opt-in resource sampling and history with clear, export, and retention controls.
+- [R139 · In progress; validation pending] Add opt-in resource sampling and history with clear, export, and retention controls. The CLI now supports an explicit bounded watch and create-only JSONL export using privacy-filtered local telemetry; in-app history, clear controls, and retention policy remain outstanding.
 - [R140 · Planned] Publish stable Python and TypeScript SDKs verified against the supported API schema.
 
 ### Delivery gates
