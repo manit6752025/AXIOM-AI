@@ -665,7 +665,11 @@ establish semantic quality, and `model_label` is user-supplied metadata.
 `axiom_evaluation_history` lists saved aggregate results or returns one run by
 ID. For additional pages, pass the previous response's `next_cursor` as
 `after_run_id`; start a fresh listing to include evaluations saved after
-paging began. Evaluation and history have separate default-deny permissions:
+paging began. `axiom_evaluation_compare` compares two saved complete reports
+after the baseline is marked; it uses the history permission, verifies saved
+report manifests, and returns aggregate lexical scores without reopening source
+files or returning dataset rows. Evaluation and history have separate
+default-deny permissions:
 
 ```bash
 axiom mcp allow axiom_evaluation_run
@@ -771,6 +775,7 @@ axiom mcp profile use readonly
 | `axiom_dataset_clean` | Write a new cleaned JSONL copy inside the workspace |
 | `axiom_evaluation_run` | Score precomputed outputs offline and save aggregate metrics |
 | `axiom_evaluation_history` | Read saved aggregate evaluation metrics |
+| `axiom_evaluation_compare` | Compare two complete saved evaluations using the history permission |
 | `axiom_evaluation_compare_examples` | Inspect paired examples from saved offline evaluations; text is off unless approved per call |
 | `axiom_training_plan` | Hardware-aware training plan |
 | `axiom_supercompress_status` | Whether SuperCompress is configured |

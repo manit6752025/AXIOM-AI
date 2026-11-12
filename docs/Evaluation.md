@@ -81,6 +81,16 @@ For example, use the previous response's cursor in the next tool call:
 {"limit":20,"after_run_id":"<previous-next_cursor>"}
 ```
 
+To compare saved runs after the fact, call `axiom_evaluation_compare` with a
+marked baseline run ID, a current run ID, a metric (`exact_match`,
+`normalized_exact_match`, or `token_f1_micro`), and a regression tolerance from
+0 to 1. It returns baseline/current scores, the current-minus-baseline delta,
+and `passed` or `regression` status. The tool uses the evaluation-history
+permission, verifies the saved report manifests and saved corpus metadata, but
+does not reopen source files or return row values. Corpus/configuration mismatch
+returns `comparison_returned: false` with a reason code. Scores are lexical and
+do not establish semantic quality or statistical significance.
+
 For a user-requested diagnosis of a saved offline comparison,
 `axiom_evaluation_compare_examples` accepts a baseline run ID, a current run
 ID, and one transition category. `fixed`/`regressed` use raw exact match;
