@@ -28,7 +28,9 @@ order. The comparison fingerprint covers every non-prediction field, including
 the reference, split, prompt, and context, and excludes the selected prediction
 field so model outputs can differ. AXIOM also stores a whole-output-file
 SHA-256 for integrity; it includes predictions and will normally differ
-between models. The selected metric and allowed absolute score drop are stored
+between models. When prediction columns differ but both reports have the same
+complete source-file SHA-256, AXIOM can still compare them because the source
+snapshot itself is identical. The selected metric and allowed absolute score drop are stored
 with the comparison result. A failed gate means the score dropped beyond that
 threshold; it does not infer statistical significance or replace human review.
 If a chosen baseline uses different examples or evaluation fields, AXIOM still

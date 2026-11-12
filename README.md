@@ -646,6 +646,11 @@ axiom mcp allow axiom_evaluation_run
 axiom mcp allow axiom_evaluation_history
 ```
 
+If two reports score different prediction columns in the same unchanged JSONL
+file, AXIOM can compare them using the identical full-file fingerprint even
+though each comparison-corpus fingerprint omits a different prediction
+column.
+
 To let the agent use additional AXIOM tools, allow only the ones you need:
 
 ```bash

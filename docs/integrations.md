@@ -389,7 +389,9 @@ reference text. Its limits are 64 MiB, 100,000 rows, and 1 MiB per line. Partial
 runs are labeled partial, cannot become baselines, and receive no pass/fail
 comparison. The whole-output hash includes predictions; a separate complete
 corpus fingerprint covers all other row fields, including references and
-prompt/context, and enables comparisons across different output files. Both
+prompt/context, and enables comparisons across different output files. If
+prediction-field choices make those corpus fingerprints differ, the reports
+can still be compared when their complete full-file SHA-256 values match. Both
 hashes are persisted locally but omitted from MCP responses. These lexical
 metrics do not establish semantic quality, and a `model_label` is user-supplied
 metadata. Grant `axiom_evaluation_run` to create runs and

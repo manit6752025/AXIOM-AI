@@ -71,6 +71,10 @@
 
 ### Fixed
 
+- Keep evaluation baseline comparisons available when both reports
+  fingerprint the same complete source file, even when they score different
+  prediction fields. Update the existing MCP tool inventory contract to cover
+  the current tool surface.
 - Aligned LoRA optional dependency minimums with Transformers 5 and blocked training when installed dependency versions are too old.
 - Improved local model/adapter loading errors without enabling remote model code or model downloads.
 
