@@ -111,10 +111,15 @@ Prediction-start permission is not needed for this plan. Its overlap check
 compares prompts by default; pass `include_reference_in_overlap=true` to
 include evaluation references, and inspect `overlap_configuration.reference_checked`.
 `plan_only` means a plan was assembled, not that a run is ready or approved.
-Never start a variant with a blocked engine check; resolve or recheck a
-blocked prompt preflight before either run. Surface review-needed,
-exact/inconclusive overlap, and expected/inconclusive truncation, then obtain
-the user's explicit informed decision to proceed. Start the baseline and
+Use `actionability.status`: resolve and rerun `blocked` findings; disclose
+`review_required` findings and wait for the user's decision;
+`clear_for_user_approval` means show both configurations and still get explicit
+approval before starting. Clear means no known blockers or review findings,
+not guaranteed load, fit, quality, or held-out data. Never start a variant
+with a blocked engine check; resolve or recheck a blocked prompt preflight
+before either run. Surface review-needed, exact/inconclusive overlap, and
+expected/inconclusive truncation, then obtain the user's explicit informed
+decision to proceed. Start the baseline and
 adapter jobs sequentially because they share AXIOM's local compute slot.
 Output paths are rechecked when each job starts.
 

@@ -105,7 +105,7 @@ mcp = MCPServer(
         "Use axiom_training_preflight for bounded, non-executing checks before local LoRA training. "
         "When the user asks whether evaluation data may overlap training data, use the separate default-deny axiom_training_eval_overlap_preflight. It normalizes case and whitespace and returns only exact-overlap counts and row numbers. A clear result does not prove the evaluation data is held out or leakage-free; paraphrases are not detected. It does not load model weights or run inference. "
         "For a completed training run, axiom_training_job_eval_overlap_preflight derives the training dataset and text field from its job ID, then checks the selected evaluation file. It requires both the training-job status and overlap-preflight permissions. The trainer fingerprints the exact dataset bytes consumed during training; the overlap tool compares that saved digest with the bytes it scans and reports matches, changed_since_training, or unavailable without returning the digest. Changed or legacy snapshots are inconclusive and do not produce a job-aligned overlap result. A matching snapshot still does not prove held-out data. It returns saved workspace-relative base-model and adapter paths only; run axiom_engine_preflight before inference because their file contents are not verified here. "
-        "For a base-versus-adapter evaluation plan before inference, use axiom_training_job_validation_preflight with two new data/ output filenames. Its overlap check compares prompts by default; set include_reference_in_overlap=true to compare reference answers too. The reference_field still configures prediction artifacts when references are omitted from overlap. plan_only means only that a read-only plan was assembled, not that a run is ready or approved. Present all check outcomes: never start a variant with a blocked engine check, resolve or recheck a blocked prompt preflight before either run, and disclose exact/inconclusive overlap, review_needed checks, or expected/inconclusive prompt truncation before getting an explicit user decision to proceed. The tool writes nothing and does not run inference; output paths are revalidated when a run starts. "
+        "For a base-versus-adapter evaluation plan before inference, use axiom_training_job_validation_preflight with two new data/ output filenames. Its overlap check compares prompts by default; set include_reference_in_overlap=true to compare reference answers too. The reference_field still configures prediction artifacts when references are omitted from overlap. Use actionability.status first: blocked means resolve findings and rerun; review_required means disclose findings and wait for the user's explicit decision; clear_for_user_approval means show both planned runs and get explicit approval before starting either sequentially. plan_only means only that a read-only plan was assembled, and clear_for_user_approval means no known blockers were detected; neither guarantees model load, fit, quality, held-out data, or approval. The actionability findings summarize blocked and review-required checks; retain the full checks for detail. The tool writes nothing and does not run inference; output paths are revalidated when a run starts. "
         "Use axiom_engine_preflight before local inference to check model/adapter structure, the selected device/precision, and advisory memory estimates; it does not load weights or run inference. Pass the same settings to axiom_engine_generate. "
         "Run preflight and show the exact configuration before calling axiom_training_job_start; "
         "call it only after the user explicitly requests that run. It uses compute and writes an adapter under outputs/. "
@@ -2146,11 +2146,196 @@ def axiom_training_job_validation_preflight(
     permissions.require("axiom_engine_preflight")
     permissions.require("axiom_prediction_job_preflight")
 
+    def actionability_from_checks(
+        overlap: dict,
+        base_engine: dict,
+        adapter_engine: dict,
+        prompt_preflight: dict,
+    ) -> dict:
+        blockers: list[dict[str, str]] = []
+        reviews: list[dict[str, str]] = []
+
+        overlap_assessment = overlap.get("assessment")
+        if overlap_assessment == "exact_overlap_found":
+            reviews.append({
+                "check": "training_evaluation_overlap",
+                "status": "exact_overlap_found",
+                "reason_code": "exact_overlap_detected",
+            })
+        elif overlap_assessment != "no_exact_overlap_detected":
+            reviews.append({
+                "check": "training_evaluation_overlap",
+                "status": "inconclusive",
+                "reason_code": overlap.get("reason_code", "overlap_assessment_unavailable"),
+            })
+
+        snapshot_status = overlap.get("training_dataset_snapshot_status", "unavailable")
+        if snapshot_status != "matches":
+            reviews.append({
+                "check": "training_dataset_snapshot",
+                "status": snapshot_status,
+                "reason_code": (
+                    "training_dataset_changed_since_training"
+                    if snapshot_status == "changed_since_training"
+                    else "training_dataset_snapshot_unavailable"
+                ),
+            })
+
+        for check_name, preflight, adapter_expected in (
+            ("base_model_preflight", base_engine, False),
+            ("adapter_preflight", adapter_engine, True),
+        ):
+            assessment = preflight.get("assessment")
+            checks = preflight.get("checks")
+            checks = checks if isinstance(checks, dict) else {}
+            engine_blockers: list[dict[str, str]] = []
+            engine_reviews: list[dict[str, str]] = []
+            expected_checks = {"model", "adapter", "runtime", "request", "precision", "resource_estimate"}
+            missing_checks = expected_checks - checks.keys()
+            for missing_name in sorted(missing_checks):
+                if missing_name == "adapter" and not adapter_expected:
+                    continue
+                engine_reviews.append({
+                    "check": f"{check_name}.{missing_name}",
+                    "status": "unavailable",
+                    "reason_code": f"{missing_name}_check_unavailable",
+                })
+
+            for nested_name, detail in checks.items():
+                if not isinstance(detail, dict):
+                    engine_reviews.append({
+                        "check": f"{check_name}.{nested_name}",
+                        "status": "inconclusive",
+                        "reason_code": f"{nested_name}_check_unavailable",
+                    })
+                    continue
+                nested_status = detail.get("status")
+                if nested_status == "blocked":
+                    engine_blockers.append({
+                        "check": f"{check_name}.{nested_name}",
+                        "status": "blocked",
+                        "reason_code": f"{nested_name}_blocked",
+                    })
+                    continue
+
+                # The base-only preflight intentionally has no adapter to check;
+                # the adapter run below performs the compatibility assessment.
+                if nested_name == "adapter" and nested_status == "not_requested" and not adapter_expected:
+                    continue
+
+                if nested_status in {"review_needed", "unknown", "unavailable", "not_checked"}:
+                    engine_reviews.append({
+                        "check": f"{check_name}.{nested_name}",
+                        "status": nested_status,
+                        "reason_code": f"{nested_name}_{nested_status}",
+                    })
+                elif nested_status == "not_requested" and adapter_expected:
+                    engine_reviews.append({
+                        "check": f"{check_name}.{nested_name}",
+                        "status": "not_requested",
+                        "reason_code": "adapter_check_not_performed",
+                    })
+                elif nested_status not in {
+                    "config_valid", "available", "pass", "estimated_fit", "path_validated", "not_requested"
+                }:
+                    engine_reviews.append({
+                        "check": f"{check_name}.{nested_name}",
+                        "status": nested_status if isinstance(nested_status, str) else "inconclusive",
+                        "reason_code": f"{nested_name}_status_unrecognized",
+                    })
+
+                if (
+                    nested_name == "adapter"
+                    and detail.get("compatible_on_selected_device") is False
+                    and not any(item["check"] == f"{check_name}.adapter" for item in engine_blockers)
+                ):
+                    engine_reviews.append({
+                        "check": f"{check_name}.adapter",
+                        "status": "incompatible_on_selected_device",
+                        "reason_code": "adapter_incompatible_on_selected_device",
+                    })
+
+            if assessment == "blocked" and not engine_blockers:
+                engine_blockers.append({
+                    "check": check_name,
+                    "status": "blocked",
+                    "reason_code": "engine_preflight_blocked",
+                })
+            elif assessment not in {"blocked", "preflight_clear", "review_needed"}:
+                engine_reviews.append({
+                    "check": check_name,
+                    "status": assessment if isinstance(assessment, str) else "inconclusive",
+                    "reason_code": "engine_preflight_assessment_unavailable",
+                })
+            elif assessment == "review_needed" and not engine_reviews:
+                # The base-only check reports review_needed by design because
+                # it does not prove adapter compatibility; the second preflight
+                # checks that adapter before the plan is considered actionable.
+                if adapter_expected or not checks:
+                    engine_reviews.append({
+                        "check": check_name,
+                        "status": "review_needed",
+                        "reason_code": "engine_preflight_review_needed",
+                    })
+
+            blockers.extend(engine_blockers)
+            reviews.extend(engine_reviews)
+
+        prompt_status = prompt_preflight.get("status")
+        if prompt_status == "blocked":
+            blockers.append({
+                "check": "prompt_truncation_preflight",
+                "status": "blocked",
+                "reason_code": prompt_preflight.get("reason_code", "prompt_preflight_blocked"),
+            })
+        elif prompt_status != "clear":
+            reviews.append({
+                "check": "prompt_truncation_preflight",
+                "status": prompt_status if isinstance(prompt_status, str) else "inconclusive",
+                "reason_code": prompt_preflight.get(
+                    "reason_code",
+                    "prompt_truncation_expected" if prompt_status == "truncation_expected"
+                    else "prompt_preflight_inconclusive",
+                ),
+            })
+
+        findings = blockers + reviews
+        if blockers:
+            status = "blocked"
+            next_action = "Resolve the blocked checks, then rerun this preflight."
+        elif reviews:
+            status = "review_required"
+            next_action = "Explain the listed findings and wait for the user's explicit decision."
+        else:
+            status = "clear_for_user_approval"
+            next_action = "Show both planned runs and obtain explicit approval before starting either run."
+        return {
+            "status": status,
+            "findings": findings,
+            "next_action": next_action,
+            "user_approval_required": True,
+            "note": (
+                "This summary reports preflight evidence only. Clear means no known blockers or review findings; "
+                "it does not guarantee that inference will load, fit, or produce quality output, or that evaluation "
+                "data is held out."
+            ),
+        }
+
     def blocked(reason_code: str) -> dict:
         return {
             "schema_version": 1,
             "assessment": "inconclusive",
             "reason_code": reason_code,
+            "actionability": {
+                "status": "blocked",
+                "findings": [{
+                    "check": "preflight_inputs",
+                    "status": "blocked",
+                    "reason_code": reason_code,
+                }],
+                "next_action": "Resolve the reported input issue, then rerun this preflight.",
+                "user_approval_required": True,
+            },
             "scope": {
                 "read_only": True,
                 "files_written": False,
@@ -2326,6 +2511,12 @@ def axiom_training_job_validation_preflight(
     return {
         "schema_version": 1,
         "assessment": "plan_only",
+        "actionability": actionability_from_checks(
+            overlap_result,
+            base_engine,
+            adapter_engine,
+            prompt_preflight,
+        ),
         "training_job": job,
         "overlap_configuration": {
             "reference_checked": include_reference_in_overlap,

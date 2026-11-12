@@ -503,10 +503,13 @@ inference. Its overlap check compares prompts by default; set
 `include_reference_in_overlap=true` to check references too. The returned
 `overlap_configuration.reference_checked` makes that choice explicit. The
 `plan_only` assessment means a read-only plan was assembled, not that either
-run is ready or approved. Show all check outcomes: never start a variant with
-a blocked engine check, resolve a blocked prompt preflight, and disclose
-`review_needed`, exact or inconclusive overlap, and expected or inconclusive
-prompt truncation before getting the user's explicit decision to proceed. The
+run is ready or approved. Use `actionability.status`: resolve and rerun
+`blocked` findings; disclose `review_required` findings and wait for the user's
+decision; show both configurations and get explicit approval for
+`clear_for_user_approval`. Clear means no known blockers or review findings,
+not guaranteed load, fit, quality, or held-out data. Show all check outcomes:
+never start a variant with a blocked engine check, and resolve or recheck a
+blocked prompt preflight before either run. The
 prediction jobs must run sequentially because AXIOM has one local compute slot.
 Output paths are checked again at job start.
 
