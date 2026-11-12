@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.util
-import io
 import json
 import logging
 import math
@@ -156,6 +155,36 @@ def validate_training_text_field(text_field: str) -> None:
         raise ValueError("Text field must be a simple JSON field name (letters, digits, underscore, dot, or hyphen).")
 
 
+def _parse_training_line(raw_line: bytes, line_number: int, text_field: str) -> str | None:
+    line = raw_line.decode("utf-8-sig" if line_number == 1 else "utf-8")
+    if not line.strip():
+        return None
+    try:
+        record = json.loads(line)
+    except (json.JSONDecodeError, RecursionError):
+        raise ValueError(f"Dataset line {line_number} is not valid JSON.") from None
+    if not isinstance(record, dict):
+        raise ValueError(f"Dataset line {line_number} must contain a JSON object.")
+    value = record.get(text_field)
+    if value is None and isinstance(record.get("prompt"), str) and isinstance(record.get("completion"), str):
+        value = record["prompt"] + "\n" + record["completion"]
+    if value is None and isinstance(record.get("messages"), list):
+        parts: list[str] = []
+        for message in record["messages"]:
+            if isinstance(message, dict) and isinstance(message.get("content"), str):
+                role = message.get("role")
+                parts.append((f"{role}: " if isinstance(role, str) and role else "") + message["content"])
+        value = "\n".join(parts) if parts else None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            f"Dataset line {line_number} needs a non-empty string in '{text_field}', "
+            "or string prompt/completion fields, or messages with content strings."
+        )
+    if len(value) > _MAX_TEXT_CHARS:
+        raise ValueError(f"Dataset line {line_number} text exceeds the {_MAX_TEXT_CHARS:,}-character limit.")
+    return value.strip()
+
+
 def iter_training_texts(dataset_path: Path, text_field: str = "text") -> Iterator[str]:
     """Yield trainer-accepted text values without retaining the full dataset."""
     with open_regular_file(dataset_path) as stream:
@@ -177,40 +206,57 @@ def iter_training_text_stream(
     if file_size_bytes > _MAX_DATASET_BYTES:
         raise ValueError(f"Dataset exceeds the {_MAX_DATASET_BYTES // (1024 * 1024)} MiB limit.")
     accepted = 0
+    actual_bytes = 0
+    line_number = 0
+    pending = bytearray()
     try:
-        with io.TextIOWrapper(stream, encoding="utf-8-sig") as handle:
-            for line_number, line in enumerate(handle, start=1):
-                if len(line.encode("utf-8")) > _MAX_LINE_BYTES:
+        while True:
+            chunk = stream.read(64 * 1024)
+            if chunk:
+                actual_bytes += len(chunk)
+                if actual_bytes > _MAX_DATASET_BYTES:
+                    raise ValueError(f"Dataset exceeds the {_MAX_DATASET_BYTES // (1024 * 1024)} MiB limit.")
+                pending.extend(chunk)
+            at_eof = not chunk
+
+            while pending:
+                newline = pending.find(b"\n")
+                carriage_return = pending.find(b"\r")
+                positions = [position for position in (newline, carriage_return) if position >= 0]
+                if not positions:
+                    if len(pending) > _MAX_LINE_BYTES:
+                        raise ValueError(f"Dataset line {line_number + 1} exceeds the 1 MiB line limit.")
+                    break
+
+                separator = min(positions)
+                if pending[separator] == 13 and separator + 1 == len(pending) and not at_eof:
+                    break
+                end = separator + 1
+                if pending[separator] == 13 and end < len(pending) and pending[end] == 10:
+                    end += 1
+                raw_line = bytes(pending[:end])
+                del pending[:end]
+                line_number += 1
+                if len(raw_line) > _MAX_LINE_BYTES:
                     raise ValueError(f"Dataset line {line_number} exceeds the 1 MiB line limit.")
-                if not line.strip():
-                    continue
-                try:
-                    record = json.loads(line)
-                except (json.JSONDecodeError, RecursionError):
-                    raise ValueError(f"Dataset line {line_number} is not valid JSON.") from None
-                if not isinstance(record, dict):
-                    raise ValueError(f"Dataset line {line_number} must contain a JSON object.")
-                value = record.get(text_field)
-                if value is None and isinstance(record.get("prompt"), str) and isinstance(record.get("completion"), str):
-                    value = record["prompt"] + "\n" + record["completion"]
-                if value is None and isinstance(record.get("messages"), list):
-                    parts: list[str] = []
-                    for message in record["messages"]:
-                        if isinstance(message, dict) and isinstance(message.get("content"), str):
-                            role = message.get("role")
-                            parts.append((f"{role}: " if isinstance(role, str) and role else "") + message["content"])
-                    value = "\n".join(parts) if parts else None
-                if not isinstance(value, str) or not value.strip():
-                    raise ValueError(
-                        f"Dataset line {line_number} needs a non-empty string in '{text_field}', "
-                        "or string prompt/completion fields, or messages with content strings."
-                    )
-                if len(value) > _MAX_TEXT_CHARS:
-                    raise ValueError(f"Dataset line {line_number} text exceeds the {_MAX_TEXT_CHARS:,}-character limit.")
-                accepted += 1
-                if accepted > _MAX_ROWS:
-                    raise ValueError(f"Dataset exceeds the {_MAX_ROWS:,}-row limit.")
-                yield value.strip()
+                value = _parse_training_line(raw_line, line_number, text_field)
+                if value is not None:
+                    accepted += 1
+                    if accepted > _MAX_ROWS:
+                        raise ValueError(f"Dataset exceeds the {_MAX_ROWS:,}-row limit.")
+                    yield value
+            if at_eof:
+                if pending:
+                    line_number += 1
+                    if len(pending) > _MAX_LINE_BYTES:
+                        raise ValueError(f"Dataset line {line_number} exceeds the 1 MiB line limit.")
+                    value = _parse_training_line(bytes(pending), line_number, text_field)
+                    if value is not None:
+                        accepted += 1
+                        if accepted > _MAX_ROWS:
+                            raise ValueError(f"Dataset exceeds the {_MAX_ROWS:,}-row limit.")
+                        yield value
+                return
     except UnicodeDecodeError:
         raise ValueError("Dataset must be UTF-8 encoded JSONL.") from None
 
