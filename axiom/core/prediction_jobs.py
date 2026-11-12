@@ -11,6 +11,7 @@ import re
 import stat
 import subprocess
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -1007,7 +1008,8 @@ def _verify_pending_artifact(root: Path, record: dict[str, Any]) -> tuple[int, i
 def _recover_record(root: Path, record: dict[str, Any]) -> dict[str, Any]:
     if record["status"] not in _ACTIVE_JOB_STATUSES:
         return record
-    if record["status"] == "publishing":
+    runner_state = _runner_state(record)
+    if record["status"] == "publishing" and runner_state != "alive":
         verified_identity = _verify_pending_artifact(root, record)
         if verified_identity is not None:
             completed = dict(record)
@@ -1027,7 +1029,6 @@ def _recover_record(root: Path, record: dict[str, Any]) -> dict[str, Any]:
                 # The pending identity and digest remain sufficient for safe re-verification.
                 pass
             return completed
-    runner_state = _runner_state(record)
     if runner_state == "alive":
         return record
     if runner_state == "unknown":
@@ -1356,6 +1357,8 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
     source_stream = None
     parent_fd: int | None = None
     parent_identity: tuple[int, int] | None = None
+    destination: Path | None = None
+    output_name: str | None = None
     output_descriptor: int | None = None
     output_stream = None
     temp_name: str | None = None
@@ -1717,6 +1720,62 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
             except Exception:
                 _mark_job_interrupted_in_memory(job_id, "job_state_unavailable")
     finally:
+        with _JOBS_LOCK:
+            unfinished = _JOBS.get(job_id)
+            unfinished = (
+                dict(unfinished)
+                if unfinished is not None and unfinished.get("status") in _ACTIVE_JOB_STATUSES
+                else None
+            )
+        if unfinished is not None:
+            completed_identity = None
+            pending_digest = unfinished.get("pending_artifact_sha256")
+            if unfinished.get("status") == "publishing":
+                try:
+                    completed_identity = _verify_pending_artifact(root, _persisted_job(unfinished))
+                except BaseException:
+                    completed_identity = None
+            try:
+                if completed_identity is not None and isinstance(pending_digest, str):
+                    _set_job(
+                        job_id,
+                        status="completed",
+                        finished_at=_now(),
+                        error_code=None,
+                        artifact_identity=completed_identity,
+                        artifact_sha256=pending_digest,
+                        pending_artifact_identity=None,
+                        pending_artifact_sha256=None,
+                    )
+                else:
+                    pending_identity = unfinished.get("pending_artifact_identity")
+                    if (
+                        unfinished.get("status") == "publishing"
+                        and isinstance(pending_identity, (list, tuple))
+                        and len(pending_identity) == 4
+                        and all(
+                            isinstance(value, int) and not isinstance(value, bool)
+                            for value in pending_identity[:2]
+                        )
+                        and destination is not None
+                        and output_name is not None
+                    ):
+                        _remove_published_output_if_same(
+                            parent_fd,
+                            output_name,
+                            destination,
+                            (pending_identity[0], pending_identity[1]),
+                        )
+                    _set_job(
+                        job_id,
+                        status="failed",
+                        finished_at=_now(),
+                        error_code="prediction_failed",
+                        pending_artifact_identity=None,
+                        pending_artifact_sha256=None,
+                    )
+            except Exception:
+                _mark_job_interrupted_in_memory(job_id, "job_state_unavailable")
         if output_stream is not None and not output_stream.closed:
             try:
                 output_stream.close()
@@ -1943,6 +2002,62 @@ def get_prediction_job(job_id: str, root: Path) -> dict[str, Any] | None:
         return None
     job = _lookup_job(job_id, root)
     return _job_summary(job) if job is not None else None
+
+
+def wait_prediction_job(
+    job_id: str,
+    root: Path,
+    *,
+    timeout_seconds: int | float = 30,
+) -> dict[str, Any]:
+    """Wait briefly for a prediction job to finish, time out, or need recovery."""
+    try:
+        timeout = float(timeout_seconds)
+    except (OverflowError, TypeError, ValueError):
+        timeout = float("nan")
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not math.isfinite(timeout)
+        or not 0 <= timeout <= 30
+    ):
+        raise ValueError("Prediction job wait must be between 0 and 30 seconds.")
+
+    started = time.monotonic()
+    deadline = started + timeout
+    while True:
+        job = get_prediction_job(job_id, root)
+        if job is None:
+            outcome = "not_found"
+            break
+        status = job.get("status")
+        if status in _TERMINAL_JOB_STATUSES:
+            outcome = status
+            break
+        if status == "recovery_unverified":
+            outcome = "recovery_unverified"
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            outcome = "timed_out"
+            break
+        time.sleep(min(0.5, remaining))
+
+    waited_seconds = round(max(0.0, time.monotonic() - started), 3)
+    return {
+        "job": job,
+        "wait_outcome": outcome,
+        "timed_out": outcome == "timed_out",
+        "waited_seconds": waited_seconds,
+        "scope": {
+            "prompts_returned": False,
+            "predictions_returned": False,
+            "logs_returned": False,
+            "absolute_paths_returned": False,
+            "job_state_persisted": True,
+            "generation_resumed_after_restart": False,
+        },
+    }
 
 
 def list_prediction_jobs(root: Path, limit: int = 10) -> list[dict[str, Any]]:

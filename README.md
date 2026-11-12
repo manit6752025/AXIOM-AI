@@ -489,6 +489,13 @@ axiom mcp allow axiom_prediction_job_status
 axiom mcp allow axiom_prediction_job_cancel
 ```
 
+`axiom_prediction_job_wait` can block for up to 30 seconds while reading the
+same safe job status; it returns the current job summary and a wait outcome of
+`completed`, `cancelled`, `failed`, `interrupted`, `recovery_unverified`,
+`timed_out`, or `not_found`. It uses the existing
+`axiom_prediction_job_status` permission. After `timed_out`, call it again if
+the returned job status remains active; after `recovery_unverified`, check status later.
+
 `axiom_prediction_job_evaluate` completes that handoff with the existing offline evaluator. It accepts a completed job ID, loads the prediction/reference fields from that job, and verifies the artifact still matches its published file identity and SHA-256 before scoring it. It returns sanitized aggregate metrics and links the evaluation run ID back to the prediction job; it does not return or persist row text. The saved evaluation also retains bounded provenance (workspace-relative paths, model/adapter references, generation settings, truncation count, and the artifact fingerprint), so the source of a score remains identifiable after an MCP restart. Provenance contains no row text and is not a guarantee of reproducibility if model files, runtime versions, or hardware change. The tool never runs automatically when generation finishes and is governed by the same default-deny `axiom_evaluation_run` permission. The agent must get approval to save aggregate metrics; if `prompts_truncated` is nonzero, it must show that count and obtain explicit approval before setting `approve_truncated_prompts=true`. If a completed job’s persisted metadata is unavailable, use `axiom_evaluation_run` on the artifact path only after separately verifying the intended file:
 
 ```bash
@@ -570,6 +577,7 @@ axiom mcp profile use readonly
 | `axiom_prediction_job_preflight` | Estimate prompt clipping for a bounded JSONL prediction dataset without loading weights or running inference |
 | `axiom_prediction_job_start` | Generate a bounded evaluation-ready JSONL artifact with local inference |
 | `axiom_prediction_job_status` | Read prediction-job counts and safe workspace-relative paths |
+| `axiom_prediction_job_wait` | Wait up to 30 seconds for a prediction-job outcome using the status permission |
 | `axiom_prediction_job_cancel` | Cancel prediction before artifact finalization begins |
 | `axiom_prediction_job_evaluate` | Evaluate a completed job artifact using the `axiom_evaluation_run` permission |
 | `axiom_prediction_job_examples` | Inspect up to three verified mismatches; text is off unless approved per call |

@@ -31,6 +31,8 @@
 ## Unreleased — latest/development
 
 ### Added
+- Added a bounded MCP wait operation for asynchronous prediction jobs using the existing status permission, avoiding rapid status polling.
+- Ensure an unexpectedly exited prediction worker thread cannot leave persisted job state active; recover a publishing artifact only after identity and hash verification.
 - Added a separately default-deny prediction-job mismatch inspector that verifies the completed artifact hash and returns up to three bounded text excerpts only after explicit per-call approval.
 - Persisted bounded prediction-job state and completed artifact identity per workspace so agents can recover status and the evaluation handoff after MCP restarts; interrupted jobs are never resumed.
 - Added a job-ID MCP handoff to evaluate completed prediction artifacts against their published file identity and SHA-256 using the existing evaluation permission.

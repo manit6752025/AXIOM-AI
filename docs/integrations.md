@@ -165,14 +165,20 @@ stages without exposing local exception text. Descriptor-relative platforms
 pin and recheck the output parent before and after publication. On platforms
 without those filesystem operations, path checks still reject static traversal
 and links, but cannot prevent another local process from moving the parent
-directory during publication. Each operation has its own default-deny
-permission:
+directory during publication. Start, status, and cancel each have their own
+default-deny permission:
 
 ```bash
 axiom mcp allow axiom_prediction_job_start
 axiom mcp allow axiom_prediction_job_status
 axiom mcp allow axiom_prediction_job_cancel
 ```
+
+`axiom_prediction_job_wait` can wait up to 30 seconds for one job and returns
+the current safe summary plus `wait_outcome`. It uses the existing
+`axiom_prediction_job_status` permission; it does not add a separate grant.
+After `timed_out`, repeat the wait if the returned job status remains active. After
+`recovery_unverified`, inspect status later.
 
 `axiom_prediction_job_preflight` is a separate default-deny, read-only tool for
 estimating prompt clipping before inference. It scans the bounded JSONL input

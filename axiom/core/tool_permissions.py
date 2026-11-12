@@ -43,7 +43,7 @@ TOOL_DESCRIPTIONS = {
         "Predict bounded local JSONL prompt truncation with tokenizer-only checks; no model weights are loaded and no row values are returned."
     ),
     "axiom_prediction_job_status": (
-        "List or inspect persisted safe counts and workspace-relative paths for local prediction jobs without prompts, predictions, or logs."
+        "List, inspect, or wait up to 30 seconds for persisted local prediction jobs; returns safe counts and paths without prompts, predictions, or logs."
     ),
     "axiom_prediction_job_cancel": (
         "Request cooperative cancellation of a local prediction job before artifact finalization begins."
