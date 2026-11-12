@@ -22,10 +22,17 @@ deletion operation for registry data, checkpoints, datasets, or output files.
 
 AXIOM stores metadata in the current workspace (commonly the hidden `.axiom/`
 directory), including registered model records, workflow designs, experiment
-plans, tool permission profiles, and agent-profile metadata. Those records are
-not the model weights. Removing a registry entry removes metadata only; it does
-not delete a checkpoint or modify the original source path. Saved-plan deletion
-also does not remove run artifacts.
+plans, tool permission profiles, agent-profile metadata, and bounded prediction
+job history. Prediction job history retains relative paths, generation settings,
+counts, status, evaluation links, and a completed artifact identity/hash. It
+does not retain prompts, dataset rows, generated predictions, or logs. Those
+records are not the model weights. Removing a registry entry removes metadata
+only; it does not delete a checkpoint or modify the original source path.
+Deleting `.axiom/prediction_jobs.json` removes only the persisted prediction
+history; a running MCP process can still return its in-memory job copy and may
+write the file again. Stop or restart that process to clear its live copy. The
+file does not control prediction artifacts or saved evaluation reports, which
+remain in place. Saved-plan deletion also does not remove run artifacts.
 
 The native fine-tuning job state is stored under the configured fine-tuning
 state directory or the user-local AXIOM data directory. Training output files

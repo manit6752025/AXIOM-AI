@@ -31,6 +31,7 @@
 ## Unreleased — latest/development
 
 ### Added
+- Persisted bounded prediction-job state and completed artifact identity per workspace so agents can recover status and the evaluation handoff after MCP restarts; interrupted jobs are never resumed.
 - Added a job-ID MCP handoff to evaluate completed prediction artifacts against their published file identity and SHA-256 using the existing evaluation permission.
 - Persisted bounded prediction-job provenance in saved evaluation reports so job settings remain attributable after an MCP restart; MCP history returns an allowlisted view and omits the artifact fingerprint.
 - Added a separately default-deny MCP dataset preflight that estimates native prompt clipping before a prediction job without loading weights, returning row values, or writing files; unsupported tokenizer paths report inconclusive.

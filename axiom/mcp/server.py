@@ -37,6 +37,7 @@ from axiom.core.prediction_jobs import (
     cancel_prediction_job,
     get_completed_prediction_artifact,
     get_prediction_job,
+    list_prediction_jobs,
     preflight_prediction_job,
     record_prediction_job_evaluation,
     start_prediction_job,
@@ -93,9 +94,9 @@ mcp = MCPServer(
         "it runs one bounded prompt locally and AXIOM does not store the prompt or response. The MCP host may retain its tool transcript. "
         "For a dataset-to-evaluation workflow, when allowed, use axiom_engine_preflight before axiom_prediction_job_start. "
         "Also use axiom_prediction_job_preflight to estimate actual dataset prompt clipping with the model tokenizer before starting; it is separate default-deny, read-only, and does not load model weights. Use the same model, dataset, prompt_field, reference_field, and max_new_tokens as the intended start call, and rerun preflight if any of those inputs change. "
-        "Before starting, show the model, input/output paths, fields, and generation limits, disclose that the new local JSONL artifact preserves the source rows and adds generated predictions, and wait for the user's explicit go-ahead. "
+        "Before starting, show the model, input/output paths, fields, and generation limits; disclose that the local JSONL artifact preserves source rows and adds generated predictions, and that AXIOM saves bounded job metadata under workspace .axiom/prediction_jobs.json (relative paths, settings, counts, status, and artifact fingerprint; no dataset rows, prompts, predictions, or logs); then wait for the user's explicit go-ahead. "
         "If prediction preflight expects clipped prompts, show the count and 1-based JSONL line numbers, then discuss whether to shorten those prompts before the run; if it is inconclusive, disclose that clipping could not be assessed and use the completed job's prompts_truncated count only if the job completes. Templates AXIOM cannot evaluate safely may also fail during generation. The preflight assessment covers prompt truncation only and does not clear a prediction run for safety or quality. "
-        "Use axiom_prediction_job_status and axiom_prediction_job_cancel to manage that cancellable job; only a completed artifact is published. "
+        "Use axiom_prediction_job_status to list persisted job history or inspect one job, and axiom_prediction_job_cancel to cancel a worker owned by this process. Prediction metadata is stored under the workspace .axiom directory; if AXIOM verifies that the worker process exited, the job becomes interrupted and generation is never resumed automatically. If process identity cannot be verified, status is recovery_unverified and the job is left untouched unless its publishing checkpoint independently verifies the completed artifact hash. Only a completed job with verified publication metadata can use the job-ID evaluation handoff. "
         "Do not evaluate a prediction job automatically when it completes. Call axiom_prediction_job_evaluate only after the user approves saving aggregate evaluation metrics; it requires the axiom_evaluation_run permission. "
         "Saved prediction-job evaluations retain bounded paths and generation settings in evaluation history, but this provenance does not guarantee exact reproducibility; MCP history omits the local artifact fingerprint. "
         "Review prompts_truncated first, and when it is nonzero show the count and get explicit approval before setting approve_truncated_prompts=true. "
@@ -562,8 +563,21 @@ def axiom_prediction_job_evaluate(
             "evaluation_saved": False,
         }
     run = evaluation["run"]
-    linked = record_prediction_job_evaluation(job_id, root, run["id"])
-    return {
+    link_note = None
+    try:
+        linked = record_prediction_job_evaluation(job_id, root, run["id"])
+    except Exception:
+        linked = False
+        link_note = (
+            "Evaluation metrics were saved, but the prediction-job link could not be recorded. "
+            "Check evaluation history before retrying to avoid saving a duplicate run."
+        )
+    if not linked and link_note is None:
+        link_note = (
+            "Evaluation metrics were saved, but the prediction-job link is unavailable. "
+            "Check evaluation history before retrying to avoid saving a duplicate run."
+        )
+    response = {
         "run": run,
         "prediction_job": {
             "id": job_id,
@@ -581,6 +595,9 @@ def axiom_prediction_job_evaluate(
             "evaluation_permission": "axiom_evaluation_run",
         },
     }
+    if link_note is not None:
+        response["prediction_job"]["recovery_note"] = link_note
+    return response
 
 
 @mcp.tool()
@@ -1393,17 +1410,35 @@ def axiom_prediction_job_start(
             "predictions_returned": False,
             "logs_returned": False,
             "absolute_paths_returned": False,
-            "job_state_memory_only": True,
-            "server_restart_clears_job_state": True,
+            "job_state_memory_only": False,
+            "job_state_persisted_in_workspace": ".axiom/prediction_jobs.json",
+            "server_restart_clears_job_state": False,
+            "generation_resumed_after_restart": False,
         },
     }
 
 
 @mcp.tool()
-def axiom_prediction_job_status(job_id: str) -> dict:
-    """Read counts and workspace-relative paths for one prediction job."""
+def axiom_prediction_job_status(job_id: str | None = None, limit: int = 10) -> dict:
+    """Read safe prediction job history or one job by ID for this workspace."""
     ToolPermissionStore().require("axiom_prediction_job_status")
     root = _mcp_workspace_root()
+    if job_id is None:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 50:
+            raise ValueError("Prediction job list limit must be between 1 and 50.")
+        jobs = list_prediction_jobs(root, limit=limit)
+        return {
+            "jobs": jobs,
+            "limit": limit,
+            "scope": {
+                "prompts_returned": False,
+                "predictions_returned": False,
+                "logs_returned": False,
+                "absolute_paths_returned": False,
+                "job_state_persisted": True,
+                "generation_resumed_after_restart": False,
+            },
+        }
     job = get_prediction_job(job_id, root)
     return {
         "job": job,
@@ -1413,6 +1448,8 @@ def axiom_prediction_job_status(job_id: str) -> dict:
             "predictions_returned": False,
             "logs_returned": False,
             "absolute_paths_returned": False,
+            "job_state_persisted": True,
+            "generation_resumed_after_restart": False,
         },
     }
 

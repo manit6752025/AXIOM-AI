@@ -140,9 +140,24 @@ Start consumes local compute and writes generated text into that local
 artifact. When permitted, run `axiom_engine_preflight` first. Server
 instructions require showing the exact configuration and output file, then
 waiting for the user's explicit go-ahead before starting. Job status omits
-prompts, predictions, logs, and absolute paths. Job state is in memory, so an MCP process restart
-clears status; AXIOM removes orphaned partial artifacts on the next prediction
-job start. Prediction jobs share AXIOM's single local compute slot with
+prompts, predictions, logs, and absolute paths. Bounded metadata is persisted
+under the workspace `.axiom/prediction_jobs.json` file, including relative
+paths, settings, row counts, safe status, and completed-artifact identity/hash.
+It does not store dataset rows, prompts, predictions, or logs. Use
+`axiom_prediction_job_status` without an ID to list recent jobs or pass an ID
+to inspect one job after an MCP restart. If the owning process exited before
+completion was recorded, the job is marked `interrupted` and is never resumed;
+its artifact is not eligible for job-ID evaluation. If AXIOM cannot verify
+whether the owning process is still alive, status is `recovery_unverified` and
+the job remains untouched until status can be checked again. A `publishing`
+checkpoint can recover to completed if the already-published artifact independently
+passes identity and hash verification. Completed jobs
+retain the evaluation handoff, which revalidates file identity and SHA-256
+before scoring.
+AXIOM removes orphaned partial artifacts on the next prediction job start.
+Cancellation is cooperative and can signal only a worker controlled by the
+MCP process handling the request; another server can inspect a live job but
+cannot cancel it. Prediction jobs share AXIOM's single local compute slot with
 fine-tuning. The `prompts_truncated` count signals that the native engine
 clipped one or more prompts to fit model context; review a nonzero count before
 using the artifact for evaluation. Safe `error_code` values identify failure
@@ -189,8 +204,10 @@ predictions are not returned. It never runs automatically when inference
 finishes and uses the existing `axiom_evaluation_run` permission. Get approval
 before saving aggregate metrics. If `prompts_truncated` is nonzero, show the
 count and obtain explicit approval before setting
-`approve_truncated_prompts: true`. If an MCP restart cleared the job ID, use
-`axiom_evaluation_run` directly on the still-existing output path.
+`approve_truncated_prompts: true`. If the saved job metadata is unavailable,
+the job is interrupted, or its artifact fingerprint no longer matches, use
+`axiom_evaluation_run` by path only after inspecting and confirming the file
+with the user.
 Saved evaluations from prediction jobs retain the job ID, workspace-relative
 input/output/model references, generation settings, row and truncation counts,
 and a local output fingerprint. The MCP history redacts that fingerprint and
