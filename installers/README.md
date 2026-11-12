@@ -9,7 +9,7 @@ Choose the installation method that fits your machine. The installer downloads p
 Open PowerShell as your normal user; administrator rights are not required. Run:
 
 ```powershell
-irm https://raw.githubusercontent.com/NetCore-Technologies/AXIOM-AI/main/installers/install.ps1 | iex
+irm https://raw.githubusercontent.com/manit6752025/AXIOM-AI/main/installers/install.ps1 | iex
 ```
 
 The script finds the latest published release, downloads the Windows x64 executable and checksum manifest, verifies SHA-256 before installing, adds the per-user directory to PATH, and runs a version check. It asks before replacing an existing installation.
@@ -17,7 +17,7 @@ The script finds the latest published release, downloads the Windows x64 executa
 To inspect the script first or pin a release, download it and run it locally:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/NetCore-Technologies/AXIOM-AI/main/installers/install.ps1 -OutFile .\install-axiom.ps1
+Invoke-WebRequest https://raw.githubusercontent.com/manit6752025/AXIOM-AI/main/installers/install.ps1 -OutFile .\install-axiom.ps1
 Get-Help .\install-axiom.ps1 -Full
 .\install-axiom.ps1 -Tag v0.3.0-beta.6
 ```
@@ -27,7 +27,7 @@ Options include `-Tag` to pin a published release, `-InstallDir` to choose the i
 ### Linux x86_64, macOS, and other Linux architectures
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NetCore-Technologies/AXIOM-AI/main/installers/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/manit6752025/AXIOM-AI/main/installers/install.sh | bash
 ```
 
 On Linux x86_64, the script downloads the onedir release bundle and verifies it against `SHA256SUMS` before activation. On macOS and non-x86 Linux, it creates a Python virtual environment and installs from the selected source ref; Python 3.11+ and Git are required for these source installs.
@@ -63,7 +63,7 @@ On PowerShell, the same commands work after reopening the terminal. If `axiom` i
 
 ## Troubleshooting
 
-- **No published release found:** open [GitHub Releases](https://github.com/NetCore-Technologies/AXIOM-AI/releases). A tag in the source tree is not necessarily a published release with downloadable assets.
+- **No published release found:** open [GitHub Releases](https://github.com/manit6752025/AXIOM-AI/releases). A tag in the source tree is not necessarily a published release with downloadable assets.
 - **Checksum missing or incorrect:** stop; do not bypass verification. Check the release assets and retry later.
 - **Python or Git missing:** source installs on macOS/non-x86 Linux require Python 3.11+ and Git.
 - **Command not found:** reopen the terminal after PATH changes, or add the printed bin directory to PATH.
