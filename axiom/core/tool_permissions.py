@@ -11,6 +11,10 @@ from axiom.core.storage import atomic_write_text, file_lock
 
 TOOL_DESCRIPTIONS = {
     "axiom_info": "Read AXIOM release information.",
+    "axiom_workspace_context": (
+        "Read bounded local project, hardware, and developer-tool context; "
+        "suggestions are not executed."
+    ),
     "axiom_model_list": "List locally registered models.",
     "axiom_model_info": "Inspect a local model path.",
     "axiom_dataset_inspect": "Inspect a local dataset.",

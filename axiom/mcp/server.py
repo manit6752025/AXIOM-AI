@@ -7,6 +7,7 @@ from mcp.server import MCPServer
 
 from axiom.core.hardware import detect_hardware
 from axiom.core.tool_permissions import ToolPermissionStore
+from axiom.daemon import local_summary
 from axiom.datasets.cleaner import clean_jsonl
 from axiom.datasets.inspector import inspect_dataset
 from axiom.models.inspector import inspect_model
@@ -19,6 +20,8 @@ mcp = MCPServer(
     f"AXIOM v{__version__}",
     instructions=(
         "AXIOM is an AI engineering platform. "
+        "After the active AXIOM profile allows it, start with axiom_workspace_context "
+        "for a bounded local workspace briefing. "
         "Use AXIOM tools to inspect models, inspect and clean datasets, "
         "inspect hardware, create training plans, and check optional "
         "AI runtime integrations. MCP tool access is denied by default and must "
@@ -45,6 +48,67 @@ def axiom_info() -> dict:
             "mcp",
             "agent_integrations",
         ],
+    }
+
+
+@mcp.tool()
+def axiom_workspace_context() -> dict:
+    """Read bounded local context; suggested commands are not run and need approval."""
+    permission_store = ToolPermissionStore()
+    permission_store.require("axiom_workspace_context")
+    permission_state = permission_store.list()
+    active_profile = next(
+        profile
+        for profile in permission_state["profiles"]
+        if profile["name"] == permission_state["active_profile"]
+    )
+    summary = local_summary(Path.cwd())
+    hardware = summary["hardware"]
+    tools = summary["tools"]
+
+    return {
+        "schema_version": 1,
+        "axiom_version": summary["version"],
+        "workspace": {
+            "project_detected": summary["project"]["detected"],
+            "missing_paths": summary["project"]["missing_paths"],
+        },
+        "hardware": {
+            "os_name": hardware["os_name"],
+            "architecture": hardware["architecture"],
+            "cpu_cores": hardware["cpu_cores"],
+            "ram_gb": hardware["ram_gb"],
+            "gpu_name": hardware["gpu_name"],
+            "vram_gb": hardware["vram_gb"],
+            "cuda_available": hardware["cuda_available"],
+        },
+        "developer_tools": {
+            "available": tools["available"],
+            "total": tools["total"],
+            "available_names": tools["names"],
+            "missing_names": tools["missing"],
+            "catalog_scope": (
+                "External developer tools in AXIOM's catalog; availability "
+                "does not establish sign-in or credential status."
+            ),
+        },
+        "mcp_access": {
+            "active_profile": permission_state["active_profile"],
+            "permitted_tools": active_profile["allowed_tools"],
+        },
+        "recommended_next_step": {
+            **summary["recommended"],
+            "requires_user_approval_before_execution": True,
+        },
+        "scope": {
+            "read_only": True,
+            "network_accessed": False,
+            "file_contents_returned": False,
+            "absolute_paths_returned": False,
+            "hardware_detection": (
+                "Local detection may query nvidia-smi when available."
+            ),
+        },
     }
 
 

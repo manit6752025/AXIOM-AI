@@ -136,7 +136,7 @@ Open `http://127.0.0.1:8765/ui/` for the Control Center. For native inference, t
 | **Model Studio** | Search GGUF models, install them, convert local models to GGUF | `axiom model studio wizard` |
 | **Agent Optimizer** | Eight workload profiles that pick quantization and build a runtime bundle | `axiom optimize profiles` |
 | **Evaluation** | Score precomputed predictions offline and gate regressions against a baseline | `axiom evaluation run` |
-| **MCP server** | Let AI agents call AXIOM tools with default-deny permissions | `axiom mcp serve` |
+| **MCP server** | Give AI agents a permissioned workspace briefing and local AI tools, with default-deny access | `axiom mcp serve` |
 | **Developer tools** | Find and safely set up coding-agent CLIs and model APIs | `axiom tools list` |
 | **Diagnostics** | Doctor, status, summary, and a privacy-safe support bundle | `axiom doctor` |
 | **Control Center** | A browser interface for all of the above | `axiom gui` |
@@ -435,15 +435,22 @@ For compatible mobile apps, `axiom mobile-bridge --listen-lan --port 40509` serv
 
 AXIOM can run as an [MCP](https://modelcontextprotocol.io/) server, so tools like coding agents can inspect your models, datasets, and hardware through a safe, controlled door. **Every tool is denied by default.** You choose what each profile may call.
 
-Step 1. Allow only the tools you want:
+Start an agent session with the bounded, read-only `axiom_workspace_context` tool. It returns project structure, hardware, external developer-tool availability, the MCP tools allowed by the active profile, and a suggested next command in one call. It omits absolute paths, executable paths, configuration contents, and credential values. Suggestions are not executed; an agent must get user approval before running a suggested shell command. Hardware detection may query `nvidia-smi` locally when available. Grant access explicitly:
 
 ```bash
-axiom mcp permissions
+axiom mcp allow axiom_workspace_context
+```
+
+Agents can then call `axiom_workspace_context` before choosing more specific tools. It reports which AXIOM MCP tools the active profile permits. External developer-tool availability does not establish sign-in or credential status.
+
+To let the agent use additional AXIOM tools, allow only the ones you need:
+
+```bash
 axiom mcp allow axiom_system_info
 axiom mcp allow axiom_model_info
 ```
 
-Step 2. Point your MCP client at AXIOM:
+Point your MCP client at AXIOM:
 
 ```json
 {
@@ -456,7 +463,7 @@ Step 2. Point your MCP client at AXIOM:
 }
 ```
 
-Step 3. Need stricter or separate access? Make a profile and switch to it:
+For stricter or separate access, make a profile and switch to it:
 
 ```bash
 axiom mcp profile create readonly
@@ -467,6 +474,7 @@ axiom mcp profile use readonly
 | Tool | What it does |
 | --- | --- |
 | `axiom_info` | AXIOM version and capabilities |
+| `axiom_workspace_context` | Read a privacy-bounded project, hardware, and developer-tool snapshot; command suggestions need user approval |
 | `axiom_system_info` | Detected hardware |
 | `axiom_model_list` | Registered models |
 | `axiom_model_info` | Inspect a local model folder |

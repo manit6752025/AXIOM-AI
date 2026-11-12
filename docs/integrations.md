@@ -13,6 +13,16 @@ It allows an agent runtime to discover AXIOM capabilities as tools.
 
 Examples include OpenClaw and PicoClaw.
 
+Agents can begin with the read-only `axiom_workspace_context` tool for one
+structured snapshot of project layout, hardware, external developer-tool
+availability, the tools allowed by the active profile, and a suggested next
+command. It omits absolute paths, executable paths, and configuration
+contents. Suggestions are never executed; agents should get user approval
+before running a suggested shell command. Hardware detection may query
+`nvidia-smi` locally when available; the tool does not modify workspace files
+or access the network. Each MCP tool, including this one, remains denied until
+it is granted in the active AXIOM tool profile.
+
 ### CLI
 
 AXIOM can also integrate with local agent binaries.
