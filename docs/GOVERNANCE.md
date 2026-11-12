@@ -108,7 +108,7 @@ Where possible, contributors should provide:
 
 Security issues should be handled privately according to:
 
-https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/SECURITY.md
+https://github.com/manit6752025/AXIOM-AI/blob/main/SECURITY.md
 
 Do not use public issues to disclose exploitable vulnerabilities or secrets.
 
@@ -116,7 +116,7 @@ Do not use public issues to disclose exploitable vulnerabilities or secrets.
 
 Everyone participating in AXIOM is expected to follow:
 
-https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/CODE_OF_CONDUCT.md
+https://github.com/manit6752025/AXIOM-AI/blob/main/CODE_OF_CONDUCT.md
 
 ## 10. Changes to governance
 
