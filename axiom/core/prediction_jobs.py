@@ -351,26 +351,37 @@ def _reserve_output_temp(
     output_path: Path,
     parent_fd: int | None,
     output_name: str,
-    job_id: str,
-) -> tuple[int, str, Path | None]:
-    temp_name = f".axiom-prediction-{os.getpid()}-{job_id}.tmp"
+) -> tuple[int, str, Path | None, tuple[int, int]]:
+    temp_name = f".axiom-prediction-{uuid.uuid4().hex}.tmp"
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     if parent_fd is not None:
         descriptor = os.open(temp_name, flags, 0o600, dir_fd=parent_fd)
-        return descriptor, temp_name, None
+        return descriptor, temp_name, None, _file_identity(os.fstat(descriptor))
     temp_path = output_path.with_name(temp_name)
     descriptor = os.open(temp_path, flags, 0o600)
-    return descriptor, temp_name, temp_path
+    return descriptor, temp_name, temp_path, _file_identity(os.fstat(descriptor))
 
 
-def _remove_temp(parent_fd: int | None, temp_name: str | None, temp_path: Path | None) -> None:
-    if temp_name is None:
+def _remove_temp(
+    parent_fd: int | None,
+    temp_name: str | None,
+    temp_path: Path | None,
+    expected_identity: tuple[int, int] | None,
+) -> None:
+    if temp_name is None or expected_identity is None:
         return
     try:
         if parent_fd is not None:
-            os.unlink(temp_name, dir_fd=parent_fd)
+            metadata = os.stat(temp_name, dir_fd=parent_fd, follow_symlinks=False)
         elif temp_path is not None:
-            temp_path.unlink()
+            metadata = temp_path.lstat()
+        else:
+            return
+        if stat.S_ISREG(metadata.st_mode) and _file_identity(metadata) == expected_identity:
+            if parent_fd is not None:
+                os.unlink(temp_name, dir_fd=parent_fd)
+            else:
+                temp_path.unlink()
     except FileNotFoundError:
         pass
     except OSError:
@@ -383,8 +394,12 @@ def _publish_output(
     temp_path: Path | None,
     output_name: str,
     output_path: Path,
+    expected_temp_identity: tuple[int, int],
 ) -> None:
     if parent_fd is not None:
+        temp_stat = os.stat(temp_name, dir_fd=parent_fd, follow_symlinks=False)
+        if not stat.S_ISREG(temp_stat.st_mode) or _file_identity(temp_stat) != expected_temp_identity:
+            raise ValueError("Temporary prediction artifact identity changed before publication.")
         os.link(
             temp_name,
             output_name,
@@ -393,21 +408,16 @@ def _publish_output(
             follow_symlinks=False,
         )
         try:
-            os.unlink(temp_name, dir_fd=parent_fd)
-        except OSError:
-            pass
-        try:
             os.fsync(parent_fd)
         except OSError:
             pass
     else:
         if temp_path is None:
             raise OSError("Temporary output path is missing.")
+        temp_stat = temp_path.lstat()
+        if not stat.S_ISREG(temp_stat.st_mode) or _file_identity(temp_stat) != expected_temp_identity:
+            raise ValueError("Temporary prediction artifact identity changed before publication.")
         os.link(temp_path, output_path, follow_symlinks=False)
-        try:
-            temp_path.unlink()
-        except OSError:
-            pass
 
 
 def _file_identity(metadata: os.stat_result) -> tuple[int, int]:
@@ -543,7 +553,7 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
     output_stream = None
     temp_name: str | None = None
     temp_path: Path | None = None
-    published = False
+    temp_file_identity: tuple[int, int] | None = None
     stage = "model_validation"
     try:
         with _JOBS_LOCK:
@@ -608,11 +618,10 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
             raise PredictionJobFailure("input_size_limit", "Prediction input exceeds the bounded size limit.")
 
         stage = "output_prepare"
-        output_descriptor, temp_name, temp_path = _reserve_output_temp(
+        output_descriptor, temp_name, temp_path, temp_file_identity = _reserve_output_temp(
             destination,
             parent_fd,
             output_name,
-            job_id,
         )
         output_stream = os.fdopen(output_descriptor, "wb")
         output_descriptor = None
@@ -770,9 +779,17 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
             temp_stat = temp_path.lstat()
         if not stat.S_ISREG(temp_stat.st_mode) or temp_stat.st_size != output_bytes:
             raise ValueError("Temporary prediction artifact changed before publication.")
-        temp_file_identity = _file_identity(temp_stat)
+        if temp_file_identity is None or _file_identity(temp_stat) != temp_file_identity:
+            raise ValueError("Temporary prediction artifact identity changed before publication.")
         try:
-            _publish_output(parent_fd, temp_name, temp_path, output_name, destination)
+            _publish_output(
+                parent_fd,
+                temp_name,
+                temp_path,
+                output_name,
+                destination,
+                temp_file_identity,
+            )
             output_stat = (
                 os.stat(output_name, dir_fd=parent_fd, follow_symlinks=False)
                 if parent_fd is not None else destination.lstat()
@@ -781,6 +798,26 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
                 not stat.S_ISREG(output_stat.st_mode)
                 or _file_identity(output_stat) != temp_file_identity
             ):
+                # If the temp name was swapped just before link(), remove only the link
+                # this publication created, and only while it still has that inode.
+                try:
+                    current_temp_stat = (
+                        os.stat(temp_name, dir_fd=parent_fd, follow_symlinks=False)
+                        if parent_fd is not None else temp_path.lstat()
+                    )
+                except OSError:
+                    current_temp_stat = None
+                if (
+                    stat.S_ISREG(output_stat.st_mode)
+                    and current_temp_stat is not None
+                    and _file_identity(current_temp_stat) == _file_identity(output_stat)
+                ):
+                    _remove_published_output_if_same(
+                        parent_fd,
+                        output_name,
+                        destination,
+                        _file_identity(output_stat),
+                    )
                 raise ValueError("Published prediction artifact is not the generated temporary file.")
             _verify_output_location(
                 destination,
@@ -813,7 +850,6 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
                 temp_file_identity,
             )
             raise
-        published = True
         _set_job(
             job_id,
             status="completed",
@@ -847,8 +883,7 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
                 os.close(output_descriptor)
             except OSError:
                 pass
-        if not published:
-            _remove_temp(parent_fd, temp_name, temp_path)
+        _remove_temp(parent_fd, temp_name, temp_path, temp_file_identity)
         if parent_fd is not None:
             try:
                 os.close(parent_fd)
