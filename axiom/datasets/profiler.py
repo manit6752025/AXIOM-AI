@@ -318,9 +318,11 @@ def profile_jsonl_stream(
         truncation_reasons.add("max_bytes")
 
     fields = []
+    truncated_field_names = 0
     for name in sorted(counts):
         occurrences = counts[name]
         shown = name if len(name) <= 160 else name[:159] + "…"
+        truncated_field_names += int(len(name) > 160)
         fields.append({
             "name": shown,
             "occurrences": occurrences,
@@ -394,6 +396,7 @@ def profile_jsonl_stream(
             for name, histogram in sorted(token_lengths.items())
         },
         "unique_fields_tracked": len(fields),
+        "truncated_field_names": truncated_field_names,
         "omitted_field_occurrences": omitted,
         "possibly_sensitive_fields": sensitive,
         "privacy_review_recommended": bool(sensitive),

@@ -445,6 +445,8 @@ Agents can then call `axiom_workspace_context` before choosing more specific too
 
 `axiom_workspace_assets` locates workspace-relative model directories and JSONL datasets. It returns paths only, with up to 200 results per category and a 50,000-entry scan budget per category; its response separates result-limit and scan-truncation status. The context and asset tools use the MCP server's working directory as the workspace root; start the server from the target project, or set the client's working-directory option where supported. MCP permissions are stored under that workspace's `.axiom/` directory, so run the `axiom mcp allow` commands from the same project root. Pass returned paths to `axiom_model_info`, `axiom_dataset_inspect`, or `axiom_dataset_clean_preview`.
 
+`axiom_dataset_inspect` accepts a workspace-relative `.jsonl` path and returns a bounded structural profile with row counts, field types/null rates, duplicate summaries, warnings, and truncation status. It scans at most 64 MiB, 100,000 rows, and 1 MiB per line; row values and absolute paths are never returned. Optional `required_fields` and `expected_types` checks cover schema presence across the profiled file, not presence in every row; truncated scans, invalid rows, truncated field names, or field-tracking limits return `validation.status: inconclusive`. Pass `duplicate_key_fields` and `duplicate_rate_threshold` to summarize repeated IDs, or `text_fields` to request token-length histograms. Sensitive-looking field names are always flagged heuristically; scanning values for PII patterns stays off unless the call explicitly sets `scan_pii=true`.
+
 `axiom_training_preflight` combines local model metadata, the LoRA trainer's own bounded JSONL text validation, training-package metadata, and a rough hardware estimate. It accepts workspace-relative model and dataset paths plus an optional `text_field` (default `text`). The data is read locally for validation, but no dataset values or model weights are returned or loaded. The tool does not create a job, write files, or access the network. Package checks inspect version metadata but do not import or initialize the runtime. It reports `blockers_found`, `review_needed`, or `no_known_blockers`; the last status is not a promise that training will load or fit. A hardware check marked `warn` means the generic planner estimated a fit, not that the actual training loop was tested. The actual trainer is LoRA-only, while the generic planner may estimate a QLoRA fallback, and the hardware estimate does not verify Apple MPS or CPU fit. Grant it separately:
 
 ```bash
@@ -504,7 +506,7 @@ axiom mcp profile use readonly
 | `axiom_system_info` | Detected hardware |
 | `axiom_model_list` | Registered models |
 | `axiom_model_info` | Inspect a local model folder |
-| `axiom_dataset_inspect` | Dataset quality report |
+| `axiom_dataset_inspect` | Bounded JSONL profile; sensitive-name heuristics run by default, value PII scanning is opt-in |
 | `axiom_dataset_clean_preview` | Preview bounded cleanup counts without returning row contents or writing files |
 | `axiom_dataset_clean` | Write a new cleaned JSONL copy inside the workspace |
 | `axiom_evaluation_run` | Score precomputed outputs offline and save aggregate metrics |

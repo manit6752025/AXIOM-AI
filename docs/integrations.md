@@ -36,6 +36,20 @@ working-directory option where supported. Pass asset paths to
 stored in `.axiom/tool_permissions.json` under that same root, so run
 `axiom mcp allow` from the project where the server will run.
 
+`axiom_dataset_inspect` profiles a workspace-relative JSONL path with a
+64 MiB, 100,000-row, and 1 MiB-per-line limit. It returns field names, observed
+types, null rates, duplicate summaries, and scan diagnostics without row
+values or absolute paths. Optional required-field and expected-type checks
+can be included in the same call; required fields mean present somewhere in
+the profiled dataset, not present in every row. Validation is marked
+inconclusive for truncated profiles, invalid rows, or when the field-tracking
+cap is reached or field names are shortened to fit the report.
+Pass `duplicate_key_fields` with an optional `duplicate_rate_threshold` to
+summarize repeated IDs, or `text_fields` to request token-length histograms.
+Sensitive-looking field names are always flagged heuristically. Scanning field
+values for PII patterns is off by default and requires `scan_pii: true` for
+that call.
+
 The separately permissioned `axiom_training_preflight` tool checks a local
 model directory, validates dataset text using the trainer's bounded rules,
 checks training-package metadata, and includes a heuristic hardware estimate.

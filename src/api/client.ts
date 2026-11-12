@@ -681,6 +681,7 @@ export type DatasetProfile = {
   text_token_lengths: Record<string, { observations: number; histogram: Record<string, number> }>;
   privacy_review_recommended: boolean;
   possibly_sensitive_fields: string[];
+  truncated_field_names: number;
   sensitive_field_rules: string[];
   ignored_sensitive_fields: string[];
   pii_scan: {

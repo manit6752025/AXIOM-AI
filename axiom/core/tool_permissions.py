@@ -23,7 +23,10 @@ TOOL_DESCRIPTIONS = {
     ),
     "axiom_model_list": "List locally registered models.",
     "axiom_model_info": "Inspect a local model path.",
-    "axiom_dataset_inspect": "Inspect a local dataset.",
+    "axiom_dataset_inspect": (
+        "Profile bounded workspace JSONL with values withheld. "
+        "Sensitive-name heuristics run by default; value PII scans are opt-in."
+    ),
     "axiom_dataset_clean_preview": "Preview bounded dataset cleaning counts without writing files.",
     "axiom_dataset_clean": "Write a new cleaned dataset copy inside the workspace.",
     "axiom_evaluation_run": "Score local precomputed outputs and persist aggregate metrics only.",

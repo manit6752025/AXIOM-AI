@@ -19,12 +19,13 @@ from axiom.daemon import local_summary
 from axiom.daemon_api import MAX_LISTED_FILES, list_workspace_files
 from axiom.datasets.cleaner import clean_jsonl
 from axiom.datasets.cleaning_preview import preview_jsonl_cleaning
-from axiom.datasets.inspector import inspect_dataset
 from axiom.datasets.profiler import (
     DEFAULT_MAX_BYTES,
     DEFAULT_MAX_LINE_BYTES,
     DEFAULT_MAX_ROWS,
+    profile_jsonl_stream,
 )
+from axiom.datasets.quality import validate_dataset_profile
 from axiom.evaluation.jsonl import (
     DEFAULT_MAX_BYTES as DEFAULT_EVALUATION_MAX_BYTES,
     DEFAULT_MAX_LINE_BYTES as DEFAULT_EVALUATION_MAX_LINE_BYTES,
@@ -46,6 +47,8 @@ mcp = MCPServer(
         "After the active AXIOM profile allows it, start with axiom_workspace_context "
         "for a bounded local workspace briefing. "
         "Use axiom_workspace_assets to find local model and dataset paths when allowed. "
+        "Use axiom_dataset_inspect for bounded JSONL structure and schema checks. "
+        "Sensitive field-name heuristics are included; content PII pattern scanning requires explicit opt-in. "
         "Use axiom_training_preflight for bounded, non-executing checks before local LoRA training. "
         "Use AXIOM tools to inspect models, datasets, and hardware; preview dataset cleaning "
         "and show the counts and proposed output path before writing a new copy. "
@@ -491,26 +494,165 @@ def axiom_model_info(path: str) -> dict:
 
 
 @mcp.tool()
-def axiom_dataset_inspect(path: str) -> dict:
-    """Inspect an AXIOM-supported dataset."""
+def axiom_dataset_inspect(
+    path: str,
+    duplicate_key_fields: list[str] | None = None,
+    duplicate_rate_threshold: float | None = None,
+    text_fields: list[str] | None = None,
+    required_fields: list[str] | None = None,
+    expected_types: dict[str, str] | None = None,
+    scan_pii: bool = False,
+) -> dict:
+    """Profile bounded workspace JSONL; content PII scanning is opt-in."""
     ToolPermissionStore().require("axiom_dataset_inspect")
-    if not isinstance(path, str) or not path.strip():
-        raise ValueError("Dataset path cannot be empty.")
-
-    result = inspect_dataset(path)
-
-    return {
-        "path": str(result.path),
-        "format": result.format,
-        "samples": result.samples,
-        "valid": result.valid,
-        "invalid": result.invalid,
-        "empty": result.empty,
-        "duplicates": result.duplicates,
-        "estimated_tokens": result.estimated_tokens,
-        "fields": result.fields,
-        "errors": result.errors,
+    if not isinstance(path, str) or not path:
+        raise ValueError("Dataset path must be workspace-relative.")
+    if type(scan_pii) is not bool:
+        raise ValueError("scan_pii must be a boolean; PII scanning is opt-in.")
+    duplicate_key_fields = [] if duplicate_key_fields is None else duplicate_key_fields
+    text_fields = [] if text_fields is None else text_fields
+    required_fields = [] if required_fields is None else required_fields
+    expected_types = {} if expected_types is None else expected_types
+    if any(
+        not isinstance(fields, list)
+        for fields in (duplicate_key_fields, text_fields, required_fields)
+    ):
+        raise ValueError("Dataset profile field options must be lists of field names.")
+    if any(
+        len(fields) > 100
+        or any(
+            not isinstance(name, str) or not name.strip() or len(name) > 160
+            for name in fields
+        )
+        for fields in (duplicate_key_fields, text_fields)
+    ):
+        raise ValueError("Profile fields must contain at most 100 non-empty names of 160 characters or fewer.")
+    for label, fields in (
+        ("duplicate_key_fields", duplicate_key_fields),
+        ("text_fields", text_fields),
+    ):
+        normalized_fields = {name.strip() for name in fields}
+        if len(normalized_fields) != len(fields):
+            raise ValueError(f"{label} must contain unique names after trimming.")
+    if duplicate_rate_threshold is not None:
+        if isinstance(duplicate_rate_threshold, bool) or not isinstance(
+            duplicate_rate_threshold, (int, float)
+        ):
+            raise ValueError("duplicate_rate_threshold must be a finite number between 0 and 1.")
+        try:
+            duplicate_rate_threshold = float(duplicate_rate_threshold)
+        except (OverflowError, ValueError):
+            duplicate_rate_threshold = float("nan")
+        if not math.isfinite(duplicate_rate_threshold) or not 0 <= duplicate_rate_threshold <= 1:
+            raise ValueError("duplicate_rate_threshold must be a finite number between 0 and 1.")
+    if not isinstance(expected_types, dict) or len(expected_types) > 100:
+        raise ValueError("expected_types must be an object with at most 100 field names.")
+    if any(
+        not isinstance(name, str)
+        or not name.strip()
+        or len(name) > 160
+        or not isinstance(value_type, str)
+        or value_type not in {"string", "integer", "number", "boolean", "object", "array"}
+        for name, value_type in expected_types.items()
+    ):
+        raise ValueError("Expected types must use supported JSON types and non-empty field names.")
+    normalized_expected_types = {
+        name.strip(): value_type for name, value_type in expected_types.items()
     }
+    if len(normalized_expected_types) != len(expected_types):
+        raise ValueError("Expected-type field names must be unique after trimming.")
+    if any(
+        not isinstance(name, str) or not name.strip() or len(name) > 160
+        for name in required_fields
+    ) or len(required_fields) > 100:
+        raise ValueError("required_fields must contain at most 100 non-empty field names of 160 characters or fewer.")
+    required_fields = [name.strip() for name in required_fields]
+    if len(set(required_fields)) != len(required_fields):
+        raise ValueError("required_fields must be unique after trimming.")
+
+    root = Path.cwd().resolve(strict=True)
+    source, source_stream = open_mcp_workspace_file(path, root)
+    if source.suffix.lower() != ".jsonl":
+        source_stream.close()
+        raise ValueError("Dataset profiling supports workspace-relative .jsonl files only.")
+    try:
+        with source_stream:
+            initial = os.fstat(source_stream.fileno())
+            profile = profile_jsonl_stream(
+                source_stream,
+                file_name=source.name,
+                file_size_bytes=initial.st_size,
+                max_bytes=DEFAULT_MAX_BYTES,
+                max_rows=DEFAULT_MAX_ROWS,
+                max_line_bytes=DEFAULT_MAX_LINE_BYTES,
+                duplicate_key_fields=duplicate_key_fields,
+                duplicate_rate_threshold=duplicate_rate_threshold,
+                text_fields=text_fields,
+                scan_pii=scan_pii,
+            )
+            final = os.fstat(source_stream.fileno())
+        current_path, current_stream = open_mcp_workspace_file(path, root)
+        with current_stream:
+            current = os.fstat(current_stream.fileno())
+        initial_identity = (initial.st_dev, initial.st_ino, initial.st_size, initial.st_mtime_ns)
+        final_identity = (final.st_dev, final.st_ino, final.st_size, final.st_mtime_ns)
+        current_identity = (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns)
+        if initial_identity != final_identity or initial_identity != current_identity:
+            raise ValueError("Dataset changed during profiling; retry against a stable file.")
+        if current_path.relative_to(root).as_posix() != path:
+            raise ValueError("Dataset path changed during profiling; retry against a stable file.")
+    except (OSError, ValueError, RecursionError):
+        source_stream.close()
+        raise ValueError("Dataset could not be profiled safely.") from None
+
+    report = {
+        "path": source.relative_to(root).as_posix(),
+        "profile": profile,
+        "scope": {
+            "read_only": True,
+            "network_accessed": False,
+            "files_written": False,
+            "absolute_paths_returned": False,
+            "dataset_values_returned": False,
+            "pii_scan_opted_in": scan_pii,
+        },
+    }
+    if required_fields or expected_types:
+        validation = validate_dataset_profile(
+            profile,
+            required_fields=required_fields,
+            expected_types=normalized_expected_types,
+        )
+        validation_incomplete = (
+            profile["truncated"]
+            or profile["invalid_rows"] > 0
+            or profile["truncated_field_names"] > 0
+            or profile["omitted_field_occurrences"] > 0
+        )
+        validation_status = (
+            "inconclusive"
+            if validation_incomplete
+            else "passed" if validation["passed"] else "failed"
+        )
+        report["validation"] = {
+            **validation,
+            "status": validation_status,
+            "scope": "profiled_rows_only",
+            "required_field_semantics": "present_at_least_once_not_every_row",
+        }
+        if validation_incomplete:
+            report["validation"]["passed"] = None
+            report["validation"]["observed_profile_passed"] = validation["passed"]
+            if profile["truncated"]:
+                reason = "profile_truncated"
+            elif profile["invalid_rows"]:
+                reason = "invalid_rows"
+            elif profile["truncated_field_names"]:
+                reason = "field_names_truncated"
+            else:
+                reason = "field_tracking_limit"
+            report["validation"]["reason"] = reason
+    return report
 
 
 @mcp.tool()
