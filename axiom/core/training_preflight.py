@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 from pathlib import Path
 from typing import Any
@@ -487,6 +488,7 @@ def run_training_evaluation_overlap_preflight(
     include_reference: bool = False,
     evaluation_reference_field: str = "completion",
     sample_limit: int = _MAX_OVERLAP_ROW_SAMPLES,
+    expected_training_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Check bounded, normalized exact overlap without returning text or hashes."""
     scope = {
@@ -498,17 +500,21 @@ def run_training_evaluation_overlap_preflight(
         "dataset_hashes_returned": False,
         "absolute_paths_returned": False,
         "dataset_content_rechecked_after_scan": False,
+        "training_dataset_snapshot_verified": False,
         "paraphrase_overlap_detected": False,
         "leakage_free_claimed": False,
     }
+
+    training_snapshot_status = "unavailable" if expected_training_sha256 is not None else "not_checked"
 
     def inconclusive(
         reason_code: str,
         *,
         training_records_scanned: int = 0,
         evaluation_rows_scanned: int = 0,
+        snapshot_status: str | None = None,
     ) -> dict[str, Any]:
-        return {
+        response = {
             "schema_version": 1,
             "assessment": "inconclusive",
             "reason_code": reason_code,
@@ -517,6 +523,15 @@ def run_training_evaluation_overlap_preflight(
             "evaluation_rows_scanned": evaluation_rows_scanned,
             "scope": scope,
         }
+        if expected_training_sha256 is not None:
+            response["training_dataset_snapshot_status"] = snapshot_status or training_snapshot_status
+        return response
+
+    if expected_training_sha256 is not None and (
+        not isinstance(expected_training_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", expected_training_sha256) is None
+    ):
+        return inconclusive("training_dataset_fingerprint_invalid", snapshot_status="unavailable")
 
     if type(include_reference) is not bool:
         return inconclusive("include_reference_must_be_boolean")
@@ -574,11 +589,19 @@ def run_training_evaluation_overlap_preflight(
                 return inconclusive(
                     "training_dataset_changed_during_scan",
                     training_records_scanned=training_records,
+                    snapshot_status="unavailable",
                 )
     except (OSError, RuntimeError, ValueError):
         return inconclusive("training_dataset_scan_incomplete", training_records_scanned=training_records)
     if not training_records or not training_texts:
         return inconclusive("training_dataset_has_no_records", training_records_scanned=training_records)
+    if expected_training_sha256 is not None:
+        if training_digest != expected_training_sha256:
+            return inconclusive(
+                "training_dataset_changed_since_training",
+                training_records_scanned=training_records,
+                snapshot_status="changed_since_training",
+            )
 
     evaluation_rows = 0
     evaluation_bytes = 0
@@ -702,25 +725,33 @@ def run_training_evaluation_overlap_preflight(
             training_records_scanned=training_records,
             evaluation_rows_scanned=evaluation_rows,
         )
-    if not _validate_input_snapshot(
+    training_snapshot_valid = _validate_input_snapshot(
         training_dataset_path,
         root,
         training_target,
         initial_identity,
         training_digest,
         initial_identity[2],
-    ) or not _validate_input_snapshot(
+    )
+    evaluation_snapshot_valid = _validate_input_snapshot(
         evaluation_dataset_path,
         root,
         evaluation_target,
         evaluation_identity,
         evaluation_digest.hexdigest(),
         _MAX_OVERLAP_EVALUATION_BYTES,
-    ):
+    )
+    if not training_snapshot_valid:
+        training_snapshot_status = "unavailable"
+    elif expected_training_sha256 is not None:
+        training_snapshot_status = "matches"
+    scope["training_dataset_snapshot_verified"] = training_snapshot_status == "matches"
+    if not training_snapshot_valid or not evaluation_snapshot_valid:
         return inconclusive(
             "dataset_path_changed_during_scan",
             training_records_scanned=training_records,
             evaluation_rows_scanned=evaluation_rows,
+            snapshot_status=training_snapshot_status,
         )
 
     scope["dataset_content_rechecked_after_scan"] = True
@@ -736,7 +767,7 @@ def run_training_evaluation_overlap_preflight(
             "sample_row_numbers": prompt_reference_match_rows,
         }
     overlap_found = prompt_matches > 0 or (include_reference and prompt_reference_matches > 0)
-    return {
+    response = {
         "schema_version": 1,
         "assessment": "exact_overlap_found" if overlap_found else "no_exact_overlap_detected",
         "scan_complete": True,
@@ -771,3 +802,6 @@ def run_training_evaluation_overlap_preflight(
         "sample_limit_per_overlap": sample_limit,
         "scope": scope,
     }
+    if expected_training_sha256 is not None:
+        response["training_dataset_snapshot_status"] = training_snapshot_status
+    return response

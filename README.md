@@ -478,11 +478,20 @@ the training job ID and an evaluation dataset path. It derives the training
 dataset and text field from the job record, runs the same bounded overlap
 check, and returns workspace-relative base-model and adapter references for a
 later `axiom_engine_preflight`. It requires both the training-job status and
-overlap-preflight permissions. It scans the current training file contents;
-AXIOM has no training-time dataset fingerprint, so it cannot verify that this
-file is unchanged from the data actually used to train. Model and adapter
-references are saved workspace-relative paths, not content-verified artifacts;
-run `axiom_engine_preflight` before inference.
+overlap-preflight permissions. The trainer fingerprints the exact raw dataset
+bytes consumed by its parser and stores the digest only in local job state;
+ordinary job status responses omit it. On POSIX, AXIOM secures the job folder
+to mode 0700 and job files to 0600. On Windows, permissions inherit from the
+configured `AXIOM_FINETUNE_HOME` location, which should have user-only ACLs
+when other local accounts are present. The overlap tool checks the saved
+fingerprint against the current bytes it scans, reporting `matches`,
+`changed_since_training`, or `unavailable` without
+returning the digest. Changed files, legacy jobs without a fingerprint, and
+incomplete scans that cannot verify a stable snapshot produce an inconclusive,
+non-job-aligned result; inspect the reason code and retry after correcting
+inputs. A matching file still does not prove the evaluation set is held out or
+leakage-free. Model and adapter references are saved workspace-relative paths, not content-verified
+artifacts; run `axiom_engine_preflight` before inference.
 
 `axiom_training_job_validation_preflight` combines this overlap check with
 base-model and adapter compatibility checks plus dataset prompt-truncation

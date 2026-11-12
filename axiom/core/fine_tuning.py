@@ -7,6 +7,7 @@ model directory and all from_pretrained calls set local_files_only=True.
 from __future__ import annotations
 
 import errno
+import hashlib
 import importlib.metadata
 import importlib.util
 import json
@@ -15,6 +16,7 @@ import math
 import os
 import random
 import re
+import stat
 import subprocess
 import threading
 import time
@@ -272,13 +274,19 @@ def _training_line_byte_length(raw_line: bytes) -> int:
     return len(raw_line) - (1 if raw_line.endswith(b"\r\n") else 0)
 
 
-def iter_training_texts(dataset_path: Path, text_field: str = "text") -> Iterator[str]:
+def iter_training_texts(
+    dataset_path: Path,
+    text_field: str = "text",
+    *,
+    on_bytes: Callable[[bytes], None] | None = None,
+) -> Iterator[str]:
     """Yield trainer-accepted text values without retaining the full dataset."""
     with open_regular_file(dataset_path) as stream:
         yield from iter_training_text_stream(
             stream,
             file_size_bytes=os.fstat(stream.fileno()).st_size,
             text_field=text_field,
+            on_bytes=on_bytes,
         )
 
 
@@ -287,6 +295,7 @@ def iter_training_text_stream(
     *,
     file_size_bytes: int,
     text_field: str = "text",
+    on_bytes: Callable[[bytes], None] | None = None,
 ) -> Iterator[str]:
     """Validate and yield accepted trainer text from an already-open stream."""
     validate_training_text_field(text_field)
@@ -306,6 +315,8 @@ def iter_training_text_stream(
                 if len(chunk) > remaining_bytes:
                     raise ValueError(f"Dataset exceeds the {_MAX_DATASET_BYTES // (1024 * 1024)} MiB limit.")
                 actual_bytes += len(chunk)
+                if on_bytes is not None:
+                    on_bytes(chunk)
                 pending.extend(chunk)
             at_eof = not chunk
 
@@ -351,8 +362,13 @@ def iter_training_text_stream(
         raise ValueError("Dataset must be UTF-8 encoded JSONL.") from None
 
 
-def _load_texts(dataset_path: Path, text_field: str) -> list[str]:
-    texts = list(iter_training_texts(dataset_path, text_field))
+def _load_texts(
+    dataset_path: Path,
+    text_field: str,
+    *,
+    on_bytes: Callable[[bytes], None] | None = None,
+) -> list[str]:
+    texts = list(iter_training_texts(dataset_path, text_field, on_bytes=on_bytes))
     if not texts:
         raise ValueError("Dataset contains no non-empty training records.")
     return texts
@@ -473,11 +489,43 @@ def _job_path(job_id: str) -> Path:
 
 def _write_job(job: dict[str, Any]) -> None:
     folder = jobs_directory()
-    folder.mkdir(parents=True, exist_ok=True)
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if folder.is_symlink() or not folder.is_dir():
+        raise FineTuningError("Local training job storage is not a safe directory.")
+    if os.name == "posix":
+        try:
+            os.chmod(folder, 0o700)
+            folder_mode = stat.S_IMODE(os.stat(folder, follow_symlinks=False).st_mode)
+        except OSError:
+            raise FineTuningError("Local training job storage permissions could not be secured.") from None
+        if folder_mode & 0o077:
+            raise FineTuningError("Local training job storage must be private to the current user.")
     target = _job_path(job["id"])
     temp = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
-    temp.write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(temp, target)
+    payload = json.dumps(job, ensure_ascii=False, indent=2)
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(temp, flags, 0o600)
+        stream = os.fdopen(descriptor, "w", encoding="utf-8")
+        descriptor = None
+        with stream:
+            stream.write(payload)
+        os.replace(temp, target)
+    except OSError:
+        if descriptor is not None:
+            os.close(descriptor)
+        try:
+            temp.unlink()
+        except OSError:
+            pass
+        raise FineTuningError("Local training job state could not be written safely.") from None
 
 
 def _read_job(job_id: str) -> dict[str, Any] | None:
@@ -489,6 +537,18 @@ def _read_job(job_id: str) -> dict[str, Any] | None:
     except (OSError, UnicodeError, json.JSONDecodeError):
         raise FineTuningError("Saved fine-tuning job state could not be read.") from None
     return job if isinstance(job, dict) else None
+
+
+def _public_training_job(job: dict[str, Any]) -> dict[str, Any]:
+    """Hide the training-input digest from ordinary job status responses."""
+    result = job.get("result")
+    if not isinstance(result, dict) or "training_dataset_sha256" not in result:
+        return job
+    public_job = dict(job)
+    public_result = dict(result)
+    public_result.pop("training_dataset_sha256", None)
+    public_job["result"] = public_result
+    return public_job
 
 
 def _recover_if_stale_locked(job: dict[str, Any]) -> dict[str, Any]:
@@ -525,7 +585,7 @@ def _recover_if_stale(job: dict[str, Any]) -> dict[str, Any]:
 
 def get_job(job_id: str) -> dict[str, Any] | None:
     job = _read_job(job_id)
-    return _recover_if_stale(job) if job is not None else None
+    return _public_training_job(_recover_if_stale(job)) if job is not None else None
 
 
 def read_job_record(job_id: str) -> dict[str, Any] | None:
@@ -598,14 +658,14 @@ def cancel_finetuning_job(job_id: str) -> dict[str, Any] | None:
             return None
         job = _recover_if_stale_locked(job)
         if job.get("status") not in {"queued", "running", "cancelling"}:
-            return job
+            return _public_training_job(job)
         if job.get("status") != "cancelling":
             job["cancel_requested"] = True
             job["status"] = "cancelling"
             job["updated_at"] = _now()
             job["logs"] = [*job.get("logs", []), "Cancellation requested; stopping at the next safe training boundary."][-80:]
             _write_job(job)
-        return job
+        return _public_training_job(job)
 
 
 def list_jobs(limit: int = 20, *, workspace_root: Path | None = None) -> list[dict[str, Any]]:
@@ -621,7 +681,7 @@ def list_jobs(limit: int = 20, *, workspace_root: Path | None = None) -> list[di
             value = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(value, dict) and re.fullmatch(r"[0-9a-f]{32}", str(value.get("id", ""))):
                 if root is None or _job_belongs_to_workspace(value, root):
-                    records.append(_recover_if_stale(value))
+                    records.append(_public_training_job(_recover_if_stale(value)))
         except (OSError, json.JSONDecodeError):
             continue
     records.sort(key=lambda item: str(item.get("created_at", "")), reverse=True)
@@ -933,22 +993,36 @@ def _begin_finalizing(job_id: str) -> None:
 def _load_training_texts(
     config: dict[str, Any],
     workspace_guard: dict[str, Any] | None = None,
-) -> list[str]:
+    *,
+    include_fingerprint: bool = False,
+) -> list[str] | tuple[list[str], str]:
+    digest = hashlib.sha256() if include_fingerprint else None
+    on_bytes = digest.update if digest is not None else None
     if workspace_guard is None:
-        return _load_texts(Path(config["dataset_path"]), config["text_field"])
-    from axiom.core.mcp_paths import open_mcp_workspace_file
+        texts = _load_texts(Path(config["dataset_path"]), config["text_field"], on_bytes=on_bytes)
+    else:
+        from axiom.core.mcp_paths import open_mcp_workspace_file
 
-    root = Path(workspace_guard["root"])
-    relative = workspace_guard["paths"]["dataset_path"]
-    _, stream = open_mcp_workspace_file(relative, root)
-    try:
-        size = os.fstat(stream.fileno()).st_size
-        texts = list(iter_training_text_stream(stream, file_size_bytes=size, text_field=config["text_field"]))
-        if not texts:
-            raise ValueError("Dataset contains no non-empty training records.")
-        return texts
-    finally:
-        stream.close()
+        root = Path(workspace_guard["root"])
+        relative = workspace_guard["paths"]["dataset_path"]
+        _, stream = open_mcp_workspace_file(relative, root)
+        try:
+            size = os.fstat(stream.fileno()).st_size
+            texts = list(
+                iter_training_text_stream(
+                    stream,
+                    file_size_bytes=size,
+                    text_field=config["text_field"],
+                    on_bytes=on_bytes,
+                )
+            )
+            if not texts:
+                raise ValueError("Dataset contains no non-empty training records.")
+        finally:
+            stream.close()
+    if digest is not None:
+        return texts, digest.hexdigest()
+    return texts
 
 
 def _assert_output_empty(output_dir: Path) -> None:
@@ -985,7 +1059,11 @@ def _run_transformers(
             "Local LoRA dependencies could not be imported. Upgrade the optional training tools with: python -m pip install -e '.[training]'"
         ) from None
 
-    texts = _load_training_texts(config, workspace_guard)
+    texts, training_dataset_sha256 = _load_training_texts(
+        config,
+        workspace_guard,
+        include_fingerprint=True,
+    )
     if cancel_check:
         cancel_check()
     if workspace_guard_check:
@@ -1159,6 +1237,7 @@ def _run_transformers(
         "adapter_files": adapter_files,
         "target_modules": targets,
         "dataset_rows": len(texts),
+        "training_dataset_sha256": training_dataset_sha256,
         "max_steps": config["max_steps"],
         "device": str(device),
         "engine": "axiom-lora-engine",

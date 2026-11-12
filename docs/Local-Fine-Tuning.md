@@ -47,10 +47,18 @@ MCP inputs are revalidated in the background worker, and the JSONL dataset is op
 Use `axiom_training_job_eval_overlap_preflight` to check a completed run's
 recorded training dataset against an explicitly selected evaluation file. It
 reuses the training-job status and overlap-preflight permissions and returns
-safe base-model and adapter references for the next model preflight. It scans
-current training-file contents, not a stored training-time snapshot, so it
-cannot verify that the file remained unchanged since the run. The model and
-adapter references are paths only, not content-verified artifacts; run
+safe base-model and adapter references for the next model preflight. Training
+stores a fingerprint of the exact raw bytes consumed by its parser in local
+job state; status responses omit the digest. POSIX job storage uses mode 0700
+for its folder and 0600 for files. On Windows, storage inherits ACLs from
+`AXIOM_FINETUNE_HOME`, which should be user-only when other local accounts are
+present. The overlap scan checks that fingerprint against the current file
+and reports `matches`, `changed_since_training`, or `unavailable` without returning the
+digest. Changed files, older jobs without a fingerprint, and scans that cannot
+verify a stable snapshot make the overlap assessment inconclusive; inspect the
+reason code and retry after correcting the input. A matching snapshot and no
+exact overlap still do not establish held-out data. The model and adapter
+references are paths only, not content-verified artifacts; run
 `axiom_engine_preflight` before inference.
 
 For a full evaluation plan, `axiom_training_job_validation_preflight` combines

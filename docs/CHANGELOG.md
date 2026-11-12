@@ -31,6 +31,7 @@
 ## Unreleased — latest/development
 
 ### Added
+- Persisted a training dataset fingerprint in local job state, hardened POSIX job-storage permissions, and made job-linked overlap checks inconclusive when the current file differs, a stable scan is unavailable, or a legacy job has no fingerprint; status responses omit the digest.
 - Added a read-only training-job validation plan that composes overlap, base/adapter compatibility, and prompt-truncation checks and returns two proposed prediction runs without starting inference.
 - Added a job-linked training/evaluation overlap preflight that derives the training dataset and text field from a completed job and returns saved base/adapter paths; it reports the current-file snapshot and unverified artifact limitations.
 - Added `axiom_training_job_wait`, a bounded wait for local LoRA job outcomes that reuses the status permission; stale recovery verifies process identity and preserves newer job state.

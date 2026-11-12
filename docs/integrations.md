@@ -88,9 +88,14 @@ dataset and text field from the job record, then returns the bounded overlap
 result plus workspace-relative base-model and adapter references for a later
 `axiom_engine_preflight`. It requires both `axiom_training_job_status` and
 `axiom_training_eval_overlap_preflight` permissions. The scan reads current
-contents at the saved training dataset path; no training-time dataset
-fingerprint was stored, so the tool cannot verify those contents match the
-training snapshot. No exact overlap still does not establish held-out data.
+contents at the saved training dataset path and compares them with a
+fingerprint of the exact bytes consumed by the trainer, stored in local job
+state and omitted from status responses. It reports
+`matches`, `changed_since_training`, or `unavailable` and never returns the
+digest. Changed files, legacy jobs, and scans that cannot verify a stable
+snapshot produce an inconclusive result; inspect the reason code and retry
+after correcting inputs. A matching snapshot and no exact overlap still do not
+establish held-out data.
 The model and adapter references are saved paths only; run
 `axiom_engine_preflight` before inference because their contents are not
 verified by this overlap scan.

@@ -97,7 +97,7 @@ mcp = MCPServer(
         "Sensitive field-name heuristics are included; content PII pattern scanning requires explicit opt-in. "
         "Use axiom_training_preflight for bounded, non-executing checks before local LoRA training. "
         "When the user asks whether evaluation data may overlap training data, use the separate default-deny axiom_training_eval_overlap_preflight. It normalizes case and whitespace and returns only exact-overlap counts and row numbers. A clear result does not prove the evaluation data is held out or leakage-free; paraphrases are not detected. It does not load model weights or run inference. "
-        "For a completed training run, axiom_training_job_eval_overlap_preflight derives the training dataset and text field from its job ID, then checks the selected evaluation file. It requires both the training-job status and overlap-preflight permissions. It reads the current training dataset contents; the job does not store a training-time fingerprint, so the scan cannot verify the original training snapshot or prove held-out data. It returns saved workspace-relative base-model and adapter paths only; run axiom_engine_preflight before inference because their file contents are not verified here. "
+        "For a completed training run, axiom_training_job_eval_overlap_preflight derives the training dataset and text field from its job ID, then checks the selected evaluation file. It requires both the training-job status and overlap-preflight permissions. The trainer fingerprints the exact dataset bytes consumed during training; the overlap tool compares that saved digest with the bytes it scans and reports matches, changed_since_training, or unavailable without returning the digest. Changed or legacy snapshots are inconclusive and do not produce a job-aligned overlap result. A matching snapshot still does not prove held-out data. It returns saved workspace-relative base-model and adapter paths only; run axiom_engine_preflight before inference because their file contents are not verified here. "
         "For a base-versus-adapter evaluation plan before inference, use axiom_training_job_validation_preflight with two new data/ output filenames. Its overlap check compares prompts by default; set include_reference_in_overlap=true to compare reference answers too. The reference_field still configures prediction artifacts when references are omitted from overlap. plan_only means only that a read-only plan was assembled, not that a run is ready or approved. Present all check outcomes: never start a variant with a blocked engine check, resolve or recheck a blocked prompt preflight before either run, and disclose exact/inconclusive overlap, review_needed checks, or expected/inconclusive prompt truncation before getting an explicit user decision to proceed. The tool writes nothing and does not run inference; output paths are revalidated when a run starts. "
         "Use axiom_engine_preflight before local inference to check model/adapter structure, the selected device/precision, and advisory memory estimates; it does not load weights or run inference. Pass the same settings to axiom_engine_generate. "
         "Run preflight and show the exact configuration before calling axiom_training_job_start; "
@@ -972,28 +972,80 @@ def axiom_training_job_eval_overlap_preflight(
     except (KeyError, ValueError):
         return inconclusive("training_job_metadata_unavailable", status="completed")
 
-    overlap = run_training_evaluation_overlap_preflight(
-        dataset_relative,
-        evaluation_dataset_path,
-        training_text_field=training_text_field,
-        evaluation_prompt_field=evaluation_prompt_field,
-        include_reference=include_reference,
-        evaluation_reference_field=evaluation_reference_field,
-        sample_limit=sample_limit,
+    training_dataset_sha256 = result.get("training_dataset_sha256")
+    fingerprint_available = (
+        isinstance(training_dataset_sha256, str)
+        and re.fullmatch(r"[0-9a-f]{64}", training_dataset_sha256) is not None
     )
+    if fingerprint_available:
+        overlap = run_training_evaluation_overlap_preflight(
+            dataset_relative,
+            evaluation_dataset_path,
+            training_text_field=training_text_field,
+            evaluation_prompt_field=evaluation_prompt_field,
+            include_reference=include_reference,
+            evaluation_reference_field=evaluation_reference_field,
+            sample_limit=sample_limit,
+            expected_training_sha256=training_dataset_sha256,
+        )
+        snapshot_status = overlap.get("training_dataset_snapshot_status", "unavailable")
+    else:
+        snapshot_status = "unavailable"
+        overlap = {
+            "schema_version": 1,
+            "assessment": "inconclusive",
+            "reason_code": "training_dataset_fingerprint_unavailable",
+            "scan_complete": False,
+            "training_dataset_snapshot_status": snapshot_status,
+            "scope": {
+                "read_only": True,
+                "network_accessed": False,
+                "files_written": False,
+                "model_weights_loaded": False,
+                "dataset_values_returned": False,
+                "dataset_hashes_returned": False,
+                "absolute_paths_returned": False,
+                "training_dataset_snapshot_verified": False,
+            },
+        }
+    training_job_summary = {
+        "id": training_job_id,
+        "status": "completed",
+        "base_model_path": model_relative,
+        "adapter_path": adapter_relative,
+        "training_dataset_path": dataset_relative,
+        "training_text_field": training_text_field,
+    }
+    if snapshot_status == "matches":
+        snapshot_note = (
+            "The current training dataset bytes match the fingerprint captured while the trainer parsed its input. "
+            "This verifies the saved training-file snapshot for this overlap scan; no exact overlap does not prove "
+            "held-out or leakage-free evaluation data. "
+        )
+    elif snapshot_status == "changed_since_training":
+        snapshot_note = (
+            "The current training dataset differs from the bytes captured during training, so the job-linked overlap "
+            "result is inconclusive. Restore the original training file or choose another completed job before relying "
+            "on an overlap result. "
+        )
+    elif fingerprint_available:
+        snapshot_note = (
+            "The job has a training-time dataset fingerprint, but this preflight could not verify it against a stable "
+            "current file and complete overlap scan. Review overlap_preflight.reason_code, correct or stabilize the "
+            "reported inputs, and retry; no job-aligned overlap result is available. "
+        )
+    else:
+        snapshot_note = (
+            "This job has no valid training-time dataset fingerprint, so the overlap result is inconclusive and cannot "
+            "be tied to the bytes used for training. This may be a legacy job. "
+        )
     return {
         "schema_version": 1,
-        "training_job": {
-            "id": training_job_id,
-            "status": "completed",
-            "base_model_path": model_relative,
-            "adapter_path": adapter_relative,
-            "training_dataset_path": dataset_relative,
-            "training_text_field": training_text_field,
-        },
+        "training_job": training_job_summary,
         "assessment": overlap.get("assessment", "inconclusive"),
         "overlap_preflight": overlap,
-        "training_dataset_snapshot_verified": False,
+        "training_dataset_snapshot_status": snapshot_status,
+        "training_dataset_snapshot_verified": snapshot_status == "matches",
         "scope": {
             "read_only": True,
             "files_written": False,
@@ -1003,15 +1055,13 @@ def axiom_training_job_eval_overlap_preflight(
             "absolute_paths_returned": False,
             "dataset_values_returned": False,
             "dataset_hashes_returned": False,
-            "training_time_dataset_fingerprint_available": False,
+            "training_time_dataset_fingerprint_available": fingerprint_available,
             "model_adapter_content_fingerprints_available": False,
         },
         "note": (
-            "The overlap scan uses the current contents at the training job's saved dataset path. "
-            "AXIOM did not store a training-time dataset fingerprint, so this cannot verify that those "
-            "contents match the examples used in training. No exact overlap does not prove held-out or "
-            "leakage-free evaluation data. The base-model and adapter references are saved paths only, "
-            "not content-verified artifacts; run axiom_engine_preflight before inference."
+            snapshot_note
+            + "The base-model and adapter references are saved paths only, not content-verified artifacts; "
+            "run axiom_engine_preflight before inference."
         ),
     }
 
@@ -1722,6 +1772,9 @@ def axiom_training_job_validation_preflight(
 
     model_path = job["base_model_path"]
     adapter_path = job["adapter_path"]
+    training_snapshot_status = overlap_result.get("training_dataset_snapshot_status", "unavailable")
+    overlap_scope = overlap_result.get("scope")
+    overlap_scope = overlap_scope if isinstance(overlap_scope, dict) else {}
     prompt_preflight = axiom_prediction_job_preflight(
         model_path=model_path,
         dataset_path=evaluation_relative,
@@ -1836,7 +1889,11 @@ def axiom_training_job_validation_preflight(
             "absolute_paths_returned": False,
             "dataset_values_returned": False,
             "dataset_hashes_returned": False,
-            "training_dataset_snapshot_verified": False,
+            "training_dataset_snapshot_verified": training_snapshot_status == "matches",
+            "training_dataset_snapshot_status": training_snapshot_status,
+            "training_time_dataset_fingerprint_available": (
+                overlap_scope.get("training_time_dataset_fingerprint_available") is True
+            ),
             "model_adapter_content_fingerprints_available": False,
             "output_paths_revalidated_at_start": True,
         },
