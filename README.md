@@ -458,6 +458,13 @@ axiom mcp allow axiom_dataset_clean_preview
 axiom mcp allow axiom_dataset_clean
 ```
 
+`axiom_evaluation_run` scores already-produced predictions in JSONL files under the workspace's `data/` directory. Pass either a returned `data/file.jsonl` asset path or a path relative to `data/`. It returns aggregate exact-match, normalized exact-match, token F1, counts, confidence intervals, and an optional baseline comparison; raw prediction/reference values are neither returned nor persisted. The MCP limits are 64 MiB, 100,000 rows, and 1 MiB per line. `baseline` defaults to false; partial runs cannot be marked as a baseline, and a partial or mismatched-corpus comparison returns `unavailable` rather than pass/fail while preserving the metrics. Baseline comparisons match row order and every non-prediction field, including references and prompt/context, across output files. The whole-file and comparison fingerprints are stored locally for integrity and baseline matching; MCP responses omit those hashes. These are lexical metrics, not semantic quality scores; `model_label` is user-supplied metadata. `axiom_evaluation_history` lists saved aggregate results or returns one run by ID. Evaluation and history have separate default-deny permissions:
+
+```bash
+axiom mcp allow axiom_evaluation_run
+axiom mcp allow axiom_evaluation_history
+```
+
 To let the agent use additional AXIOM tools, allow only the ones you need:
 
 ```bash
@@ -500,6 +507,8 @@ axiom mcp profile use readonly
 | `axiom_dataset_inspect` | Dataset quality report |
 | `axiom_dataset_clean_preview` | Preview bounded cleanup counts without returning row contents or writing files |
 | `axiom_dataset_clean` | Write a new cleaned JSONL copy inside the workspace |
+| `axiom_evaluation_run` | Score precomputed outputs offline and save aggregate metrics |
+| `axiom_evaluation_history` | Read saved aggregate evaluation metrics |
 | `axiom_training_plan` | Hardware-aware training plan |
 | `axiom_supercompress_status` | Whether SuperCompress is configured |
 | `axiom_supercompress` | Compress context before inference |

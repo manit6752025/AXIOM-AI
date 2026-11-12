@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import math
 import os
+import platform
+import re
 from pathlib import Path
 
 from mcp.server import MCPServer
@@ -22,6 +25,14 @@ from axiom.datasets.profiler import (
     DEFAULT_MAX_LINE_BYTES,
     DEFAULT_MAX_ROWS,
 )
+from axiom.evaluation.jsonl import (
+    DEFAULT_MAX_BYTES as DEFAULT_EVALUATION_MAX_BYTES,
+    DEFAULT_MAX_LINE_BYTES as DEFAULT_EVALUATION_MAX_LINE_BYTES,
+    DEFAULT_MAX_ROWS as DEFAULT_EVALUATION_MAX_ROWS,
+    evaluate_jsonl_stream,
+)
+from axiom.evaluation.service import persist_evaluation_run
+from axiom.evaluation.store import EvaluationStore
 from axiom.models.inspector import inspect_model
 from axiom.models.registry import ModelRegistry
 from axiom.runtime.supercompress import compress_context, redacted_base_url
@@ -39,6 +50,9 @@ mcp = MCPServer(
         "Use AXIOM tools to inspect models, datasets, and hardware; preview dataset cleaning "
         "and show the counts and proposed output path before writing a new copy. "
         "Re-preview immediately before cleaning because previews are advisory. "
+        "Use axiom_evaluation_run for bounded, offline lexical metrics on completed outputs; "
+        "use axiom_evaluation_history to retrieve saved baselines; "
+        "these metrics do not establish semantic quality. "
         "Create training plans and check optional AI runtime integrations. "
         "MCP tool access is denied by default and must "
         "be explicitly granted in an AXIOM tool profile."
@@ -62,6 +76,82 @@ def _validate_cleaning_limits(
         raise ValueError("Cleaning limits exceed the supported bounded scan range.")
 
 
+def _validate_evaluation_limits(
+    max_bytes: int,
+    max_rows: int,
+    max_line_bytes: int,
+) -> None:
+    if (
+        type(max_bytes) is not int
+        or not 1 <= max_bytes <= 64 * 1024 * 1024
+        or type(max_rows) is not int
+        or not 1 <= max_rows <= 100_000
+        or type(max_line_bytes) is not int
+        or not 1 <= max_line_bytes <= 1024 * 1024
+    ):
+        raise ValueError("Evaluation limits exceed the supported bounded scan range.")
+
+
+def _evaluation_dataset_root(workspace: Path) -> Path:
+    entry = workspace / "data"
+    if entry.is_symlink():
+        raise ValueError("The workspace data directory must not be a symlink.")
+    try:
+        data_root = entry.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError("The workspace data directory is unavailable.") from exc
+    if not data_root.is_dir() or not data_root.is_relative_to(workspace):
+        raise ValueError("The workspace data directory is invalid.")
+    return data_root
+
+
+def _evaluation_record_summary(record: dict, *, include_report: bool = False) -> dict:
+    report = record.get("report", {})
+    if not isinstance(report, dict):
+        report = {}
+    counts = report.get("counts", {})
+    metrics = report.get("metrics", {})
+    manifest = report.get("dataset_manifest", {})
+    if not isinstance(counts, dict):
+        counts = {}
+    if not isinstance(metrics, dict):
+        metrics = {}
+    if not isinstance(manifest, dict):
+        manifest = {}
+    summary = {
+        "id": record.get("id"),
+        "name": record.get("name"),
+        "created_at": record.get("created_at"),
+        "model_label": record.get("model_label"),
+        "baseline": record.get("baseline"),
+        "status": record.get("status"),
+        "comparison": record.get("comparison"),
+        "dataset_file": report.get("file_name"),
+        "valid_samples": counts.get("valid_samples"),
+        "metrics": metrics,
+        "dataset_fully_hashed": manifest.get("full_content_hashed"),
+    }
+    if include_report:
+        summary["run"] = _public_evaluation_record(record)
+    return summary
+
+
+def _public_evaluation_record(record: dict) -> dict:
+    """Remove deterministic input fingerprints from data returned over MCP."""
+    safe_record = dict(record)
+    original_report = record.get("report", {})
+    safe_report = dict(original_report) if isinstance(original_report, dict) else {}
+    original_manifest = safe_report.get("dataset_manifest", {})
+    safe_manifest = dict(original_manifest) if isinstance(original_manifest, dict) else {}
+    for key in ("sha256", "partial_sha256", "comparison_corpus_sha256"):
+        safe_manifest.pop(key, None)
+    safe_report["dataset_manifest"] = safe_manifest
+    safe_report["path"] = safe_report.get("file_name", "dataset.jsonl")
+    safe_record["report"] = safe_report
+    safe_record.pop("output_manifest", None)
+    return safe_record
+
+
 @mcp.tool()
 def axiom_info() -> dict:
     """Return AXIOM release information."""
@@ -76,10 +166,180 @@ def axiom_info() -> dict:
             "datasets",
             "hardware",
             "training_planning",
+            "offline_evaluation",
             "supercompress",
             "mcp",
             "agent_integrations",
         ],
+    }
+
+
+@mcp.tool()
+def axiom_evaluation_run(
+    path: str,
+    prediction_field: str,
+    reference_field: str,
+    split_field: str | None = None,
+    split_value: str | None = None,
+    name: str | None = None,
+    model_label: str | None = None,
+    baseline: bool = False,
+    baseline_run_id: str | None = None,
+    regression_metric: str = "token_f1_micro",
+    regression_tolerance: float = 0.05,
+    max_bytes: int = DEFAULT_EVALUATION_MAX_BYTES,
+    max_rows: int = DEFAULT_EVALUATION_MAX_ROWS,
+    max_line_bytes: int = DEFAULT_EVALUATION_MAX_LINE_BYTES,
+) -> dict:
+    """Score precomputed JSONL predictions offline and save aggregate metrics."""
+    ToolPermissionStore().require("axiom_evaluation_run")
+    _validate_evaluation_limits(max_bytes, max_rows, max_line_bytes)
+
+    if (
+        not isinstance(prediction_field, str)
+        or not prediction_field.strip()
+        or len(prediction_field) > 160
+        or not isinstance(reference_field, str)
+        or not reference_field.strip()
+        or len(reference_field) > 160
+    ):
+        raise ValueError("Prediction and reference fields must contain 1 to 160 characters.")
+    prediction_field = prediction_field.strip()
+    reference_field = reference_field.strip()
+    if prediction_field == reference_field:
+        raise ValueError("Prediction and reference fields must be different.")
+    if (split_field is None) != (split_value is None):
+        raise ValueError("Split field and split value must be supplied together.")
+    if split_field is not None:
+        if (
+            not isinstance(split_field, str)
+            or not split_field.strip()
+            or len(split_field) > 160
+            or not isinstance(split_value, str)
+            or len(split_value) > 160
+        ):
+            raise ValueError("Split field and value must contain at most 160 characters.")
+        split_field = split_field.strip()
+    if name is not None:
+        if not isinstance(name, str) or not name.strip() or len(name) > 120:
+            raise ValueError("Evaluation names must contain 1 to 120 characters.")
+        name = name.strip()
+    if model_label is not None and (
+        not isinstance(model_label, str) or len(model_label) > 256
+    ):
+        raise ValueError("Model labels cannot exceed 256 characters.")
+    if type(baseline) is not bool:
+        raise ValueError("baseline must be a boolean.")
+    if baseline_run_id is not None and (
+        not isinstance(baseline_run_id, str)
+        or not baseline_run_id.strip()
+        or len(baseline_run_id) > 64
+    ):
+        raise ValueError("Baseline run IDs must contain 1 to 64 characters.")
+    if baseline_run_id is not None:
+        baseline_run_id = baseline_run_id.strip()
+    if not isinstance(regression_metric, str) or regression_metric not in {
+        "exact_match",
+        "normalized_exact_match",
+        "token_f1_micro",
+    }:
+        raise ValueError("Choose exact_match, normalized_exact_match, or token_f1_micro.")
+    if isinstance(regression_tolerance, bool) or not isinstance(regression_tolerance, (int, float)):
+        raise ValueError("Regression tolerance must be a finite number between 0 and 1.")
+    try:
+        regression_tolerance = float(regression_tolerance)
+    except (OverflowError, ValueError):
+        regression_tolerance = float("nan")
+    if not math.isfinite(regression_tolerance) or not 0 <= regression_tolerance <= 1:
+        raise ValueError("Regression tolerance must be a finite number between 0 and 1.")
+
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("Evaluation path cannot be empty.")
+    relative_path = path[5:] if path.startswith("data/") else path
+    root = Path.cwd().resolve(strict=True)
+    data_root = _evaluation_dataset_root(root)
+    source, source_stream = open_mcp_workspace_file(relative_path, data_root)
+    if source.suffix.lower() != ".jsonl":
+        source_stream.close()
+        raise ValueError("Evaluation input must be a workspace-relative .jsonl file.")
+    try:
+        with source_stream:
+            initial = os.fstat(source_stream.fileno())
+            report = evaluate_jsonl_stream(
+                source_stream,
+                path=source.relative_to(data_root).as_posix(),
+                file_name=source.name,
+                file_size_bytes=initial.st_size,
+                prediction_field=prediction_field,
+                reference_field=reference_field,
+                split_field=split_field,
+                split_value=split_value,
+                max_bytes=max_bytes,
+                max_rows=max_rows,
+                max_line_bytes=max_line_bytes,
+            )
+            final = os.fstat(source_stream.fileno())
+        current_path, current_stream = open_mcp_workspace_file(relative_path, data_root)
+        with current_stream:
+            current = os.fstat(current_stream.fileno())
+        initial_identity = (initial.st_dev, initial.st_ino, initial.st_size, initial.st_mtime_ns)
+        final_identity = (final.st_dev, final.st_ino, final.st_size, final.st_mtime_ns)
+        current_identity = (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns)
+        if initial_identity != final_identity or initial_identity != current_identity:
+            raise ValueError("Dataset changed during evaluation; retry against a stable file.")
+        if current_path.relative_to(data_root).as_posix() != report["path"]:
+            raise ValueError("Dataset path changed during evaluation; retry against a stable file.")
+    except (OSError, ValueError) as exc:
+        source_stream.close()
+        raise ValueError(f"Offline evaluation could not complete safely: {exc}") from None
+
+    try:
+        record = persist_evaluation_run(
+            report,
+            name=name,
+            model_label=model_label,
+            baseline=baseline,
+            baseline_run_id=baseline_run_id,
+            regression_metric=regression_metric,
+            regression_tolerance=regression_tolerance,
+            python_version=platform.python_version(),
+        )
+    except (OSError, TimeoutError, ValueError, RuntimeError) as exc:
+        raise ValueError(f"Offline evaluation could not be saved safely: {exc}") from None
+
+    from axiom.api.workspace import record_workspace_event
+
+    record_workspace_event("evaluation.run", f"Evaluated precomputed outputs from {report['path']}")
+    return {"run": _public_evaluation_record(record)}
+
+
+@mcp.tool()
+def axiom_evaluation_history(
+    run_id: str | None = None,
+    limit: int = 20,
+) -> dict:
+    """Read aggregate evaluation history without exposing dataset row values or absolute paths."""
+    ToolPermissionStore().require("axiom_evaluation_history")
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise ValueError("Evaluation history limit must be between 1 and 100.")
+    store = EvaluationStore()
+    try:
+        if run_id is not None:
+            if not isinstance(run_id, str) or not re.fullmatch(r"[0-9a-f]{32}", run_id):
+                raise ValueError("Invalid evaluation run ID.")
+            record = store.get(run_id)
+            if record is None:
+                raise ValueError("Evaluation run was not found.")
+            return _evaluation_record_summary(record, include_report=True)
+
+        page = store.list_page(limit=limit, offset=0)
+    except (OSError, ValueError):
+        raise ValueError("Evaluation history could not be read safely.") from None
+    return {
+        "runs": [_evaluation_record_summary(record) for record in page["runs"]],
+        "total": page["total"],
+        "limit": page["limit"],
+        "has_more": page["has_more"],
     }
 
 

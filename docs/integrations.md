@@ -68,6 +68,23 @@ parent directory can race the path checks; the fallback is scoped against
 static traversal and refuses existing outputs, but does not pin directory
 handles against another process changing the workspace at the same time.
 
+The separately permissioned `axiom_evaluation_run` tool scores precomputed
+prediction JSONL under the workspace's `data/` directory and saves a local
+aggregate report. It does not load a model, run inference, or access the
+network. It returns counts, exact-match, normalized exact-match, token F1,
+confidence intervals, and optional baseline comparison without prediction or
+reference text. Its limits are 64 MiB, 100,000 rows, and 1 MiB per line. Partial
+runs are labeled partial, cannot become baselines, and receive no pass/fail
+comparison. The whole-output hash includes predictions; a separate complete
+corpus fingerprint covers all other row fields, including references and
+prompt/context, and enables comparisons across different output files. Both
+hashes are persisted locally but omitted from MCP responses. These lexical
+metrics do not establish semantic quality, and a `model_label` is user-supplied
+metadata. Grant `axiom_evaluation_run` to create runs and
+`axiom_evaluation_history` separately to read stored aggregates.
+When a selected baseline has different examples or evaluation fields, the new
+run is still saved and its comparison is reported as unavailable.
+
 ### CLI
 
 AXIOM can also integrate with local agent binaries.

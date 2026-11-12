@@ -821,6 +821,15 @@ export type WorkspaceEvaluationRun = {
     delta: number;
     regression_tolerance: number;
     status: "passed" | "regression";
+  } | {
+    status: "unavailable";
+    reason:
+      | "current_evaluation_partial"
+      | "current_comparison_unavailable"
+      | "baseline_run_partial"
+      | "baseline_comparison_unavailable"
+      | "evaluation_configuration_mismatch"
+      | "sample_corpus_mismatch";
   } | null;
   output_manifest: { format: string; sha256: string; bytes: number };
   report: {
@@ -832,6 +841,9 @@ export type WorkspaceEvaluationRun = {
       bytes_hashed: number;
       file_size_bytes: number;
       full_content_hashed: boolean;
+      comparison_corpus_sha256: string | null;
+      comparison_corpus_fully_hashed: boolean;
+      comparison_corpus_rows_hashed: number;
     };
     fields: {
       prediction: string;
@@ -865,7 +877,11 @@ export type WorkspaceEvaluationRun = {
     truncated: boolean;
     truncation_reasons: string[];
     limits: DatasetScanLimits;
-    privacy: { raw_values_returned: false; raw_values_persisted: false };
+    privacy: {
+      raw_values_returned: false;
+      raw_values_persisted: false;
+      content_fingerprints_persisted_locally: true;
+    };
   };
 };
 

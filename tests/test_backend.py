@@ -49,6 +49,8 @@ def test_mcp_schema_and_all_handlers(tmp_path: Path, monkeypatch: pytest.MonkeyP
         "axiom_workspace_context",
         "axiom_workspace_assets",
         "axiom_training_preflight",
+        "axiom_evaluation_run",
+        "axiom_evaluation_history",
         "axiom_model_list",
         "axiom_model_info",
         "axiom_dataset_inspect",

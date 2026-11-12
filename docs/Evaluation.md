@@ -23,10 +23,24 @@ the scan as partial and carry the truncation causes.
 ## Baselines and regression gates
 
 Create an immutable baseline report, then select it for a later run. Comparisons
-are allowed only when the report uses the same fully hashed dataset, reference
-field, and split. The selected metric and allowed absolute score drop are stored
+are allowed when both reports use the same complete sample corpus and row
+order. The comparison fingerprint covers every non-prediction field, including
+the reference, split, prompt, and context, and excludes the selected prediction
+field so model outputs can differ. AXIOM also stores a whole-output-file
+SHA-256 for integrity; it includes predictions and will normally differ
+between models. The selected metric and allowed absolute score drop are stored
 with the comparison result. A failed gate means the score dropped beyond that
 threshold; it does not infer statistical significance or replace human review.
+If a chosen baseline uses different examples or evaluation fields, AXIOM still
+saves the new metrics and marks the comparison unavailable.
+
+For example, create a baseline first, then pass its run ID when scoring the
+candidate output:
+
+```bash
+axiom evaluation run ./data/baseline.jsonl --prediction-field prediction --reference-field reference --baseline
+axiom evaluation run ./data/candidate.jsonl --prediction-field prediction --reference-field reference --baseline-run-id <baseline-run-id>
+```
 
 ## CLI
 
@@ -41,3 +55,15 @@ axiom evaluation delete <run-id>
 
 Evaluation history is local in `.axiom/evaluations.json`, bounded to 1,000
 records and 4 MB. Deleting a report never changes its dataset.
+
+## MCP
+
+Agents can call `axiom_evaluation_run` on JSONL files under the MCP workspace's
+`data/` directory after the permission is explicitly granted. It uses bounded
+64 MiB, 100,000-row, and 1 MiB-per-line limits and persists aggregate reports
+only. Prediction/reference text is not returned or persisted. Local whole-file
+and comparison fingerprints are persisted for integrity and baseline matching,
+but MCP responses omit those hashes. Grant `axiom_evaluation_history`
+separately to read saved run summaries or reports. Baseline marking is opt-in;
+partial runs cannot be marked as baselines or produce a pass/fail comparison.
+These metrics measure lexical overlap, not semantic quality.

@@ -26,6 +26,8 @@ TOOL_DESCRIPTIONS = {
     "axiom_dataset_inspect": "Inspect a local dataset.",
     "axiom_dataset_clean_preview": "Preview bounded dataset cleaning counts without writing files.",
     "axiom_dataset_clean": "Write a new cleaned dataset copy inside the workspace.",
+    "axiom_evaluation_run": "Score local precomputed outputs and persist aggregate metrics only.",
+    "axiom_evaluation_history": "Read saved aggregate evaluation metrics without dataset values.",
     "axiom_system_info": "Read local hardware information.",
     "axiom_training_plan": "Create a hardware-aware training estimate.",
     "axiom_supercompress_status": "Read optional SuperCompress configuration status.",

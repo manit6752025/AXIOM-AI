@@ -78,9 +78,15 @@ def _open_parent(root: Path, parts: tuple[str, ...]) -> tuple[Path, int, str]:
     descriptor: int | None = None
     try:
         workspace = Path(root).resolve(strict=True)
+        process_root = Path.cwd().resolve(strict=True)
+        workspace_parts = workspace.relative_to(process_root).parts
         directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
         directory_flags |= getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(".", directory_flags)
+        for part in workspace_parts:
+            next_descriptor = os.open(part, directory_flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_descriptor
         expected = os.stat(workspace)
         opened = os.fstat(descriptor)
         if (expected.st_dev, expected.st_ino) != (opened.st_dev, opened.st_ino):

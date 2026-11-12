@@ -2755,8 +2755,12 @@ function Evaluation({ onNotify }: { onNotify: (message: string, tone?: Tone) => 
       onNotify(
         result.run.comparison?.status === "regression"
           ? `Regression gate failed: ${result.run.comparison.delta.toFixed(3)} ${result.run.comparison.metric}.`
-          : "Offline evaluation report saved. No model inference was run.",
-        result.run.comparison?.status === "regression" ? "warning" : "success",
+          : result.run.comparison?.status === "unavailable"
+            ? `Report saved, but its baseline comparison is unavailable (${result.run.comparison.reason.replaceAll("_", " ")}).`
+            : "Offline evaluation report saved. No model inference was run.",
+        result.run.comparison?.status === "regression" || result.run.comparison?.status === "unavailable"
+          ? "warning"
+          : "success",
       );
       await refreshEvaluationRuns(0);
     } catch (cause) {
@@ -2814,7 +2818,7 @@ function Evaluation({ onNotify }: { onNotify: (message: string, tone?: Tone) => 
           <label className="field"><span className="field-label-row"><span>Regression metric</span></span><select value={regressionMetric} onChange={(event) => setRegressionMetric(event.target.value as typeof regressionMetric)}><option value="token_f1_micro">Token F1 (micro)</option><option value="exact_match">Exact match</option><option value="normalized_exact_match">Normalized exact match</option></select></label>
           <label className="field"><span className="field-label-row"><span>Allowed score drop</span></span><input type="number" min="0" max="1" step="0.01" value={regressionTolerance} onChange={(event) => setRegressionTolerance(event.target.value)} /></label>
           <label className="checkbox-field"><input type="checkbox" checked={markBaseline} onChange={(event) => setMarkBaseline(event.target.checked)} /><span>Mark this immutable report as a baseline</span></label>
-          <p className="quiet-note">Metrics use exact match, whitespace-normalized case-insensitive exact match, and micro token F1. Only aggregate counts and scores are stored; raw text is never returned.</p>
+          <p className="quiet-note">Metrics use exact match, whitespace-normalized case-insensitive exact match, and micro token F1. Raw text is never stored; local reports keep file and comparison fingerprints for integrity and baseline matching.</p>
           <button type="button" className="button primary-button" onClick={() => void runOfflineEvaluation()} disabled={evaluationBusy || !datasetPath || !predictionField.trim() || !referenceField.trim() || Boolean(splitField.trim()) !== Boolean(splitValue.trim())}>{evaluationBusy ? "Scoring bounded dataset…" : "Run offline evaluation"}</button>
         </div>
       </div>
@@ -2822,8 +2826,8 @@ function Evaluation({ onNotify }: { onNotify: (message: string, tone?: Tone) => 
     <Surface title="Evaluation reports" eyebrow="IMMUTABLE / LOCAL HISTORY">
       {evaluationRuns.length ? <div className="module-list">{evaluationRuns.map((run) => <div className="module-row experiment-row" key={run.id}>
         <span className="module-icon"><BarChart3 size={17} /></span>
-        <span className="module-copy"><b>{run.name}{run.baseline ? " · baseline" : ""}</b><small>{run.report.path} · {run.report.counts.valid_samples.toLocaleString()} samples · exact {run.report.metrics.exact_match.toFixed(3)} (95% {run.report.confidence_intervals.exact_match.low.toFixed(3)}–{run.report.confidence_intervals.exact_match.high.toFixed(3)}) · normalized {run.report.metrics.normalized_exact_match.toFixed(3)} · token F1 {run.report.metrics.token_f1_micro.toFixed(3)} · {run.status}{run.comparison ? ` · ${run.comparison.status} vs baseline (${run.comparison.delta >= 0 ? "+" : ""}${run.comparison.delta.toFixed(3)})` : ""}</small></span>
-        <StatusPill tone={run.comparison?.status === "regression" ? "warning" : run.baseline ? "success" : "neutral"}>{run.comparison?.status === "regression" ? "REGRESSION" : run.baseline ? "BASELINE" : run.status.toUpperCase()}</StatusPill>
+        <span className="module-copy"><b>{run.name}{run.baseline ? " · baseline" : ""}</b><small>{run.report.path} · {run.report.counts.valid_samples.toLocaleString()} samples · exact {run.report.metrics.exact_match.toFixed(3)} (95% {run.report.confidence_intervals.exact_match.low.toFixed(3)}–{run.report.confidence_intervals.exact_match.high.toFixed(3)}) · normalized {run.report.metrics.normalized_exact_match.toFixed(3)} · token F1 {run.report.metrics.token_f1_micro.toFixed(3)} · {run.status}{run.comparison ? run.comparison.status === "unavailable" ? ` · baseline comparison unavailable (${run.comparison.reason.replaceAll("_", " ")})` : ` · ${run.comparison.status} vs baseline (${run.comparison.delta >= 0 ? "+" : ""}${run.comparison.delta.toFixed(3)})` : ""}</small></span>
+        <StatusPill tone={run.comparison?.status === "regression" || run.comparison?.status === "unavailable" ? "warning" : run.baseline ? "success" : "neutral"}>{run.comparison?.status === "regression" ? "REGRESSION" : run.comparison?.status === "unavailable" ? "GATE UNAVAILABLE" : run.baseline ? "BASELINE" : run.status.toUpperCase()}</StatusPill>
         <button type="button" className="icon-button" aria-label={"Export " + run.name + " report as JSON"} onClick={() => exportEvaluationRun(run)}><ArrowDownToLine size={15} /></button>
         <button type="button" className="icon-button danger-icon-button" aria-label={"Delete " + run.name + " evaluation report"} onClick={() => setDeletingRun(run)}><Trash2 size={15} /></button>
       </div>)}</div> : <EmptyState icon={BarChart3} title="No evaluation reports" description="Select a local JSONL file containing precomputed prediction and reference fields. AXIOM does not run model inference here." action={<CliReference command="axiom evaluation run ./data/eval.jsonl --prediction-field prediction --reference-field reference" />} />}
