@@ -31,6 +31,7 @@
 ## Unreleased — latest/development
 
 ### Added
+- Added a separately default-deny prediction-job mismatch inspector that verifies the completed artifact hash and returns up to three bounded text excerpts only after explicit per-call approval.
 - Persisted bounded prediction-job state and completed artifact identity per workspace so agents can recover status and the evaluation handoff after MCP restarts; interrupted jobs are never resumed.
 - Added a job-ID MCP handoff to evaluate completed prediction artifacts against their published file identity and SHA-256 using the existing evaluation permission.
 - Persisted bounded prediction-job provenance in saved evaluation reports so job settings remain attributable after an MCP restart; MCP history returns an allowlisted view and omits the artifact fingerprint.

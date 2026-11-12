@@ -48,6 +48,9 @@ TOOL_DESCRIPTIONS = {
     "axiom_prediction_job_cancel": (
         "Request cooperative cancellation of a local prediction job before artifact finalization begins."
     ),
+    "axiom_prediction_job_examples": (
+        "Inspect the first up to three identity- and hash-verified raw exact mismatches; text is off by default and bounded excerpts require explicit per-call opt-in."
+    ),
     "axiom_model_list": "List locally registered models.",
     "axiom_model_info": "Inspect a local model path.",
     "axiom_dataset_inspect": (

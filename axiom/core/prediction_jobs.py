@@ -47,6 +47,9 @@ _MAX_BATCH_PROMPT_CHARS = 24_000
 _MAX_RETAINED_JOBS = 50
 _MAX_PERSISTED_JOB_BYTES = 512 * 1024
 _MAX_EVALUATION_LINKS_PER_JOB = 20
+_MAX_FAILURE_EXAMPLES = 3
+_MAX_FAILURE_EXAMPLE_TEXT_CHARS = 2_000
+_NORMALIZED_TOKEN = re.compile(r"\S+")
 _FIELD_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,159}$")
 _JOB_ID = re.compile(r"^[0-9a-f]{32}$")
 _TEMP_NAME = re.compile(r"^\.axiom-prediction-(\d+)-([0-9a-f]{32})(?:-([0-9a-f]{32}))?\.tmp$")
@@ -2016,6 +2019,143 @@ def get_completed_prediction_artifact(job_id: str, root: Path) -> dict[str, Any]
         "evaluation_run_ids": list(job.get("evaluation_run_ids", [])),
         "artifact_identity": identity,
         "artifact_sha256": digest,
+    }
+
+
+def _normalized_text_equal(left: str, right: str) -> bool:
+    left_tokens = _NORMALIZED_TOKEN.finditer(left)
+    right_tokens = _NORMALIZED_TOKEN.finditer(right)
+    while True:
+        left_token = next(left_tokens, None)
+        right_token = next(right_tokens, None)
+        if left_token is None or right_token is None:
+            return left_token is None and right_token is None
+        if left_token.group().casefold() != right_token.group().casefold():
+            return False
+
+
+def get_prediction_job_examples(
+    job_id: str,
+    root: Path,
+    *,
+    limit: int = 3,
+    include_text: bool = False,
+    include_prompt: bool = False,
+) -> dict[str, Any] | None:
+    """Return a few mismatch examples from a hash-verified completed artifact."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= _MAX_FAILURE_EXAMPLES:
+        raise ValueError(f"Example limit must be between 1 and {_MAX_FAILURE_EXAMPLES}.")
+    if type(include_text) is not bool or type(include_prompt) is not bool:
+        raise ValueError("include_text and include_prompt must be booleans.")
+    if include_prompt and not include_text:
+        raise ValueError("include_prompt requires include_text=true.")
+    artifact = get_completed_prediction_artifact(job_id, root)
+    if artifact is None:
+        return None
+    identity = artifact["artifact_identity"]
+    expected_sha256 = artifact["artifact_sha256"]
+    expected_size = identity[2]
+    if not 1 <= expected_size <= _MAX_OUTPUT_BYTES:
+        raise ValueError("Completed prediction artifact exceeds the bounded output size.")
+
+    workspace = Path(root).resolve(strict=True)
+    output_path, stream = open_mcp_workspace_file(artifact["output_path"], workspace)
+    examples: list[dict[str, Any]] = []
+    mismatches = 0
+    exact_matches = 0
+    normalized_matches = 0
+    bytes_scanned = 0
+    digest = hashlib.sha256()
+    with stream:
+        initial = os.fstat(stream.fileno())
+        initial_identity = (initial.st_dev, initial.st_ino, initial.st_size, initial.st_mtime_ns)
+        if (
+            not stat.S_ISREG(initial.st_mode)
+            or initial_identity != identity
+            or initial.st_size > _MAX_OUTPUT_BYTES
+        ):
+            raise ValueError("Completed prediction artifact identity changed before example inspection.")
+
+        for line_number in range(1, artifact["rows_completed"] + 1):
+            raw_line = stream.readline(_MAX_OUTPUT_LINE_BYTES + 1)
+            if not raw_line:
+                raise ValueError("Completed prediction artifact ended before all rows were read.")
+            if len(raw_line) > _MAX_OUTPUT_LINE_BYTES:
+                raise ValueError("Completed prediction artifact contains an oversized JSONL line.")
+            bytes_scanned += len(raw_line)
+            if bytes_scanned > _MAX_OUTPUT_BYTES:
+                raise ValueError("Completed prediction artifact exceeds the bounded output size.")
+            digest.update(raw_line)
+            row = _read_row(raw_line, line_number)
+            prediction = row.get(artifact["prediction_field"])
+            reference = row.get(artifact["reference_field"])
+            if not isinstance(prediction, str) or not isinstance(reference, str):
+                raise ValueError("Completed prediction artifact has invalid evaluation fields.")
+
+            exact_match = prediction == reference
+            normalized_match = _normalized_text_equal(prediction, reference)
+            exact_matches += int(exact_match)
+            normalized_matches += int(normalized_match)
+            if exact_match:
+                continue
+            mismatches += 1
+            if len(examples) >= limit:
+                continue
+
+            example: dict[str, Any] = {"row_number": line_number}
+            if include_text:
+                example["exact_match"] = exact_match
+                example["normalized_exact_match"] = normalized_match
+                example["prediction_excerpt"] = prediction[:_MAX_FAILURE_EXAMPLE_TEXT_CHARS]
+                example["reference_excerpt"] = reference[:_MAX_FAILURE_EXAMPLE_TEXT_CHARS]
+                example["text_truncated"] = {
+                    "prediction": len(prediction) > _MAX_FAILURE_EXAMPLE_TEXT_CHARS,
+                    "reference": len(reference) > _MAX_FAILURE_EXAMPLE_TEXT_CHARS,
+                }
+                if include_prompt:
+                    prompt = row.get(artifact["prompt_field"])
+                    if not isinstance(prompt, str):
+                        raise ValueError("Completed prediction artifact has an invalid prompt field.")
+                    example["prompt_excerpt"] = prompt[:_MAX_FAILURE_EXAMPLE_TEXT_CHARS]
+                    example["text_truncated"]["prompt"] = len(prompt) > _MAX_FAILURE_EXAMPLE_TEXT_CHARS
+            examples.append(example)
+
+        if stream.read(1):
+            raise ValueError("Completed prediction artifact contains more rows than its job metadata.")
+        final = os.fstat(stream.fileno())
+
+    if (
+        not _same_identity(initial, final)
+        or bytes_scanned != initial.st_size
+        or digest.hexdigest() != expected_sha256
+    ):
+        raise ValueError("Completed prediction artifact changed or no longer matches its published hash.")
+    current_path, current_stream = open_mcp_workspace_file(artifact["output_path"], workspace)
+    with current_stream:
+        current = os.fstat(current_stream.fileno())
+    current_identity = (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns)
+    if current_path != output_path or current_identity != identity:
+        raise ValueError("Completed prediction artifact path changed during example inspection.")
+
+    return {
+        "job_id": artifact["id"],
+        "rows_scanned": artifact["rows_completed"],
+        "exact_matches": exact_matches,
+        "normalized_exact_matches": normalized_matches,
+        "exact_mismatch_rows": mismatches,
+        "sample_limit": limit,
+        "sample_strategy": "first_exact_mismatches_in_file_order",
+        "mismatch_definition": "raw prediction string differs from reference string",
+        "examples": examples,
+        "scope": {
+            "artifact_identity_and_sha256_verified": True,
+            "full_source_rows_returned": False,
+            "prediction_reference_text_returned": include_text,
+            "prompt_text_returned": include_prompt,
+            "network_accessed": False,
+            "model_inference_run": False,
+            "max_excerpt_chars_per_field": _MAX_FAILURE_EXAMPLE_TEXT_CHARS if include_text else 0,
+        },
     }
 
 
