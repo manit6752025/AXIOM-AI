@@ -420,9 +420,11 @@ hashes are persisted locally but omitted from MCP responses. These lexical
 metrics do not establish semantic quality, and a `model_label` is user-supplied
 metadata. Grant `axiom_evaluation_run` to create runs and
 `axiom_evaluation_history` separately to read stored aggregates. History pages
-continue with `after_run_id` from the previous page's `next_cursor`; start a
-fresh listing to include newer runs saved during pagination. To compare two
-saved complete reports after the fact, use `axiom_evaluation_compare` with a
+continue with `after_run_id` from the previous page's `next_cursor`; set
+`baselines_only=true` to list only marked baselines, in which case counts and
+cursors refer to that filtered list. Keep the same filter for each page, and
+start a fresh listing to include newer runs saved during pagination. To compare
+two saved complete reports after the fact, use `axiom_evaluation_compare` with a
 marked baseline and the `axiom_evaluation_history` permission; it returns
 aggregate lexical scores without reopening the source files.
 When a selected baseline has different examples or evaluation fields, the new

@@ -69,16 +69,23 @@ but MCP responses omit those hashes. Grant `axiom_evaluation_history`
 separately to read saved run summaries or reports. Baseline marking is opt-in;
 partial runs cannot be marked as baselines or produce a pass/fail comparison.
 These metrics measure lexical overlap, not semantic quality. History lists are
-bounded to 100 summaries per call. To continue, pass the previous page's
-`next_cursor` value as `after_run_id`; the cursor anchors after that saved run,
-so newly saved runs do not shift the continuation. Start a fresh first-page
+bounded to 100 summaries per call. Set `baselines_only=true` to list only runs
+explicitly marked as baselines; it returns every marked baseline and does not
+select an active or latest baseline. This filter applies to history listings
+and cannot be combined with `run_id`; comparisons still require an explicit
+baseline run ID. `total` and `has_more` describe the filtered list. To continue,
+pass the previous page's `next_cursor` value as
+`after_run_id` and keep the same filter; the cursor anchors after that saved
+run, so newly saved runs do not shift the continuation. Start a fresh first-page
 request to include runs saved after paging began. If the cursor run was deleted
 or aged out of retained history, start a fresh listing.
 
-For example, use the previous response's cursor in the next tool call:
+For example, request the first baseline page, then use that response's cursor
+for the next page with the same filter:
 
 ```json
-{"limit":20,"after_run_id":"<previous-next_cursor>"}
+{"limit":20,"baselines_only":true}
+{"limit":20,"baselines_only":true,"after_run_id":"<previous-next_cursor>"}
 ```
 
 To compare saved runs after the fact, call `axiom_evaluation_compare` with a

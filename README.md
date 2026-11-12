@@ -680,9 +680,11 @@ references and prompt/context. Local fingerprints are used for integrity and
 baseline matching but omitted from MCP responses. These lexical metrics do not
 establish semantic quality, and `model_label` is user-supplied metadata.
 `axiom_evaluation_history` lists saved aggregate results or returns one run by
-ID. For additional pages, pass the previous response's `next_cursor` as
-`after_run_id`; start a fresh listing to include evaluations saved after
-paging began. `axiom_evaluation_compare` compares two saved complete reports
+ID. Set `baselines_only=true` to list only marked baselines; `total` and
+`has_more` then describe the filtered list. For additional pages, pass the
+previous response's `next_cursor` as `after_run_id` and keep the same filter;
+start a fresh listing to include evaluations saved after paging began.
+`axiom_evaluation_compare` compares two saved complete reports
 after the baseline is marked; it uses the history permission, verifies saved
 report manifests, and returns aggregate lexical scores without reopening source
 files or returning dataset rows. Evaluation and history have separate
