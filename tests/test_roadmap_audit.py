@@ -18,18 +18,18 @@ def _write_roadmap(path: Path, rows: list[str]) -> Path:
     return path
 
 
-def test_audit_parses_all_120_known_statuses_and_group_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_audit_parses_all_140_known_statuses_and_group_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(tmp_path)
     rows = []
-    for number in range(1, 121):
+    for number in range(1, 141):
         status = "Implemented; tests passing" if number <= 30 else "In progress; validation pending" if number <= 50 else "Planned"
         rows.append(f"- [R{number:03d} · {status}] Example deliverable {number}.")
     report = audit_roadmap(_write_roadmap(tmp_path / "ROADMAP.md", rows))
     assert report["integrity"]["ok"] is True
-    assert report["total"] == 120
-    assert report["counts"] == {"implemented": 30, "in_progress": 20, "planned": 70, "unknown": 0}
+    assert report["total"] == 140
+    assert report["counts"] == {"implemented": 30, "in_progress": 20, "planned": 90, "unknown": 0}
     assert report["items"][0]["group"] == "Test group"
-    assert report["items"][-1]["id"] == "R120"
+    assert report["items"][-1]["id"] == "R140"
     json.dumps(report)
 
 
@@ -39,7 +39,7 @@ def test_audit_reports_missing_duplicate_and_unknown_statuses(tmp_path: Path, mo
     report = audit_roadmap(_write_roadmap(tmp_path / "ROADMAP.md", rows))
     assert report["integrity"]["ok"] is False
     assert report["integrity"]["duplicate_ids"] == ["R001"]
-    assert "R120" in report["integrity"]["missing_ids"]
+    assert "R140" in report["integrity"]["missing_ids"]
     assert report["integrity"]["unknown_status_ids"] == ["R001"]
 
 
@@ -88,19 +88,19 @@ def test_audit_requires_the_canonical_roadmap_filename(tmp_path: Path, monkeypat
 def test_audit_preserves_the_four_repository_status_classes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(tmp_path)
     rows = []
-    for number in range(1, 121):
+    for number in range(1, 141):
         if number <= 29:
             status = "Implemented; tests passing"
         elif number <= 51:
             status = "In progress; validation pending"
-        elif number <= 119:
+        elif number <= 139:
             status = "Planned"
         else:
             status = "In progress"
         rows.append(f"- [R{number:03d} · {status}] Item {number}")
     report = audit_roadmap(_write_roadmap(tmp_path / "ROADMAP.md", rows))
     assert report["integrity"]["ok"] is True
-    assert report["counts"] == {"implemented": 29, "in_progress": 23, "planned": 68, "unknown": 0}
+    assert report["counts"] == {"implemented": 29, "in_progress": 23, "planned": 88, "unknown": 0}
 
 
 def test_roadmap_cli_emits_machine_readable_audit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -110,7 +110,7 @@ def test_roadmap_cli_emits_machine_readable_audit(tmp_path: Path, monkeypatch: p
 
     from axiom.cli.roadmap import roadmap_app
 
-    rows = [f"- [R{number:03d} · Planned] Item {number}" for number in range(1, 121)]
+    rows = [f"- [R{number:03d} · Planned] Item {number}" for number in range(1, 141)]
     source = _write_roadmap(tmp_path / "ROADMAP.md", rows)
     app = typer.Typer()
     app.add_typer(roadmap_app, name="roadmap")
@@ -118,5 +118,5 @@ def test_roadmap_cli_emits_machine_readable_audit(tmp_path: Path, monkeypatch: p
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)
     assert payload["integrity"]["ok"] is True
-    assert payload["total"] == 120
-    assert payload["counts"]["planned"] == 120
+    assert payload["total"] == 140
+    assert payload["counts"]["planned"] == 140
