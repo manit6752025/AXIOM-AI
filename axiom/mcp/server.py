@@ -113,9 +113,9 @@ mcp = MCPServer(
         "Training status includes up to 64 evenly spaced loss samples; each point is one selected training record and may be noisy. Do not treat the trace as held-out validation or evidence of model quality/generalization; use held-out evaluation to assess quality. "
         "For local inference, use axiom_engine_generate only after the user requests a response; "
         "it runs one bounded prompt locally and AXIOM does not store the prompt or response. The MCP host may retain its tool transcript. "
-        "For a normal dataset prediction, prefer axiom_prediction_job_validation_preflight when the engine-preflight and prediction-preflight capabilities are allowed; it composes prompt-truncation and base/optional-adapter engine checks for the intended settings without prediction-start permission. Use actionability.status: resolve and rerun blocked findings; disclose review_required findings and wait for the user's decision; clear_for_user_approval means show the intended run and still get explicit approval before starting. The plan does not start a job, reserve compute, or check output-path availability. "
+        "For a normal dataset prediction, prefer axiom_prediction_job_validation_preflight when the engine-preflight and prediction-preflight capabilities are allowed; it composes prompt-truncation and base/optional-adapter engine checks for the intended settings without prediction-start permission. Use actionability.status: resolve and rerun blocked findings; for an output_path_availability blocker, choose a new direct data/*.jsonl destination or resolve the workspace path issue, then rerun; disclose review_required findings and wait for the user's decision; clear_for_user_approval means show the intended run and still get explicit approval before starting. checks.output_destination.status reports unoccupied, occupied, uninspectable, or not_checked. Occupancy checks do not verify write permission or reserve the path; active compute-slot availability is checked at start. "
         "Use axiom_engine_preflight and axiom_prediction_job_preflight separately for focused diagnostics. The prediction preflight estimates actual prompt clipping with the model tokenizer; use the same model, dataset, prompt_field, reference_field, and max_new_tokens as the intended start call. Rerun the composite preflight immediately before start if the model, adapter, or dataset changes; start validates current inputs independently and does not bind them to the checked snapshot. "
-        "Before starting, show the exact model, adapter, input/output paths, fields, and generation limits; disclose that the local JSONL artifact preserves source rows and adds generated predictions, and that AXIOM saves bounded job metadata under workspace .axiom/prediction_jobs.json (relative paths, settings, counts, status, and artifact fingerprint; no dataset rows, prompts, predictions, or logs); then wait for the user's explicit go-ahead. Start revalidates inputs and output availability and checks for active compute jobs. "
+        "Before starting, show the exact model, adapter, input/output paths, fields, and generation limits; disclose that the local JSONL artifact preserves source rows and adds generated predictions, and that AXIOM saves bounded job metadata under workspace .axiom/prediction_jobs.json (relative paths, settings, counts, status, and artifact fingerprint; no dataset rows, prompts, predictions, or logs); then wait for the user's explicit go-ahead. Start revalidates inputs and output availability and checks for active compute jobs. If the destination changed and start rejects it, choose a new path, rerun preflight, show the revised configuration, and obtain approval for that configuration. "
         "If the composite preflight expects clipped prompts, show the count and 1-based JSONL line numbers, then discuss whether to shorten those prompts before the run; if it is inconclusive, disclose that clipping could not be assessed and use the completed job's prompts_truncated count only if the job completes. Templates AXIOM cannot evaluate safely may also fail during generation. A clear_for_user_approval status means only that no known blockers or review findings were detected; it does not guarantee loading, fit, or quality. "
         "Use axiom_prediction_job_status to list persisted job history or inspect one job, axiom_prediction_job_wait to wait up to 30 seconds for a job outcome without polling, and axiom_prediction_job_cancel to cancel a worker owned by this process. The wait tool uses the axiom_prediction_job_status permission; repeat it after timed_out, and check status later after recovery_unverified. Prediction metadata is stored under the workspace .axiom directory; if AXIOM verifies that the worker process exited, the job becomes interrupted and generation is never resumed automatically. If process identity cannot be verified, status is recovery_unverified and the job is left untouched unless its publishing checkpoint independently verifies the completed artifact hash. Only a completed job with verified publication metadata can use the job-ID evaluation handoff. "
         "Do not evaluate a prediction job automatically when it completes. Call axiom_prediction_job_evaluate only after the user approves saving aggregate evaluation metrics; it requires the axiom_evaluation_run permission. "
@@ -2278,7 +2278,26 @@ def axiom_prediction_job_validation_preflight(
     permissions.require("axiom_engine_preflight")
     root = _mcp_workspace_root()
 
-    def blocked(reason_code: str) -> dict:
+    def blocked(
+        reason_code: str,
+        *,
+        check: str = "preflight_inputs",
+        next_action: str = "Resolve the reported input issue, then rerun this preflight.",
+        scope_updates: dict[str, bool] | None = None,
+        output_destination_status: str = "not_checked",
+    ) -> dict:
+        scope = {
+            "read_only": True,
+            "files_written": False,
+            "model_weights_loaded": False,
+            "inference_run": False,
+            "network_accessed": False,
+            "dataset_values_returned": False,
+            "absolute_paths_returned": False,
+            "output_path_write_permission_checked": False,
+        }
+        if scope_updates:
+            scope.update(scope_updates)
         return {
             "schema_version": 1,
             "assessment": "inconclusive",
@@ -2286,22 +2305,22 @@ def axiom_prediction_job_validation_preflight(
             "actionability": {
                 "status": "blocked",
                 "findings": [{
-                    "check": "preflight_inputs",
+                    "check": check,
                     "status": "blocked",
                     "reason_code": reason_code,
                 }],
-                "next_action": "Resolve the reported input issue, then rerun this preflight.",
+                "next_action": next_action,
                 "user_approval_required": True,
             },
-            "scope": {
-                "read_only": True,
-                "files_written": False,
-                "model_weights_loaded": False,
-                "inference_run": False,
-                "network_accessed": False,
-                "dataset_values_returned": False,
-                "absolute_paths_returned": False,
+            "checks": {
+                "output_destination": {
+                    "status": output_destination_status,
+                    "write_permission_checked": False,
+                    "reserved": False,
+                    "start_revalidates_destination": True,
+                },
             },
+            "scope": scope,
         }
 
     if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens <= 64:
@@ -2403,6 +2422,59 @@ def axiom_prediction_job_validation_preflight(
 
     if path_key(output_path) == path_key(dataset_relative):
         return blocked("prediction_output_must_differ_from_dataset")
+
+    output_parent_fd: int | None = None
+    try:
+        output_target, output_parent_fd, _output_name, output_unoccupied = (
+            open_mcp_workspace_output_parent(output_path, root)
+        )
+        if not output_target.is_relative_to(root):
+            return blocked(
+                "prediction_output_path_uninspectable",
+                check="output_path_availability",
+                output_destination_status="uninspectable",
+                scope_updates={
+                    "output_path_shape_checked": True,
+                    "output_path_availability_checked": False,
+                    "output_path_reserved": False,
+                },
+            )
+        if not output_unoccupied:
+            return blocked(
+                "prediction_output_already_exists",
+                check="output_path_availability",
+                next_action="Choose a new data/*.jsonl destination, then rerun this preflight.",
+                output_destination_status="occupied",
+                scope_updates={
+                    "output_path_shape_checked": True,
+                    "output_path_availability_checked": True,
+                    "output_path_unoccupied_at_preflight": False,
+                    "output_path_reserved": False,
+                    "job_start_revalidates_current_inputs_and_output_path": True,
+                },
+            )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return blocked(
+            "prediction_output_path_uninspectable",
+            check="output_path_availability",
+            next_action=(
+                "Use an existing, accessible workspace data/ directory and a safe direct-child output path, "
+                "then rerun this preflight."
+            ),
+            output_destination_status="uninspectable",
+            scope_updates={
+                "output_path_shape_checked": True,
+                "output_path_availability_checked": False,
+                "output_path_reserved": False,
+                "job_start_revalidates_current_inputs_and_output_path": True,
+            },
+        )
+    finally:
+        if output_parent_fd is not None:
+            try:
+                os.close(output_parent_fd)
+            except OSError:
+                pass
 
     prompt_preflight = axiom_prediction_job_preflight(
         model_path=model_relative,
@@ -2576,7 +2648,8 @@ def axiom_prediction_job_validation_preflight(
     else:
         actionability_status = "clear_for_user_approval"
         next_action = (
-            "Show the planned configuration, explain output and active-compute availability are checked at start, "
+            "Show the planned configuration, explain the output name was unoccupied when checked but is not reserved, "
+            "that write permission was not checked, and that active-compute availability is checked at start, "
             "and obtain explicit approval before starting the job."
         )
     return {
@@ -2588,7 +2661,7 @@ def axiom_prediction_job_validation_preflight(
             "next_action": next_action,
             "user_approval_required": True,
             "note": (
-                "Clear means no known blockers or review findings. Prompt results apply only to the scanned snapshot; output-path and active compute-slot availability are not checked. "
+                "Clear means no known blockers or review findings. Prompt results apply only to the scanned snapshot; output-name occupancy is a read-only check and is not reserved, write permission is not checked, and active compute-slot availability is not checked. "
                 "It does not guarantee model loading, fit, or output quality."
             ),
         },
@@ -2611,6 +2684,12 @@ def axiom_prediction_job_validation_preflight(
             "prompt_budget_source": prompt_budget_source,
         },
         "checks": {
+            "output_destination": {
+                "status": "unoccupied",
+                "write_permission_checked": False,
+                "reserved": False,
+                "start_revalidates_destination": True,
+            },
             "prompt_truncation": prompt_preflight,
             "base_engine": base_engine,
             "adapter_engine": adapter_engine,
@@ -2623,15 +2702,18 @@ def axiom_prediction_job_validation_preflight(
             "network_accessed": False,
             "dataset_values_returned": False,
             "absolute_paths_returned": False,
+            "output_path_write_permission_checked": False,
             "output_path_shape_checked": True,
-            "output_path_availability_checked": False,
+            "output_path_availability_checked": True,
+            "output_path_unoccupied_at_preflight": True,
+            "output_path_reserved": False,
             "compute_slot_availability_checked": False,
             "preflight_snapshot_bound_to_job_start": False,
             "job_start_revalidates_current_inputs_and_output_path": True,
         },
         "note": (
             "Prompt checks apply only to the scanned snapshot. Rerun if the model, adapter, or dataset changes; job start validates current inputs independently and does not verify they match this snapshot. "
-            "Output-path and active compute-slot availability are not checked or reserved; prediction-job start validates the output and checks active jobs again."
+            "The destination name was unoccupied in the inspected parent at preflight time. This check does not verify write permission or reserve the path. Start rechecks the destination and refuses to overwrite an existing file."
         ),
     }
 

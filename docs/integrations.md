@@ -301,9 +301,16 @@ result and `actionability.status`; a clear result still requires showing the
 configuration and getting explicit user approval. Prompt results apply only
 to the scanned snapshot; rerun immediately before start if model, adapter, or
 dataset files change. Start validates current inputs independently and does
-not prove they match that snapshot. The plan does not load weights, run
-inference, write files, check whether the output exists, or reserve the compute
-slot. Start revalidates input/output and active compute.
+not prove they match that snapshot. The plan checks whether the output name is
+unoccupied in its workspace parent and reports `unoccupied`, `occupied`,
+`uninspectable`, or `not_checked` in `checks.output_destination.status`;
+`not_checked` means an earlier input check blocked before destination
+inspection. Occupied or uninspectable destinations block the plan. It does not
+verify write permission or reserve the path. Start rechecks the destination
+and active compute slot.
+If start rejects a destination that changed, choose a new path, rerun preflight,
+show the revised configuration, and obtain approval again. The plan does not
+load weights, run inference, or write files.
 
 `axiom_prediction_job_evaluate` accepts a completed job ID, reads the saved
 prediction/reference fields from that job, and verifies the artifact's
