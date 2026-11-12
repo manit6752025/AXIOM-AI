@@ -8,6 +8,7 @@ from mcp.server import MCPServer
 from axiom.core.hardware import detect_hardware
 from axiom.core.tool_permissions import ToolPermissionStore
 from axiom.daemon import local_summary
+from axiom.daemon_api import MAX_LISTED_FILES, list_workspace_files
 from axiom.datasets.cleaner import clean_jsonl
 from axiom.datasets.inspector import inspect_dataset
 from axiom.models.inspector import inspect_model
@@ -22,6 +23,7 @@ mcp = MCPServer(
         "AXIOM is an AI engineering platform. "
         "After the active AXIOM profile allows it, start with axiom_workspace_context "
         "for a bounded local workspace briefing. "
+        "Use axiom_workspace_assets to find local model and dataset paths when allowed. "
         "Use AXIOM tools to inspect models, inspect and clean datasets, "
         "inspect hardware, create training plans, and check optional "
         "AI runtime integrations. MCP tool access is denied by default and must "
@@ -108,6 +110,44 @@ def axiom_workspace_context() -> dict:
             "hardware_detection": (
                 "Local detection may query nvidia-smi when available."
             ),
+        },
+    }
+
+
+@mcp.tool()
+def axiom_workspace_assets() -> dict:
+    """List bounded workspace-relative model and JSONL paths without reading file contents."""
+    ToolPermissionStore().require("axiom_workspace_assets")
+    model_listing = list_workspace_files("models")
+    dataset_listing = list_workspace_files("datasets")
+    models = model_listing["items"]
+    datasets = dataset_listing["items"]
+
+    return {
+        "schema_version": 1,
+        "model_directories": models,
+        "jsonl_datasets": datasets,
+        "max_results_per_category": MAX_LISTED_FILES,
+        "result_limit_reached": {
+            "models": model_listing["result_limit_reached"],
+            "datasets": dataset_listing["result_limit_reached"],
+        },
+        "scan_truncated": {
+            "models": model_listing["scan_truncated"],
+            "datasets": dataset_listing["scan_truncated"],
+        },
+        "may_be_truncated": {
+            "models": model_listing["result_limit_reached"]
+            or model_listing["scan_truncated"],
+            "datasets": dataset_listing["result_limit_reached"]
+            or dataset_listing["scan_truncated"],
+        },
+        "scan_entry_limit_per_category": model_listing["scan_entry_limit"],
+        "scope": {
+            "read_only": True,
+            "file_contents_read": False,
+            "absolute_paths_returned": False,
+            "symlinked_entries_followed": False,
         },
     }
 

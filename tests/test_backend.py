@@ -47,6 +47,7 @@ def test_mcp_schema_and_all_handlers(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert tool_names == {
         "axiom_info",
         "axiom_workspace_context",
+        "axiom_workspace_assets",
         "axiom_model_list",
         "axiom_model_info",
         "axiom_dataset_inspect",

@@ -23,6 +23,19 @@ before running a suggested shell command. Hardware detection may query
 or access the network. Each MCP tool, including this one, remains denied until
 it is granted in the active AXIOM tool profile.
 
+The separately permissioned `axiom_workspace_assets` tool lists up to 200
+workspace-relative model directories and JSONL dataset paths, with a 50,000
+entry scan budget per category. The response distinguishes reaching the
+result cap from a truncated or incomplete scan. It does not read file contents
+or follow symlinked entries, and omits the absolute workspace path from its
+response.
+Both workspace tools use the MCP server process's working directory as the
+workspace root. Start the server from the target project or set the client's
+working-directory option where supported. Pass asset paths to
+`axiom_model_info` or `axiom_dataset_inspect` for details. MCP permissions are
+stored in `.axiom/tool_permissions.json` under that same root, so run
+`axiom mcp allow` from the project where the server will run.
+
 ### CLI
 
 AXIOM can also integrate with local agent binaries.

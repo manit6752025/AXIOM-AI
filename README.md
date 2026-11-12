@@ -443,11 +443,15 @@ axiom mcp allow axiom_workspace_context
 
 Agents can then call `axiom_workspace_context` before choosing more specific tools. It reports which AXIOM MCP tools the active profile permits. External developer-tool availability does not establish sign-in or credential status.
 
+`axiom_workspace_assets` locates workspace-relative model directories and JSONL datasets. It returns paths only, with up to 200 results per category and a 50,000-entry scan budget per category; its response separates result-limit and scan-truncation status. The context and asset tools use the MCP server's working directory as the workspace root; start the server from the target project, or set the client's working-directory option where supported. MCP permissions are stored under that workspace's `.axiom/` directory, so run the `axiom mcp allow` commands from the same project root. Pass returned paths to `axiom_model_info` or `axiom_dataset_inspect`.
+
 To let the agent use additional AXIOM tools, allow only the ones you need:
 
 ```bash
+axiom mcp allow axiom_workspace_assets
 axiom mcp allow axiom_system_info
 axiom mcp allow axiom_model_info
+axiom mcp allow axiom_dataset_inspect
 ```
 
 Point your MCP client at AXIOM:
@@ -475,6 +479,7 @@ axiom mcp profile use readonly
 | --- | --- |
 | `axiom_info` | AXIOM version and capabilities |
 | `axiom_workspace_context` | Read a privacy-bounded project, hardware, and developer-tool snapshot; command suggestions need user approval |
+| `axiom_workspace_assets` | Find model directories and JSONL datasets with bounded, workspace-relative path scans |
 | `axiom_system_info` | Detected hardware |
 | `axiom_model_list` | Registered models |
 | `axiom_model_info` | Inspect a local model folder |

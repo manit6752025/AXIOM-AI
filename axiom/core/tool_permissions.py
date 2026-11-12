@@ -15,6 +15,9 @@ TOOL_DESCRIPTIONS = {
         "Read bounded local project, hardware, and developer-tool context; "
         "suggestions are not executed."
     ),
+    "axiom_workspace_assets": (
+        "List workspace-relative model and JSONL paths without reading contents."
+    ),
     "axiom_model_list": "List locally registered models.",
     "axiom_model_info": "Inspect a local model path.",
     "axiom_dataset_inspect": "Inspect a local dataset.",
