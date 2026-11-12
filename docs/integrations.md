@@ -118,6 +118,14 @@ the user's explicit informed decision to proceed. Start the baseline and
 adapter jobs sequentially because they share AXIOM's local compute slot.
 Output paths are rechecked when each job starts.
 
+After both user-requested prediction jobs complete, use
+`axiom_training_job_prediction_compare` to verify that their saved model,
+adapter, dataset, and generation settings match the completed training job
+before reporting exact-match transitions. It reuses the existing training-
+status and prediction-comparison permissions and performs no inference or
+file writes. Exact matches are lexical and do not measure semantic quality or
+verify model/adapter contents.
+
 The permission-checked `axiom_training_job_start`,
 `axiom_training_job_status`, `axiom_training_job_wait`, and
 `axiom_training_job_cancel` tools expose the

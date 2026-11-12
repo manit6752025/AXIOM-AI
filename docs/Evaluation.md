@@ -116,6 +116,14 @@ separately:
 axiom mcp allow axiom_prediction_job_compare
 ```
 
+For a user-requested comparison tied to a completed LoRA job,
+`axiom_training_job_prediction_compare` verifies that the baseline used the
+job's saved base model, the candidate used that base with the saved adapter,
+and both jobs used the same dataset and generation settings. It then returns
+the bounded exact-match transitions above. It reuses the training-status and
+prediction-comparison permissions, runs no inference, writes no files, and
+does not verify model or adapter contents or measure semantic quality.
+
 Evaluations created from prediction jobs also persist bounded run provenance:
 the job ID, workspace-relative dataset/output/model/adapter references, field
 names, generation settings, completed row count, prompt-truncation count, and
