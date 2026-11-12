@@ -63,6 +63,7 @@ def test_mcp_schema_and_all_handlers(tmp_path: Path, monkeypatch: pytest.MonkeyP
         "axiom_prediction_job_evaluate",
         "axiom_prediction_job_examples",
         "axiom_prediction_job_preflight",
+        "axiom_prediction_job_validation_preflight",
         "axiom_prediction_job_start",
         "axiom_prediction_job_status",
         "axiom_prediction_job_wait",
