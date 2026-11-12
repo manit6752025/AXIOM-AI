@@ -63,6 +63,27 @@ supports LoRA, not QLoRA, and the generic planner may suggest a QLoRA fallback.
 Hardware status `warn` means only the generic estimate predicts a fit; actual
 loading was not tested. The estimate also cannot verify Apple MPS or CPU fit.
 
+The separately permissioned `axiom_training_job_start`,
+`axiom_training_job_status`, and `axiom_training_job_cancel` tools expose the
+existing local LoRA trainer to agents. Start accepts workspace-relative model
+and JSONL paths plus an adapter destination below an existing `outputs/`
+directory. It creates a local job record and launches training, which consumes
+compute and later writes adapter files; it does not download models or execute
+remote code. It retains the trainer's dataset/step limits and single-active-job
+lock. Model directories with symbolic links or junctions are rejected. MCP job
+responses include workspace-relative paths and selected progress/result fields;
+local logs, absolute paths, and detailed failure text are omitted. Cancellation
+is cooperative at training boundaries and remains available until adapter
+finalization begins. The server instructions ask agents to run preflight, show
+the exact configuration, and wait for an explicit user request before starting;
+granting start permission itself gives the agent standing capability.
+
+```bash
+axiom mcp allow axiom_training_job_start
+axiom mcp allow axiom_training_job_status
+axiom mcp allow axiom_training_job_cancel
+```
+
 The separately permissioned `axiom_dataset_clean_preview` reports bounded
 keep/remove counts and a proposed output path for a workspace-relative JSONL
 file. It returns no row values and writes no file. A partial scan includes its
@@ -115,7 +136,8 @@ Future versions can expose agent-to-agent capabilities for systems that support 
 
 ## Philosophy
 
-AXIOM should make local AI preflight work legible.
+AXIOM should make local AI work legible and give agents bounded access to
+supported local operations.
 
 External agents decide:
 
@@ -128,10 +150,15 @@ AXIOM currently handles:
 - model metadata and local model inspection;
 - JSONL dataset inspection, validation, statistics, and cleaning;
 - hardware detection and conservative training-plan estimates;
+- opt-in local LoRA training jobs with status and cooperative cancellation;
+- bounded offline evaluation and supported local inference;
 - local project state and developer-tool discovery.
 
-External runtimes handle training, evaluation, inference, and deployment. AXIOM
-does not claim that a plan ran or that a detected tool is authenticated.
+External runtimes still decide what the user wants, which tools to call, and
+how to communicate. Work outside AXIOM's supported local operations—such as
+hosted model training or deployment—remains with those runtimes. A training
+plan does not mean a job ran, offline lexical metrics do not establish semantic
+quality, and discovered developer tools are not evidence of authentication.
 
 ## Optional Headroom proxy
 

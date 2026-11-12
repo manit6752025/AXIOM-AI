@@ -9,12 +9,24 @@ from pathlib import Path
 from mcp.server import MCPServer
 
 from axiom.core.hardware import detect_hardware
+from axiom.core.fine_tuning import (
+    ActiveFineTuningJobError,
+    FineTuningError,
+    cancel_finetuning_job,
+    get_job,
+    list_jobs,
+    start_finetuning_job,
+)
 from axiom.core.mcp_paths import (
     open_mcp_workspace_file,
     open_mcp_workspace_output_parent,
 )
 from axiom.core.tool_permissions import ToolPermissionStore
-from axiom.core.training_preflight import run_training_preflight
+from axiom.core.training_preflight import (
+    resolve_workspace_input,
+    resolve_workspace_output,
+    run_training_preflight,
+)
 from axiom.daemon import local_summary
 from axiom.daemon_api import MAX_LISTED_FILES, list_workspace_files
 from axiom.datasets.cleaner import clean_jsonl
@@ -50,6 +62,9 @@ mcp = MCPServer(
         "Use axiom_dataset_inspect for bounded JSONL structure and schema checks. "
         "Sensitive field-name heuristics are included; content PII pattern scanning requires explicit opt-in. "
         "Use axiom_training_preflight for bounded, non-executing checks before local LoRA training. "
+        "Run preflight and show the exact configuration before calling axiom_training_job_start; "
+        "call it only after the user explicitly requests that run. It uses compute and writes an adapter under outputs/. "
+        "Use the separate status/cancel tools to manage the job. "
         "Use AXIOM tools to inspect models, datasets, and hardware; preview dataset cleaning "
         "and show the counts and proposed output path before writing a new copy. "
         "Re-preview immediately before cleaning because previews are advisory. "
@@ -454,6 +469,208 @@ def axiom_training_preflight(
     """Check local LoRA prerequisites without loading weights or starting a job."""
     ToolPermissionStore().require("axiom_training_preflight")
     return run_training_preflight(model_path, dataset_path, text_field)
+
+
+def _training_workspace_root() -> Path:
+    try:
+        return Path.cwd().resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise ValueError("The MCP workspace could not be resolved safely.") from None
+
+
+def _training_job_matches_workspace(job: dict, root: Path) -> bool:
+    config = job.get("config")
+    if not isinstance(config, dict):
+        return False
+    for key in ("model_path", "dataset_path", "output_dir"):
+        raw = config.get(key)
+        if not isinstance(raw, str) or not raw:
+            return False
+        try:
+            path = Path(raw).resolve(strict=False)
+        except (OSError, RuntimeError):
+            return False
+        if not path.is_relative_to(root):
+            return False
+    return True
+
+
+def _training_job_summary(job: dict, root: Path) -> dict:
+    config = job.get("config") or {}
+    relative_paths = {}
+    for key in ("model_path", "dataset_path", "output_dir"):
+        resolved = Path(config[key]).resolve(strict=False)
+        try:
+            relative_paths[key] = resolved.relative_to(root).as_posix()
+        except ValueError:
+            raise ValueError("Saved training job paths no longer belong to this workspace.") from None
+
+    result = job.get("result")
+    safe_result = None
+    if isinstance(result, dict):
+        safe_result = {
+            "dataset_rows": result.get("dataset_rows"),
+            "max_steps": result.get("max_steps"),
+            "device": result.get("device"),
+            "engine": result.get("engine"),
+            "target_modules": result.get("target_modules", []),
+            "trainable_parameters": result.get("trainable_parameters"),
+            "adapter_files": [Path(value).name for value in result.get("adapter_files", []) if isinstance(value, str)],
+        }
+    status = job.get("status")
+    return {
+        "schema_version": 1,
+        "id": job.get("id"),
+        "status": status,
+        "created_at": job.get("created_at"),
+        "updated_at": job.get("updated_at"),
+        "started_at": job.get("started_at"),
+        "finished_at": job.get("finished_at"),
+        "cancel_requested": bool(job.get("cancel_requested", False)),
+        "config": {
+            **relative_paths,
+            "text_field": config.get("text_field"),
+            "max_steps": config.get("max_steps"),
+            "sequence_length": config.get("sequence_length"),
+            "learning_rate": config.get("learning_rate"),
+            "lora_rank": config.get("lora_rank"),
+        },
+        "completed_steps": job.get("completed_steps", 0),
+        "loss": job.get("loss"),
+        "result": safe_result,
+        "error": (
+            "Training failed; inspect the job in AXIOM for local details."
+            if status == "failed"
+            else None
+        ),
+    }
+
+
+def _training_job_scope() -> dict:
+    return {
+        "dataset_values_returned": False,
+        "logs_returned": False,
+        "absolute_paths_returned": False,
+        "network_accessed": False,
+    }
+
+
+@mcp.tool()
+def axiom_training_job_start(
+    model_path: str,
+    dataset_path: str,
+    output_dir: str,
+    text_field: str = "text",
+    max_steps: int = 20,
+    sequence_length: int = 512,
+    learning_rate: float = 0.0001,
+    lora_rank: int = 8,
+) -> dict:
+    """Start a bounded local LoRA job using workspace inputs and an outputs/ destination."""
+    ToolPermissionStore().require("axiom_training_job_start")
+    root = _training_workspace_root()
+    try:
+        model_target = resolve_workspace_input(model_path, root, "Model path")
+        dataset_target = resolve_workspace_input(dataset_path, root, "Dataset path")
+        output_target = resolve_workspace_output(output_dir, root)
+        if not model_target.is_dir():
+            raise ValueError("Model path must refer to a local model directory.")
+        if not dataset_target.is_file() or dataset_target.suffix.lower() != ".jsonl":
+            raise ValueError("Dataset path must refer to a workspace .jsonl file.")
+        created = start_finetuning_job({
+            "model_path": str(model_target),
+            "dataset_path": str(dataset_target),
+            "output_dir": str(output_target),
+            "text_field": text_field,
+            "max_steps": max_steps,
+            "sequence_length": sequence_length,
+            "learning_rate": learning_rate,
+            "lora_rank": lora_rank,
+        }, workspace_guard={
+            "root": str(root),
+            "paths": {
+                "model_path": model_path,
+                "dataset_path": dataset_path,
+                "output_dir": output_dir,
+            },
+        })
+    except ActiveFineTuningJobError:
+        return {"error": "Another local fine-tuning job is active; inspect its status before starting a new job."}
+    except (FineTuningError, OSError, RuntimeError, ValueError):
+        return {"error": "The local training job could not be started; check the workspace paths, dataset, and training runtime."}
+    return {
+        "job": _training_job_summary(created, root),
+        "scope": {
+            **_training_job_scope(),
+            "job_created": True,
+            "job_record_written_locally": True,
+            "adapter_written": created.get("status") == "completed",
+            "network_accessed": False,
+            "model_downloaded": False,
+            "remote_code_executed": False,
+            "adapter_destination_under": "outputs/",
+            "max_steps": 1000,
+            "cancellation_available_until": "adapter finalization begins",
+        },
+    }
+
+
+@mcp.tool()
+def axiom_training_job_status(job_id: str | None = None, limit: int = 10) -> dict:
+    """Read safe local LoRA job summaries for this workspace."""
+    ToolPermissionStore().require("axiom_training_job_status")
+    root = _training_workspace_root()
+    if job_id is not None:
+        try:
+            job = get_job(job_id)
+        except (FineTuningError, ValueError):
+            job = None
+        if job is None or not _training_job_matches_workspace(job, root):
+            return {"jobs": [], "not_found": True, "scope": _training_job_scope()}
+        return {"jobs": [_training_job_summary(job, root)], "scope": _training_job_scope()}
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 25:
+        raise ValueError("Job list limit must be between 1 and 25.")
+    jobs = list_jobs(limit=limit, workspace_root=root)
+    jobs = [job for job in jobs if _training_job_matches_workspace(job, root)]
+    return {"jobs": [_training_job_summary(job, root) for job in jobs], "scope": _training_job_scope()}
+
+
+@mcp.tool()
+def axiom_training_job_cancel(job_id: str) -> dict:
+    """Request safe-boundary cancellation for a local LoRA job in this workspace."""
+    ToolPermissionStore().require("axiom_training_job_cancel")
+    root = _training_workspace_root()
+    try:
+        existing = get_job(job_id)
+    except (FineTuningError, ValueError):
+        existing = None
+    if existing is None or not _training_job_matches_workspace(existing, root):
+        return {"job": None, "not_found": True, "scope": _training_job_scope()}
+    try:
+        job = cancel_finetuning_job(job_id)
+    except (FineTuningError, ValueError):
+        job = None
+    if job is None or not _training_job_matches_workspace(job, root):
+        return {"job": None, "not_found": True, "scope": _training_job_scope()}
+    status = job.get("status")
+    if status in {"queued", "running", "cancelling"}:
+        note = "Cancellation is cooperative and completes at the next safe training boundary."
+    elif status == "finalizing":
+        note = "Adapter finalization has started; cancellation is no longer available."
+    elif status == "cancelled":
+        note = "The job has already been cancelled."
+    elif status == "completed":
+        note = "The job completed before this cancellation request."
+    elif status == "failed":
+        note = "The job failed before this cancellation request."
+    else:
+        note = "Cancellation is unavailable for the current job state."
+    return {
+        "job": _training_job_summary(job, root),
+        "scope": _training_job_scope(),
+        "cancellation_accepted": status in {"queued", "running", "cancelling"},
+        "note": note,
+    }
 
 
 @mcp.tool()

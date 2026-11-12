@@ -453,6 +453,16 @@ Agents can then call `axiom_workspace_context` before choosing more specific too
 axiom mcp allow axiom_training_preflight
 ```
 
+`axiom_training_job_start`, `axiom_training_job_status`, and `axiom_training_job_cancel` expose AXIOM's existing local LoRA trainer to agents. Start accepts workspace-relative model and JSONL paths, writes adapter output only under an existing `outputs/` directory, supports up to 1,000 steps, never downloads weights or executes remote code, and is serialized by AXIOM's single-job lock. The start tool creates a local job record and launches training; the adapter is written later when training finishes. It consumes local compute and writes model artifacts, so each tool is default-deny and has its own permission. The server instructions tell agents to run preflight, show the exact configuration, and wait for an explicit user request before starting that run. Tool permission itself grants standing capability. Status returns workspace-relative paths and omits local logs and detailed failure strings. Cancellation stops at the next safe training boundary; once `finalizing` begins, the adapter is saved and cancellation is no longer accepted.
+
+Grant these capabilities only when needed:
+
+```bash
+axiom mcp allow axiom_training_job_start
+axiom mcp allow axiom_training_job_status
+axiom mcp allow axiom_training_job_cancel
+```
+
 `axiom_dataset_clean_preview` reports bounded keep/remove counts and a proposed output path before cleanup. It accepts workspace-relative `.jsonl` paths, returns no row values, and never writes files. When `truncated` is true, counts describe only the scanned portion; overlong rows are unclassified because the cleaner may still keep them. CR-only line endings and invalid UTF-8 produce warnings when preview decisions may differ from cleaner behavior. The preview is advisory because the source can change between calls, so re-preview immediately before writing. `axiom_dataset_clean` is a separate write permission: it repeats the preview, refuses partial or mismatched previews, and enforces the same byte, row, and line limits while writing. It only accepts workspace-relative paths, writes a new output file, and refuses to overwrite an existing destination. The output parent directory must already exist. Review the preview counts and destination with the user before calling the write tool. Grant preview and writing separately:
 
 ```bash
@@ -503,6 +513,9 @@ axiom mcp profile use readonly
 | `axiom_workspace_context` | Read a privacy-bounded project, hardware, and developer-tool snapshot; command suggestions need user approval |
 | `axiom_workspace_assets` | Find model directories and JSONL datasets with bounded, workspace-relative path scans |
 | `axiom_training_preflight` | Check local LoRA inputs and estimates without loading weights or starting a job |
+| `axiom_training_job_start` | Start a user-requested bounded local LoRA job; writes adapter output under `outputs/` |
+| `axiom_training_job_status` | Read workspace-scoped local LoRA job progress without logs or absolute paths |
+| `axiom_training_job_cancel` | Request cancellation before adapter finalization |
 | `axiom_system_info` | Detected hardware |
 | `axiom_model_list` | Registered models |
 | `axiom_model_info` | Inspect a local model folder |

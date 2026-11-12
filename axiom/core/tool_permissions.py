@@ -21,6 +21,15 @@ TOOL_DESCRIPTIONS = {
     "axiom_training_preflight": (
         "Check local LoRA inputs and estimates without loading weights or starting a job."
     ),
+    "axiom_training_job_start": (
+        "Start a local LoRA training job from workspace assets; consumes compute and writes an adapter under outputs/."
+    ),
+    "axiom_training_job_status": (
+        "Read local LoRA job progress and safe workspace-relative summaries."
+    ),
+    "axiom_training_job_cancel": (
+        "Request cooperative cancellation before adapter finalization for a local LoRA job."
+    ),
     "axiom_model_list": "List locally registered models.",
     "axiom_model_info": "Inspect a local model path.",
     "axiom_dataset_inspect": (

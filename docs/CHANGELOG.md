@@ -31,6 +31,7 @@
 ## Unreleased — latest/development
 
 ### Added
+- Add separate default-deny MCP start/status/cancel tools for local LoRA jobs, workspace-scoped redacted job summaries, cooperative cancellation through training boundaries, and a finalization state shared by the API and Control Center.
 - Add native LoRA adapter compatibility preflight to the Runtime GUI and API: inspect target modules and tensor shapes without loading full base weights, and report CPU/CUDA/ROCm/MPS availability separately.
 - Added cooperative cancellation for native inference streams: browser disconnects are monitored asynchronously, cancellation reaches the AXIOM decoder, and tests cover cancellation before prompt prefill and between tokens.
 - Added explicit workspace-root resolution with environment override and nearest-project discovery, plus bounded read-only workspace diagnostics and safe support bundles exposed through CLI and API.
