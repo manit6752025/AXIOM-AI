@@ -43,7 +43,7 @@ _MAX_RETAINED_JOBS = 50
 _MAX_EVALUATION_LINKS_PER_JOB = 20
 _FIELD_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,159}$")
 _JOB_ID = re.compile(r"^[0-9a-f]{32}$")
-_TEMP_NAME = re.compile(r"^\.axiom-prediction-(\d+)-([0-9a-f]{32})\.tmp$")
+_TEMP_NAME = re.compile(r"^\.axiom-prediction-(\d+)-([0-9a-f]{32})(?:-([0-9a-f]{32}))?\.tmp$")
 
 _JOBS_LOCK = threading.RLock()
 _JOBS: dict[str, dict[str, Any]] = {}
@@ -351,8 +351,9 @@ def _reserve_output_temp(
     output_path: Path,
     parent_fd: int | None,
     output_name: str,
+    job_id: str,
 ) -> tuple[int, str, Path | None, tuple[int, int]]:
-    temp_name = f".axiom-prediction-{uuid.uuid4().hex}.tmp"
+    temp_name = f".axiom-prediction-{os.getpid()}-{job_id}-{uuid.uuid4().hex}.tmp"
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     if parent_fd is not None:
         descriptor = os.open(temp_name, flags, 0o600, dir_fd=parent_fd)
@@ -622,6 +623,7 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
             destination,
             parent_fd,
             output_name,
+            job_id,
         )
         output_stream = os.fdopen(output_descriptor, "wb")
         output_descriptor = None
