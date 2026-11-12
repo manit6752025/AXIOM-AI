@@ -1,7 +1,7 @@
 # AXIOM Roadmap
 
 <!-- AXIOM-ROADMAP-UPDATE:START -->
-## Product roadmap — 120 scoped deliverables
+## Product roadmap — 140 scoped deliverables
 
 This backlog expands the ten original priorities into concrete, reviewable
 deliverables. Preserve the existing Control Center navigation, visual language,
@@ -159,6 +159,29 @@ feature exists or a delivery-date promise.
 - [R119 · Planned] Add migration/rollback notes for every persisted-data schema change.
 - [R120 · Planned] Add end-to-end acceptance coverage for each shipped workflow.
 
+### 11 · Applied AI workflows and knowledge infrastructure
+
+- [R121 · Planned] Add reproducible hardware-specific benchmark profiles with environment and provenance records.
+- [R122 · Planned] Add versioned Prompt Studio templates with typed variables, validation, and revision history.
+- [R123 · Planned] Add JSON Schema-constrained local inference with safe schema validation and bounded outputs.
+- [R124 · Planned] Add a local embeddings engine abstraction with bounded batch and chunk processing.
+- [R125 · Planned] Add local reranking adapters with deterministic score and ranking contracts.
+- [R126 · Planned] Add workspace-scoped knowledge bases and safe document ingestion.
+- [R127 · Planned] Add hybrid retrieval with chunking, metadata filters, source citations, and bounded search.
+- [R128 · Planned] Add opt-in local multimodal image understanding with explicit model and runtime capability checks.
+- [R129 · Planned] Add local speech-to-text and text-to-speech adapters with resource and privacy controls.
+- [R130 · Planned] Add versioned dataset snapshots with content hashes and immutable lineage.
+- [R131 · Planned] Add experiment comparison views and machine-readable statistical diffs.
+- [R132 · Planned] Add local model-serving profiles with validated resource limits and readiness probes.
+- [R133 · Planned] Add bounded, cancellable, resumable batch inference jobs with progress checkpoints.
+- [R134 · Planned] Add request admission queues with concurrency caps, backpressure, and cancellation.
+- [R135 · Planned] Add model provenance and security inspection with source, license, hash, and format evidence.
+- [R136 · Planned] Add software bill of materials generation and dependency vulnerability reports with export.
+- [R137 · Planned] Add versioned, default-deny plugin manifests and permission validation.
+- [R138 · Planned] Add workspace backup and restore with manifests, checksums, and safe path validation.
+- [R139 · Planned] Add opt-in resource sampling and history with clear, export, and retention controls.
+- [R140 · Planned] Publish stable Python and TypeScript SDKs verified against the supported API schema.
+
 ### Delivery gates
 
 An item is shipped only when its backend validation and security boundaries,
@@ -242,5 +265,5 @@ The release workflow packages separate macOS Apple Silicon (arm64) and Intel (x8
 
 The companion [Community and Adoption Strategy](docs/Community-and-Adoption-Strategy.md) proposes a workstream for public benchmark evidence, hardware-estimate calibration, integration quality, physical-hardware validation, user support, and external contribution.
 
-This is a proposal, not a delivery-status claim. It supplements the 120 scoped deliverables above without changing their IDs or marking unverified work as complete. Hardware validation must distinguish simulated CI coverage from measurements on physical NVIDIA, Apple Silicon, AMD, and CPU-only systems where those test environments are available. External repository metrics quoted in assessments must be checked against a current public snapshot before publication.
+This is a proposal, not a delivery-status claim. It supplements the 140 scoped deliverables above without changing their IDs or marking unverified work as complete. Hardware validation must distinguish simulated CI coverage from measurements on physical NVIDIA, Apple Silicon, AMD, and CPU-only systems where those test environments are available. External repository metrics quoted in assessments must be checked against a current public snapshot before publication.
 
