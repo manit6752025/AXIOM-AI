@@ -36,6 +36,15 @@ TOOL_DESCRIPTIONS = {
     "axiom_engine_generate": (
         "Run one user-requested bounded prompt through AXIOM's native local engine; returns generated text and uses local compute synchronously."
     ),
+    "axiom_prediction_job_start": (
+        "Run a user-requested bounded local prediction job over a JSONL dataset and write source rows plus generated predictions to a new artifact under data/."
+    ),
+    "axiom_prediction_job_status": (
+        "Read safe counts and workspace-relative paths for a local prediction job without prompts, predictions, or logs."
+    ),
+    "axiom_prediction_job_cancel": (
+        "Request cooperative cancellation of a local prediction job before its artifact is published."
+    ),
     "axiom_model_list": "List locally registered models.",
     "axiom_model_info": "Inspect a local model path.",
     "axiom_dataset_inspect": (

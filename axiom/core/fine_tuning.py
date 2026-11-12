@@ -492,7 +492,11 @@ def _pid_is_alive(pid: Any) -> bool:
         return False
 
 
-def _acquire_lock(job_id: str) -> None:
+def _acquire_lock(
+    job_id: str,
+    *,
+    conflict_message: str = "Another local fine-tuning job is active. Check `axiom train jobs` before starting another.",
+) -> None:
     lock = _lock_path()
     lock.parent.mkdir(parents=True, exist_ok=True)
     with _LOCAL_LOCK:
@@ -502,7 +506,7 @@ def _acquire_lock(job_id: str) -> None:
             except (OSError, json.JSONDecodeError):
                 current = {}
             if _pid_is_alive(current.get("pid")):
-                raise ActiveFineTuningJobError("Another local fine-tuning job is active. Check `axiom train jobs` before starting another.")
+                raise ActiveFineTuningJobError(conflict_message)
             try:
                 lock.unlink(missing_ok=True)
             except OSError:
@@ -511,7 +515,7 @@ def _acquire_lock(job_id: str) -> None:
         try:
             fd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError:
-            raise ActiveFineTuningJobError("Another local fine-tuning job is starting. Try again shortly.") from None
+            raise ActiveFineTuningJobError(conflict_message) from None
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(payload)
 
@@ -529,6 +533,23 @@ def _release_lock(job_id: str) -> None:
                 job_id,
                 exc_info=True,
             )
+
+
+def acquire_local_compute_job_lock(job_id: str) -> None:
+    """Reserve AXIOM's shared local fine-tuning/prediction-job slot."""
+    if not isinstance(job_id, str) or not re.fullmatch(r"[0-9a-f]{32}", job_id):
+        raise FineTuningError("Invalid local compute job ID.")
+    _acquire_lock(
+        job_id,
+        conflict_message="Another AXIOM local compute job is active; wait for it to finish before starting another.",
+    )
+
+
+def release_local_compute_job_lock(job_id: str) -> None:
+    """Release the shared local training/inference job slot."""
+    if not isinstance(job_id, str) or not re.fullmatch(r"[0-9a-f]{32}", job_id):
+        raise FineTuningError("Invalid local compute job ID.")
+    _release_lock(job_id)
 
 
 def _new_job(

@@ -24,7 +24,7 @@ AXIOM helps inspect local model files and dataset structure, report detected har
 ## What AXIOM does not claim
 
 - A workflow design or dry run is not a training job.
-- Evaluation scores precomputed predictions; it does not generate inference outputs.
+- Evaluation scoring stays offline; a separately permissioned MCP prediction job can generate a bounded artifact first.
 - Runtime discovery is not proof that a runtime is installed, configured, or connected.
 - Beta.4 does not introduce a hosted workspace or cloud inference service.
 - A tag alone does not prove that all release packages built or were published.

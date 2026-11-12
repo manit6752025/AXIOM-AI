@@ -30,7 +30,7 @@ Most AI projects fail early for boring reasons: the model does not fit, the data
 | --- | --- | --- |
 | Inspect model folders and Hugging Face repos | Fit estimates for your RAM and VRAM | LoRA and QLoRA fine-tuning |
 | Validate and clean JSONL datasets | Training plans you can save and compare | Local text generation with the AXIOM Engine or Ollama |
-| Diagnose your workspace | Agent-specific optimization profiles | Score predictions and gate regressions |
+| Diagnose your workspace | Agent-specific optimization profiles | Generate predictions, score them, and gate regressions |
 
 AXIOM is still in beta. Plans are estimates, and real results depend on your model, data, and hardware.
 
@@ -475,6 +475,14 @@ axiom mcp allow axiom_engine_preflight
 axiom mcp allow axiom_engine_generate
 ```
 
+`axiom_prediction_job_start`, `axiom_prediction_job_status`, and `axiom_prediction_job_cancel` connect local inference to offline evaluation. Start accepts a workspace-relative JSONL input under `data/`, a prompt field, a required string reference field, a trusted local model and optional adapter, and a new `data/NAME.jsonl` destination. It validates the complete input before launch and caps it at 100 rows, 48 MiB total, 768 KiB per line, and 8,000 characters per prompt; generation is limited to 64 tokens and 16,000 characters per row. Output is capped at 64 MiB total and 1 MiB per line. Generation accepts a temperature and optional seed. Original row fields are preserved and the selected prediction field is added or replaced. The result file is published atomically only after every row succeeds; cancellation and failure discard the partial file, and existing destinations are never overwritten. The completed artifact can be passed to `axiom_evaluation_run`. Job status contains counts and workspace-relative paths only; prompts, predictions, and logs are not returned. `prompts_truncated` counts rows where the native engine clipped input to fit the model context; review a nonzero count before evaluating the artifact. A safe `error_code` identifies failure stage without returning local exception details. Job state is held in memory and is cleared when the MCP process restarts. The job reserves AXIOM's shared local fine-tuning/prediction-job slot, uses local compute, and writes generated text into the requested artifact. When permitted, run `axiom_engine_preflight` first. Start is separately default-deny and the server instructions require showing the exact run configuration and output file, then receiving the user's explicit go-ahead:
+
+```bash
+axiom mcp allow axiom_prediction_job_start
+axiom mcp allow axiom_prediction_job_status
+axiom mcp allow axiom_prediction_job_cancel
+```
+
 `axiom_dataset_clean_preview` reports bounded keep/remove counts and a proposed output path before cleanup. It accepts workspace-relative `.jsonl` paths, returns no row values, and never writes files. When `truncated` is true, counts describe only the scanned portion; overlong rows are unclassified because the cleaner may still keep them. CR-only line endings and invalid UTF-8 produce warnings when preview decisions may differ from cleaner behavior. The preview is advisory because the source can change between calls, so re-preview immediately before writing. `axiom_dataset_clean` is a separate write permission: it repeats the preview, refuses partial or mismatched previews, and enforces the same byte, row, and line limits while writing. It only accepts workspace-relative paths, writes a new output file, and refuses to overwrite an existing destination. The output parent directory must already exist. Review the preview counts and destination with the user before calling the write tool. Grant preview and writing separately:
 
 ```bash
@@ -530,6 +538,9 @@ axiom mcp profile use readonly
 | `axiom_training_job_cancel` | Request cancellation before adapter finalization |
 | `axiom_engine_preflight` | Check local native model/adapter structure and advisory memory estimates without inference |
 | `axiom_engine_generate` | Run one bounded local native inference request and return generated text |
+| `axiom_prediction_job_start` | Generate a bounded evaluation-ready JSONL artifact with local inference |
+| `axiom_prediction_job_status` | Read prediction-job counts and safe workspace-relative paths |
+| `axiom_prediction_job_cancel` | Cancel prediction before artifact publication |
 | `axiom_system_info` | Detected hardware |
 | `axiom_model_list` | Registered models |
 | `axiom_model_info` | Inspect a local model folder |

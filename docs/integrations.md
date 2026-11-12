@@ -121,6 +121,44 @@ require an explicit user request before invocation.
 axiom mcp allow axiom_engine_generate
 ```
 
+The separately permissioned `axiom_prediction_job_start`,
+`axiom_prediction_job_status`, and `axiom_prediction_job_cancel` tools bridge
+local inference to the offline evaluator. Start accepts a JSONL input below
+`data/`, workspace-relative model and optional adapter paths, prompt/reference/
+prediction field names, and a new `data/NAME.jsonl` destination. It validates
+all input rows before launch, then caps work at 100 rows, 48 MiB total input,
+768 KiB per input line, 8,000 prompt characters per row, and 64 generated
+tokens per row. Generation accepts a temperature and optional seed. Output is
+capped at 64 MiB total, 1 MiB per line, and 16,000 prediction characters per
+row. Every source field is preserved and the selected prediction field is
+added or replaced. Output is written to a hidden temporary file and atomically
+published only after all rows complete; failure or cancellation discards
+partial output, and an existing destination is never overwritten. The
+completed artifact can be passed to `axiom_evaluation_run`.
+
+Start consumes local compute and writes generated text into that local
+artifact. When permitted, run `axiom_engine_preflight` first. Server
+instructions require showing the exact configuration and output file, then
+waiting for the user's explicit go-ahead before starting. Job status omits
+prompts, predictions, logs, and absolute paths. Job state is in memory, so an MCP process restart
+clears status; AXIOM removes orphaned partial artifacts on the next prediction
+job start. Prediction jobs share AXIOM's single local compute slot with
+fine-tuning. The `prompts_truncated` count signals that the native engine
+clipped one or more prompts to fit model context; review a nonzero count before
+using the artifact for evaluation. Safe `error_code` values identify failure
+stages without exposing local exception text. Descriptor-relative platforms
+pin and recheck the output parent before and after publication. On platforms
+without those filesystem operations, path checks still reject static traversal
+and links, but cannot prevent another local process from moving the parent
+directory during publication. Each operation has its own default-deny
+permission:
+
+```bash
+axiom mcp allow axiom_prediction_job_start
+axiom mcp allow axiom_prediction_job_status
+axiom mcp allow axiom_prediction_job_cancel
+```
+
 The separately permissioned `axiom_dataset_clean_preview` reports bounded
 keep/remove counts and a proposed output path for a workspace-relative JSONL
 file. It returns no row values and writes no file. A partial scan includes its

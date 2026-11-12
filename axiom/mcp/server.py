@@ -32,6 +32,11 @@ from axiom.core.mcp_paths import (
     open_mcp_workspace_file,
     open_mcp_workspace_output_parent,
 )
+from axiom.core.prediction_jobs import (
+    cancel_prediction_job,
+    get_prediction_job,
+    start_prediction_job,
+)
 from axiom.core.tool_permissions import ToolPermissionStore
 from axiom.core.training_preflight import (
     resolve_workspace_input,
@@ -82,6 +87,9 @@ mcp = MCPServer(
         "Use the separate status/cancel tools to manage the job. "
         "For local inference, use axiom_engine_generate only after the user requests a response; "
         "it runs one bounded prompt locally and AXIOM does not store the prompt or response. The MCP host may retain its tool transcript. "
+        "For a dataset-to-evaluation workflow, when allowed, use axiom_engine_preflight before axiom_prediction_job_start. "
+        "Before starting, show the model, input/output paths, fields, and generation limits, disclose that the new local JSONL artifact preserves the source rows and adds generated predictions, and wait for the user's explicit go-ahead. "
+        "Use axiom_prediction_job_status and axiom_prediction_job_cancel to manage that cancellable job; only a completed artifact is published. "
         "Use AXIOM tools to inspect models, datasets, and hardware; preview dataset cleaning "
         "and show the counts and proposed output path before writing a new copy. "
         "Re-preview immediately before cleaning because previews are advisory. "
@@ -201,6 +209,8 @@ def axiom_info() -> dict:
             "datasets",
             "hardware",
             "training_planning",
+            "local_native_inference",
+            "cancellable_prediction_jobs",
             "offline_evaluation",
             "supercompress",
             "mcp",
@@ -1039,6 +1049,120 @@ def axiom_engine_preflight(
             "device kernels, free memory, and output quality remain unverified."
         ),
     }
+@mcp.tool()
+def axiom_prediction_job_start(
+    model_path: str,
+    dataset_path: str,
+    output_path: str,
+    prompt_field: str = "prompt",
+    reference_field: str = "reference",
+    prediction_field: str = "prediction",
+    adapter_path: str | None = None,
+    max_new_tokens: int = 64,
+    temperature: float = 0.7,
+    seed: int | None = None,
+    device: str = "auto",
+    precision: str = "auto",
+) -> dict:
+    """Write a bounded evaluation artifact preserving source rows and adding local predictions."""
+    ToolPermissionStore().require("axiom_prediction_job_start")
+    root = _mcp_workspace_root()
+    try:
+        job = start_prediction_job(
+            root,
+            model_path=model_path,
+            adapter_path=adapter_path,
+            dataset_path=dataset_path,
+            prompt_field=prompt_field,
+            reference_field=reference_field,
+            prediction_field=prediction_field,
+            output_path=output_path,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            seed=seed,
+            device=device,
+            precision=precision,
+        )
+    except (AxiomEngineError, FineTuningError, OSError, RuntimeError, ValueError) as exc:
+        return {
+            "error": _safe_preflight_reason(str(exc), known_paths=(str(root),)),
+            "job_created": False,
+        }
+    return {
+        "job": job,
+        "configuration": {
+            "model_path": model_path,
+            "adapter_path": adapter_path,
+            "dataset_path": dataset_path,
+            "output_path": output_path,
+            "prompt_field": prompt_field,
+            "reference_field": reference_field,
+            "prediction_field": prediction_field,
+            "max_new_tokens": max_new_tokens,
+            "temperature": float(temperature),
+            "seed": seed,
+            "device": device,
+            "precision": precision,
+        },
+        "limits": {
+            "rows": 100,
+            "input_bytes": 48 * 1024 * 1024,
+            "input_line_bytes": 768 * 1024,
+            "prompt_characters": 8000,
+            "generated_tokens_per_row": 64,
+            "prediction_characters_per_row": 16000,
+            "output_bytes": 64 * 1024 * 1024,
+            "output_line_bytes": 1024 * 1024,
+            "output_published_only_after_full_completion": True,
+        },
+        "scope": {
+            "network_accessed": False,
+            "model_downloaded": False,
+            "generated_text_written_to_local_artifact": True,
+            "source_dataset_rows_preserved_in_artifact": True,
+            "prompts_returned": False,
+            "predictions_returned": False,
+            "logs_returned": False,
+            "absolute_paths_returned": False,
+            "job_state_memory_only": True,
+            "server_restart_clears_job_state": True,
+        },
+    }
+
+
+@mcp.tool()
+def axiom_prediction_job_status(job_id: str) -> dict:
+    """Read counts and workspace-relative paths for one prediction job."""
+    ToolPermissionStore().require("axiom_prediction_job_status")
+    root = _mcp_workspace_root()
+    job = get_prediction_job(job_id, root)
+    return {
+        "job": job,
+        "not_found": job is None,
+        "scope": {
+            "prompts_returned": False,
+            "predictions_returned": False,
+            "logs_returned": False,
+            "absolute_paths_returned": False,
+        },
+    }
+
+
+@mcp.tool()
+def axiom_prediction_job_cancel(job_id: str) -> dict:
+    """Request cooperative cancellation of one local prediction job."""
+    ToolPermissionStore().require("axiom_prediction_job_cancel")
+    root = _mcp_workspace_root()
+    result = cancel_prediction_job(job_id, root)
+    if result is None:
+        return {
+            "job": None,
+            "not_found": True,
+            "cancellation_accepted": False,
+        }
+    return result
+
+
 @mcp.tool()
 def axiom_training_job_start(
     model_path: str,
