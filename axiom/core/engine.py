@@ -96,6 +96,111 @@ def _native_generation_token_budget(
     return context_cap, effective_max_new_tokens, input_limit
 
 
+def _template_value_size_bound(value: Any, *, depth: int = 0, quoted: bool = False) -> int:
+    """Bound rendered size before Jinja stringifies a value or collection."""
+    if depth > 8:
+        return _MAX_RENDERED_PROMPT_CHARS + 1
+    if isinstance(value, str):
+        size = len(value) * (10 if quoted else 1) + (2 if quoted else 0)
+        return min(size, _MAX_RENDERED_PROMPT_CHARS + 1)
+    if isinstance(value, bytes):
+        size = len(value) * 4 + (3 if quoted else 0)
+        return min(size, _MAX_RENDERED_PROMPT_CHARS + 1)
+    if isinstance(value, (list, tuple)):
+        if len(value) > _MAX_TEMPLATE_ITER_ITEMS:
+            return _MAX_RENDERED_PROMPT_CHARS + 1
+        size = 2
+        for item in value:
+            size += _template_value_size_bound(item, depth=depth + 1, quoted=True) + 2
+            if size > _MAX_RENDERED_PROMPT_CHARS:
+                return _MAX_RENDERED_PROMPT_CHARS + 1
+        if isinstance(value, tuple) and len(value) == 1:
+            size += 1
+        return size
+    if isinstance(value, dict):
+        if len(value) > _MAX_TEMPLATE_ITER_ITEMS:
+            return _MAX_RENDERED_PROMPT_CHARS + 1
+        size = 2
+        for key, item in value.items():
+            size += (
+                _template_value_size_bound(key, depth=depth + 1, quoted=True)
+                + _template_value_size_bound(item, depth=depth + 1, quoted=True)
+                + 4
+            )
+            if size > _MAX_RENDERED_PROMPT_CHARS:
+                return _MAX_RENDERED_PROMPT_CHARS + 1
+        return size
+    if value is None or isinstance(value, (bool, int, float)):
+        if isinstance(value, int) and value.bit_length() > 4_096:
+            return _MAX_RENDERED_PROMPT_CHARS + 1
+        return len(str(value))
+    if type(value).__name__ == "Undefined":
+        return 0
+    return _MAX_RENDERED_PROMPT_CHARS + 1
+
+
+def _template_json_size_bound(value: Any, *, depth: int = 0) -> int:
+    """Bound JSON serialization size for the small value set exposed to templates."""
+    if depth > 8:
+        return _MAX_RENDERED_PROMPT_CHARS + 1
+    if isinstance(value, str):
+        return min(6 * len(value) + 2, _MAX_RENDERED_PROMPT_CHARS + 1)
+    if isinstance(value, (list, tuple)):
+        if len(value) > _MAX_TEMPLATE_ITER_ITEMS:
+            return _MAX_RENDERED_PROMPT_CHARS + 1
+        size = 2
+        for item in value:
+            size += _template_json_size_bound(item, depth=depth + 1) + 1
+            if size > _MAX_RENDERED_PROMPT_CHARS:
+                return _MAX_RENDERED_PROMPT_CHARS + 1
+        return size
+    if isinstance(value, dict):
+        if len(value) > _MAX_TEMPLATE_ITER_ITEMS:
+            return _MAX_RENDERED_PROMPT_CHARS + 1
+        size = 2
+        for key, item in value.items():
+            if isinstance(key, str):
+                key_size = _template_json_size_bound(key, depth=depth + 1)
+            elif key is None or isinstance(key, (bool, int, float)):
+                key_size = _template_json_size_bound(str(key), depth=depth + 1)
+            else:
+                return _MAX_RENDERED_PROMPT_CHARS + 1
+            size += (
+                key_size
+                + _template_json_size_bound(item, depth=depth + 1)
+                + 2
+            )
+            if size > _MAX_RENDERED_PROMPT_CHARS:
+                return _MAX_RENDERED_PROMPT_CHARS + 1
+        return size
+    if value is None or isinstance(value, (bool, int, float)):
+        if isinstance(value, int) and value.bit_length() > 4_096:
+            return _MAX_RENDERED_PROMPT_CHARS + 1
+        return len(str(value))
+    return _MAX_RENDERED_PROMPT_CHARS + 1
+
+
+def _template_percent_format_size_bound(format_string: str, argument_bound: int) -> int:
+    """Estimate a printf-style formatted string before creating its result."""
+    projected = len(format_string)
+    for match in _TEMPLATE_FORMAT_WIDTH_RE.finditer(format_string):
+        width_bound = 0
+        precision_bound = 0
+        for key in ("width", "precision"):
+            limit = match.group(key)
+            if limit == "*" or (limit and int(limit) > _MAX_RENDERED_PROMPT_CHARS):
+                return _MAX_RENDERED_PROMPT_CHARS + 1
+            if limit and key == "width":
+                width_bound = int(limit)
+            if limit and key == "precision":
+                precision_bound = int(limit)
+        field_bound = max(width_bound, precision_bound, argument_bound) + 16
+        projected += field_bound - len(match.group(0))
+        if projected > _MAX_RENDERED_PROMPT_CHARS:
+            return projected
+    return projected
+
+
 def _device_capability_rows(torch_module: Any | None = None) -> list[dict[str, Any]]:
     """Return observed PyTorch devices without assuming a GPU exists."""
     try:
@@ -1655,6 +1760,7 @@ def _format_prompt_for_native_model(
         try:
             from jinja2 import nodes
             from jinja2.sandbox import SandboxedEnvironment
+            from markupsafe import Markup
         except ImportError:
             if model_type in {"qwen2", "qwen3"}:
                 fallback_messages = chat_messages or [{"role": "user", "content": prompt}]
@@ -1723,23 +1829,38 @@ def _format_prompt_for_native_model(
                     if max(left.bit_length(), right.bit_length()) >= 4_096:
                         raise ValueError("chat-template integer expansion exceeds AXIOM's bit limit")
                 if operator == "%" and isinstance(left, str):
-                    for match in _TEMPLATE_FORMAT_WIDTH_RE.finditer(left):
-                        for key in ("width", "precision"):
-                            limit = match.group(key)
-                            if limit == "*" or (limit and int(limit) > _MAX_RENDERED_PROMPT_CHARS):
-                                raise ValueError("chat-template format expansion exceeds AXIOM's output limit")
+                    if _template_value_size_bound(right) > _MAX_RENDERED_PROMPT_CHARS:
+                        raise ValueError("chat-template format input exceeds AXIOM's output limit")
+                    if _template_percent_format_size_bound(
+                        left,
+                        _template_value_size_bound(right, quoted=True),
+                    ) > _MAX_RENDERED_PROMPT_CHARS:
+                        raise ValueError("chat-template format expansion exceeds AXIOM's output limit")
                 result = super().call_binop(context, operator, left, right)
                 if isinstance(result, str) and len(result) > _MAX_RENDERED_PROMPT_CHARS:
                     raise ValueError("chat-template string expansion exceeds AXIOM's output limit")
                 return result
 
         environment = BoundedTemplateEnvironment(autoescape=False, keep_trailing_newline=True)
+        def bounded_finalize(value: Any) -> Any:
+            if _template_value_size_bound(value) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template value exceeds AXIOM's rendered-prompt limit")
+            return value
+
+        environment.finalize = bounded_finalize
         original_format_filter = environment.filters["format"]
         original_center_filter = environment.filters["center"]
         original_indent_filter = environment.filters["indent"]
         original_urlencode_filter = environment.filters["urlencode"]
+        original_pprint_filter = environment.filters["pprint"]
+        original_wordwrap_filter = environment.filters["wordwrap"]
 
         def bounded_replace(value: Any, old: Any, new: Any, count: Any = None) -> Any:
+            if any(
+                _template_value_size_bound(item) > _MAX_RENDERED_PROMPT_CHARS
+                for item in (value, old, new)
+            ):
+                raise ValueError("chat-template replace input exceeds AXIOM's output limit")
             value_text, old_text, new_text = str(value), str(old), str(new)
             if isinstance(value_text, str):
                 replacements = len(value_text) + 1 if old_text == "" else value_text.count(old_text)
@@ -1758,18 +1879,28 @@ def _format_prompt_for_native_model(
             return result
 
         def bounded_format(value: Any, *args: Any, **kwargs: Any) -> Any:
+            if (
+                _template_value_size_bound(value) > _MAX_RENDERED_PROMPT_CHARS
+                or any(_template_value_size_bound(item) > _MAX_RENDERED_PROMPT_CHARS for item in args)
+                or any(_template_value_size_bound(item) > _MAX_RENDERED_PROMPT_CHARS for item in kwargs.values())
+            ):
+                raise ValueError("chat-template format input exceeds AXIOM's output limit")
             if isinstance(value, str):
-                for match in _TEMPLATE_FORMAT_WIDTH_RE.finditer(value):
-                    for key in ("width", "precision"):
-                        limit = match.group(key)
-                        if limit == "*" or (limit and int(limit) > _MAX_RENDERED_PROMPT_CHARS):
-                            raise ValueError("chat-template format expansion exceeds AXIOM's output limit")
+                argument_bound = sum(
+                    _template_value_size_bound(item, quoted=True) for item in args
+                ) + sum(
+                    _template_value_size_bound(item, quoted=True) for item in kwargs.values()
+                )
+                if _template_percent_format_size_bound(value, argument_bound) > _MAX_RENDERED_PROMPT_CHARS:
+                    raise ValueError("chat-template format expansion exceeds AXIOM's output limit")
             result = original_format_filter(value, *args, **kwargs)
             if isinstance(result, str) and len(result) > _MAX_RENDERED_PROMPT_CHARS:
                 raise ValueError("chat-template format expansion exceeds AXIOM's output limit")
             return result
 
         def bounded_center(value: Any, width: Any = 80) -> Any:
+            if _template_value_size_bound(value) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template center input exceeds AXIOM's output limit")
             if isinstance(width, int) and width > _MAX_RENDERED_PROMPT_CHARS:
                 raise ValueError("chat-template center expansion exceeds AXIOM's output limit")
             result = original_center_filter(value, width)
@@ -1778,6 +1909,8 @@ def _format_prompt_for_native_model(
             return result
 
         def bounded_indent(value: Any, width: Any = 4, first: bool = False, blank: bool = False) -> Any:
+            if _template_value_size_bound(value) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template indent input exceeds AXIOM's output limit")
             text = value if isinstance(value, str) else str(value)
             indent_width = len(width) if isinstance(width, str) else max(0, width) if isinstance(width, int) else 4
             if len(text) + (text.count("\n") + 1) * indent_width > _MAX_RENDERED_PROMPT_CHARS:
@@ -1785,6 +1918,10 @@ def _format_prompt_for_native_model(
             return original_indent_filter(text, width, first=first, blank=blank)
 
         def bounded_join(value: Any, separator: Any = "", attribute: Any = None) -> str:
+            if _template_value_size_bound(separator) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template join separator exceeds AXIOM's output limit")
+            if attribute is not None and _template_value_size_bound(attribute) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template join attribute exceeds AXIOM's output limit")
             separator_text = str(separator)
             parts: list[str] = []
             projected = 0
@@ -1803,6 +1940,8 @@ def _format_prompt_for_native_model(
                                 item = getattr(item, str(component))
                     except (AttributeError, IndexError, KeyError, TypeError):
                         item = ""
+                if _template_value_size_bound(item) > _MAX_RENDERED_PROMPT_CHARS:
+                    raise ValueError("chat-template join item exceeds AXIOM's output limit")
                 item_text = item if isinstance(item, str) else str(item)
                 projected += len(item_text) + (len(separator_text) if parts else 0)
                 if projected > _MAX_RENDERED_PROMPT_CHARS:
@@ -1810,25 +1949,84 @@ def _format_prompt_for_native_model(
                 parts.append(item_text)
             return separator_text.join(parts)
 
+        def bounded_html_escape(value: Any, *, force: bool = False) -> Any:
+            if isinstance(value, Markup) and not force:
+                return value
+            if _template_value_size_bound(value) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template escaping input exceeds AXIOM's output limit")
+            text = str(value)
+            projected = (
+                len(text)
+                + 4 * text.count("&")
+                + 3 * text.count("<")
+                + 3 * text.count(">")
+                + 4 * text.count('"')
+                + 4 * text.count("'")
+            )
+            if projected > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template escaping exceeds AXIOM's output limit")
+            escaped = text.translate({
+                ord("&"): "&amp;",
+                ord("<"): "&lt;",
+                ord(">"): "&gt;",
+                ord('"'): "&#34;",
+                ord("'"): "&#39;",
+            })
+            return Markup(escaped)
+
+        def bounded_escape(value: Any) -> Any:
+            return bounded_html_escape(value)
+
+        def bounded_forceescape(value: Any) -> Any:
+            return bounded_html_escape(value, force=True)
+
         def estimate_urlencoded_size(value: Any, depth: int = 0) -> int:
             if depth > 8:
                 raise ValueError("chat-template URL encoding exceeds AXIOM's nesting limit")
-            if isinstance(value, (str, bytes)):
-                return len(value) * 3
+            def scalar_size(item: Any) -> int:
+                if isinstance(item, str):
+                    return len(item.encode("utf-8")) * 3
+                if isinstance(item, bytes):
+                    return len(item) * 3
+                if item is None or isinstance(item, (bool, int, float)):
+                    return len(str(item).encode("utf-8")) * 3
+                raise ValueError("chat-template URL encoding accepts only scalar keys and values")
+
+            def pair_size(key: Any, item: Any) -> int:
+                key_size = scalar_size(key)
+                values = item if isinstance(item, (list, tuple)) else (item,)
+                if len(values) > _MAX_TEMPLATE_ITER_ITEMS:
+                    raise ValueError("chat-template URL encoding exceeds AXIOM's item limit")
+                size = 0
+                for value_item in values:
+                    size += key_size + scalar_size(value_item) + 5
+                    if size > _MAX_RENDERED_PROMPT_CHARS:
+                        return size
+                return size
+
             if isinstance(value, dict):
                 if len(value) > _MAX_TEMPLATE_ITER_ITEMS:
                     raise ValueError("chat-template URL encoding exceeds AXIOM's item limit")
-                return sum(
-                    estimate_urlencoded_size(key, depth + 1)
-                    + estimate_urlencoded_size(item, depth + 1)
-                    + 5
-                    for key, item in value.items()
-                )
+                size = 0
+                for key, item in value.items():
+                    size += pair_size(key, item)
+                    if size > _MAX_RENDERED_PROMPT_CHARS:
+                        return size
+                return size
             if isinstance(value, (list, tuple)):
                 if len(value) > _MAX_TEMPLATE_ITER_ITEMS:
                     raise ValueError("chat-template URL encoding exceeds AXIOM's item limit")
-                return sum(estimate_urlencoded_size(item, depth + 1) + 8 for item in value)
-            return len(str(value)) * 3
+                size = 0
+                for pair in value:
+                    if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                        raise ValueError("chat-template URL encoding requires bounded key/value pairs")
+                    size += pair_size(pair[0], pair[1])
+                    if size > _MAX_RENDERED_PROMPT_CHARS:
+                        return size
+                return size
+            if isinstance(value, (str, bytes)) or value is None or isinstance(value, (bool, int, float)):
+                return scalar_size(value)
+            raise ValueError("chat-template URL encoding accepts only bounded text and JSON containers")
 
         def bounded_urlencode(value: Any) -> Any:
             if estimate_urlencoded_size(value) > _MAX_RENDERED_PROMPT_CHARS:
@@ -1838,20 +2036,87 @@ def _format_prompt_for_native_model(
                 raise ValueError("chat-template URL encoding exceeds AXIOM's output limit")
             return result
 
+        def bounded_pprint(value: Any, *args: Any, **kwargs: Any) -> Any:
+            if _template_value_size_bound(value) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template pprint input exceeds AXIOM's output limit")
+            result = original_pprint_filter(value, *args, **kwargs)
+            if len(str(result)) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template pprint output exceeds AXIOM's output limit")
+            return result
+
+        def bounded_string(value: Any) -> str:
+            if _template_value_size_bound(value) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template string conversion exceeds AXIOM's output limit")
+            return str(value)
+
+        def bounded_safe(value: Any) -> Any:
+            if _template_value_size_bound(value) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template safe conversion exceeds AXIOM's output limit")
+            return Markup(str(value))
+
+        def bounded_wordwrap(
+            value: Any,
+            width: int = 79,
+            break_long_words: bool = True,
+            wrapstring: str | None = None,
+            break_on_hyphens: bool = True,
+        ) -> Any:
+            if _template_value_size_bound(value) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template wordwrap input exceeds AXIOM's output limit")
+            text = value if isinstance(value, str) else str(value)
+            if wrapstring is not None and _template_value_size_bound(wrapstring) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template wordwrap separator exceeds AXIOM's output limit")
+            separator = "\n" if wrapstring is None else str(wrapstring)
+            if len(text) + (len(text) + 1) * len(separator) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template wordwrap output exceeds AXIOM's output limit")
+            result = original_wordwrap_filter(
+                text,
+                width=width,
+                break_long_words=break_long_words,
+                wrapstring=wrapstring,
+                break_on_hyphens=break_on_hyphens,
+            )
+            if len(result) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template wordwrap output exceeds AXIOM's output limit")
+            return result
+
+        def bounded_tojson(value: Any) -> str:
+            if _template_json_size_bound(value) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template JSON output exceeds AXIOM's output limit")
+            result = json.dumps(value, ensure_ascii=False)
+            if len(result) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template JSON output exceeds AXIOM's output limit")
+            return result
+
         environment.filters.update({
             "center": bounded_center,
+            "e": bounded_escape,
+            "escape": bounded_escape,
             "format": bounded_format,
+            "forceescape": bounded_forceescape,
             "indent": bounded_indent,
             "join": bounded_join,
+            "pprint": bounded_pprint,
             "replace": bounded_replace,
+            "safe": bounded_safe,
+            "string": bounded_string,
             "urlencode": bounded_urlencode,
+            "wordwrap": bounded_wordwrap,
         })
+        environment.filters.pop("urlize", None)
+        environment.filters.pop("xmlattr", None)
         environment.globals.clear()
+
+        def bounded_raise_exception(message: Any) -> Any:
+            if _template_value_size_bound(message) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template error value exceeds AXIOM's output limit")
+            raise ValueError(str(message))
+
         environment.globals.update({
-            "raise_exception": lambda message: (_ for _ in ()).throw(ValueError(str(message))),
+            "raise_exception": bounded_raise_exception,
             "strftime_now": lambda fmt: datetime.now(UTC).strftime(fmt),
         })
-        environment.filters["tojson"] = lambda value: json.dumps(value, ensure_ascii=False)
+        environment.filters["tojson"] = bounded_tojson
         template_messages = chat_messages or [{"role": "user", "content": prompt}]
         context = {
             "messages": template_messages,
@@ -1863,19 +2128,92 @@ def _format_prompt_for_native_model(
         }
         try:
             template_ast = environment.parse(template)
+            bounded_message_names: set[str] = set()
+
+            def bounded_message_field_size(expression: Any) -> int | None:
+                if isinstance(expression, nodes.Getattr):
+                    key = expression.attr
+                    base = expression.node
+                elif isinstance(expression, nodes.Getitem) and isinstance(expression.arg, nodes.Const):
+                    key = expression.arg.value
+                    base = expression.node
+                else:
+                    return None
+                if key not in {"content", "role"}:
+                    return None
+                if isinstance(base, nodes.Name) and base.name in bounded_message_names:
+                    return max((len(message[key]) for message in template_messages), default=0)
+                indexed_message = (
+                    isinstance(base, nodes.Getitem)
+                    and isinstance(base.node, nodes.Name)
+                    and base.node.name == "messages"
+                    and isinstance(base.arg, nodes.Const)
+                    and isinstance(base.arg.value, int)
+                )
+                if indexed_message and -len(template_messages) <= base.arg.value < len(template_messages):
+                    return len(template_messages[base.arg.value].get(key, ""))
+                return None
+
+            def bounded_text_expression_size(expression: Any) -> int | None:
+                if isinstance(expression, nodes.Const):
+                    if isinstance(expression.value, (str, int, float, bool)):
+                        return len(str(expression.value))
+                    return None
+                if isinstance(expression, nodes.Name):
+                    if expression.name == "bos_token":
+                        return len(context["bos_token"])
+                    if expression.name == "eos_token":
+                        return len(context["eos_token"])
+                    if expression.name == "add_generation_prompt":
+                        return 5
+                    return None
+                message_field_size = bounded_message_field_size(expression)
+                if message_field_size is not None:
+                    return message_field_size
+                if isinstance(expression, nodes.Filter):
+                    input_size = bounded_text_expression_size(expression.node)
+                    if input_size is None:
+                        return None
+                    if expression.name in {"capitalize", "lower", "string", "title", "trim", "upper"}:
+                        return input_size
+                    if expression.name == "length":
+                        return 20
+                    return None
+                if isinstance(expression, nodes.Concat):
+                    total = 0
+                    for item in expression.nodes:
+                        item_size = bounded_text_expression_size(item)
+                        if item_size is None:
+                            return None
+                        total += item_size
+                        if total > _MAX_RENDERED_PROMPT_CHARS:
+                            return total
+                    return total
+                return None
 
             def check_template_loops(node: Any, loop_depth: int = 0) -> None:
                 next_depth = loop_depth
                 if isinstance(node, (nodes.Macro, nodes.CallBlock)):
                     raise ValueError("chat-template macros are not supported by AXIOM's bounded renderer")
+                if isinstance(node, nodes.Concat):
+                    concat_size = bounded_text_expression_size(node)
+                    if concat_size is None or concat_size > _MAX_RENDERED_PROMPT_CHARS:
+                        raise ValueError("chat-template concatenation exceeds AXIOM's output limit")
                 if isinstance(node, nodes.For):
                     if loop_depth or node.recursive:
                         raise ValueError("nested or recursive chat-template loops are not supported")
                     iterable = node.iter
                     while isinstance(iterable, nodes.Filter):
+                        if iterable.name not in {
+                            "list", "reject", "rejectattr", "reverse", "select", "selectattr", "sort", "unique",
+                        }:
+                            raise ValueError("chat-template loops may only filter the bounded messages list")
                         iterable = iterable.node
                     if not isinstance(iterable, nodes.Name) or iterable.name != "messages":
                         raise ValueError("chat-template loops may iterate only over the bounded messages list")
+                    targets = node.target
+                    if isinstance(targets, nodes.Name):
+                        bounded_message_names.add(targets.name)
                     next_depth = loop_depth + 1
                 for child in node.iter_child_nodes():
                     check_template_loops(child, next_depth)
