@@ -75,7 +75,7 @@ test.describe("AXIOM landing page", () => {
 
   test("keeps GitHub and CLI destinations explicit and network-independent", async ({ page }) => {
     const githubLinks = page.locator(
-      'a[href="https://github.com/NetCore-Technologies/AXIOM-AI"]',
+      'a[href="https://github.com/manit6752025/AXIOM-AI"]',
     );
     const cliCtas = page.locator('a[href="#install"]');
 
@@ -83,7 +83,7 @@ test.describe("AXIOM landing page", () => {
     expect(await cliCtas.count()).toBeGreaterThan(0);
 
     const destinationChecks = [
-      [githubLinks, "https://github.com/NetCore-Technologies/AXIOM-AI"],
+      [githubLinks, "https://github.com/manit6752025/AXIOM-AI"],
       [cliCtas, "#install"],
     ] as const;
 
