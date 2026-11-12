@@ -13,7 +13,7 @@ SPEC.loader.exec_module(release_smoke)
 def test_roadmap_audit_accepts_all_unique_deliverables() -> None:
     markdown = "\n".join(
         f"- [R{i:03d} · {'Planned' if i % 2 else 'Implemented; tests passing'}] Requirement {i}."
-        for i in range(1, 121)
+        for i in range(1, 141)
     )
     assert release_smoke.roadmap_issues(markdown) == []
 
@@ -21,7 +21,7 @@ def test_roadmap_audit_accepts_all_unique_deliverables() -> None:
 def test_roadmap_audit_detects_duplicates_missing_ids_and_unknown_status() -> None:
     markdown = "- [R001 · Maybe] A\n- [R001 · Planned] Duplicate\n"
     issues = release_smoke.roadmap_issues(markdown)
-    assert any("Expected 120" in item for item in issues)
+    assert any("Expected 140" in item for item in issues)
     assert any("Missing roadmap IDs" in item for item in issues)
     assert any("Duplicate roadmap IDs: R001" in item for item in issues)
     assert any("Unknown roadmap statuses: Maybe" in item for item in issues)
