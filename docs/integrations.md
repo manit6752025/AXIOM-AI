@@ -36,6 +36,19 @@ working-directory option where supported. Pass asset paths to
 stored in `.axiom/tool_permissions.json` under that same root, so run
 `axiom mcp allow` from the project where the server will run.
 
+The separately permissioned `axiom_training_preflight` tool checks a local
+model directory, validates dataset text using the trainer's bounded rules,
+checks training-package metadata, and includes a heuristic hardware estimate.
+It reads dataset text locally but never returns its values, loads model
+weights, creates a job, writes files, or accesses the network. Package checks
+read presence and version metadata only; they do not import or initialize
+training dependencies or verify a device backend. Its verdict is
+`blockers_found`, `review_needed`, or `no_known_blockers`; the final status is
+not a guarantee that training will load or fit. AXIOM's current local trainer
+supports LoRA, not QLoRA, and the generic planner may suggest a QLoRA fallback.
+Hardware status `warn` means only the generic estimate predicts a fit; actual
+loading was not tested. The estimate also cannot verify Apple MPS or CPU fit.
+
 ### CLI
 
 AXIOM can also integrate with local agent binaries.

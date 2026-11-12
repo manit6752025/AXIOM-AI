@@ -445,6 +445,12 @@ Agents can then call `axiom_workspace_context` before choosing more specific too
 
 `axiom_workspace_assets` locates workspace-relative model directories and JSONL datasets. It returns paths only, with up to 200 results per category and a 50,000-entry scan budget per category; its response separates result-limit and scan-truncation status. The context and asset tools use the MCP server's working directory as the workspace root; start the server from the target project, or set the client's working-directory option where supported. MCP permissions are stored under that workspace's `.axiom/` directory, so run the `axiom mcp allow` commands from the same project root. Pass returned paths to `axiom_model_info` or `axiom_dataset_inspect`.
 
+`axiom_training_preflight` combines local model metadata, the LoRA trainer's own bounded JSONL text validation, training-package metadata, and a rough hardware estimate. It accepts workspace-relative model and dataset paths plus an optional `text_field` (default `text`). The data is read locally for validation, but no dataset values or model weights are returned or loaded. The tool does not create a job, write files, or access the network. Package checks inspect version metadata but do not import or initialize the runtime. It reports `blockers_found`, `review_needed`, or `no_known_blockers`; the last status is not a promise that training will load or fit. A hardware check marked `warn` means the generic planner estimated a fit, not that the actual training loop was tested. The actual trainer is LoRA-only, while the generic planner may estimate a QLoRA fallback, and the hardware estimate does not verify Apple MPS or CPU fit. Grant it separately:
+
+```bash
+axiom mcp allow axiom_training_preflight
+```
+
 To let the agent use additional AXIOM tools, allow only the ones you need:
 
 ```bash
@@ -480,6 +486,7 @@ axiom mcp profile use readonly
 | `axiom_info` | AXIOM version and capabilities |
 | `axiom_workspace_context` | Read a privacy-bounded project, hardware, and developer-tool snapshot; command suggestions need user approval |
 | `axiom_workspace_assets` | Find model directories and JSONL datasets with bounded, workspace-relative path scans |
+| `axiom_training_preflight` | Check local LoRA inputs and estimates without loading weights or starting a job |
 | `axiom_system_info` | Detected hardware |
 | `axiom_model_list` | Registered models |
 | `axiom_model_info` | Inspect a local model folder |

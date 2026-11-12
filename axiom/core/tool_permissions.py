@@ -18,6 +18,9 @@ TOOL_DESCRIPTIONS = {
     "axiom_workspace_assets": (
         "List workspace-relative model and JSONL paths without reading contents."
     ),
+    "axiom_training_preflight": (
+        "Check local LoRA inputs and estimates without loading weights or starting a job."
+    ),
     "axiom_model_list": "List locally registered models.",
     "axiom_model_info": "Inspect a local model path.",
     "axiom_dataset_inspect": "Inspect a local dataset.",

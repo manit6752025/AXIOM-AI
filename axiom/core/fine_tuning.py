@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.util
+import io
 import json
 import logging
 import math
@@ -16,9 +17,12 @@ import random
 import re
 import threading
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, BinaryIO, Callable
+
+from axiom.path_safety import open_regular_file
 
 _LOG = logging.getLogger(__name__)
 
@@ -112,12 +116,34 @@ def _resolve_existing(value: str, label: str) -> Path:
         raise ValueError(f"{label} must point to an existing local path.") from None
 
 
-def _load_texts(dataset_path: Path, text_field: str) -> list[str]:
-    if dataset_path.stat().st_size > _MAX_DATASET_BYTES:
+def validate_training_text_field(text_field: str) -> None:
+    if not isinstance(text_field, str) or not _TEXT_FIELD.fullmatch(text_field):
+        raise ValueError("Text field must be a simple JSON field name (letters, digits, underscore, dot, or hyphen).")
+
+
+def iter_training_texts(dataset_path: Path, text_field: str = "text") -> Iterator[str]:
+    """Yield trainer-accepted text values without retaining the full dataset."""
+    with open_regular_file(dataset_path) as stream:
+        yield from iter_training_text_stream(
+            stream,
+            file_size_bytes=os.fstat(stream.fileno()).st_size,
+            text_field=text_field,
+        )
+
+
+def iter_training_text_stream(
+    stream: BinaryIO,
+    *,
+    file_size_bytes: int,
+    text_field: str = "text",
+) -> Iterator[str]:
+    """Validate and yield accepted trainer text from an already-open stream."""
+    validate_training_text_field(text_field)
+    if file_size_bytes > _MAX_DATASET_BYTES:
         raise ValueError(f"Dataset exceeds the {_MAX_DATASET_BYTES // (1024 * 1024)} MiB limit.")
-    texts: list[str] = []
+    accepted = 0
     try:
-        with dataset_path.open("r", encoding="utf-8-sig") as handle:
+        with io.TextIOWrapper(stream, encoding="utf-8-sig") as handle:
             for line_number, line in enumerate(handle, start=1):
                 if len(line.encode("utf-8")) > _MAX_LINE_BYTES:
                     raise ValueError(f"Dataset line {line_number} exceeds the 1 MiB line limit.")
@@ -125,7 +151,7 @@ def _load_texts(dataset_path: Path, text_field: str) -> list[str]:
                     continue
                 try:
                     record = json.loads(line)
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, RecursionError):
                     raise ValueError(f"Dataset line {line_number} is not valid JSON.") from None
                 if not isinstance(record, dict):
                     raise ValueError(f"Dataset line {line_number} must contain a JSON object.")
@@ -146,11 +172,16 @@ def _load_texts(dataset_path: Path, text_field: str) -> list[str]:
                     )
                 if len(value) > _MAX_TEXT_CHARS:
                     raise ValueError(f"Dataset line {line_number} text exceeds the {_MAX_TEXT_CHARS:,}-character limit.")
-                texts.append(value.strip())
-                if len(texts) > _MAX_ROWS:
+                accepted += 1
+                if accepted > _MAX_ROWS:
                     raise ValueError(f"Dataset exceeds the {_MAX_ROWS:,}-row limit.")
+                yield value.strip()
     except UnicodeDecodeError:
         raise ValueError("Dataset must be UTF-8 encoded JSONL.") from None
+
+
+def _load_texts(dataset_path: Path, text_field: str) -> list[str]:
+    texts = list(iter_training_texts(dataset_path, text_field))
     if not texts:
         raise ValueError("Dataset contains no non-empty training records.")
     return texts
@@ -184,8 +215,7 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         if not output_dir.is_dir() or any(output_dir.iterdir()):
             raise ValueError("Adapter output must be a new directory or an existing empty directory.")
     text_field = config.get("text_field", "text")
-    if not isinstance(text_field, str) or not _TEXT_FIELD.fullmatch(text_field):
-        raise ValueError("Text field must be a simple JSON field name (letters, digits, underscore, dot, or hyphen).")
+    validate_training_text_field(text_field)
     max_steps = config.get("max_steps", 20)
     sequence_length = config.get("sequence_length", 512)
     lora_rank = config.get("lora_rank", 8)

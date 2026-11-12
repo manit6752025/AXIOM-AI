@@ -7,6 +7,7 @@ from mcp.server import MCPServer
 
 from axiom.core.hardware import detect_hardware
 from axiom.core.tool_permissions import ToolPermissionStore
+from axiom.core.training_preflight import run_training_preflight
 from axiom.daemon import local_summary
 from axiom.daemon_api import MAX_LISTED_FILES, list_workspace_files
 from axiom.datasets.cleaner import clean_jsonl
@@ -24,6 +25,7 @@ mcp = MCPServer(
         "After the active AXIOM profile allows it, start with axiom_workspace_context "
         "for a bounded local workspace briefing. "
         "Use axiom_workspace_assets to find local model and dataset paths when allowed. "
+        "Use axiom_training_preflight for bounded, non-executing checks before local LoRA training. "
         "Use AXIOM tools to inspect models, inspect and clean datasets, "
         "inspect hardware, create training plans, and check optional "
         "AI runtime integrations. MCP tool access is denied by default and must "
@@ -150,6 +152,17 @@ def axiom_workspace_assets() -> dict:
             "symlinked_entries_followed": False,
         },
     }
+
+
+@mcp.tool()
+def axiom_training_preflight(
+    model_path: str,
+    dataset_path: str,
+    text_field: str = "text",
+) -> dict:
+    """Check local LoRA prerequisites without loading weights or starting a job."""
+    ToolPermissionStore().require("axiom_training_preflight")
+    return run_training_preflight(model_path, dataset_path, text_field)
 
 
 @mcp.tool()
