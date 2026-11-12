@@ -86,8 +86,11 @@ For a user-requested diagnosis of a saved offline comparison,
 ID, and one transition category. `fixed`/`regressed` use raw exact match;
 `token_f1_improved`/`token_f1_worsened` rank rows by the largest positive or
 most negative per-row token-F1 delta and return the per-row baseline score,
-candidate score, and delta. The current run must have been saved against that
-baseline, and both reports must be complete and intact. The tool reopens the
+candidate score, and delta. It also returns baseline/current corpus scores
+(0–1), the current-minus-baseline delta, and saved tolerance status for the
+selected regression metric across all `rows_compared` rows. These aggregate
+values are separate from the returned examples. The current run must have been
+saved against that baseline, and both reports must be complete and intact. The tool reopens the
 reports' workspace-relative sources under `data/`, verifies their saved report
 manifests and full content hashes, and confirms the comparison corpus before
 returning examples. It returns exact-match transition counts and token-F1
@@ -98,8 +101,9 @@ seeded with the baseline run ID, current run ID, and category, then list the
 selected examples by row number. `sample_strategy` applies only to exact-match
 categories; F1 categories always use metric ranking, so `uniform_hash` is
 unavailable for them. At most three examples are illustrative, not
-statistically representative. F1-ranked extremes are also intentionally not representative.
-Per-row token-F1 deltas do not add up to the corpus-level micro-F1 delta.
+statistically representative. F1-ranked extremes are also intentionally not
+representative. Per-row token-F1 deltas do not add up to the corpus-level
+micro-F1 delta; the selected `token_f1_micro` score covers all compared rows.
 Paired comparison supports sources up to
 256 MiB, 500,000 rows, and 8 MiB per JSONL line; larger saved evaluations
 cannot be inspected by this tool.

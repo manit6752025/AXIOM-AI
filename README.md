@@ -697,7 +697,10 @@ explicit approval,
 `include_text=true` returns baseline/candidate prediction and reference
 excerpts capped at 2,000 characters each; the MCP host may retain returned
 text. Saved evaluation runs do not record a prompt field. Exact-match examples
-use raw string equality. These diagnostics do not establish semantic quality.
+use raw string equality. The result also includes the selected regression
+metric's baseline and current scores (0–1), its current-minus-baseline delta,
+and status across all `rows_compared` rows. These corpus scores are separate
+from sample-level values and do not establish semantic quality.
 The tool has a separate default-deny permission and does no inference, network
 access, or file writes:
 

@@ -38,6 +38,7 @@
 - Added hash-verified paired examples for selected prediction-job transitions; row numbers are the default and text requires a separately granted capability plus per-call approval.
 - Added offline-evaluator-compatible exact-match, normalized exact-match, and token-F1 scores with candidate-minus-baseline deltas to verified prediction-job comparisons.
 - Added run-ID cursor pagination to MCP evaluation history so agents can continue through bounded saved summaries as new evaluations are recorded.
+- Added verified baseline/current corpus scores for the selected regression metric to paired offline-evaluation example diagnostics.
 - Added a default-deny paired-example tool for saved offline evaluation comparisons; it revalidates report manifests and source snapshots, diagnoses raw exact-match transitions or ranks per-row token-F1 changes, supports deterministic hash-priority samples, returns row numbers by default, and requires per-call approval for bounded text excerpts.
 - Added a job-linked training/evaluation overlap preflight that derives the training dataset and text field from a completed job and returns saved base/adapter paths; it reports the current-file snapshot and unverified artifact limitations.
 - Added `axiom_training_job_wait`, a bounded wait for local LoRA job outcomes that reuses the status permission; stale recovery verifies process identity and preserves newer job state.
