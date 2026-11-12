@@ -100,7 +100,7 @@ export default function EngineTelemetryMonitor() {
     setNotice("Cleared the browser's in-memory resource history.");
   };
 
-  const latest = samples.at(-1);
+  const latest = samples.length > 0 ? samples[samples.length - 1] : undefined;
   const cpuSamples = samples
     .map((sample) => sample.cpu.system_percent)
     .filter((value): value is number => value !== null && Number.isFinite(value));
