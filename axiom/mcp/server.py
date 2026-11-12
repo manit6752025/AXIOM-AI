@@ -4,6 +4,7 @@ import math
 import os
 import platform
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +83,7 @@ from axiom.training.planner import create_training_plan
 from axiom.version import __version__
 
 _MCP_ENGINE_MAX_PROMPT_CHARS = 8_000
+_MCP_ENGINE_MAX_PROMPT_TOKENS = 8_192
 _MCP_ENGINE_MAX_NEW_TOKENS = 256
 
 mcp = MCPServer(
@@ -96,6 +98,7 @@ mcp = MCPServer(
         "Use axiom_training_preflight for bounded, non-executing checks before local LoRA training. "
         "When the user asks whether evaluation data may overlap training data, use the separate default-deny axiom_training_eval_overlap_preflight. It normalizes case and whitespace and returns only exact-overlap counts and row numbers. A clear result does not prove the evaluation data is held out or leakage-free; paraphrases are not detected. It does not load model weights or run inference. "
         "For a completed training run, axiom_training_job_eval_overlap_preflight derives the training dataset and text field from its job ID, then checks the selected evaluation file. It requires both the training-job status and overlap-preflight permissions. It reads the current training dataset contents; the job does not store a training-time fingerprint, so the scan cannot verify the original training snapshot or prove held-out data. It returns saved workspace-relative base-model and adapter paths only; run axiom_engine_preflight before inference because their file contents are not verified here. "
+        "For a base-versus-adapter evaluation plan before inference, use axiom_training_job_validation_preflight with two new data/ output filenames. Its overlap check compares prompts by default; set include_reference_in_overlap=true to compare reference answers too. The reference_field still configures prediction artifacts when references are omitted from overlap. plan_only means only that a read-only plan was assembled, not that a run is ready or approved. Present all check outcomes: never start a variant with a blocked engine check, resolve or recheck a blocked prompt preflight before either run, and disclose exact/inconclusive overlap, review_needed checks, or expected/inconclusive prompt truncation before getting an explicit user decision to proceed. The tool writes nothing and does not run inference; output paths are revalidated when a run starts. "
         "Use axiom_engine_preflight before local inference to check model/adapter structure, the selected device/precision, and advisory memory estimates; it does not load weights or run inference. Pass the same settings to axiom_engine_generate. "
         "Run preflight and show the exact configuration before calling axiom_training_job_start; "
         "call it only after the user explicitly requests that run. It uses compute and writes an adapter under outputs/. "
@@ -1139,9 +1142,9 @@ def axiom_engine_preflight(
     if (
         isinstance(max_prompt_tokens, bool)
         or not isinstance(max_prompt_tokens, int)
-        or not 1 <= max_prompt_tokens <= 8192
+        or not 1 <= max_prompt_tokens <= _MCP_ENGINE_MAX_PROMPT_TOKENS
     ):
-        return {"error": "max_prompt_tokens must be an integer from 1 through 8192."}
+        return {"error": f"max_prompt_tokens must be an integer from 1 through {_MCP_ENGINE_MAX_PROMPT_TOKENS}."}
     if (
         isinstance(max_new_tokens, bool)
         or not isinstance(max_new_tokens, int)
@@ -1584,6 +1587,273 @@ def axiom_prediction_job_preflight(
                 "absolute_paths_returned": False,
             },
         }
+
+
+@mcp.tool()
+def axiom_training_job_validation_preflight(
+    training_job_id: str,
+    evaluation_dataset_path: str,
+    baseline_output_path: str,
+    adapter_output_path: str,
+    prompt_field: str = "prompt",
+    reference_field: str = "reference",
+    prediction_field: str = "prediction",
+    include_reference_in_overlap: bool = False,
+    max_new_tokens: int = 64,
+    temperature: float = 0.7,
+    seed: int | None = None,
+    device: str = "auto",
+    precision: str = "auto",
+    ram_budget_gib: float | None = None,
+    vram_budget_gib: float | None = None,
+) -> dict:
+    """Build a read-only base-versus-adapter evaluation plan for a completed LoRA job."""
+    permissions = ToolPermissionStore()
+    permissions.require("axiom_training_job_status")
+    permissions.require("axiom_training_eval_overlap_preflight")
+    permissions.require("axiom_engine_preflight")
+    permissions.require("axiom_prediction_job_preflight")
+
+    def blocked(reason_code: str) -> dict:
+        return {
+            "schema_version": 1,
+            "assessment": "inconclusive",
+            "reason_code": reason_code,
+            "scope": {
+                "read_only": True,
+                "files_written": False,
+                "model_weights_loaded": False,
+                "inference_run": False,
+                "network_accessed": False,
+                "absolute_paths_returned": False,
+                "dataset_values_returned": False,
+                "dataset_hashes_returned": False,
+            },
+        }
+
+    if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens <= 64:
+        return blocked("prediction_limits_out_of_range")
+    if not isinstance(temperature, (int, float)) or isinstance(temperature, bool):
+        return blocked("temperature_out_of_range")
+    try:
+        temperature_value = float(temperature)
+    except (OverflowError, ValueError):
+        return blocked("temperature_out_of_range")
+    if not math.isfinite(temperature_value) or not 0 <= temperature_value <= 2:
+        return blocked("temperature_out_of_range")
+    if seed is not None and (
+        isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= 2**63 - 1
+    ):
+        return blocked("seed_out_of_range")
+    for label, budget in (("ram", ram_budget_gib), ("vram", vram_budget_gib)):
+        if budget is not None and (
+            isinstance(budget, bool)
+            or not isinstance(budget, (int, float))
+            or not 0.1 <= budget <= 2048
+            or not math.isfinite(float(budget))
+        ):
+            return blocked(f"{label}_budget_out_of_range")
+    if type(include_reference_in_overlap) is not bool:
+        return blocked("include_reference_must_be_boolean")
+    if not isinstance(device, str) or device not in {"auto", "cpu", "cuda", "rocm", "mps", "xpu"}:
+        return blocked("device_invalid")
+    if not isinstance(precision, str) or precision not in {"auto", "fp32", "fp16", "bf16"}:
+        return blocked("precision_invalid")
+    if device == "mps" and precision == "bf16":
+        return blocked("precision_unsupported_for_device")
+    field_pattern = r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$"
+    if any(
+        not isinstance(field, str) or re.fullmatch(field_pattern, field) is None
+        for field in (prompt_field, reference_field, prediction_field)
+    ):
+        return blocked("field_name_invalid")
+    if len({prompt_field, reference_field, prediction_field}) != 3:
+        return blocked("prediction_fields_must_be_different")
+
+    root = _mcp_workspace_root()
+    try:
+        evaluation_target = resolve_workspace_input(evaluation_dataset_path, root, "Evaluation dataset path")
+        if not evaluation_target.is_file() or evaluation_target.suffix.lower() != ".jsonl":
+            return blocked("evaluation_dataset_invalid")
+        evaluation_relative = evaluation_target.relative_to(root).as_posix()
+        if not evaluation_relative.startswith("data/"):
+            return blocked("evaluation_dataset_must_be_under_data")
+
+        outputs: list[str] = []
+        for raw_output in (baseline_output_path, adapter_output_path):
+            if (
+                not isinstance(raw_output, str)
+                or not raw_output.startswith("data/")
+                or raw_output.count("/") != 1
+                or not raw_output.lower().endswith(".jsonl")
+            ):
+                return blocked("prediction_output_path_invalid")
+            output_target, parent_fd, _name, available = open_mcp_workspace_output_parent(raw_output, root)
+            try:
+                if not available:
+                    return blocked("prediction_output_already_exists")
+                outputs.append(output_target.relative_to(root).as_posix())
+            finally:
+                if parent_fd is not None:
+                    os.close(parent_fd)
+        # Common macOS/Windows filesystems resolve case and canonical Unicode variants alike.
+        output_keys = [
+            unicodedata.normalize("NFD", unicodedata.normalize("NFD", value).casefold())
+            for value in outputs
+        ]
+        if output_keys[0] == output_keys[1]:
+            return blocked("prediction_output_paths_must_be_different")
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return blocked("workspace_paths_unavailable")
+
+    overlap_result = axiom_training_job_eval_overlap_preflight(
+        training_job_id,
+        evaluation_relative,
+        evaluation_prompt_field=prompt_field,
+        include_reference=include_reference_in_overlap,
+        evaluation_reference_field=reference_field,
+    )
+    job = overlap_result.get("training_job")
+    if not isinstance(job, dict):
+        return {
+            **blocked(overlap_result.get("reason_code", "training_job_unavailable")),
+            "overlap_preflight": overlap_result,
+        }
+
+    model_path = job["base_model_path"]
+    adapter_path = job["adapter_path"]
+    prompt_preflight = axiom_prediction_job_preflight(
+        model_path=model_path,
+        dataset_path=evaluation_relative,
+        prompt_field=prompt_field,
+        reference_field=reference_field,
+        max_new_tokens=max_new_tokens,
+    )
+    prompt_token_limit = prompt_preflight.get("prompt_token_limit")
+    effective_max_new_tokens = prompt_preflight.get("effective_max_new_tokens")
+    prompt_budget_source = "prompt_truncation_preflight"
+    if (
+        isinstance(prompt_token_limit, bool)
+        or not isinstance(prompt_token_limit, int)
+        or not 1 <= prompt_token_limit <= _MCP_ENGINE_MAX_PROMPT_TOKENS
+        or isinstance(effective_max_new_tokens, bool)
+        or not isinstance(effective_max_new_tokens, int)
+        or not 1 <= effective_max_new_tokens <= max_new_tokens
+    ):
+        # If tokenizer metadata is unavailable, still align model checks with
+        # the engine's context-based prompt limit rather than its UI default.
+        try:
+            model_context = inspect_native_model_context(str(root / model_path))
+            effective_context = model_context.get("effective_max_position_embeddings")
+            if isinstance(effective_context, bool) or not isinstance(effective_context, int) or effective_context < 1:
+                raise ValueError("Model context metadata is unavailable.")
+            context_cap = max(
+                2,
+                min(effective_context, _MCP_ENGINE_MAX_PROMPT_TOKENS + max_new_tokens),
+            )
+            effective_max_new_tokens = min(max_new_tokens, context_cap - 1)
+            prompt_token_limit = max(
+                1,
+                min(_MCP_ENGINE_MAX_PROMPT_TOKENS, context_cap - effective_max_new_tokens),
+            )
+            prompt_budget_source = "model_context_metadata"
+        except (AxiomEngineError, OSError, RuntimeError, ValueError):
+            # The engine preflights below will report the underlying metadata failure.
+            prompt_token_limit = 4096
+            effective_max_new_tokens = max_new_tokens
+            prompt_budget_source = "fallback_after_context_metadata_error"
+    engine_arguments = {
+        "max_prompt_tokens": prompt_token_limit,
+        "max_new_tokens": effective_max_new_tokens,
+        "device": device,
+        "precision": precision,
+        "ram_budget_gib": ram_budget_gib,
+        "vram_budget_gib": vram_budget_gib,
+    }
+    base_engine = axiom_engine_preflight(model_path=model_path, **engine_arguments)
+    adapter_engine = axiom_engine_preflight(
+        model_path=model_path,
+        adapter_path=adapter_path,
+        **engine_arguments,
+    )
+    run_settings = {
+        "model_path": model_path,
+        "dataset_path": evaluation_relative,
+        "prompt_field": prompt_field,
+        "reference_field": reference_field,
+        "prediction_field": prediction_field,
+        "max_new_tokens": max_new_tokens,
+        "temperature": temperature_value,
+        "seed": seed,
+        "device": device,
+        "precision": precision,
+    }
+    return {
+        "schema_version": 1,
+        "assessment": "plan_only",
+        "training_job": job,
+        "overlap_configuration": {
+            "reference_checked": include_reference_in_overlap,
+            "reference_field": reference_field if include_reference_in_overlap else None,
+        },
+        "planned_runs": [
+            {
+                "variant": "base_model",
+                **run_settings,
+                "adapter_path": None,
+                "output_path": outputs[0],
+            },
+            {
+                "variant": "trained_adapter",
+                **run_settings,
+                "adapter_path": adapter_path,
+                "output_path": outputs[1],
+            },
+        ],
+        "engine_preflight_assumptions": {
+            "max_prompt_tokens": prompt_token_limit,
+            "prompt_budget_source": prompt_budget_source,
+            "max_new_tokens": effective_max_new_tokens,
+            "requested_max_new_tokens": max_new_tokens,
+            "ram_budget_gib": ram_budget_gib,
+            "vram_budget_gib": vram_budget_gib,
+        },
+        "checks": {
+            "training_evaluation_overlap": overlap_result,
+            "base_model_preflight": base_engine,
+            "adapter_preflight": adapter_engine,
+            "prompt_truncation_preflight": prompt_preflight,
+        },
+        "scope": {
+            "read_only": True,
+            "plan_only": True,
+            "files_written": False,
+            "model_weights_loaded": False,
+            "adapter_tensor_values_loaded": False,
+            "inference_run": False,
+            "evaluation_metrics_computed": False,
+            "network_accessed": False,
+            "absolute_paths_returned": False,
+            "dataset_values_returned": False,
+            "dataset_hashes_returned": False,
+            "training_dataset_snapshot_verified": False,
+            "model_adapter_content_fingerprints_available": False,
+            "output_paths_revalidated_at_start": True,
+        },
+        "note": (
+            "Prompt truncation is checked with the base model tokenizer, shared by the adapter run. "
+            "The engine checks are structural and advisory; they do not guarantee successful inference. "
+            "The plan_only assessment means only that a read-only plan was assembled; it does not indicate "
+            "readiness or approval. The overlap check compares prompts by default; evaluation references "
+            "are checked only when overlap_configuration.reference_checked is true. This does not assess "
+            "output quality or prove that evaluation data is held out. Output names are checked as currently "
+            "unused but prediction-job start checks them again. Never start a variant with a blocked engine "
+            "check. Resolve or recheck a blocked prompt-truncation preflight before either run. Disclose "
+            "review_needed checks, exact or inconclusive overlap, and expected or inconclusive prompt "
+            "truncation before getting the user's explicit decision to proceed. Run the two jobs "
+            "sequentially because AXIOM has one local compute slot."
+        ),
+    }
 
 
 @mcp.tool()
