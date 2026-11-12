@@ -354,6 +354,46 @@ def api_playground_issues(component: str, client: str) -> list[str]:
         )
     return issues
 
+
+def resource_monitoring_issues(cli_source: str, panel_source: str, app_source: str, e2e_source: str) -> list[str]:
+    """Require explicit opt-in, bounded retention and safe export across CLI and Runtime UI."""
+    issues: list[str] = []
+    groups = (
+        ("CLI", cli_source, (
+            'watch: bool = typer.Option(False, "--watch"',
+            'samples: int = typer.Option(30, "--samples", min=1, max=300',
+            'output.open("x"',
+            "time.sleep(interval_seconds)",
+            "--output requires explicit opt-in",
+        )),
+        ("Runtime GUI", panel_source, (
+            "MAX_SAMPLES = 120",
+            "if (!recording) return undefined;",
+            "axiomApi.axiomEngineTelemetry()",
+            "window.setInterval",
+            'anchor.download = "axiom-resource-telemetry.json"',
+            "setSamples([])",
+        )),
+        ("Runtime page integration", app_source, (
+            'import EngineTelemetryMonitor from "./components/EngineTelemetryMonitor";',
+            "<EngineTelemetryMonitor />",
+        )),
+        ("Browser acceptance", e2e_source, (
+            "expect(telemetryCalls).toBe(0)",
+            'name: "Start monitoring"',
+            'name: "Stop monitoring"',
+            "axiom-resource-telemetry.json",
+            'name: "Clear history"',
+            "privacy.model_paths_included",
+        )),
+    )
+    for label, source, tokens in groups:
+        for token in tokens:
+            if token not in source:
+                issues.append(f"{label} resource monitoring is missing: {token}")
+    return issues
+
+
 def inspect(root: Path) -> dict[str, Any]:
     failures: list[str] = []
     warnings: list[str] = []
