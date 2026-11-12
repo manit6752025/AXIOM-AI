@@ -27,6 +27,19 @@ def test_roadmap_audit_detects_duplicates_missing_ids_and_unknown_status() -> No
     assert any("Unknown roadmap statuses: Maybe" in item for item in issues)
 
 
+def test_resource_monitoring_contract_requires_opt_in_bounds_export_and_gui_history() -> None:
+    cli = (ROOT / "axiom" / "cli" / "engine.py").read_text(encoding="utf-8")
+    panel = (ROOT / "src" / "components" / "EngineTelemetryMonitor.tsx").read_text(encoding="utf-8")
+    app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e" / "telemetry-monitor.spec.ts").read_text(encoding="utf-8")
+
+    assert release_smoke.resource_monitoring_issues(cli, panel, app, e2e) == []
+    issues = release_smoke.resource_monitoring_issues(
+        cli, panel, app, e2e.replace('name: "Start monitoring"', 'name: "Begin monitoring"')
+    )
+    assert any("Browser acceptance" in issue and "Start monitoring" in issue for issue in issues)
+
+
 def test_gui_page_registration_requires_union_nav_metadata_and_switch() -> None:
     complete = '''
   | "api-playground"
