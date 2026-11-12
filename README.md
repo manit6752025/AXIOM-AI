@@ -601,6 +601,28 @@ rather than a semantic quality judgment. Grant it separately:
 axiom mcp allow axiom_prediction_job_compare
 ```
 
+For a user-requested paired example from a completed comparison,
+`axiom_prediction_job_compare_examples` inspects up to three `fixed` or
+`regressed` rows, sampled first in file order. It rechecks both artifact
+identities and hashes and requires matching non-prediction rows. It returns
+row numbers only by default. The read-only comparison does not recover or
+rewrite stale job state; if it returns `not_ready`, inspect or wait on both
+jobs and retry. Grant the separate capability with:
+
+```bash
+axiom mcp allow axiom_prediction_job_compare_examples
+```
+
+Before setting `include_text=true`, get explicit approval and disclose that up
+to three baseline-prediction, candidate-prediction, and reference excerpts
+capped at 2,000 characters each will be returned and that the MCP host may
+retain them. Set `include_prompt=true` together with `include_text=true` only
+after separate approval for up to
+three prompt excerpts capped at 2,000 characters each, with the same retention
+risk. Examples are first-in-file-order lexical transitions, may not represent
+the corpus, and are not semantic quality judgments. The tool never returns
+full rows, artifact hashes, or artifact paths, runs inference, or writes files.
+
 For a user-requested base-versus-adapter comparison tied to a completed LoRA
 run, `axiom_training_job_prediction_compare` first verifies that the baseline
 job used the recorded base model, the candidate used that base plus the saved
@@ -678,6 +700,7 @@ axiom mcp profile use readonly
 | `axiom_prediction_job_evaluate` | Evaluate a completed job artifact using the `axiom_evaluation_run` permission |
 | `axiom_prediction_job_examples` | Inspect up to three verified mismatches; text is off unless approved per call |
 | `axiom_prediction_job_compare` | Compare exact-match transitions between two verified prediction jobs |
+| `axiom_prediction_job_compare_examples` | Inspect paired examples from one verified fixed/regressed transition; text is off unless approved per call |
 | `axiom_system_info` | Detected hardware |
 | `axiom_model_list` | Registered models |
 | `axiom_model_info` | Inspect a local model folder |

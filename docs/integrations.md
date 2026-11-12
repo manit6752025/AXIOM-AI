@@ -339,6 +339,20 @@ writes no files. This capability is separately default-deny:
 axiom mcp allow axiom_prediction_job_compare
 ```
 
+For user-requested diagnosis of a `fixed` or `regressed` transition,
+`axiom_prediction_job_compare_examples` returns up to three paired rows in
+first-in-file order after rechecking both artifact hashes and matching corpus
+rows. It returns row numbers only by default. Grant it separately with
+`axiom mcp allow axiom_prediction_job_compare_examples`. Before requesting
+`include_text=true`, obtain explicit approval and disclose that up to three
+baseline/candidate prediction and reference excerpts capped at 2,000
+characters each will be returned and that the MCP host may retain them. Ask
+separately before setting `include_prompt=true` together with
+`include_text=true`; prompt excerpts are also capped at
+2,000 characters each. If either job is `not_ready`, inspect or wait on the
+jobs and retry; comparison reads do not rewrite job state. The sample is not representative or semantic-quality
+evidence. No full rows, hashes, paths, inference, or file writes are returned.
+
 Saved evaluations from prediction jobs retain the job ID, workspace-relative
 input/output/model references, generation settings, row and truncation counts,
 and a local output fingerprint. The MCP history redacts that fingerprint and
