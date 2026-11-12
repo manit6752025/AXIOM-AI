@@ -535,6 +535,9 @@ def inspect(root: Path) -> dict[str, Any]:
     for token in ('["discover", "--json"]', "test_engine_discover_json_lists_local_model_and_adapter_metadata", '"--stream"', "test_engine_run_stream_shows_live_output_and_final_metrics"):
         if token not in engine_cli_tests:
             failures.append("Native Engine CLI discovery regression coverage is missing: " + token)
+    telemetry_panel = (root / "src/components/EngineTelemetryMonitor.tsx").read_text(encoding="utf-8")
+    telemetry_e2e = (root / "e2e/telemetry-monitor.spec.ts").read_text(encoding="utf-8")
+    failures.extend(resource_monitoring_issues(engine_cli_source, telemetry_panel, app_source, telemetry_e2e))
     for path in (
         "/api/health", "/api/meta", "/api/workspace/runtime",
         "/api/workspace/models?offset=0&limit=5", "/api/workspace/datasets",
