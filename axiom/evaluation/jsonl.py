@@ -15,6 +15,56 @@ MAX_EVALUATION_BYTES = 256 * 1024 * 1024
 METRIC_SCHEMA_VERSION = 1
 
 
+def text_pair_counts(prediction: str, reference: str) -> tuple[bool, bool, int, int, int]:
+    """Return the row counts shared by offline evaluation and paired job comparison."""
+    normalized_prediction = " ".join(prediction.split()).casefold()
+    normalized_reference = " ".join(reference.split()).casefold()
+    prediction_words = Counter(normalized_prediction.split())
+    reference_words = Counter(normalized_reference.split())
+    prediction_tokens = sum(prediction_words.values())
+    reference_tokens = sum(reference_words.values())
+    overlapping_tokens = sum((prediction_words & reference_words).values())
+    return (
+        prediction == reference,
+        normalized_prediction == normalized_reference,
+        prediction_tokens,
+        reference_tokens,
+        overlapping_tokens,
+    )
+
+
+def aggregate_text_metrics(
+    *,
+    valid_samples: int,
+    exact_matches: int,
+    normalized_exact_matches: int,
+    prediction_tokens: int,
+    reference_tokens: int,
+    overlapping_tokens: int,
+) -> dict[str, float]:
+    """Aggregate the same lexical metrics returned by the offline evaluator."""
+    if valid_samples <= 0:
+        raise ValueError("At least one valid text pair is required for metric aggregation.")
+    precision = (
+        overlapping_tokens / prediction_tokens
+        if prediction_tokens
+        else float(reference_tokens == 0)
+    )
+    recall = (
+        overlapping_tokens / reference_tokens
+        if reference_tokens
+        else float(prediction_tokens == 0)
+    )
+    token_f1 = (2 * precision * recall / (precision + recall)) if precision + recall else 0.0
+    return {
+        "exact_match": exact_matches / valid_samples,
+        "normalized_exact_match": normalized_exact_matches / valid_samples,
+        "token_precision_micro": precision,
+        "token_recall_micro": recall,
+        "token_f1_micro": token_f1,
+    }
+
+
 class BaselineCorpusMismatchError(ValueError):
     """A report cannot be gated against a baseline from a different corpus."""
 
@@ -156,20 +206,13 @@ def evaluate_jsonl_stream(
             non_string_value_rows += 1
             continue
 
-        normalized_prediction = " ".join(prediction.split()).casefold()
-        normalized_reference = " ".join(reference.split()).casefold()
-        prediction_word_counts = Counter(normalized_prediction.split())
-        reference_word_counts = Counter(normalized_reference.split())
-        prediction_count = sum(prediction_word_counts.values())
-        reference_count = sum(reference_word_counts.values())
-        overlap = sum((prediction_word_counts & reference_word_counts).values())
-
+        row_counts = text_pair_counts(prediction, reference)
         valid_samples += 1
-        exact_matches += prediction == reference
-        normalized_exact_matches += normalized_prediction == normalized_reference
-        prediction_tokens += prediction_count
-        reference_tokens += reference_count
-        overlapping_tokens += overlap
+        exact_matches += row_counts[0]
+        normalized_exact_matches += row_counts[1]
+        prediction_tokens += row_counts[2]
+        reference_tokens += row_counts[3]
+        overlapping_tokens += row_counts[4]
 
     if bytes_scanned >= max_bytes and file_size_bytes > bytes_scanned:
         truncation_reasons.add("max_bytes")
@@ -179,9 +222,14 @@ def evaluate_jsonl_stream(
     if valid_samples == 0:
         raise ValueError("No rows with string prediction and reference values were found within the scan limits.")
 
-    precision = overlapping_tokens / prediction_tokens if prediction_tokens else float(reference_tokens == 0)
-    recall = overlapping_tokens / reference_tokens if reference_tokens else float(prediction_tokens == 0)
-    token_f1 = (2 * precision * recall / (precision + recall)) if precision + recall else 0.0
+    metrics = aggregate_text_metrics(
+        valid_samples=valid_samples,
+        exact_matches=exact_matches,
+        normalized_exact_matches=normalized_exact_matches,
+        prediction_tokens=prediction_tokens,
+        reference_tokens=reference_tokens,
+        overlapping_tokens=overlapping_tokens,
+    )
     complete_hash = bytes_scanned == file_size_bytes
     complete_comparison_corpus = (
         complete_hash and not truncation_reasons and comparison_corpus_hashable
@@ -221,13 +269,7 @@ def evaluate_jsonl_stream(
             "non_string_value_rows": non_string_value_rows,
             "filtered_split_rows": filtered_split_rows,
         },
-        "metrics": {
-            "exact_match": exact_matches / valid_samples,
-            "normalized_exact_match": normalized_exact_matches / valid_samples,
-            "token_precision_micro": precision,
-            "token_recall_micro": recall,
-            "token_f1_micro": token_f1,
-        },
+        "metrics": metrics,
         "confidence_intervals": {
             "confidence_level": 0.95,
             "method": "Wilson score interval",

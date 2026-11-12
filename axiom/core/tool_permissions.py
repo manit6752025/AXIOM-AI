@@ -55,7 +55,7 @@ TOOL_DESCRIPTIONS = {
         "Inspect the first up to three identity- and hash-verified raw exact mismatches; text is off by default and bounded excerpts require explicit per-call opt-in."
     ),
     "axiom_prediction_job_compare": (
-        "Compare two completed prediction jobs on hash-verified artifacts; returns transition counts, bounded row-number samples, and workspace-relative model settings without dataset or output paths."
+        "Compare two completed prediction jobs on hash-verified artifacts; returns exact-match transitions, offline-compatible lexical metric scores and deltas, bounded row-number samples, and workspace-relative model settings without dataset or output paths."
     ),
     "axiom_prediction_job_compare_examples": (
         "Inspect up to three hash-verified paired examples from one prediction-job transition; text is off by default and prompt excerpts require separate per-call opt-in."

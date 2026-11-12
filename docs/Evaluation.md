@@ -103,16 +103,22 @@ axiom mcp allow axiom_prediction_job_examples
 
 For a user-requested comparison between two completed prediction jobs, the
 separately default-deny `axiom_prediction_job_compare` tool counts rows that
-were fixed, regressed, still correct, or still wrong by exact string match.
-It requires matching field settings, row counts, and non-prediction row data
-in the same order, and verifies both artifact identities and SHA-256 values.
-It returns counts and up to three 1-based row numbers per category, never row
-text, dataset/output paths, or hashes. `fixed` means the baseline was incorrect
-and the candidate correct; `regressed` means the reverse. Matching is case-
-and whitespace-sensitive. The result includes workspace-relative model/adapter
-references and generation settings so the runs can be identified. Exact match
-is a lexical metric and does not establish semantic quality. Allow it
-separately:
+were fixed, regressed, still correct, or still wrong by raw exact match. It
+requires matching field settings, row counts, and non-prediction row data in
+the same order, and verifies both artifact identities and SHA-256 values. It
+returns counts and up to three 1-based row numbers per category, never row
+text, dataset/output paths, or hashes. `fixed` means the baseline was
+incorrect and the candidate correct; `regressed` means the reverse.
+
+The comparison also reports baseline and candidate `exact_match`,
+`normalized_exact_match`, and `token_f1_micro` scores with candidate-minus-
+baseline deltas over all verified rows. These formulas match
+`axiom_evaluation_run`. Normalized exact match case-folds and collapses
+whitespace; token F1 uses normalized whitespace-token overlap. These are
+descriptive lexical metrics, not pass/fail or statistical-significance claims,
+and they do not establish semantic quality. The result includes
+workspace-relative model/adapter references and generation settings, but no
+dataset/output paths, row text, or hashes. Allow the tool separately:
 
 ```bash
 axiom mcp allow axiom_prediction_job_compare
@@ -146,9 +152,10 @@ For a user-requested comparison tied to a completed LoRA job,
 `axiom_training_job_prediction_compare` verifies that the baseline used the
 job's saved base model, the candidate used that base with the saved adapter,
 and both jobs used the same dataset and generation settings. It then returns
-the bounded exact-match transitions above. It reuses the training-status and
-prediction-comparison permissions, runs no inference, writes no files, and
-does not verify model or adapter contents or measure semantic quality.
+the bounded exact-match transitions and lexical metric scores above over all
+compared rows. It reuses the training-status and prediction-comparison
+permissions, runs no inference, writes no files, and does not verify model or
+adapter contents or measure semantic quality.
 
 Evaluations created from prediction jobs also persist bounded run provenance:
 the job ID, workspace-relative dataset/output/model/adapter references, field

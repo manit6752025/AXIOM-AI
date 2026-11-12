@@ -34,8 +34,12 @@ from axiom.core.fine_tuning import (
 from axiom.core.mcp_paths import open_mcp_workspace_file, open_mcp_workspace_output_parent
 from axiom.core.storage import atomic_write_text, file_lock
 from axiom.core.training_preflight import resolve_workspace_input
-from axiom.evaluation.jsonl import DEFAULT_MAX_BYTES as _MAX_OUTPUT_BYTES
-from axiom.evaluation.jsonl import DEFAULT_MAX_LINE_BYTES as _MAX_OUTPUT_LINE_BYTES
+from axiom.evaluation.jsonl import (
+    DEFAULT_MAX_BYTES as _MAX_OUTPUT_BYTES,
+    DEFAULT_MAX_LINE_BYTES as _MAX_OUTPUT_LINE_BYTES,
+    aggregate_text_metrics,
+    text_pair_counts,
+)
 
 _MAX_ROWS = 100
 _MAX_INPUT_BYTES = 48 * 1024 * 1024
@@ -2384,6 +2388,16 @@ def compare_prediction_jobs(
         for name in ("fixed", "regressed", "still_correct", "still_wrong")
     }
     paired_examples: list[dict[str, Any]] = []
+    metric_counts = {
+        role: {
+            "exact_matches": 0,
+            "normalized_exact_matches": 0,
+            "prediction_tokens": 0,
+            "reference_tokens": 0,
+            "overlapping_tokens": 0,
+        }
+        for role in ("baseline", "candidate")
+    }
     bytes_scanned = [0, 0]
     digests = [hashlib.sha256(), hashlib.sha256()]
     workspace = Path(root).resolve(strict=True)
@@ -2457,8 +2471,20 @@ def compare_prediction_jobs(
             if baseline_corpus != candidate_corpus:
                 raise ValueError("Prediction jobs do not contain the same non-prediction rows in the same order.")
 
-            baseline_correct = baseline_prediction == baseline_reference
-            candidate_correct = candidate_prediction == candidate_reference
+            baseline_row_counts = text_pair_counts(baseline_prediction, baseline_reference)
+            candidate_row_counts = text_pair_counts(candidate_prediction, candidate_reference)
+            for role, row_counts in (
+                ("baseline", baseline_row_counts),
+                ("candidate", candidate_row_counts),
+            ):
+                metric_counts[role]["exact_matches"] += row_counts[0]
+                metric_counts[role]["normalized_exact_matches"] += row_counts[1]
+                metric_counts[role]["prediction_tokens"] += row_counts[2]
+                metric_counts[role]["reference_tokens"] += row_counts[3]
+                metric_counts[role]["overlapping_tokens"] += row_counts[4]
+
+            baseline_correct = baseline_row_counts[0]
+            candidate_correct = candidate_row_counts[0]
             if not baseline_correct and candidate_correct:
                 category = "fixed"
             elif baseline_correct and not candidate_correct:
@@ -2511,6 +2537,14 @@ def compare_prediction_jobs(
         if current_path != output_path or current_identity != artifact["artifact_identity"]:
             raise ValueError("Completed prediction artifact path changed during comparison.")
 
+    aggregate_metrics = {
+        role: aggregate_text_metrics(
+            valid_samples=row_count,
+            **counts,
+        )
+        for role, counts in metric_counts.items()
+    }
+    compared_metrics = ("exact_match", "normalized_exact_match", "token_f1_micro")
     comparison = {
         "baseline_job_id": baseline_job_id,
         "candidate_job_id": candidate_job_id,
@@ -2529,6 +2563,28 @@ def compare_prediction_jobs(
         },
         "rows_compared": row_count,
         "exact_match_definition": "case- and whitespace-sensitive raw prediction string equals reference string",
+        "lexical_metrics": {
+            "valid_samples": row_count,
+            "definitions": {
+                "exact_match": "Raw prediction string equals the reference string.",
+                "normalized_exact_match": "Case-folded prediction and reference match after collapsing whitespace.",
+                "token_f1_micro": "Micro-averaged multiset overlap F1 over whitespace tokens after case-folding and whitespace normalization.",
+                "candidate_minus_baseline": "Candidate score minus baseline score.",
+            },
+            "baseline": {
+                metric: aggregate_metrics["baseline"][metric]
+                for metric in compared_metrics
+            },
+            "candidate": {
+                metric: aggregate_metrics["candidate"][metric]
+                for metric in compared_metrics
+            },
+            "candidate_minus_baseline": {
+                metric: aggregate_metrics["candidate"][metric]
+                - aggregate_metrics["baseline"][metric]
+                for metric in compared_metrics
+            },
+        },
         "transition_counts": transitions,
         "sample_limit_per_category": limit_per_category,
         "sample_strategy": "first_rows_in_file_order_per_transition",

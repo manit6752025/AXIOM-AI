@@ -121,10 +121,11 @@ Output paths are rechecked when each job starts.
 After both user-requested prediction jobs complete, use
 `axiom_training_job_prediction_compare` to verify that their saved model,
 adapter, dataset, and generation settings match the completed training job
-before reporting exact-match transitions. It reuses the existing training-
-status and prediction-comparison permissions and performs no inference or
-file writes. Exact matches are lexical and do not measure semantic quality or
-verify model/adapter contents.
+before reporting exact-match transitions and lexical metric scores over all
+compared rows. It reuses the existing training-status and prediction-
+comparison permissions and performs no inference or file writes. These scores
+are lexical and do not measure semantic quality or verify model/adapter
+contents.
 
 The permission-checked `axiom_training_job_start`,
 `axiom_training_job_status`, `axiom_training_job_wait`, and
@@ -328,12 +329,18 @@ counts, and matching non-prediction row data in the same order. Both output
 artifacts are checked against their published file identities and SHA-256
 values. The result contains transition counts and up to three 1-based row
 numbers per category; `fixed` means baseline was wrong and candidate is
-correct, while `regressed` means the reverse. Comparisons are case- and
-whitespace-sensitive. The result also includes workspace-relative
-model/adapter references and generation settings to identify each run, but no
-dataset/output artifact paths, row text, or hashes. This measures exact string
-match only; it is not a semantic quality score. It runs no inference and
-writes no files. This capability is separately default-deny:
+correct, while `regressed` means the reverse, using raw exact match.
+
+It also includes baseline and candidate `exact_match`,
+`normalized_exact_match`, and `token_f1_micro` scores with candidate-minus-
+baseline deltas over all verified rows. These formulas match offline
+evaluation. Normalized exact match case-folds and collapses whitespace; token
+F1 uses normalized whitespace-token overlap. These are descriptive lexical
+metrics, not pass/fail or statistical-significance claims, and they do not
+establish semantic quality. The result includes workspace-relative
+model/adapter references and generation settings, but no dataset/output paths,
+row text, or hashes. It runs no inference and writes no files. This capability
+is separately default-deny:
 
 ```bash
 axiom mcp allow axiom_prediction_job_compare
