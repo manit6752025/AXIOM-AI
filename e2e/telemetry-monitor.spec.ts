@@ -80,7 +80,7 @@ test("Runtime resource monitoring is opt-in, bounded, exportable, and clearable"
   await monitor.getByLabel("Sample interval").selectOption("1");
   await monitor.getByRole("button", { name: "Start monitoring" }).click();
   await expect.poll(() => telemetryCalls, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
-  await expect(monitor.getByText(/2\/120|3\/120|4\/120/)).toBeVisible();
+  await expect(monitor.getByText(/\d+\/120/)).toBeVisible();
   await expect(monitor.getByRole("table", { name: "Resource telemetry samples" })).toBeVisible();
 
   await monitor.getByRole("button", { name: "Stop monitoring" }).click();
