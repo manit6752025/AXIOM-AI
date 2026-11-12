@@ -453,6 +453,24 @@ Agents can then call `axiom_workspace_context` before choosing more specific too
 axiom mcp allow axiom_training_preflight
 ```
 
+The separately default-deny `axiom_training_eval_overlap_preflight` checks
+whether an evaluation JSONL contains exact examples found in the training
+JSONL. It reuses the trainer's accepted-text parser, normalizes case and
+whitespace, and returns overlap counts plus up to five 1-based evaluation row
+numbers without returning text or hashes. By default it compares evaluation
+prompts; set `include_reference=true` and choose `evaluation_reference_field`
+to also compare combined prompt/reference text. Training scans use the
+trainer's 50 MiB, 10,000-record, 1 MiB-per-line, and 300,000-character
+per-record limits; evaluation scans cap at 64 MiB, 100,000 rows, and 1 MiB
+per line. Changed files, invalid inputs, or incomplete scans
+are `inconclusive`. No exact match does not prove the set is held out or
+leakage-free, and paraphrases are not detected. The read-only tool loads no
+weights, runs no inference, and writes no files:
+
+```bash
+axiom mcp allow axiom_training_eval_overlap_preflight
+```
+
 `axiom_training_job_start`, `axiom_training_job_status`, and `axiom_training_job_cancel` expose AXIOM's existing local LoRA trainer to agents. Start accepts workspace-relative model and JSONL paths, writes adapter output only under an existing `outputs/` directory, supports up to 1,000 steps, never downloads weights or executes remote code, and is serialized by AXIOM's single-job lock. The start tool creates a local job record and launches training; the adapter is written later when training finishes. It consumes local compute and writes model artifacts, so each tool is default-deny and has its own permission. The server instructions tell agents to run preflight, show the exact configuration, and wait for an explicit user request before starting that run. Tool permission itself grants standing capability. Status returns workspace-relative paths and omits local logs and detailed failure strings. Cancellation stops at the next safe training boundary; once `finalizing` begins, the adapter is saved and cancellation is no longer accepted.
 
 Training status also returns `loss_trace.samples`: up to 64 evenly spaced
@@ -596,6 +614,7 @@ axiom mcp profile use readonly
 | `axiom_workspace_context` | Read a privacy-bounded project, hardware, and developer-tool snapshot; command suggestions need user approval |
 | `axiom_workspace_assets` | Find model directories and JSONL datasets with bounded, workspace-relative path scans |
 | `axiom_training_preflight` | Check local LoRA inputs and estimates without loading weights or starting a job |
+| `axiom_training_eval_overlap_preflight` | Check for normalized exact overlap between training and evaluation JSONL without returning text |
 | `axiom_training_job_start` | Start a user-requested bounded local LoRA job; writes adapter output under `outputs/` |
 | `axiom_training_job_status` | Read local LoRA progress and a bounded training-loss trace without logs or absolute paths |
 | `axiom_training_job_cancel` | Request cancellation before adapter finalization |

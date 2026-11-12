@@ -31,6 +31,7 @@
 ## Unreleased — latest/development
 
 ### Added
+- Added a separately default-deny training/evaluation overlap preflight using the trainer's bounded text parser; it returns normalized exact-match counts and row numbers without text and never claims that no match proves held-out data.
 - Added a persisted, bounded training-loss trace to local LoRA job status for post-run agent diagnosis; the response labels it as training-only, not validation or quality evidence.
 - Added a separately default-deny prediction-job comparison that verifies two completed artifacts and reports bounded exact-match transition counts and row-number samples without returning row text.
 - Added a bounded MCP wait operation for asynchronous prediction jobs using the existing status permission, avoiding rapid status polling.

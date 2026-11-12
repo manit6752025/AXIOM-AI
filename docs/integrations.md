@@ -63,6 +63,25 @@ supports LoRA, not QLoRA, and the generic planner may suggest a QLoRA fallback.
 Hardware status `warn` means only the generic estimate predicts a fit; actual
 loading was not tested. The estimate also cannot verify Apple MPS or CPU fit.
 
+The separately default-deny `axiom_training_eval_overlap_preflight` checks
+whether a workspace evaluation JSONL contains normalized exact examples from
+the training JSONL. It reuses the LoRA trainer's accepted-text parsing and
+compares after case folding and whitespace collapse. By default it compares
+evaluation prompts; set `include_reference: true` and select
+`evaluation_reference_field` to also compare combined prompt/reference text.
+Training scans use the trainer's 50 MiB, 10,000-record, 1 MiB-per-line, and
+300,000-character-per-record bounds; evaluation scans are capped at 64 MiB,
+100,000 rows, and 1 MiB per line. It returns only counts and up to five
+1-based evaluation row numbers, with no text or hashes.
+Changed files, invalid records, and incomplete scans are `inconclusive`. No
+exact overlap does not prove a dataset is held out or leakage-free, and
+paraphrases are not detected. The result applies only to the scanned file
+snapshots. The tool is read-only, loads no weights, and runs no inference:
+
+```bash
+axiom mcp allow axiom_training_eval_overlap_preflight
+```
+
 The separately permissioned `axiom_training_job_start`,
 `axiom_training_job_status`, and `axiom_training_job_cancel` tools expose the
 existing local LoRA trainer to agents. Start accepts workspace-relative model

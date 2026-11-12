@@ -50,6 +50,7 @@ from axiom.core.tool_permissions import ToolPermissionStore
 from axiom.core.training_preflight import (
     resolve_workspace_input,
     resolve_workspace_output,
+    run_training_evaluation_overlap_preflight,
     run_training_preflight,
 )
 from axiom.daemon import local_summary
@@ -90,6 +91,7 @@ mcp = MCPServer(
         "Use axiom_dataset_inspect for bounded JSONL structure and schema checks. "
         "Sensitive field-name heuristics are included; content PII pattern scanning requires explicit opt-in. "
         "Use axiom_training_preflight for bounded, non-executing checks before local LoRA training. "
+        "When the user asks whether evaluation data may overlap training data, use the separate default-deny axiom_training_eval_overlap_preflight. It normalizes case and whitespace and returns only exact-overlap counts and row numbers. A clear result does not prove the evaluation data is held out or leakage-free; paraphrases are not detected. It does not load model weights or run inference. "
         "Use axiom_engine_preflight before local inference to check model/adapter structure, the selected device/precision, and advisory memory estimates; it does not load weights or run inference. Pass the same settings to axiom_engine_generate. "
         "Run preflight and show the exact configuration before calling axiom_training_job_start; "
         "call it only after the user explicitly requests that run. It uses compute and writes an adapter under outputs/. "
@@ -828,6 +830,29 @@ def axiom_training_preflight(
     """Check local LoRA prerequisites without loading weights or starting a job."""
     ToolPermissionStore().require("axiom_training_preflight")
     return run_training_preflight(model_path, dataset_path, text_field)
+
+
+@mcp.tool()
+def axiom_training_eval_overlap_preflight(
+    training_dataset_path: str,
+    evaluation_dataset_path: str,
+    training_text_field: str = "text",
+    evaluation_prompt_field: str = "prompt",
+    include_reference: bool = False,
+    evaluation_reference_field: str = "completion",
+    sample_limit: int = 5,
+) -> dict:
+    """Check for bounded normalized exact overlap between training and evaluation text."""
+    ToolPermissionStore().require("axiom_training_eval_overlap_preflight")
+    return run_training_evaluation_overlap_preflight(
+        training_dataset_path,
+        evaluation_dataset_path,
+        training_text_field=training_text_field,
+        evaluation_prompt_field=evaluation_prompt_field,
+        include_reference=include_reference,
+        evaluation_reference_field=evaluation_reference_field,
+        sample_limit=sample_limit,
+    )
 
 
 def _mcp_workspace_root() -> Path:

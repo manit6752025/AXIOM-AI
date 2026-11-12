@@ -21,6 +21,9 @@ TOOL_DESCRIPTIONS = {
     "axiom_training_preflight": (
         "Check local LoRA inputs and estimates without loading weights or starting a job."
     ),
+    "axiom_training_eval_overlap_preflight": (
+        "Read bounded local training and evaluation JSONL to detect case- and whitespace-normalized exact overlap; returns counts and row numbers without text or hashes."
+    ),
     "axiom_training_job_start": (
         "Start a local LoRA training job from workspace assets; consumes compute and writes an adapter under outputs/."
     ),
