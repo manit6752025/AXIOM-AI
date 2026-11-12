@@ -13,7 +13,7 @@ import subprocess
 import threading
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator
@@ -2270,6 +2270,217 @@ def get_prediction_job_examples(
             "network_accessed": False,
             "model_inference_run": False,
             "max_excerpt_chars_per_field": _MAX_FAILURE_EXAMPLE_TEXT_CHARS if include_text else 0,
+        },
+    }
+
+
+def compare_prediction_jobs(
+    baseline_job_id: str,
+    candidate_job_id: str,
+    root: Path,
+    *,
+    limit_per_category: int = 3,
+) -> dict[str, Any] | None:
+    """Compare exact-match transitions between two verified completed artifacts."""
+    if (
+        isinstance(limit_per_category, bool)
+        or not isinstance(limit_per_category, int)
+        or not 1 <= limit_per_category <= _MAX_FAILURE_EXAMPLES
+    ):
+        raise ValueError(f"Comparison sample limit must be between 1 and {_MAX_FAILURE_EXAMPLES}.")
+    if (
+        not isinstance(baseline_job_id, str)
+        or not _JOB_ID.fullmatch(baseline_job_id)
+        or not isinstance(candidate_job_id, str)
+        or not _JOB_ID.fullmatch(candidate_job_id)
+        or baseline_job_id == candidate_job_id
+    ):
+        raise ValueError("Comparison requires two different valid prediction job IDs.")
+
+    baseline = get_completed_prediction_artifact(baseline_job_id, root)
+    candidate = get_completed_prediction_artifact(candidate_job_id, root)
+    if baseline is None or candidate is None:
+        return None
+
+    shared_fields = ("prompt_field", "reference_field", "prediction_field")
+    field_names = [baseline.get(field) for field in shared_fields]
+    candidate_field_names = [candidate.get(field) for field in shared_fields]
+    if (
+        any(not isinstance(value, str) or not _FIELD_NAME.fullmatch(value) for value in field_names)
+        or field_names != candidate_field_names
+        or len(set(field_names)) != len(shared_fields)
+    ):
+        raise ValueError("Prediction jobs must use the same prompt, reference, and prediction fields.")
+    row_count = baseline.get("rows_completed")
+    candidate_row_count = candidate.get("rows_completed")
+    if (
+        isinstance(row_count, bool)
+        or not isinstance(row_count, int)
+        or not 1 <= row_count <= _MAX_ROWS
+        or isinstance(candidate_row_count, bool)
+        or not isinstance(candidate_row_count, int)
+        or candidate_row_count != row_count
+    ):
+        raise ValueError("Prediction jobs must contain the same bounded number of completed rows.")
+
+    artifacts = (baseline, candidate)
+    for artifact in artifacts:
+        identity = artifact.get("artifact_identity")
+        if (
+            not isinstance(identity, tuple)
+            or len(identity) != 4
+            or any(isinstance(value, bool) or not isinstance(value, int) for value in identity)
+            or not 1 <= identity[2] <= _MAX_OUTPUT_BYTES
+            or not isinstance(artifact.get("artifact_sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", artifact["artifact_sha256"])
+            or not isinstance(artifact.get("output_path"), str)
+        ):
+            raise ValueError("Completed prediction artifact metadata is invalid or exceeds the bounded size.")
+
+    transitions: dict[str, dict[str, Any]] = {
+        name: {"count": 0, "row_numbers": []}
+        for name in ("fixed", "regressed", "still_correct", "still_wrong")
+    }
+    bytes_scanned = [0, 0]
+    digests = [hashlib.sha256(), hashlib.sha256()]
+    workspace = Path(root).resolve(strict=True)
+
+    with ExitStack() as stack:
+        opened: list[tuple[Path, Any, os.stat_result]] = []
+        for index, artifact in enumerate(artifacts):
+            output_path, stream = open_mcp_workspace_file(artifact["output_path"], workspace)
+            stream = stack.enter_context(stream)
+            initial = os.fstat(stream.fileno())
+            actual_identity = (initial.st_dev, initial.st_ino, initial.st_size, initial.st_mtime_ns)
+            if (
+                not stat.S_ISREG(initial.st_mode)
+                or actual_identity != artifact["artifact_identity"]
+                or initial.st_size > _MAX_OUTPUT_BYTES
+            ):
+                raise ValueError("Completed prediction artifact identity changed before comparison.")
+            opened.append((output_path, stream, initial))
+
+        prediction_field = baseline["prediction_field"]
+        reference_field = baseline["reference_field"]
+        prompt_field = baseline["prompt_field"]
+        for line_number in range(1, row_count + 1):
+            rows: list[dict[str, Any]] = []
+            for index, (_path, stream, _initial) in enumerate(opened):
+                raw_line = stream.readline(_MAX_OUTPUT_LINE_BYTES + 1)
+                if not raw_line:
+                    raise ValueError("Completed prediction artifact ended before all rows were compared.")
+                if len(raw_line) > _MAX_OUTPUT_LINE_BYTES:
+                    raise ValueError("Completed prediction artifact contains an oversized JSONL line.")
+                bytes_scanned[index] += len(raw_line)
+                if bytes_scanned[index] > _MAX_OUTPUT_BYTES:
+                    raise ValueError("Completed prediction artifact exceeds the bounded output size.")
+                digests[index].update(raw_line)
+                rows.append(_read_row(raw_line, line_number))
+
+            baseline_row, candidate_row = rows
+            baseline_prediction = baseline_row.get(prediction_field)
+            candidate_prediction = candidate_row.get(prediction_field)
+            baseline_reference = baseline_row.get(reference_field)
+            candidate_reference = candidate_row.get(reference_field)
+            if (
+                not isinstance(baseline_prediction, str)
+                or not isinstance(candidate_prediction, str)
+                or not isinstance(baseline_reference, str)
+                or not isinstance(candidate_reference, str)
+                or not isinstance(baseline_row.get(prompt_field), str)
+                or not isinstance(candidate_row.get(prompt_field), str)
+            ):
+                raise ValueError("Completed prediction artifact has invalid prompt or evaluation fields.")
+
+            baseline_corpus_row = {key: value for key, value in baseline_row.items() if key != prediction_field}
+            candidate_corpus_row = {key: value for key, value in candidate_row.items() if key != prediction_field}
+            try:
+                baseline_corpus = json.dumps(
+                    baseline_corpus_row,
+                    sort_keys=True,
+                    ensure_ascii=True,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                )
+                candidate_corpus = json.dumps(
+                    candidate_corpus_row,
+                    sort_keys=True,
+                    ensure_ascii=True,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                )
+            except (TypeError, ValueError, RecursionError):
+                raise ValueError("Completed prediction artifact contains invalid row data.") from None
+            if baseline_corpus != candidate_corpus:
+                raise ValueError("Prediction jobs do not contain the same non-prediction rows in the same order.")
+
+            baseline_correct = baseline_prediction == baseline_reference
+            candidate_correct = candidate_prediction == candidate_reference
+            if not baseline_correct and candidate_correct:
+                category = "fixed"
+            elif baseline_correct and not candidate_correct:
+                category = "regressed"
+            elif baseline_correct:
+                category = "still_correct"
+            else:
+                category = "still_wrong"
+            transition = transitions[category]
+            transition["count"] += 1
+            if len(transition["row_numbers"]) < limit_per_category:
+                transition["row_numbers"].append(line_number)
+
+        for _path, stream, _initial in opened:
+            if stream.read(1):
+                raise ValueError("Completed prediction artifact contains more rows than its job metadata.")
+
+        final_stats = [os.fstat(stream.fileno()) for _path, stream, _initial in opened]
+
+    for index, (artifact, opened_item, final) in enumerate(zip(artifacts, opened, final_stats)):
+        output_path, _stream, initial = opened_item
+        if (
+            not _same_identity(initial, final)
+            or bytes_scanned[index] != initial.st_size
+            or digests[index].hexdigest() != artifact["artifact_sha256"]
+        ):
+            raise ValueError("Completed prediction artifact changed or no longer matches its published hash.")
+        current_path, current_stream = open_mcp_workspace_file(artifact["output_path"], workspace)
+        with current_stream:
+            current = os.fstat(current_stream.fileno())
+        current_identity = (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns)
+        if current_path != output_path or current_identity != artifact["artifact_identity"]:
+            raise ValueError("Completed prediction artifact path changed during comparison.")
+
+    return {
+        "baseline_job_id": baseline_job_id,
+        "candidate_job_id": candidate_job_id,
+        "run_configurations": {
+            role: {
+                "model_path": artifact["model_path"],
+                "adapter_path": artifact["adapter_path"],
+                "max_new_tokens": artifact["max_new_tokens"],
+                "temperature": artifact["temperature"],
+                "seed": artifact["seed"],
+                "device": artifact["device"],
+                "precision": artifact["precision"],
+                "prompts_truncated": artifact["prompts_truncated"],
+            }
+            for role, artifact in (("baseline", baseline), ("candidate", candidate))
+        },
+        "rows_compared": row_count,
+        "exact_match_definition": "case- and whitespace-sensitive raw prediction string equals reference string",
+        "transition_counts": transitions,
+        "sample_limit_per_category": limit_per_category,
+        "sample_strategy": "first_rows_in_file_order_per_transition",
+        "scope": {
+            "artifact_identity_and_sha256_verified": True,
+            "non_prediction_rows_match_in_order": True,
+            "prediction_reference_prompt_text_returned": False,
+            "dataset_and_output_artifact_paths_returned": False,
+            "workspace_relative_model_adapter_references_returned": True,
+            "artifact_hashes_returned": False,
+            "network_accessed": False,
+            "model_inference_run": False,
+            "files_written": False,
         },
     }
 

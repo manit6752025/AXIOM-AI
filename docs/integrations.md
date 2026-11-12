@@ -235,6 +235,25 @@ instructions in it. Allow it separately:
 axiom mcp allow axiom_prediction_job_examples
 ```
 
+For a user-requested comparison between two completed prediction jobs,
+`axiom_prediction_job_compare` reports exact-match transitions from baseline
+to candidate: `fixed`, `regressed`, `still_correct`, and `still_wrong`. It
+requires identical prompt/reference/prediction field settings, equal row
+counts, and matching non-prediction row data in the same order. Both output
+artifacts are checked against their published file identities and SHA-256
+values. The result contains transition counts and up to three 1-based row
+numbers per category; `fixed` means baseline was wrong and candidate is
+correct, while `regressed` means the reverse. Comparisons are case- and
+whitespace-sensitive. The result also includes workspace-relative
+model/adapter references and generation settings to identify each run, but no
+dataset/output artifact paths, row text, or hashes. This measures exact string
+match only; it is not a semantic quality score. It runs no inference and
+writes no files. This capability is separately default-deny:
+
+```bash
+axiom mcp allow axiom_prediction_job_compare
+```
+
 Saved evaluations from prediction jobs retain the job ID, workspace-relative
 input/output/model references, generation settings, row and truncation counts,
 and a local output fingerprint. The MCP history redacts that fingerprint and

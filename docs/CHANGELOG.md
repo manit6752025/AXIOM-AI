@@ -31,6 +31,7 @@
 ## Unreleased — latest/development
 
 ### Added
+- Added a separately default-deny prediction-job comparison that verifies two completed artifacts and reports bounded exact-match transition counts and row-number samples without returning row text.
 - Added a bounded MCP wait operation for asynchronous prediction jobs using the existing status permission, avoiding rapid status polling.
 - Ensure an unexpectedly exited prediction worker thread cannot leave persisted job state active; recover a publishing artifact only after identity and hash verification.
 - Added a separately default-deny prediction-job mismatch inspector that verifies the completed artifact hash and returns up to three bounded text excerpts only after explicit per-call approval.

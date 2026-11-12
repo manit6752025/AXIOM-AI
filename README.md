@@ -519,6 +519,25 @@ not instructions. It has a separate default-deny permission:
 axiom mcp allow axiom_prediction_job_examples
 ```
 
+For a user-requested run-to-run comparison, the separately default-deny
+`axiom_prediction_job_compare` tool compares two completed prediction jobs. It
+requires the same prompt, reference, and prediction fields, equal row counts,
+and identical non-prediction row data in the same order. It verifies both
+artifacts' file identities and SHA-256 values before returning exact-match
+transition counts (`fixed`, `regressed`, `still_correct`, and `still_wrong`)
+plus up to three 1-based row numbers per category. The sample is the first
+rows in file order for each category. `fixed` means baseline was not an exact
+match and candidate is; `regressed` means baseline matched and candidate did
+not. Comparison is case- and whitespace-sensitive. The response includes
+workspace-relative model/adapter references and generation settings to
+identify each run, but no dataset or output artifact paths, row text, or
+hashes. It runs no inference and writes no files. This is a lexical diagnostic
+rather than a semantic quality judgment. Grant it separately:
+
+```bash
+axiom mcp allow axiom_prediction_job_compare
+```
+
 `axiom_dataset_clean_preview` reports bounded keep/remove counts and a proposed output path before cleanup. It accepts workspace-relative `.jsonl` paths, returns no row values, and never writes files. When `truncated` is true, counts describe only the scanned portion; overlong rows are unclassified because the cleaner may still keep them. CR-only line endings and invalid UTF-8 produce warnings when preview decisions may differ from cleaner behavior. The preview is advisory because the source can change between calls, so re-preview immediately before writing. `axiom_dataset_clean` is a separate write permission: it repeats the preview, refuses partial or mismatched previews, and enforces the same byte, row, and line limits while writing. It only accepts workspace-relative paths, writes a new output file, and refuses to overwrite an existing destination. The output parent directory must already exist. Review the preview counts and destination with the user before calling the write tool. Grant preview and writing separately:
 
 ```bash
@@ -581,6 +600,7 @@ axiom mcp profile use readonly
 | `axiom_prediction_job_cancel` | Cancel prediction before artifact finalization begins |
 | `axiom_prediction_job_evaluate` | Evaluate a completed job artifact using the `axiom_evaluation_run` permission |
 | `axiom_prediction_job_examples` | Inspect up to three verified mismatches; text is off unless approved per call |
+| `axiom_prediction_job_compare` | Compare exact-match transitions between two verified prediction jobs |
 | `axiom_system_info` | Detected hardware |
 | `axiom_model_list` | Registered models |
 | `axiom_model_info` | Inspect a local model folder |
