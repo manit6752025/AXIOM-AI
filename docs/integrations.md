@@ -159,6 +159,28 @@ axiom mcp allow axiom_prediction_job_status
 axiom mcp allow axiom_prediction_job_cancel
 ```
 
+`axiom_prediction_job_preflight` is a separate default-deny, read-only tool for
+estimating prompt clipping before inference. It scans the bounded JSONL input
+and, when exact tokenizer/template metadata is available, applies the same
+native prompt formatting, BOS handling, and context budget as generation. It
+must use the same model, dataset, prompt and reference fields, and
+`max_new_tokens` as the intended start call; rerun it after changing any of
+those inputs. The result returns aggregate token counts, 1-based JSONL line numbers for expected
+truncations, and one of `clear`, `truncation_expected`, or
+`inconclusive`; it never returns row values or a dataset hash and does not load
+weights, run inference, access the network, or write files. `inconclusive`
+means AXIOM could not establish the exact tokenizer behavior, such as a GGUF
+model with only embedded tokenizer metadata or a chat template using macros or
+nested loops. Those templates are rejected by the shared generation formatter,
+so a prediction job can fail during generation. The result has `assessment_scope: prompt_truncation_only`; `clear` does not
+mean the model or full prediction run is ready. It applies to the current
+snapshot, so the job validates its input again at start and its final
+`prompts_truncated` count remains authoritative. Allow it independently:
+
+```bash
+axiom mcp allow axiom_prediction_job_preflight
+```
+
 `axiom_prediction_job_evaluate` accepts a completed job ID, reads the saved
 prediction/reference fields from that job, and verifies the artifact's
 published file identity and SHA-256 before scoring it. It returns sanitized

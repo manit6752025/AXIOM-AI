@@ -475,6 +475,12 @@ axiom mcp allow axiom_engine_preflight
 axiom mcp allow axiom_engine_generate
 ```
 
+`axiom_prediction_job_preflight` scans the same bounded JSONL input used by a prediction job and estimates whether the model's native tokenizer/template will clip prompts at the requested `max_new_tokens` limit. Use the same model, dataset, prompt and reference fields, and token limit as the intended start call; rerun preflight after changing any of them. It reports aggregate token lengths, 1-based JSONL line numbers for prompts expected to be clipped, and a `clear`, `truncation_expected`, or `inconclusive` status. The `assessment_scope` is prompt truncation only; `clear` does not mean the model or full prediction run is ready. It reads no model weights, runs no inference, makes no network request, writes no files, and returns neither row values nor dataset hashes. The estimate describes the scanned snapshot; the prediction job validates its input again at start, and its final `prompts_truncated` count is authoritative. GGUF checkpoints without a sidecar `tokenizer.json`, unavailable tokenizer metadata, or chat templates AXIOM cannot evaluate safely, return `inconclusive`. The shared generation formatter also rejects those unsupported templates, so the corresponding prediction job may fail during generation. This read-only capability has a separate default-deny permission:
+
+```bash
+axiom mcp allow axiom_prediction_job_preflight
+```
+
 `axiom_prediction_job_start`, `axiom_prediction_job_status`, and `axiom_prediction_job_cancel` connect local inference to offline evaluation. Start accepts a workspace-relative JSONL input under `data/`, a prompt field, a required string reference field, a trusted local model and optional adapter, and a new `data/NAME.jsonl` destination. It validates the complete input before launch and caps it at 100 rows, 48 MiB total, 768 KiB per line, and 8,000 characters per prompt; generation is limited to 64 tokens and 16,000 characters per row. Output is capped at 64 MiB total and 1 MiB per line. Generation accepts a temperature and optional seed. Original row fields are preserved and the selected prediction field is added or replaced. The result file is published atomically only after every row succeeds; cancellation and failure discard the partial file, and existing destinations are never overwritten. The completed artifact can be passed to `axiom_evaluation_run`. Job status contains counts and workspace-relative paths only; prompts, predictions, and logs are not returned. `prompts_truncated` counts rows where the native engine clipped input to fit the model context; review a nonzero count before evaluating the artifact. A safe `error_code` identifies failure stage without returning local exception details. Job state is held in memory and is cleared when the MCP process restarts. The job reserves AXIOM's shared local fine-tuning/prediction-job slot, uses local compute, and writes generated text into the requested artifact. When permitted, run `axiom_engine_preflight` first. Start is separately default-deny and the server instructions require showing the exact run configuration and output file, then receiving the user's explicit go-ahead:
 
 ```bash
@@ -544,6 +550,7 @@ axiom mcp profile use readonly
 | `axiom_training_job_cancel` | Request cancellation before adapter finalization |
 | `axiom_engine_preflight` | Check local native model/adapter structure and advisory memory estimates without inference |
 | `axiom_engine_generate` | Run one bounded local native inference request and return generated text |
+| `axiom_prediction_job_preflight` | Estimate prompt clipping for a bounded JSONL prediction dataset without loading weights or running inference |
 | `axiom_prediction_job_start` | Generate a bounded evaluation-ready JSONL artifact with local inference |
 | `axiom_prediction_job_status` | Read prediction-job counts and safe workspace-relative paths |
 | `axiom_prediction_job_cancel` | Cancel prediction before artifact publication |

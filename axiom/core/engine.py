@@ -32,6 +32,11 @@ _MAX_NEW_TOKENS = 2_048
 _MAX_ENGINE_QUEUE_WAIT_SECONDS = 30.0
 _MAX_INPUT_TOKENS = 8_192
 _MAX_CONFIG_BYTES = 1_048_576
+_MAX_RENDERED_PROMPT_CHARS = 262_144
+_MAX_TEMPLATE_ITER_ITEMS = 16_384
+_TEMPLATE_FORMAT_WIDTH_RE = re.compile(
+    r"%(?!%)(?:\([^)]+\))?[-+#0 ]*(?P<width>\d+|\*)?(?:\.(?P<precision>\d+|\*))?[diouxXeEfFgGcrsa]"
+)
 _LOG = logging.getLogger(__name__)
 # A plain Lock is deliberate: the streaming generator may resume on a different worker thread.
 _ENGINE_LOCK = threading.Lock()
@@ -72,6 +77,23 @@ class AxiomEngineError(RuntimeError):
 def _version_key(value: str) -> tuple[int, int, int]:
     parts = [int(part) for part in re.findall(r"\d+", value)[:3]]
     return tuple((parts + [0, 0, 0])[:3])
+
+
+def _native_generation_token_budget(
+    effective_max_position_embeddings: int,
+    max_new_tokens: int,
+) -> tuple[int, int, int]:
+    """Return the shared context cap, effective output limit, and prompt budget."""
+    context_cap = max(
+        2,
+        min(
+            effective_max_position_embeddings,
+            _MAX_INPUT_TOKENS + max_new_tokens,
+        ),
+    )
+    effective_max_new_tokens = min(max_new_tokens, context_cap - 1)
+    input_limit = max(1, min(_MAX_INPUT_TOKENS, context_cap - effective_max_new_tokens))
+    return context_cap, effective_max_new_tokens, input_limit
 
 
 def _device_capability_rows(torch_module: Any | None = None) -> list[dict[str, Any]]:
@@ -1611,17 +1633,17 @@ def _format_prompt_for_native_model(
     """
     tokenizer_config: dict[str, Any] = {}
     config_path = model_dir / "tokenizer_config.json"
-    if config_path.is_file():
+    if config_path.exists() or config_path.is_symlink():
         try:
-            if config_path.stat().st_size > _MAX_CONFIG_BYTES:
-                raise AxiomEngineError("tokenizer_config.json exceeds AXIOM's 1 MiB chat-template limit.")
-            value = json.loads(config_path.read_text(encoding="utf-8"))
-            if not isinstance(value, dict):
-                raise AxiomEngineError("tokenizer_config.json must be a JSON object.")
-            tokenizer_config = value
-        except AxiomEngineError:
-            raise
-        except (OSError, UnicodeError, json.JSONDecodeError):
+            from axiom.core.native_engine import _MAX_CONFIG_BYTES, _read_json_object
+
+            tokenizer_config = _read_json_object(
+                config_path,
+                _MAX_CONFIG_BYTES,
+                "Tokenizer config",
+                _allowed_model_roots(),
+            )
+        except Exception:
             raise AxiomEngineError("tokenizer_config.json could not be read while resolving the model's chat template.") from None
 
     template = tokenizer_config.get("chat_template")
@@ -1631,6 +1653,7 @@ def _format_prompt_for_native_model(
         template = preferred["template"] if preferred else None
     if isinstance(template, str) and template.strip():
         try:
+            from jinja2 import nodes
             from jinja2.sandbox import SandboxedEnvironment
         except ImportError:
             if model_type in {"qwen2", "qwen3"}:
@@ -1650,7 +1673,179 @@ def _format_prompt_for_native_model(
             if not isinstance(raw, str):
                 return ""
             return raw if tokenizer.token_to_id(raw) is not None else ""
-        environment = SandboxedEnvironment(autoescape=False, keep_trailing_newline=True)
+        class BoundedTemplateEnvironment(SandboxedEnvironment):
+            intercepted_binops = frozenset({"+", "*", "**", "%", "<<"})
+
+            def is_safe_callable(self, obj: Any) -> bool:
+                owner = getattr(obj, "__self__", None)
+                method_name = getattr(obj, "__name__", "")
+                if isinstance(owner, str) and method_name in {
+                    "center", "expandtabs", "format", "format_map", "join",
+                    "encode", "ljust", "replace", "rjust", "translate", "zfill",
+                }:
+                    return False
+                return super().is_safe_callable(obj)
+
+            def call_binop(self, context: Any, operator: str, left: Any, right: Any) -> Any:
+                if operator == "**":
+                    raise ValueError("chat-template exponentiation is disabled to keep rendering bounded")
+                if operator == "*" and isinstance(left, str) and isinstance(right, int):
+                    if len(left) * max(0, right) > _MAX_RENDERED_PROMPT_CHARS:
+                        raise ValueError("chat-template string expansion exceeds AXIOM's output limit")
+                if operator == "*" and isinstance(right, str) and isinstance(left, int):
+                    if len(right) * max(0, left) > _MAX_RENDERED_PROMPT_CHARS:
+                        raise ValueError("chat-template string expansion exceeds AXIOM's output limit")
+                if operator == "*" and isinstance(left, bytes) and isinstance(right, int):
+                    if len(left) * max(0, right) > _MAX_RENDERED_PROMPT_CHARS:
+                        raise ValueError("chat-template byte expansion exceeds AXIOM's output limit")
+                if operator == "*" and isinstance(right, bytes) and isinstance(left, int):
+                    if len(right) * max(0, left) > _MAX_RENDERED_PROMPT_CHARS:
+                        raise ValueError("chat-template byte expansion exceeds AXIOM's output limit")
+                if operator == "+" and isinstance(left, str) and isinstance(right, str):
+                    if len(left) + len(right) > _MAX_RENDERED_PROMPT_CHARS:
+                        raise ValueError("chat-template string expansion exceeds AXIOM's output limit")
+                if operator == "*" and isinstance(left, (list, tuple)) and isinstance(right, int):
+                    if len(left) * max(0, right) > _MAX_TEMPLATE_ITER_ITEMS:
+                        raise ValueError("chat-template sequence expansion exceeds AXIOM's item limit")
+                if operator == "*" and isinstance(right, (list, tuple)) and isinstance(left, int):
+                    if len(right) * max(0, left) > _MAX_TEMPLATE_ITER_ITEMS:
+                        raise ValueError("chat-template sequence expansion exceeds AXIOM's item limit")
+                if operator == "+" and isinstance(left, (list, tuple)) and isinstance(right, (list, tuple)):
+                    if len(left) + len(right) > _MAX_TEMPLATE_ITER_ITEMS:
+                        raise ValueError("chat-template sequence expansion exceeds AXIOM's item limit")
+                if operator == "<<" and isinstance(left, int) and isinstance(right, int):
+                    if right < 0 or left.bit_length() + right > 4_096:
+                        raise ValueError("chat-template integer expansion exceeds AXIOM's bit limit")
+                if operator == "*" and isinstance(left, int) and isinstance(right, int):
+                    if left and right and left.bit_length() + right.bit_length() > 4_096:
+                        raise ValueError("chat-template integer expansion exceeds AXIOM's bit limit")
+                if operator == "+" and isinstance(left, int) and isinstance(right, int):
+                    if max(left.bit_length(), right.bit_length()) >= 4_096:
+                        raise ValueError("chat-template integer expansion exceeds AXIOM's bit limit")
+                if operator == "%" and isinstance(left, str):
+                    for match in _TEMPLATE_FORMAT_WIDTH_RE.finditer(left):
+                        for key in ("width", "precision"):
+                            limit = match.group(key)
+                            if limit == "*" or (limit and int(limit) > _MAX_RENDERED_PROMPT_CHARS):
+                                raise ValueError("chat-template format expansion exceeds AXIOM's output limit")
+                result = super().call_binop(context, operator, left, right)
+                if isinstance(result, str) and len(result) > _MAX_RENDERED_PROMPT_CHARS:
+                    raise ValueError("chat-template string expansion exceeds AXIOM's output limit")
+                return result
+
+        environment = BoundedTemplateEnvironment(autoescape=False, keep_trailing_newline=True)
+        original_format_filter = environment.filters["format"]
+        original_center_filter = environment.filters["center"]
+        original_indent_filter = environment.filters["indent"]
+        original_urlencode_filter = environment.filters["urlencode"]
+
+        def bounded_replace(value: Any, old: Any, new: Any, count: Any = None) -> Any:
+            value_text, old_text, new_text = str(value), str(old), str(new)
+            if isinstance(value_text, str):
+                replacements = len(value_text) + 1 if old_text == "" else value_text.count(old_text)
+                if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+                    replacements = min(replacements, count)
+                projected = (
+                    len(value_text) + replacements * len(new_text)
+                    if old_text == ""
+                    else len(value_text) + replacements * (len(new_text) - len(old_text))
+                )
+                if projected > _MAX_RENDERED_PROMPT_CHARS:
+                    raise ValueError("chat-template replace expansion exceeds AXIOM's output limit")
+            result = value_text.replace(old_text, new_text, -1 if count is None else count)
+            if len(result) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template replace expansion exceeds AXIOM's output limit")
+            return result
+
+        def bounded_format(value: Any, *args: Any, **kwargs: Any) -> Any:
+            if isinstance(value, str):
+                for match in _TEMPLATE_FORMAT_WIDTH_RE.finditer(value):
+                    for key in ("width", "precision"):
+                        limit = match.group(key)
+                        if limit == "*" or (limit and int(limit) > _MAX_RENDERED_PROMPT_CHARS):
+                            raise ValueError("chat-template format expansion exceeds AXIOM's output limit")
+            result = original_format_filter(value, *args, **kwargs)
+            if isinstance(result, str) and len(result) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template format expansion exceeds AXIOM's output limit")
+            return result
+
+        def bounded_center(value: Any, width: Any = 80) -> Any:
+            if isinstance(width, int) and width > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template center expansion exceeds AXIOM's output limit")
+            result = original_center_filter(value, width)
+            if isinstance(result, str) and len(result) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template center expansion exceeds AXIOM's output limit")
+            return result
+
+        def bounded_indent(value: Any, width: Any = 4, first: bool = False, blank: bool = False) -> Any:
+            text = value if isinstance(value, str) else str(value)
+            indent_width = len(width) if isinstance(width, str) else max(0, width) if isinstance(width, int) else 4
+            if len(text) + (text.count("\n") + 1) * indent_width > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template indent expansion exceeds AXIOM's output limit")
+            return original_indent_filter(text, width, first=first, blank=blank)
+
+        def bounded_join(value: Any, separator: Any = "", attribute: Any = None) -> str:
+            separator_text = str(separator)
+            parts: list[str] = []
+            projected = 0
+            for item_count, item in enumerate(value):
+                if item_count >= _MAX_TEMPLATE_ITER_ITEMS:
+                    raise ValueError("chat-template join exceeds AXIOM's item limit")
+                if attribute is not None:
+                    components = [attribute] if isinstance(attribute, int) else str(attribute).split(".")
+                    try:
+                        for component in components:
+                            if isinstance(item, dict):
+                                item = item[component]
+                            elif isinstance(component, int) or str(component).isdigit():
+                                item = item[int(component)]
+                            else:
+                                item = getattr(item, str(component))
+                    except (AttributeError, IndexError, KeyError, TypeError):
+                        item = ""
+                item_text = item if isinstance(item, str) else str(item)
+                projected += len(item_text) + (len(separator_text) if parts else 0)
+                if projected > _MAX_RENDERED_PROMPT_CHARS:
+                    raise ValueError("chat-template join expansion exceeds AXIOM's output limit")
+                parts.append(item_text)
+            return separator_text.join(parts)
+
+        def estimate_urlencoded_size(value: Any, depth: int = 0) -> int:
+            if depth > 8:
+                raise ValueError("chat-template URL encoding exceeds AXIOM's nesting limit")
+            if isinstance(value, (str, bytes)):
+                return len(value) * 3
+            if isinstance(value, dict):
+                if len(value) > _MAX_TEMPLATE_ITER_ITEMS:
+                    raise ValueError("chat-template URL encoding exceeds AXIOM's item limit")
+                return sum(
+                    estimate_urlencoded_size(key, depth + 1)
+                    + estimate_urlencoded_size(item, depth + 1)
+                    + 5
+                    for key, item in value.items()
+                )
+            if isinstance(value, (list, tuple)):
+                if len(value) > _MAX_TEMPLATE_ITER_ITEMS:
+                    raise ValueError("chat-template URL encoding exceeds AXIOM's item limit")
+                return sum(estimate_urlencoded_size(item, depth + 1) + 8 for item in value)
+            return len(str(value)) * 3
+
+        def bounded_urlencode(value: Any) -> Any:
+            if estimate_urlencoded_size(value) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template URL encoding exceeds AXIOM's output limit")
+            result = original_urlencode_filter(value)
+            if isinstance(result, str) and len(result) > _MAX_RENDERED_PROMPT_CHARS:
+                raise ValueError("chat-template URL encoding exceeds AXIOM's output limit")
+            return result
+
+        environment.filters.update({
+            "center": bounded_center,
+            "format": bounded_format,
+            "indent": bounded_indent,
+            "join": bounded_join,
+            "replace": bounded_replace,
+            "urlencode": bounded_urlencode,
+        })
         environment.globals.clear()
         environment.globals.update({
             "raise_exception": lambda message: (_ for _ in ()).throw(ValueError(str(message))),
@@ -1667,7 +1862,33 @@ def _format_prompt_for_native_model(
             "documents": None,
         }
         try:
-            rendered = environment.from_string(template).render(**context)
+            template_ast = environment.parse(template)
+
+            def check_template_loops(node: Any, loop_depth: int = 0) -> None:
+                next_depth = loop_depth
+                if isinstance(node, (nodes.Macro, nodes.CallBlock)):
+                    raise ValueError("chat-template macros are not supported by AXIOM's bounded renderer")
+                if isinstance(node, nodes.For):
+                    if loop_depth or node.recursive:
+                        raise ValueError("nested or recursive chat-template loops are not supported")
+                    iterable = node.iter
+                    while isinstance(iterable, nodes.Filter):
+                        iterable = iterable.node
+                    if not isinstance(iterable, nodes.Name) or iterable.name != "messages":
+                        raise ValueError("chat-template loops may iterate only over the bounded messages list")
+                    next_depth = loop_depth + 1
+                for child in node.iter_child_nodes():
+                    check_template_loops(child, next_depth)
+
+            check_template_loops(template_ast)
+            rendered_parts: list[str] = []
+            rendered_chars = 0
+            for rendered_part in environment.from_string(template).generate(**context):
+                rendered_chars += len(rendered_part)
+                if rendered_chars > _MAX_RENDERED_PROMPT_CHARS:
+                    raise ValueError("chat-template output exceeds AXIOM's rendered-prompt limit")
+                rendered_parts.append(rendered_part)
+            rendered = "".join(rendered_parts)
         except Exception as exc:
             raise AxiomEngineError(
                 f"AXIOM could not safely render this checkpoint's chat template: {type(exc).__name__}. "
@@ -1693,6 +1914,107 @@ def _format_prompt_for_native_model(
         # older/custom releases omit an exported chat_template.
         return f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n", f"{model_type}-chatml-fallback"
     return prompt, "raw-completion"
+
+
+def inspect_native_prompt_batch(
+    model_path: str,
+    prompts: list[str],
+    *,
+    max_new_tokens: int,
+) -> dict[str, Any]:
+    """Estimate exact native batch token counts without loading model weights."""
+    if not isinstance(prompts, list) or not prompts:
+        raise ValueError("Prompt inspection requires at least one prompt.")
+    if (
+        isinstance(max_new_tokens, bool)
+        or not isinstance(max_new_tokens, int)
+        or not 1 <= max_new_tokens <= 64
+    ):
+        raise ValueError("Prediction preflight output limit must be between 1 and 64 tokens.")
+
+    model_dir = _resolve_model_directory(model_path, "Base model")
+    inspected = _inspect_model_config(model_dir)
+    if (
+        inspected.get("checkpoint_format") == "gguf"
+        and inspected.get("tokenizer_source") != "tokenizer.json"
+    ):
+        return {"available": False, "reason_code": "embedded_tokenizer_not_inspected"}
+
+    try:
+        from tokenizers import Tokenizer
+
+        from axiom.core.native_engine import (
+            NativeLlamaConfig,
+            _MAX_CONFIG_BYTES as native_max_config_bytes,
+            _MAX_TOKENIZER_BYTES,
+            _read_json_object,
+            _resolve_trusted_file,
+        )
+
+        roots = _allowed_model_roots()
+        config = NativeLlamaConfig.from_mapping(inspected["config"])
+        tokenizer_path = _resolve_trusted_file(model_dir / "tokenizer.json", roots, "Tokenizer file")
+        if tokenizer_path.stat().st_size > _MAX_TOKENIZER_BYTES:
+            return {"available": False, "reason_code": "tokenizer_metadata_too_large"}
+        tokenizer = Tokenizer.from_file(str(tokenizer_path))
+        if tokenizer.get_vocab_size(with_added_tokens=True) > config.vocab_size:
+            return {"available": False, "reason_code": "tokenizer_vocab_mismatch"}
+
+        if inspected.get("checkpoint_format") == "gguf":
+            add_bos = inspected.get("add_bos_token") is True
+        else:
+            add_bos = config.bos_token_id is not None
+            tokenizer_config_path = model_dir / "tokenizer_config.json"
+            if tokenizer_config_path.exists() or tokenizer_config_path.is_symlink():
+                tokenizer_config = _read_json_object(
+                    tokenizer_config_path,
+                    native_max_config_bytes,
+                    "Tokenizer config",
+                    roots,
+                )
+                add_bos = tokenizer_config.get("add_bos_token") is not False and add_bos
+
+        _context_cap, effective_new_tokens, input_limit = _native_generation_token_budget(
+            config.effective_max_position_embeddings,
+            max_new_tokens,
+        )
+        token_counts: list[int] = []
+        truncated = 0
+        truncated_row_indices: list[int] = []
+        for row_index, prompt in enumerate(prompts, start=1):
+            formatted, _format_source = _format_prompt_for_native_model(
+                prompt,
+                model_dir,
+                config.model_type,
+                tokenizer,
+            )
+            ids = list(tokenizer.encode(formatted, add_special_tokens=False).ids)
+            if add_bos and config.bos_token_id is not None and (not ids or ids[0] != config.bos_token_id):
+                ids.insert(0, config.bos_token_id)
+            if not ids:
+                return {"available": False, "reason_code": "prompt_tokenization_empty"}
+            token_counts.append(len(ids))
+            if len(ids) > input_limit:
+                truncated += 1
+                truncated_row_indices.append(row_index)
+    except Exception:
+        return {"available": False, "reason_code": "tokenizer_or_template_unavailable"}
+
+    sorted_counts = sorted(token_counts)
+    p95_index = max(0, math.ceil(0.95 * len(sorted_counts)) - 1)
+    return {
+        "available": True,
+        "prompt_token_limit": input_limit,
+        "effective_max_new_tokens": effective_new_tokens,
+        "prompts_truncated": truncated,
+        "truncated_row_indices": truncated_row_indices,
+        "prompt_token_counts": {
+            "min": sorted_counts[0],
+            "median": statistics.median(sorted_counts),
+            "p95": sorted_counts[p95_index],
+            "max": sorted_counts[-1],
+        },
+    }
 
 
 def generate_local_stream(
@@ -1753,12 +2075,10 @@ def generate_local_stream(
         selected_backend = details.get("device_selection", {}).get("selected")
         device_memory_before = _device_memory_snapshot(torch, device, selected_backend=selected_backend)
         device_memory_before["peak_reset_supported"] = _reset_device_peak_memory(torch, device)
-        context_cap = max(2, min(
+        context_cap, effective_max_new_tokens, input_limit = _native_generation_token_budget(
             getattr(model.config, "effective_max_position_embeddings", model.config.max_position_embeddings),
-            _MAX_INPUT_TOKENS + max_new_tokens,
-        ))
-        effective_max_new_tokens = min(max_new_tokens, context_cap - 1)
-        input_limit = max(1, min(_MAX_INPUT_TOKENS, context_cap - effective_max_new_tokens))
+            max_new_tokens,
+        )
         original_message_count = len(chat_messages or [])
         original_message_chars = sum(len(message["content"]) for message in (chat_messages or []))
         dropped_history_messages = 0
@@ -2355,15 +2675,10 @@ def generate_local_batch(
             torch, device, selected_backend=selected_backend
         )
         device_memory_before["peak_reset_supported"] = _reset_device_peak_memory(torch, device)
-        context_cap = max(
-            2,
-            min(
-                getattr(model.config, "effective_max_position_embeddings", model.config.max_position_embeddings),
-                _MAX_INPUT_TOKENS + max_new_tokens,
-            ),
+        context_cap, effective_max_new_tokens, input_limit = _native_generation_token_budget(
+            getattr(model.config, "effective_max_position_embeddings", model.config.max_position_embeddings),
+            max_new_tokens,
         )
-        effective_max_new_tokens = min(max_new_tokens, context_cap - 1)
-        input_limit = max(1, min(_MAX_INPUT_TOKENS, context_cap - effective_max_new_tokens))
         prompt_ids_batch: list[list[int]] = []
         prompt_formats: list[str] = []
         context_rows: list[dict[str, Any]] = []

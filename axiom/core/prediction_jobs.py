@@ -16,6 +16,7 @@ from typing import Any
 
 from axiom.core.engine import (
     generate_local_batch,
+    inspect_native_prompt_batch,
     refresh_local_engine_asset_index,
     resolve_local_model_directory,
     runtime_status,
@@ -156,6 +157,7 @@ def _preflight_dataset(
     *,
     prompt_field: str,
     reference_field: str,
+    collect_prompts: bool = False,
 ) -> dict[str, Any]:
     data_root = _safe_data_root(root)
     source, source_stream = open_mcp_workspace_file(dataset_path, root)
@@ -166,6 +168,7 @@ def _preflight_dataset(
     digest = hashlib.sha256()
     rows = 0
     bytes_scanned = 0
+    prompts: list[str] | None = [] if collect_prompts else None
     try:
         with source_stream:
             initial = os.fstat(source_stream.fileno())
@@ -187,12 +190,14 @@ def _preflight_dataset(
                 if not raw_line.strip():
                     raise ValueError(f"Dataset line {rows} is empty.")
                 row = _read_row(raw_line, rows)
-                _validate_row_fields(
+                prompt = _validate_row_fields(
                     row,
                     line_number=rows,
                     prompt_field=prompt_field,
                     reference_field=reference_field,
                 )
+                if prompts is not None:
+                    prompts.append(prompt)
             final = os.fstat(source_stream.fileno())
         current_path, current_stream = open_mcp_workspace_file(dataset_path, root)
         with current_stream:
@@ -207,12 +212,91 @@ def _preflight_dataset(
 
     if rows == 0:
         raise ValueError("Prediction input contains no JSONL rows.")
-    return {
+    manifest = {
         "rows": rows,
         "size_bytes": bytes_scanned,
         "sha256": digest.hexdigest(),
         "identity": (initial.st_dev, initial.st_ino, initial.st_size, initial.st_mtime_ns),
         "path": source.relative_to(root).as_posix(),
+    }
+    if prompts is not None:
+        manifest["prompts"] = prompts
+    return manifest
+
+
+def preflight_prediction_job(
+    root: Path,
+    *,
+    model_path: str,
+    dataset_path: str,
+    prompt_field: str,
+    reference_field: str,
+    max_new_tokens: int,
+) -> dict[str, Any]:
+    """Predict native prompt clipping from a bounded JSONL snapshot without inference."""
+    root = Path(root).resolve(strict=True)
+    prompt_field = _validate_field_name(prompt_field, "prompt_field")
+    reference_field = _validate_field_name(reference_field, "reference_field")
+    if prompt_field == reference_field:
+        raise ValueError("Prompt and reference fields must be different.")
+    if (
+        isinstance(max_new_tokens, bool)
+        or not isinstance(max_new_tokens, int)
+        or not 1 <= max_new_tokens <= _MAX_NEW_TOKENS
+    ):
+        raise ValueError(f"max_new_tokens must be an integer from 1 through {_MAX_NEW_TOKENS}.")
+    if not isinstance(dataset_path, str) or not dataset_path.startswith("data/"):
+        raise ValueError("Prediction dataset path must be workspace-relative under data/.")
+
+    manifest = _preflight_dataset(
+        dataset_path,
+        root,
+        prompt_field=prompt_field,
+        reference_field=reference_field,
+        collect_prompts=True,
+    )
+    prompts = manifest.get("prompts")
+    if not isinstance(prompts, list) or len(prompts) != manifest["rows"]:
+        raise ValueError("Prediction preflight could not retain the bounded prompt snapshot safely.")
+    token_report = inspect_native_prompt_batch(
+        model_path,
+        prompts,
+        max_new_tokens=max_new_tokens,
+    )
+    base = {
+        "schema_version": 1,
+        "assessment_scope": "prompt_truncation_only",
+        "rows_scanned": manifest["rows"],
+        "max_new_tokens_requested": max_new_tokens,
+        "scope": {
+            "read_only": True,
+            "model_weights_loaded": False,
+            "model_inference_run": False,
+            "network_accessed": False,
+            "files_written": False,
+            "dataset_values_returned": False,
+            "dataset_hash_returned": False,
+            "current_snapshot_only": True,
+            "job_start_revalidates_input": True,
+        },
+    }
+    if token_report.get("available") is not True:
+        return {
+            **base,
+            "status": "inconclusive",
+            "reason_code": token_report.get("reason_code", "tokenizer_or_template_unavailable"),
+            "note": "AXIOM could not match the model's exact tokenizer/template behavior without loading model weights.",
+        }
+    prompts_truncated = token_report["prompts_truncated"]
+    return {
+        **base,
+        "status": "truncation_expected" if prompts_truncated else "clear",
+        "prompts_truncated": prompts_truncated,
+        "truncated_row_indices": token_report["truncated_row_indices"],
+        "prompt_token_limit": token_report["prompt_token_limit"],
+        "effective_max_new_tokens": token_report["effective_max_new_tokens"],
+        "prompt_token_counts": token_report["prompt_token_counts"],
+        "note": "This is a tokenization snapshot; prompt clipping reported after a started job is authoritative.",
     }
 
 

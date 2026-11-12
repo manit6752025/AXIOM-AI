@@ -37,6 +37,7 @@ from axiom.core.prediction_jobs import (
     cancel_prediction_job,
     get_completed_prediction_artifact,
     get_prediction_job,
+    preflight_prediction_job,
     record_prediction_job_evaluation,
     start_prediction_job,
 )
@@ -91,7 +92,9 @@ mcp = MCPServer(
         "For local inference, use axiom_engine_generate only after the user requests a response; "
         "it runs one bounded prompt locally and AXIOM does not store the prompt or response. The MCP host may retain its tool transcript. "
         "For a dataset-to-evaluation workflow, when allowed, use axiom_engine_preflight before axiom_prediction_job_start. "
+        "Also use axiom_prediction_job_preflight to estimate actual dataset prompt clipping with the model tokenizer before starting; it is separate default-deny, read-only, and does not load model weights. Use the same model, dataset, prompt_field, reference_field, and max_new_tokens as the intended start call, and rerun preflight if any of those inputs change. "
         "Before starting, show the model, input/output paths, fields, and generation limits, disclose that the new local JSONL artifact preserves the source rows and adds generated predictions, and wait for the user's explicit go-ahead. "
+        "If prediction preflight expects clipped prompts, show the count and 1-based JSONL line numbers, then discuss whether to shorten those prompts before the run; if it is inconclusive, disclose that clipping could not be assessed and use the completed job's prompts_truncated count only if the job completes. Templates AXIOM cannot evaluate safely may also fail during generation. The preflight assessment covers prompt truncation only and does not clear a prediction run for safety or quality. "
         "Use axiom_prediction_job_status and axiom_prediction_job_cancel to manage that cancellable job; only a completed artifact is published. "
         "Do not evaluate a prediction job automatically when it completes. Call axiom_prediction_job_evaluate only after the user approves saving aggregate evaluation metrics; it requires the axiom_evaluation_run permission. "
         "Saved prediction-job evaluations retain bounded paths and generation settings in evaluation history, but this provenance does not guarantee exact reproducibility; MCP history omits the local artifact fingerprint. "
@@ -1271,6 +1274,50 @@ def axiom_engine_preflight(
             "device kernels, free memory, and output quality remain unverified."
         ),
     }
+@mcp.tool()
+def axiom_prediction_job_preflight(
+    model_path: str,
+    dataset_path: str,
+    prompt_field: str = "prompt",
+    reference_field: str = "reference",
+    max_new_tokens: int = 64,
+) -> dict:
+    """Predict bounded dataset prompt clipping without loading model weights or running inference."""
+    ToolPermissionStore().require("axiom_prediction_job_preflight")
+    root = _mcp_workspace_root()
+    try:
+        model_target = resolve_workspace_input(model_path, root, "Base model path")
+        if not model_target.is_dir():
+            raise ValueError("Model path must refer to a directory.")
+        validate_local_model_tree(model_target)
+        trusted_model = _resolve_engine_workspace_asset(model_target, "Base model")
+        if trusted_model != model_target:
+            raise ValueError("Model path changed during validation.")
+        return preflight_prediction_job(
+            root,
+            model_path=str(trusted_model),
+            dataset_path=dataset_path,
+            prompt_field=prompt_field,
+            reference_field=reference_field,
+            max_new_tokens=max_new_tokens,
+        )
+    except (AxiomEngineError, FineTuningError, OSError, RuntimeError, ValueError) as exc:
+        return {
+            "schema_version": 1,
+            "status": "blocked",
+            "error": _safe_preflight_reason(str(exc), known_paths=(str(root),)),
+            "scope": {
+                "read_only": True,
+                "model_weights_loaded": False,
+                "model_inference_run": False,
+                "network_accessed": False,
+                "files_written": False,
+                "dataset_values_returned": False,
+                "absolute_paths_returned": False,
+            },
+        }
+
+
 @mcp.tool()
 def axiom_prediction_job_start(
     model_path: str,

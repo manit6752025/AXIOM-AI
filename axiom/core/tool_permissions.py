@@ -39,6 +39,9 @@ TOOL_DESCRIPTIONS = {
     "axiom_prediction_job_start": (
         "Run a user-requested bounded local prediction job over a JSONL dataset and write source rows plus generated predictions to a new artifact under data/."
     ),
+    "axiom_prediction_job_preflight": (
+        "Predict bounded local JSONL prompt truncation with tokenizer-only checks; no model weights are loaded and no row values are returned."
+    ),
     "axiom_prediction_job_status": (
         "Read safe counts and workspace-relative paths for a local prediction job without prompts, predictions, or logs."
     ),
