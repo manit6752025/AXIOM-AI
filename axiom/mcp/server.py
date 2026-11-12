@@ -5,6 +5,7 @@ import os
 import platform
 import re
 from pathlib import Path
+from typing import Any
 
 from mcp.server import MCPServer
 
@@ -62,7 +63,7 @@ from axiom.evaluation.jsonl import (
     DEFAULT_MAX_ROWS as DEFAULT_EVALUATION_MAX_ROWS,
     evaluate_jsonl_stream,
 )
-from axiom.evaluation.service import persist_evaluation_run
+from axiom.evaluation.service import persist_evaluation_run, validate_prediction_provenance
 from axiom.evaluation.store import EvaluationStore
 from axiom.models.inspector import inspect_model
 from axiom.models.registry import ModelRegistry
@@ -93,6 +94,7 @@ mcp = MCPServer(
         "Before starting, show the model, input/output paths, fields, and generation limits, disclose that the new local JSONL artifact preserves the source rows and adds generated predictions, and wait for the user's explicit go-ahead. "
         "Use axiom_prediction_job_status and axiom_prediction_job_cancel to manage that cancellable job; only a completed artifact is published. "
         "Do not evaluate a prediction job automatically when it completes. Call axiom_prediction_job_evaluate only after the user approves saving aggregate evaluation metrics; it requires the axiom_evaluation_run permission. "
+        "Saved prediction-job evaluations retain bounded paths and generation settings in evaluation history, but this provenance does not guarantee exact reproducibility; MCP history omits the local artifact fingerprint. "
         "Review prompts_truncated first, and when it is nonzero show the count and get explicit approval before setting approve_truncated_prompts=true. "
         "Use AXIOM tools to inspect models, datasets, and hardware; preview dataset cleaning "
         "and show the counts and proposed output path before writing a new copy. "
@@ -178,9 +180,24 @@ def _evaluation_record_summary(record: dict, *, include_report: bool = False) ->
         "metrics": metrics,
         "dataset_fully_hashed": manifest.get("full_content_hashed"),
     }
+    provenance = _public_evaluation_provenance(record.get("provenance"))
+    if provenance is not None:
+        summary["provenance"] = provenance
     if include_report:
         summary["run"] = _public_evaluation_record(record)
     return summary
+
+
+def _public_evaluation_provenance(provenance: Any) -> dict | None:
+    """Allowlist provenance metadata for MCP without returning local fingerprints."""
+    try:
+        safe = validate_prediction_provenance(provenance)
+    except (TypeError, ValueError):
+        return None
+    if safe is None:
+        return None
+    safe.pop("artifact_sha256", None)
+    return safe
 
 
 def _public_evaluation_record(record: dict) -> dict:
@@ -196,6 +213,11 @@ def _public_evaluation_record(record: dict) -> dict:
     safe_report["path"] = safe_report.get("file_name", "dataset.jsonl")
     safe_record["report"] = safe_report
     safe_record.pop("output_manifest", None)
+    safe_provenance = _public_evaluation_provenance(record.get("provenance"))
+    if safe_provenance is None:
+        safe_record.pop("provenance", None)
+    else:
+        safe_record["provenance"] = safe_provenance
     return safe_record
 
 
@@ -218,6 +240,7 @@ def _score_evaluation_artifact(
     max_line_bytes: int = DEFAULT_EVALUATION_MAX_LINE_BYTES,
     expected_identity: tuple[int, int, int, int] | None = None,
     expected_sha256: str | None = None,
+    provenance: dict | None = None,
 ) -> dict:
     """Score and persist a stable workspace artifact, optionally pinned to a job output."""
     if not isinstance(path, str) or not path.strip():
@@ -283,6 +306,7 @@ def _score_evaluation_artifact(
             regression_metric=regression_metric,
             regression_tolerance=regression_tolerance,
             python_version=platform.python_version(),
+            provenance=provenance,
         )
     except (OSError, TimeoutError, ValueError, RuntimeError) as exc:
         raise ValueError(f"Offline evaluation could not be saved safely: {exc}") from None
@@ -427,7 +451,7 @@ def axiom_prediction_job_evaluate(
     regression_metric: str = "token_f1_micro",
     regression_tolerance: float = 0.05,
 ) -> dict:
-    """Evaluate a completed prediction job under the existing evaluation permission."""
+    """Evaluate a completed job and persist bounded provenance with aggregate metrics."""
     ToolPermissionStore().require("axiom_evaluation_run")
     if type(approve_truncated_prompts) is not bool:
         raise ValueError("approve_truncated_prompts must be a boolean.")
@@ -503,6 +527,31 @@ def axiom_prediction_job_evaluate(
             regression_tolerance=regression_tolerance,
             expected_identity=artifact["artifact_identity"],
             expected_sha256=artifact["artifact_sha256"],
+            provenance={
+                "schema_version": 1,
+                "kind": "axiom_prediction_job",
+                "prediction_job_id": artifact["id"],
+                "dataset_path": artifact["dataset_path"],
+                "output_path": artifact["output_path"],
+                "model_path": artifact["model_path"],
+                "adapter_path": artifact["adapter_path"],
+                "prompt_field": artifact["prompt_field"],
+                "prediction_field": artifact["prediction_field"],
+                "reference_field": artifact["reference_field"],
+                "generation": {
+                    "max_new_tokens": artifact["max_new_tokens"],
+                    "temperature": artifact["temperature"],
+                    "seed": artifact["seed"],
+                    "device_preference": artifact["device"],
+                    "precision_preference": artifact["precision"],
+                },
+                "rows_completed": artifact["rows_completed"],
+                "prompts_truncated": prompts_truncated,
+                "artifact_sha256": artifact["artifact_sha256"],
+                "reproducibility_note": (
+                    "Paths and settings only; model files, runtime versions, and hardware may change."
+                ),
+            },
         )
     except (OSError, RuntimeError, ValueError) as exc:
         return {
@@ -536,7 +585,7 @@ def axiom_evaluation_history(
     run_id: str | None = None,
     limit: int = 20,
 ) -> dict:
-    """Read aggregate evaluation history without exposing dataset row values or absolute paths."""
+    """Read aggregate evaluation history and safe provenance without row values or absolute paths."""
     ToolPermissionStore().require("axiom_evaluation_history")
     if type(limit) is not int or not 1 <= limit <= 100:
         raise ValueError("Evaluation history limit must be between 1 and 100.")

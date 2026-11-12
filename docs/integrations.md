@@ -169,6 +169,13 @@ before saving aggregate metrics. If `prompts_truncated` is nonzero, show the
 count and obtain explicit approval before setting
 `approve_truncated_prompts: true`. If an MCP restart cleared the job ID, use
 `axiom_evaluation_run` directly on the still-existing output path.
+Saved evaluations from prediction jobs retain the job ID, workspace-relative
+input/output/model references, generation settings, row and truncation counts,
+and a local output fingerprint. The MCP history redacts that fingerprint and
+returns only bounded provenance metadata; no prompt, prediction, or source row
+is included. The metadata helps attribute scores across server restarts, but
+does not guarantee exact reproduction if model files, runtime versions, or
+hardware change.
 
 The separately permissioned `axiom_dataset_clean_preview` reports bounded
 keep/remove counts and a proposed output path for a workspace-relative JSONL

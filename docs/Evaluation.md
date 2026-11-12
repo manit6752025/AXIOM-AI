@@ -78,3 +78,12 @@ clipped prompts, show the count and get explicit approval before evaluating
 with `approve_truncated_prompts: true`. After an MCP restart, use the artifact
 path with `axiom_evaluation_run` directly because prediction-job IDs are in
 memory only.
+
+Evaluations created from prediction jobs also persist bounded run provenance:
+the job ID, workspace-relative dataset/output/model/adapter references, field
+names, generation settings, completed row count, prompt-truncation count, and
+the output artifact fingerprint. It contains no prompts, predictions, or source
+rows. MCP history exposes only an allowlisted summary and omits fingerprints;
+the local API and report export retain the fingerprint. Provenance identifies
+the recorded paths and settings, but does not guarantee reproducibility when
+model files, runtime versions, or hardware change.
