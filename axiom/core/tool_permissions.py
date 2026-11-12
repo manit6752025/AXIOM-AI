@@ -71,7 +71,7 @@ TOOL_DESCRIPTIONS = {
     "axiom_evaluation_run": "Score local precomputed outputs, including completed prediction-job artifacts, and persist aggregate metrics plus bounded run provenance without row values.",
     "axiom_evaluation_history": "Read saved aggregate evaluation metrics and bounded run provenance without dataset values or local fingerprints.",
     "axiom_evaluation_compare_examples": (
-        "Inspect up to three verified exact-match or per-row token-F1 examples between saved complete evaluations; row numbers are default and bounded prediction/reference text requires explicit per-call opt-in."
+        "Inspect up to three verified exact-match or per-row token-F1 examples between saved complete evaluations; row numbers and first-in-file-order exact-match examples are default, with optional deterministic hash-priority sampling and explicit per-call text opt-in."
     ),
     "axiom_system_info": "Read local hardware information.",
     "axiom_training_plan": "Create a hardware-aware training estimate.",

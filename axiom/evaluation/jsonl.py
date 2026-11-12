@@ -303,11 +303,21 @@ def compare_evaluation_examples_streams(
     limit: int = 3,
     include_text: bool = False,
     max_excerpt_chars: int = 2_000,
+    sample_strategy: str = "first",
+    sample_seed: str | None = None,
 ) -> dict[str, Any]:
     """Verify saved evaluation snapshots and inspect exact-match or token-F1 examples."""
     categories = {"fixed", "regressed", "token_f1_improved", "token_f1_worsened"}
     if not isinstance(category, str) or category not in categories:
         raise ValueError("Choose a fixed/regressed exact-match or token-F1 transition.")
+    if not isinstance(sample_strategy, str) or sample_strategy not in {"first", "uniform_hash"}:
+        raise ValueError("Choose the first or uniform_hash example-sampling strategy.")
+    if category.startswith("token_f1_") and sample_strategy != "first":
+        raise ValueError("uniform_hash sampling is available only for exact-match transitions.")
+    if sample_strategy == "uniform_hash" and (
+        not isinstance(sample_seed, str) or not sample_seed or len(sample_seed) > 256
+    ):
+        raise ValueError("A bounded comparison seed is required for uniform_hash sampling.")
     if type(limit) is not int or not 1 <= limit <= 3:
         raise ValueError("Evaluation example limit must be between 1 and 3.")
     if type(include_text) is not bool:
@@ -464,6 +474,17 @@ def compare_evaluation_examples_streams(
     token_f1_changes = {"improved": 0, "worsened": 0}
     examples: list[dict[str, Any]] = []
     ranked_examples: list[tuple[float, int, dict[str, Any]]] = []
+    hash_examples: list[tuple[bytes, int, dict[str, Any]]] = []
+    hash_priority_seed = b""
+    if sample_strategy == "uniform_hash":
+        assert sample_seed is not None
+        hash_priority_seed = (
+            b"axiom:evaluation-example-sample:v1\x00"
+            + sample_seed.encode("utf-8")
+            + b"\x00"
+            + category.encode("ascii")
+            + b"\x00"
+        )
 
     def read_row(raw: bytes, state: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
         if not raw.strip():
@@ -481,6 +502,25 @@ def compare_evaluation_examples_streams(
     def row_token_f1(pair_counts: tuple[bool, bool, int, int, int]) -> float:
         token_total = pair_counts[2] + pair_counts[3]
         return 2 * pair_counts[4] / token_total if token_total else 1.0
+
+    def add_text_excerpts(
+        example: dict[str, Any],
+        baseline_prediction: str,
+        candidate_prediction: str,
+        reference: str,
+    ) -> None:
+        if not include_text:
+            return
+        example.update({
+            "baseline_prediction_excerpt": baseline_prediction[:max_excerpt_chars],
+            "candidate_prediction_excerpt": candidate_prediction[:max_excerpt_chars],
+            "reference_excerpt": reference[:max_excerpt_chars],
+            "text_truncated": {
+                "baseline_prediction": len(baseline_prediction) > max_excerpt_chars,
+                "candidate_prediction": len(candidate_prediction) > max_excerpt_chars,
+                "reference": len(reference) > max_excerpt_chars,
+            },
+        })
 
     for line_number in range(1, min(baseline["limits"]["max_rows"], candidate["limits"]["max_rows"]) + 1):
         raw_lines: list[bytes] = []
@@ -592,54 +632,53 @@ def compare_evaluation_examples_streams(
                 (category == "fixed" and not baseline_correct and candidate_correct)
                 or (category == "regressed" and baseline_correct and not candidate_correct)
             )
-            if not row_matches_category or len(examples) >= limit:
-                continue
-            example: dict[str, Any] = {"row_number": line_number}
-        else:
-            row_matches_category = (
-                (category == "token_f1_improved" and token_f1_delta > 0)
-                or (category == "token_f1_worsened" and token_f1_delta < 0)
-            )
             if not row_matches_category:
                 continue
-            example = {
-                "row_number": line_number,
-                "baseline_token_f1_per_row": baseline_token_f1,
-                "current_token_f1_per_row": candidate_token_f1,
-                "token_f1_per_row_delta": token_f1_delta,
-            }
-            if include_text:
-                example.update({
-                    "baseline_prediction_excerpt": baseline_prediction[:max_excerpt_chars],
-                    "candidate_prediction_excerpt": candidate_prediction[:max_excerpt_chars],
-                    "reference_excerpt": baseline_reference[:max_excerpt_chars],
-                    "text_truncated": {
-                        "baseline_prediction": len(baseline_prediction) > max_excerpt_chars,
-                        "candidate_prediction": len(candidate_prediction) > max_excerpt_chars,
-                        "reference": len(baseline_reference) > max_excerpt_chars,
-                    },
-                })
-            if category == "token_f1_improved":
-                priority = -token_f1_delta
+            if sample_strategy == "first":
+                if len(examples) >= limit:
+                    continue
+                example: dict[str, Any] = {"row_number": line_number}
+                add_text_excerpts(
+                    example, baseline_prediction, candidate_prediction, baseline_reference
+                )
+                examples.append(example)
             else:
-                priority = token_f1_delta
-            ranked_examples.append((priority, line_number, example))
-            ranked_examples.sort(key=lambda item: (item[0], item[1]))
-            if len(ranked_examples) > limit:
-                ranked_examples.pop()
+                priority = hashlib.sha256(
+                    hash_priority_seed + line_number.to_bytes(8, byteorder="big")
+                ).digest()
+                priority_key = (priority, line_number)
+                if len(hash_examples) >= limit and priority_key >= hash_examples[-1][:2]:
+                    continue
+                example = {"row_number": line_number}
+                add_text_excerpts(
+                    example, baseline_prediction, candidate_prediction, baseline_reference
+                )
+                hash_examples.append((priority, line_number, example))
+                hash_examples.sort(key=lambda item: (item[0], item[1]))
+                if len(hash_examples) > limit:
+                    hash_examples.pop()
             continue
-        if include_text:
-            example.update({
-                "baseline_prediction_excerpt": baseline_prediction[:max_excerpt_chars],
-                "candidate_prediction_excerpt": candidate_prediction[:max_excerpt_chars],
-                "reference_excerpt": baseline_reference[:max_excerpt_chars],
-                "text_truncated": {
-                    "baseline_prediction": len(baseline_prediction) > max_excerpt_chars,
-                    "candidate_prediction": len(candidate_prediction) > max_excerpt_chars,
-                    "reference": len(baseline_reference) > max_excerpt_chars,
-                },
-            })
-        examples.append(example)
+        row_matches_category = (
+            (category == "token_f1_improved" and token_f1_delta > 0)
+            or (category == "token_f1_worsened" and token_f1_delta < 0)
+        )
+        if not row_matches_category:
+            continue
+        priority = -token_f1_delta if category == "token_f1_improved" else token_f1_delta
+        priority_key = (priority, line_number)
+        if len(ranked_examples) >= limit and priority_key >= ranked_examples[-1][:2]:
+            continue
+        example = {
+            "row_number": line_number,
+            "baseline_token_f1_per_row": baseline_token_f1,
+            "current_token_f1_per_row": candidate_token_f1,
+            "token_f1_per_row_delta": token_f1_delta,
+        }
+        add_text_excerpts(example, baseline_prediction, candidate_prediction, baseline_reference)
+        ranked_examples.append((priority, line_number, example))
+        ranked_examples.sort(key=lambda item: (item[0], item[1]))
+        if len(ranked_examples) > limit:
+            ranked_examples.pop()
 
     for index, state in enumerate(states):
         if (
@@ -652,7 +691,10 @@ def compare_evaluation_examples_streams(
         ):
             raise ValueError("Evaluation source no longer matches its saved complete snapshot.")
 
-    if category in {"fixed", "regressed"}:
+    if category in {"fixed", "regressed"} and sample_strategy == "uniform_hash":
+        sample_strategy = "uniform_hash"
+        examples = [item[2] for item in sorted(hash_examples, key=lambda item: item[1])]
+    elif category in {"fixed", "regressed"}:
         sample_strategy = "first_in_file_order_for_raw_exact_match_transition"
     elif category == "token_f1_improved":
         sample_strategy = "largest_per_row_token_f1_delta"

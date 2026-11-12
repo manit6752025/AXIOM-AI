@@ -80,10 +80,16 @@ baseline, and both reports must be complete and intact. The tool reopens the
 reports' workspace-relative sources under `data/`, verifies their saved report
 manifests and full content hashes, and confirms the comparison corpus before
 returning examples. It returns exact-match transition counts and token-F1
-change counts separately, plus up to three row numbers by default.
-Exact-match examples are first in file order; F1-ranked extremes
-are intentionally not representative. Per-row token-F1 deltas do not add up
-to the corpus-level micro-F1 delta. Paired comparison supports sources up to
+change counts separately, plus up to three row numbers by default. Exact-match
+examples use the first matching rows by default; set
+`sample_strategy=uniform_hash` to select by deterministic SHA-256 priority
+seeded with the baseline run ID, current run ID, and category, then list the
+selected examples by row number. `sample_strategy` applies only to exact-match
+categories; F1 categories always use metric ranking, so `uniform_hash` is
+unavailable for them. At most three examples are illustrative, not
+statistically representative. F1-ranked extremes are also intentionally not representative.
+Per-row token-F1 deltas do not add up to the corpus-level micro-F1 delta.
+Paired comparison supports sources up to
 256 MiB, 500,000 rows, and 8 MiB per JSONL line; larger saved evaluations
 cannot be inspected by this tool.
 After explicit approval, `include_text=true` returns paired baseline/candidate
