@@ -25,14 +25,14 @@ VALID_STATUSES = {
 def roadmap_issues(markdown: str) -> list[str]:
     entries = ROADMAP_PATTERN.findall(markdown)
     ids = [item[0] for item in entries]
-    expected = {f"R{i:03d}" for i in range(1, 121)}
+    expected = {f"R{i:03d}" for i in range(1, 141)}
     issues: list[str] = []
     missing = sorted(expected - set(ids))
     duplicates = sorted({item for item in ids if ids.count(item) > 1})
     unexpected = sorted(set(ids) - expected)
     unknown_statuses = sorted({status for _, status in entries if status not in VALID_STATUSES})
-    if len(entries) != 120:
-        issues.append(f"Expected 120 roadmap entries; found {len(entries)}.")
+    if len(entries) != 140:
+        issues.append(f"Expected 140 roadmap entries; found {len(entries)}.")
     if missing:
         issues.append("Missing roadmap IDs: " + ", ".join(missing))
     if duplicates:
