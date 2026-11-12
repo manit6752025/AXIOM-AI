@@ -34,7 +34,9 @@ from axiom.core.mcp_paths import (
 )
 from axiom.core.prediction_jobs import (
     cancel_prediction_job,
+    get_completed_prediction_artifact,
     get_prediction_job,
+    record_prediction_job_evaluation,
     start_prediction_job,
 )
 from axiom.core.tool_permissions import ToolPermissionStore
@@ -90,6 +92,8 @@ mcp = MCPServer(
         "For a dataset-to-evaluation workflow, when allowed, use axiom_engine_preflight before axiom_prediction_job_start. "
         "Before starting, show the model, input/output paths, fields, and generation limits, disclose that the new local JSONL artifact preserves the source rows and adds generated predictions, and wait for the user's explicit go-ahead. "
         "Use axiom_prediction_job_status and axiom_prediction_job_cancel to manage that cancellable job; only a completed artifact is published. "
+        "Do not evaluate a prediction job automatically when it completes. Call axiom_prediction_job_evaluate only after the user approves saving aggregate evaluation metrics; it requires the axiom_evaluation_run permission. "
+        "Review prompts_truncated first, and when it is nonzero show the count and get explicit approval before setting approve_truncated_prompts=true. "
         "Use AXIOM tools to inspect models, datasets, and hardware; preview dataset cleaning "
         "and show the counts and proposed output path before writing a new copy. "
         "Re-preview immediately before cleaning because previews are advisory. "
@@ -195,6 +199,100 @@ def _public_evaluation_record(record: dict) -> dict:
     return safe_record
 
 
+def _score_evaluation_artifact(
+    root: Path,
+    path: str,
+    prediction_field: str,
+    reference_field: str,
+    *,
+    split_field: str | None = None,
+    split_value: str | None = None,
+    name: str | None = None,
+    model_label: str | None = None,
+    baseline: bool = False,
+    baseline_run_id: str | None = None,
+    regression_metric: str = "token_f1_micro",
+    regression_tolerance: float = 0.05,
+    max_bytes: int = DEFAULT_EVALUATION_MAX_BYTES,
+    max_rows: int = DEFAULT_EVALUATION_MAX_ROWS,
+    max_line_bytes: int = DEFAULT_EVALUATION_MAX_LINE_BYTES,
+    expected_identity: tuple[int, int, int, int] | None = None,
+    expected_sha256: str | None = None,
+) -> dict:
+    """Score and persist a stable workspace artifact, optionally pinned to a job output."""
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("Evaluation path cannot be empty.")
+    relative_path = path[5:] if path.startswith("data/") else path
+    data_root = _evaluation_dataset_root(root)
+    source, source_stream = open_mcp_workspace_file(relative_path, data_root)
+    if source.suffix.lower() != ".jsonl":
+        source_stream.close()
+        raise ValueError("Evaluation input must be a workspace-relative .jsonl file.")
+    try:
+        with source_stream:
+            initial = os.fstat(source_stream.fileno())
+            initial_identity = (
+                initial.st_dev,
+                initial.st_ino,
+                initial.st_size,
+                initial.st_mtime_ns,
+            )
+            if expected_identity is not None and initial_identity != expected_identity:
+                raise ValueError("Completed prediction artifact changed after job publication.")
+            report = evaluate_jsonl_stream(
+                source_stream,
+                path=source.relative_to(data_root).as_posix(),
+                file_name=source.name,
+                file_size_bytes=initial.st_size,
+                prediction_field=prediction_field,
+                reference_field=reference_field,
+                split_field=split_field,
+                split_value=split_value,
+                max_bytes=max_bytes,
+                max_rows=max_rows,
+                max_line_bytes=max_line_bytes,
+            )
+            final = os.fstat(source_stream.fileno())
+        current_path, current_stream = open_mcp_workspace_file(relative_path, data_root)
+        with current_stream:
+            current = os.fstat(current_stream.fileno())
+        final_identity = (final.st_dev, final.st_ino, final.st_size, final.st_mtime_ns)
+        current_identity = (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns)
+        if initial_identity != final_identity or initial_identity != current_identity:
+            raise ValueError("Dataset changed during evaluation; retry against a stable file.")
+        if current_path.relative_to(data_root).as_posix() != report["path"]:
+            raise ValueError("Dataset path changed during evaluation; retry against a stable file.")
+        manifest = report.get("dataset_manifest", {})
+        if expected_sha256 is not None and (
+            not isinstance(manifest, dict)
+            or manifest.get("sha256") != expected_sha256
+            or manifest.get("full_content_hashed") is not True
+        ):
+            raise ValueError("Completed prediction artifact no longer matches its published content hash.")
+    except (OSError, ValueError) as exc:
+        source_stream.close()
+        raise ValueError(f"Offline evaluation could not complete safely: {exc}") from None
+
+    try:
+        record = persist_evaluation_run(
+            report,
+            name=name,
+            model_label=model_label,
+            baseline=baseline,
+            baseline_run_id=baseline_run_id,
+            regression_metric=regression_metric,
+            regression_tolerance=regression_tolerance,
+            python_version=platform.python_version(),
+        )
+    except (OSError, TimeoutError, ValueError, RuntimeError) as exc:
+        raise ValueError(f"Offline evaluation could not be saved safely: {exc}") from None
+
+    from axiom.api.workspace import record_workspace_event
+
+    record_workspace_event("evaluation.run", f"Evaluated precomputed outputs from {report['path']}")
+    return {"run": _public_evaluation_record(record)}
+
+
 @mcp.tool()
 def axiom_info() -> dict:
     """Return AXIOM release information."""
@@ -298,64 +396,139 @@ def axiom_evaluation_run(
     if not math.isfinite(regression_tolerance) or not 0 <= regression_tolerance <= 1:
         raise ValueError("Regression tolerance must be a finite number between 0 and 1.")
 
-    if not isinstance(path, str) or not path.strip():
-        raise ValueError("Evaluation path cannot be empty.")
-    relative_path = path[5:] if path.startswith("data/") else path
     root = Path.cwd().resolve(strict=True)
-    data_root = _evaluation_dataset_root(root)
-    source, source_stream = open_mcp_workspace_file(relative_path, data_root)
-    if source.suffix.lower() != ".jsonl":
-        source_stream.close()
-        raise ValueError("Evaluation input must be a workspace-relative .jsonl file.")
+    return _score_evaluation_artifact(
+        root,
+        path,
+        prediction_field,
+        reference_field,
+        split_field=split_field,
+        split_value=split_value,
+        name=name,
+        model_label=model_label,
+        baseline=baseline,
+        baseline_run_id=baseline_run_id,
+        regression_metric=regression_metric,
+        regression_tolerance=regression_tolerance,
+        max_bytes=max_bytes,
+        max_rows=max_rows,
+        max_line_bytes=max_line_bytes,
+    )
+
+
+@mcp.tool()
+def axiom_prediction_job_evaluate(
+    job_id: str,
+    approve_truncated_prompts: bool = False,
+    name: str | None = None,
+    model_label: str | None = None,
+    baseline: bool = False,
+    baseline_run_id: str | None = None,
+    regression_metric: str = "token_f1_micro",
+    regression_tolerance: float = 0.05,
+) -> dict:
+    """Evaluate a completed prediction job under the existing evaluation permission."""
+    ToolPermissionStore().require("axiom_evaluation_run")
+    if type(approve_truncated_prompts) is not bool:
+        raise ValueError("approve_truncated_prompts must be a boolean.")
+    if name is not None:
+        if not isinstance(name, str) or not name.strip() or len(name) > 120:
+            raise ValueError("Evaluation names must contain 1 to 120 characters.")
+        name = name.strip()
+    if model_label is not None and (
+        not isinstance(model_label, str) or len(model_label) > 256
+    ):
+        raise ValueError("Model labels cannot exceed 256 characters.")
+    if type(baseline) is not bool:
+        raise ValueError("baseline must be a boolean.")
+    if baseline_run_id is not None and (
+        not isinstance(baseline_run_id, str)
+        or not baseline_run_id.strip()
+        or len(baseline_run_id) > 64
+    ):
+        raise ValueError("Baseline run IDs must contain 1 to 64 characters.")
+    if baseline_run_id is not None:
+        baseline_run_id = baseline_run_id.strip()
+    if not isinstance(regression_metric, str) or regression_metric not in {
+        "exact_match",
+        "normalized_exact_match",
+        "token_f1_micro",
+    }:
+        raise ValueError("Choose exact_match, normalized_exact_match, or token_f1_micro.")
+    if isinstance(regression_tolerance, bool) or not isinstance(regression_tolerance, (int, float)):
+        raise ValueError("Regression tolerance must be a finite number between 0 and 1.")
     try:
-        with source_stream:
-            initial = os.fstat(source_stream.fileno())
-            report = evaluate_jsonl_stream(
-                source_stream,
-                path=source.relative_to(data_root).as_posix(),
-                file_name=source.name,
-                file_size_bytes=initial.st_size,
-                prediction_field=prediction_field,
-                reference_field=reference_field,
-                split_field=split_field,
-                split_value=split_value,
-                max_bytes=max_bytes,
-                max_rows=max_rows,
-                max_line_bytes=max_line_bytes,
-            )
-            final = os.fstat(source_stream.fileno())
-        current_path, current_stream = open_mcp_workspace_file(relative_path, data_root)
-        with current_stream:
-            current = os.fstat(current_stream.fileno())
-        initial_identity = (initial.st_dev, initial.st_ino, initial.st_size, initial.st_mtime_ns)
-        final_identity = (final.st_dev, final.st_ino, final.st_size, final.st_mtime_ns)
-        current_identity = (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns)
-        if initial_identity != final_identity or initial_identity != current_identity:
-            raise ValueError("Dataset changed during evaluation; retry against a stable file.")
-        if current_path.relative_to(data_root).as_posix() != report["path"]:
-            raise ValueError("Dataset path changed during evaluation; retry against a stable file.")
-    except (OSError, ValueError) as exc:
-        source_stream.close()
-        raise ValueError(f"Offline evaluation could not complete safely: {exc}") from None
+        regression_tolerance = float(regression_tolerance)
+    except (OverflowError, ValueError):
+        regression_tolerance = float("nan")
+    if not math.isfinite(regression_tolerance) or not 0 <= regression_tolerance <= 1:
+        raise ValueError("Regression tolerance must be a finite number between 0 and 1.")
+
+    root = _mcp_workspace_root()
+    job = get_prediction_job(job_id, root)
+    if job is None:
+        return {"not_found": True, "evaluation_saved": False}
+    if job.get("status") != "completed" or job.get("artifact_ready") is not True:
+        return {
+            "not_ready": True,
+            "job": job,
+            "evaluation_saved": False,
+        }
+    artifact = get_completed_prediction_artifact(job_id, root)
+    if artifact is None:
+        return {
+            "error": "The completed prediction artifact metadata is unavailable; evaluate its workspace JSONL path directly if it still exists.",
+            "evaluation_saved": False,
+        }
+    prompts_truncated = artifact["prompts_truncated"]
+    if prompts_truncated and not approve_truncated_prompts:
+        return {
+            "approval_required": True,
+            "prompts_truncated": prompts_truncated,
+            "note": "Some prompts were clipped to fit model context. Review the job status and obtain approval before scoring this artifact.",
+            "evaluation_saved": False,
+        }
 
     try:
-        record = persist_evaluation_run(
-            report,
+        evaluation = _score_evaluation_artifact(
+            root,
+            artifact["output_path"],
+            artifact["prediction_field"],
+            artifact["reference_field"],
             name=name,
             model_label=model_label,
             baseline=baseline,
             baseline_run_id=baseline_run_id,
             regression_metric=regression_metric,
             regression_tolerance=regression_tolerance,
-            python_version=platform.python_version(),
+            expected_identity=artifact["artifact_identity"],
+            expected_sha256=artifact["artifact_sha256"],
         )
-    except (OSError, TimeoutError, ValueError, RuntimeError) as exc:
-        raise ValueError(f"Offline evaluation could not be saved safely: {exc}") from None
-
-    from axiom.api.workspace import record_workspace_event
-
-    record_workspace_event("evaluation.run", f"Evaluated precomputed outputs from {report['path']}")
-    return {"run": _public_evaluation_record(record)}
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {
+            "error": _safe_preflight_reason(str(exc), known_paths=(str(root),)),
+            "evaluation_saved": False,
+        }
+    run = evaluation["run"]
+    linked = record_prediction_job_evaluation(job_id, root, run["id"])
+    return {
+        "run": run,
+        "prediction_job": {
+            "id": job_id,
+            "evaluation_run_id": run["id"],
+            "prompts_truncated": prompts_truncated,
+            "evaluation_linked_to_job": linked,
+        },
+        "scope": {
+            "prompts_returned": False,
+            "predictions_returned": False,
+            "raw_values_returned": False,
+            "raw_values_persisted": False,
+            "model_inference_run": False,
+            "network_accessed": False,
+            "evaluation_permission": "axiom_evaluation_run",
+        },
+    }
 
 
 @mcp.tool()

@@ -67,3 +67,14 @@ but MCP responses omit those hashes. Grant `axiom_evaluation_history`
 separately to read saved run summaries or reports. Baseline marking is opt-in;
 partial runs cannot be marked as baselines or produce a pass/fail comparison.
 These metrics measure lexical overlap, not semantic quality.
+
+The separately exposed `axiom_prediction_job_evaluate` tool uses the same
+`axiom_evaluation_run` permission to evaluate a completed prediction job by ID.
+It reads the job's saved field names and verifies the artifact's publication
+identity and content hash before scoring. It returns sanitized aggregate
+metrics, links the run ID to job status, and never returns row text. Evaluation
+is not triggered automatically when inference completes. If the job reports
+clipped prompts, show the count and get explicit approval before evaluating
+with `approve_truncated_prompts: true`. After an MCP restart, use the artifact
+path with `axiom_evaluation_run` directly because prediction-job IDs are in
+memory only.

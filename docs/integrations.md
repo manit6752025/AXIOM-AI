@@ -159,6 +159,17 @@ axiom mcp allow axiom_prediction_job_status
 axiom mcp allow axiom_prediction_job_cancel
 ```
 
+`axiom_prediction_job_evaluate` accepts a completed job ID, reads the saved
+prediction/reference fields from that job, and verifies the artifact's
+published file identity and SHA-256 before scoring it. It returns sanitized
+aggregate metrics and links the evaluation run ID back to the job; prompts and
+predictions are not returned. It never runs automatically when inference
+finishes and uses the existing `axiom_evaluation_run` permission. Get approval
+before saving aggregate metrics. If `prompts_truncated` is nonzero, show the
+count and obtain explicit approval before setting
+`approve_truncated_prompts: true`. If an MCP restart cleared the job ID, use
+`axiom_evaluation_run` directly on the still-existing output path.
+
 The separately permissioned `axiom_dataset_clean_preview` reports bounded
 keep/remove counts and a proposed output path for a workspace-relative JSONL
 file. It returns no row values and writes no file. A partial scan includes its

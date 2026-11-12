@@ -31,6 +31,7 @@
 ## Unreleased — latest/development
 
 ### Added
+- Added a job-ID MCP handoff to evaluate completed prediction artifacts against their published file identity and SHA-256 using the existing evaluation permission.
 - Added separately default-deny MCP start/status/cancel tools for cancellable local JSONL prediction jobs that publish evaluation-ready artifacts only after complete success.
 - Add a separately default-deny MCP generation tool for one bounded AXIOM-native local prompt, with workspace-trusted model/adapter paths and no prompt/response persistence.
 - Add separate default-deny MCP start/status/cancel tools for local LoRA jobs, workspace-scoped redacted job summaries, cooperative cancellation through training boundaries, and a finalization state shared by the API and Control Center.
