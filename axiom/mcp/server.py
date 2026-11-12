@@ -113,10 +113,10 @@ mcp = MCPServer(
         "Training status includes up to 64 evenly spaced loss samples; each point is one selected training record and may be noisy. Do not treat the trace as held-out validation or evidence of model quality/generalization; use held-out evaluation to assess quality. "
         "For local inference, use axiom_engine_generate only after the user requests a response; "
         "it runs one bounded prompt locally and AXIOM does not store the prompt or response. The MCP host may retain its tool transcript. "
-        "For a dataset-to-evaluation workflow, when allowed, use axiom_engine_preflight before axiom_prediction_job_start. "
-        "Also use axiom_prediction_job_preflight to estimate actual dataset prompt clipping with the model tokenizer before starting; it is separate default-deny, read-only, and does not load model weights. Use the same model, dataset, prompt_field, reference_field, and max_new_tokens as the intended start call, and rerun preflight if any of those inputs change. "
-        "Before starting, show the model, input/output paths, fields, and generation limits; disclose that the local JSONL artifact preserves source rows and adds generated predictions, and that AXIOM saves bounded job metadata under workspace .axiom/prediction_jobs.json (relative paths, settings, counts, status, and artifact fingerprint; no dataset rows, prompts, predictions, or logs); then wait for the user's explicit go-ahead. "
-        "If prediction preflight expects clipped prompts, show the count and 1-based JSONL line numbers, then discuss whether to shorten those prompts before the run; if it is inconclusive, disclose that clipping could not be assessed and use the completed job's prompts_truncated count only if the job completes. Templates AXIOM cannot evaluate safely may also fail during generation. The preflight assessment covers prompt truncation only and does not clear a prediction run for safety or quality. "
+        "For a normal dataset prediction, prefer axiom_prediction_job_validation_preflight when the engine-preflight and prediction-preflight capabilities are allowed; it composes prompt-truncation and base/optional-adapter engine checks for the intended settings without prediction-start permission. Use actionability.status: resolve and rerun blocked findings; disclose review_required findings and wait for the user's decision; clear_for_user_approval means show the intended run and still get explicit approval before starting. The plan does not start a job, reserve compute, or check output-path availability. "
+        "Use axiom_engine_preflight and axiom_prediction_job_preflight separately for focused diagnostics. The prediction preflight estimates actual prompt clipping with the model tokenizer; use the same model, dataset, prompt_field, reference_field, and max_new_tokens as the intended start call. Rerun the composite preflight immediately before start if the model, adapter, or dataset changes; start validates current inputs independently and does not bind them to the checked snapshot. "
+        "Before starting, show the exact model, adapter, input/output paths, fields, and generation limits; disclose that the local JSONL artifact preserves source rows and adds generated predictions, and that AXIOM saves bounded job metadata under workspace .axiom/prediction_jobs.json (relative paths, settings, counts, status, and artifact fingerprint; no dataset rows, prompts, predictions, or logs); then wait for the user's explicit go-ahead. Start revalidates inputs and output availability and checks for active compute jobs. "
+        "If the composite preflight expects clipped prompts, show the count and 1-based JSONL line numbers, then discuss whether to shorten those prompts before the run; if it is inconclusive, disclose that clipping could not be assessed and use the completed job's prompts_truncated count only if the job completes. Templates AXIOM cannot evaluate safely may also fail during generation. A clear_for_user_approval status means only that no known blockers or review findings were detected; it does not guarantee loading, fit, or quality. "
         "Use axiom_prediction_job_status to list persisted job history or inspect one job, axiom_prediction_job_wait to wait up to 30 seconds for a job outcome without polling, and axiom_prediction_job_cancel to cancel a worker owned by this process. The wait tool uses the axiom_prediction_job_status permission; repeat it after timed_out, and check status later after recovery_unverified. Prediction metadata is stored under the workspace .axiom directory; if AXIOM verifies that the worker process exited, the job becomes interrupted and generation is never resumed automatically. If process identity cannot be verified, status is recovery_unverified and the job is left untouched unless its publishing checkpoint independently verifies the completed artifact hash. Only a completed job with verified publication metadata can use the job-ID evaluation handoff. "
         "Do not evaluate a prediction job automatically when it completes. Call axiom_prediction_job_evaluate only after the user approves saving aggregate evaluation metrics; it requires the axiom_evaluation_run permission. "
         "Saved prediction-job evaluations retain bounded paths and generation settings in evaluation history, but this provenance does not guarantee exact reproducibility; MCP history omits the local artifact fingerprint. "
@@ -2243,6 +2243,387 @@ def axiom_prediction_job_preflight(
                 "absolute_paths_returned": False,
             },
         }
+
+
+@mcp.tool()
+def axiom_prediction_job_validation_preflight(
+    model_path: str,
+    dataset_path: str,
+    output_path: str,
+    prompt_field: str = "prompt",
+    reference_field: str = "reference",
+    prediction_field: str = "prediction",
+    adapter_path: str | None = None,
+    max_new_tokens: int = 64,
+    temperature: float = 0.7,
+    seed: int | None = None,
+    device: str = "auto",
+    precision: str = "auto",
+    ram_budget_gib: float | None = None,
+    vram_budget_gib: float | None = None,
+) -> dict:
+    """Compose prompt and engine checks before a user-approved prediction job."""
+    permissions = ToolPermissionStore()
+    permissions.require("axiom_prediction_job_preflight")
+    permissions.require("axiom_engine_preflight")
+    root = _mcp_workspace_root()
+
+    def blocked(reason_code: str) -> dict:
+        return {
+            "schema_version": 1,
+            "assessment": "inconclusive",
+            "reason_code": reason_code,
+            "actionability": {
+                "status": "blocked",
+                "findings": [{
+                    "check": "preflight_inputs",
+                    "status": "blocked",
+                    "reason_code": reason_code,
+                }],
+                "next_action": "Resolve the reported input issue, then rerun this preflight.",
+                "user_approval_required": True,
+            },
+            "scope": {
+                "read_only": True,
+                "files_written": False,
+                "model_weights_loaded": False,
+                "inference_run": False,
+                "network_accessed": False,
+                "dataset_values_returned": False,
+                "absolute_paths_returned": False,
+            },
+        }
+
+    if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens <= 64:
+        return blocked("prediction_limits_out_of_range")
+    if not isinstance(temperature, (int, float)) or isinstance(temperature, bool):
+        return blocked("temperature_out_of_range")
+    try:
+        temperature_value = float(temperature)
+    except (OverflowError, TypeError, ValueError):
+        return blocked("temperature_out_of_range")
+    if not math.isfinite(temperature_value) or not 0 <= temperature_value <= 2:
+        return blocked("temperature_out_of_range")
+    if seed is not None and (
+        isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= 2**63 - 1
+    ):
+        return blocked("seed_out_of_range")
+    for label, budget in (("ram", ram_budget_gib), ("vram", vram_budget_gib)):
+        if budget is not None and (
+            isinstance(budget, bool)
+            or not isinstance(budget, (int, float))
+            or not 0.1 <= budget <= 2048
+            or not math.isfinite(float(budget))
+        ):
+            return blocked(f"{label}_budget_out_of_range")
+    if not isinstance(device, str) or device not in {"auto", "cpu", "cuda", "rocm", "mps", "xpu"}:
+        return blocked("device_invalid")
+    if not isinstance(precision, str) or precision not in {"auto", "fp32", "fp16", "bf16"}:
+        return blocked("precision_invalid")
+    if device == "mps" and precision == "bf16":
+        return blocked("precision_unsupported_for_device")
+    field_pattern = r"^[A-Za-z_][A-Za-z0-9_.-]{0,159}$"
+    if any(
+        not isinstance(field, str) or re.fullmatch(field_pattern, field) is None
+        for field in (prompt_field, reference_field, prediction_field)
+    ):
+        return blocked("field_name_invalid")
+    if len({prompt_field, reference_field, prediction_field}) != 3:
+        return blocked("prediction_fields_must_be_different")
+    if (
+        not isinstance(output_path, str)
+        or output_path != output_path.strip()
+        or len(output_path) > 4096
+        or not output_path.startswith("data/")
+        or output_path.count("/") != 1
+        or not output_path.lower().endswith(".jsonl")
+        or "\\" in output_path
+        or any(ord(character) < 32 or ord(character) == 127 for character in output_path)
+    ):
+        return blocked("prediction_output_path_invalid")
+    output_name = output_path.removeprefix("data/")
+    try:
+        output_name_size = (
+            len(output_name.encode("utf-16-le")) // 2
+            if os.name == "nt"
+            else len(output_name.encode("utf-8"))
+        )
+    except UnicodeEncodeError:
+        return blocked("prediction_output_path_invalid")
+    if output_name_size > 255:
+        return blocked("prediction_output_path_invalid")
+    if os.name == "nt":
+        windows_device_names = {
+            "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+            *(f"COM{index}" for index in range(1, 10)),
+            *(f"LPT{index}" for index in range(1, 10)),
+        }
+        output_stem = output_name.split(".", 1)[0].rstrip(" .").upper()
+        if (
+            any(character in '<>:"|?*' for character in output_name)
+            or output_name.endswith((".", " "))
+            or output_stem in windows_device_names
+        ):
+            return blocked("prediction_output_path_invalid")
+
+    try:
+        model_target = resolve_workspace_input(model_path, root, "Model path")
+        dataset_target = resolve_workspace_input(dataset_path, root, "Dataset path")
+        if not model_target.is_dir():
+            return blocked("model_path_invalid")
+        if (
+            not dataset_target.is_file()
+            or dataset_target.suffix.lower() != ".jsonl"
+            or not dataset_target.relative_to(root).as_posix().startswith("data/")
+        ):
+            return blocked("prediction_dataset_invalid")
+        model_relative = model_target.relative_to(root).as_posix()
+        dataset_relative = dataset_target.relative_to(root).as_posix()
+        adapter_relative = None
+        if adapter_path is not None:
+            adapter_target = resolve_workspace_input(adapter_path, root, "Adapter path")
+            if not adapter_target.is_dir():
+                return blocked("adapter_path_invalid")
+            adapter_relative = adapter_target.relative_to(root).as_posix()
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return blocked("workspace_paths_unavailable")
+
+    def path_key(value: str) -> str:
+        return unicodedata.normalize("NFD", unicodedata.normalize("NFD", value).casefold())
+
+    if path_key(output_path) == path_key(dataset_relative):
+        return blocked("prediction_output_must_differ_from_dataset")
+
+    prompt_preflight = axiom_prediction_job_preflight(
+        model_path=model_relative,
+        dataset_path=dataset_relative,
+        prompt_field=prompt_field,
+        reference_field=reference_field,
+        max_new_tokens=max_new_tokens,
+    )
+    prompt_token_limit = prompt_preflight.get("prompt_token_limit")
+    effective_max_new_tokens = prompt_preflight.get("effective_max_new_tokens")
+    prompt_budget_source = "prompt_truncation_preflight"
+    if (
+        isinstance(prompt_token_limit, bool)
+        or not isinstance(prompt_token_limit, int)
+        or not 1 <= prompt_token_limit <= _MCP_ENGINE_MAX_PROMPT_TOKENS
+        or isinstance(effective_max_new_tokens, bool)
+        or not isinstance(effective_max_new_tokens, int)
+        or not 1 <= effective_max_new_tokens <= max_new_tokens
+    ):
+        try:
+            model_context = inspect_native_model_context(str(model_target))
+            effective_context = model_context.get("effective_max_position_embeddings")
+            if isinstance(effective_context, bool) or not isinstance(effective_context, int) or effective_context < 1:
+                raise ValueError("Model context metadata is unavailable.")
+            context_cap = max(
+                2,
+                min(effective_context, _MCP_ENGINE_MAX_PROMPT_TOKENS + max_new_tokens),
+            )
+            effective_max_new_tokens = min(max_new_tokens, context_cap - 1)
+            prompt_token_limit = max(
+                1,
+                min(_MCP_ENGINE_MAX_PROMPT_TOKENS, context_cap - effective_max_new_tokens),
+            )
+            prompt_budget_source = "model_context_metadata"
+        except (AxiomEngineError, OSError, RuntimeError, ValueError):
+            prompt_token_limit = 4096
+            effective_max_new_tokens = max_new_tokens
+            prompt_budget_source = "fallback_after_context_metadata_error"
+
+    engine_arguments = {
+        "max_prompt_tokens": prompt_token_limit,
+        "max_new_tokens": effective_max_new_tokens,
+        "device": device,
+        "precision": precision,
+        "ram_budget_gib": ram_budget_gib,
+        "vram_budget_gib": vram_budget_gib,
+    }
+    base_engine = axiom_engine_preflight(model_path=model_relative, **engine_arguments)
+    adapter_engine = (
+        axiom_engine_preflight(
+            model_path=model_relative,
+            adapter_path=adapter_relative,
+            **engine_arguments,
+        )
+        if adapter_relative is not None else None
+    )
+
+    blockers: list[dict[str, str]] = []
+    reviews: list[dict[str, str]] = []
+
+    def collect_engine_findings(check_name: str, preflight: dict, adapter_expected: bool) -> None:
+        assessment = preflight.get("assessment")
+        checks = preflight.get("checks")
+        checks = checks if isinstance(checks, dict) else {}
+        engine_blockers: list[dict[str, str]] = []
+        engine_reviews: list[dict[str, str]] = []
+        expected_checks = {"model", "adapter", "runtime", "request", "precision", "resource_estimate"}
+        for missing_name in sorted(expected_checks - checks.keys()):
+            engine_reviews.append({
+                "check": f"{check_name}.{missing_name}",
+                "status": "unavailable",
+                "reason_code": f"{missing_name}_check_unavailable",
+            })
+        for nested_name, detail in checks.items():
+            if not isinstance(detail, dict):
+                engine_reviews.append({
+                    "check": f"{check_name}.{nested_name}",
+                    "status": "inconclusive",
+                    "reason_code": f"{nested_name}_check_unavailable",
+                })
+                continue
+            nested_status = detail.get("status")
+            if nested_status == "blocked" or (
+                nested_name == "runtime" and detail.get("ready") is False
+            ):
+                reason_code = "runtime_unavailable" if nested_name == "runtime" else f"{nested_name}_blocked"
+                engine_blockers.append({
+                    "check": f"{check_name}.{nested_name}",
+                    "status": "blocked",
+                    "reason_code": reason_code,
+                })
+                continue
+            if nested_name == "adapter" and nested_status == "not_requested" and not adapter_expected:
+                continue
+            if nested_status in {"review_needed", "unknown", "unavailable", "not_checked"}:
+                engine_reviews.append({
+                    "check": f"{check_name}.{nested_name}",
+                    "status": nested_status,
+                    "reason_code": f"{nested_name}_{nested_status}",
+                })
+            elif nested_status == "not_requested":
+                engine_reviews.append({
+                    "check": f"{check_name}.{nested_name}",
+                    "status": nested_status,
+                    "reason_code": f"{nested_name}_not_requested",
+                })
+            elif nested_status not in {
+                "config_valid", "available", "pass", "estimated_fit", "path_validated"
+            }:
+                engine_reviews.append({
+                    "check": f"{check_name}.{nested_name}",
+                    "status": nested_status if isinstance(nested_status, str) else "inconclusive",
+                    "reason_code": f"{nested_name}_status_unrecognized",
+                })
+            if nested_name == "adapter" and detail.get("compatible_on_selected_device") is False:
+                engine_reviews.append({
+                    "check": f"{check_name}.adapter",
+                    "status": "incompatible_on_selected_device",
+                    "reason_code": "adapter_incompatible_on_selected_device",
+                })
+        if assessment == "blocked" and not engine_blockers:
+            engine_blockers.append({
+                "check": check_name,
+                "status": "blocked",
+                "reason_code": "engine_preflight_blocked",
+            })
+        elif assessment not in {"blocked", "preflight_clear", "review_needed"}:
+            engine_reviews.append({
+                "check": check_name,
+                "status": assessment if isinstance(assessment, str) else "inconclusive",
+                "reason_code": "engine_preflight_assessment_unavailable",
+            })
+        elif assessment == "review_needed" and not engine_reviews and adapter_expected:
+            engine_reviews.append({
+                "check": check_name,
+                "status": "review_needed",
+                "reason_code": "engine_preflight_review_needed",
+            })
+        blockers.extend(engine_blockers)
+        reviews.extend(engine_reviews)
+
+    collect_engine_findings("base_engine_preflight", base_engine, False)
+    if adapter_engine is not None:
+        collect_engine_findings("adapter_engine_preflight", adapter_engine, True)
+
+    prompt_status = prompt_preflight.get("status")
+    if prompt_status == "blocked":
+        blockers.append({
+            "check": "prompt_truncation_preflight",
+            "status": "blocked",
+            "reason_code": prompt_preflight.get("reason_code", "prompt_preflight_blocked"),
+        })
+    elif prompt_status != "clear":
+        reviews.append({
+            "check": "prompt_truncation_preflight",
+            "status": prompt_status if isinstance(prompt_status, str) else "inconclusive",
+            "reason_code": prompt_preflight.get(
+                "reason_code",
+                "prompt_truncation_expected" if prompt_status == "truncation_expected"
+                else "prompt_preflight_inconclusive",
+            ),
+        })
+
+    findings = blockers + reviews
+    if blockers:
+        actionability_status = "blocked"
+        next_action = "Resolve the blocked checks, then rerun this preflight."
+    elif reviews:
+        actionability_status = "review_required"
+        next_action = "Explain the listed findings and wait for the user's explicit decision."
+    else:
+        actionability_status = "clear_for_user_approval"
+        next_action = (
+            "Show the planned configuration, explain output and active-compute availability are checked at start, "
+            "and obtain explicit approval before starting the job."
+        )
+    return {
+        "schema_version": 1,
+        "assessment": "plan_only",
+        "actionability": {
+            "status": actionability_status,
+            "findings": findings,
+            "next_action": next_action,
+            "user_approval_required": True,
+            "note": (
+                "Clear means no known blockers or review findings. Prompt results apply only to the scanned snapshot; output-path and active compute-slot availability are not checked. "
+                "It does not guarantee model loading, fit, or output quality."
+            ),
+        },
+        "intended_run": {
+            "model_path": model_relative,
+            "adapter_path": adapter_relative,
+            "dataset_path": dataset_relative,
+            "output_path": output_path,
+            "prompt_field": prompt_field,
+            "reference_field": reference_field,
+            "prediction_field": prediction_field,
+            "max_new_tokens": max_new_tokens,
+            "temperature": temperature_value,
+            "seed": seed,
+            "device": device,
+            "precision": precision,
+        },
+        "engine_preflight_request": {
+            **engine_arguments,
+            "prompt_budget_source": prompt_budget_source,
+        },
+        "checks": {
+            "prompt_truncation": prompt_preflight,
+            "base_engine": base_engine,
+            "adapter_engine": adapter_engine,
+        },
+        "scope": {
+            "read_only": True,
+            "files_written": False,
+            "model_weights_loaded": False,
+            "inference_run": False,
+            "network_accessed": False,
+            "dataset_values_returned": False,
+            "absolute_paths_returned": False,
+            "output_path_shape_checked": True,
+            "output_path_availability_checked": False,
+            "compute_slot_availability_checked": False,
+            "preflight_snapshot_bound_to_job_start": False,
+            "job_start_revalidates_current_inputs_and_output_path": True,
+        },
+        "note": (
+            "Prompt checks apply only to the scanned snapshot. Rerun if the model, adapter, or dataset changes; job start validates current inputs independently and does not verify they match this snapshot. "
+            "Output-path and active compute-slot availability are not checked or reserved; prediction-job start validates the output and checks active jobs again."
+        ),
+    }
 
 
 @mcp.tool()

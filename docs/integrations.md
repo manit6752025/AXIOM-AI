@@ -293,6 +293,18 @@ snapshot, so the job validates its input again at start and its final
 axiom mcp allow axiom_prediction_job_preflight
 ```
 
+`axiom_prediction_job_validation_preflight` composes that prompt check with
+base and optional adapter engine preflights for the intended run. It requires
+the existing `axiom_prediction_job_preflight` and `axiom_engine_preflight`
+permissions, but not prediction-start permission. It returns a `plan_only`
+result and `actionability.status`; a clear result still requires showing the
+configuration and getting explicit user approval. Prompt results apply only
+to the scanned snapshot; rerun immediately before start if model, adapter, or
+dataset files change. Start validates current inputs independently and does
+not prove they match that snapshot. The plan does not load weights, run
+inference, write files, check whether the output exists, or reserve the compute
+slot. Start revalidates input/output and active compute.
+
 `axiom_prediction_job_evaluate` accepts a completed job ID, reads the saved
 prediction/reference fields from that job, and verifies the artifact's
 published file identity and SHA-256 before scoring it. It returns sanitized
