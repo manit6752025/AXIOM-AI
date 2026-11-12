@@ -660,19 +660,23 @@ column.
 
 For a user-requested diagnosis of saved offline evaluations,
 `axiom_evaluation_compare_examples` inspects up to three first-in-file-order
-`fixed` or `regressed` rows from a completed baseline comparison. It verifies
-the saved reports and reopens each source under `data/`, then checks both full
-file hashes and the compatible comparison corpus before returning any result.
+`fixed` or `regressed` rows from a completed baseline comparison. It can also
+inspect `token_f1_improved` or `token_f1_worsened` rows, ranking by the largest
+positive or most negative per-row F1 delta. It verifies the saved reports and
+reopens each source under `data/`, then checks both full file hashes and the
+compatible comparison corpus before returning any result.
 Paired comparison supports sources up to 256 MiB, 500,000 rows, and 8 MiB per
 JSONL line; larger saved evaluations cannot be inspected by this tool.
 Row numbers are returned by default; this first-in-file-order sample may not
-represent the corpus. Only after explicit approval,
+represent the corpus, and F1-ranked extremes are intentionally not a
+representative sample. Per-row F1 deltas do not add up to the corpus-level
+micro-F1 delta. Only after explicit approval,
 `include_text=true` returns baseline/candidate prediction and reference
 excerpts capped at 2,000 characters each; the MCP host may retain returned
-text. Saved evaluation runs do not record a prompt field. These examples use
-raw exact match and may not explain the selected regression metric, such as
-token F1. They do not establish semantic quality. The tool has a separate
-default-deny permission and does no inference, network access, or file writes:
+text. Saved evaluation runs do not record a prompt field. Exact-match examples
+use raw string equality. These diagnostics do not establish semantic quality.
+The tool has a separate default-deny permission and does no inference, network
+access, or file writes:
 
 ```bash
 axiom mcp allow axiom_evaluation_compare_examples
