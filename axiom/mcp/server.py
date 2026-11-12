@@ -8,6 +8,12 @@ from pathlib import Path
 
 from mcp.server import MCPServer
 
+from axiom.core.engine import (
+    AxiomEngineError,
+    generate_local,
+    refresh_local_engine_asset_index,
+    resolve_local_model_directory,
+)
 from axiom.core.hardware import detect_hardware
 from axiom.core.fine_tuning import (
     ActiveFineTuningJobError,
@@ -16,6 +22,7 @@ from axiom.core.fine_tuning import (
     get_job,
     list_jobs,
     start_finetuning_job,
+    validate_local_model_tree,
 )
 from axiom.core.mcp_paths import (
     open_mcp_workspace_file,
@@ -52,6 +59,9 @@ from axiom.runtime.supercompress import compress_context, redacted_base_url
 from axiom.training.planner import create_training_plan
 from axiom.version import __version__
 
+_MCP_ENGINE_MAX_PROMPT_CHARS = 8_000
+_MCP_ENGINE_MAX_NEW_TOKENS = 256
+
 mcp = MCPServer(
     f"AXIOM v{__version__}",
     instructions=(
@@ -65,6 +75,8 @@ mcp = MCPServer(
         "Run preflight and show the exact configuration before calling axiom_training_job_start; "
         "call it only after the user explicitly requests that run. It uses compute and writes an adapter under outputs/. "
         "Use the separate status/cancel tools to manage the job. "
+        "For local inference, use axiom_engine_generate only after the user requests a response; "
+        "it runs one bounded prompt locally and AXIOM does not store the prompt or response. The MCP host may retain its tool transcript. "
         "Use AXIOM tools to inspect models, datasets, and hardware; preview dataset cleaning "
         "and show the counts and proposed output path before writing a new copy. "
         "Re-preview immediately before cleaning because previews are advisory. "
@@ -471,7 +483,7 @@ def axiom_training_preflight(
     return run_training_preflight(model_path, dataset_path, text_field)
 
 
-def _training_workspace_root() -> Path:
+def _mcp_workspace_root() -> Path:
     try:
         return Path.cwd().resolve(strict=True)
     except (OSError, RuntimeError):
@@ -555,6 +567,15 @@ def _training_job_scope() -> dict:
     }
 
 
+def _resolve_engine_workspace_asset(path: Path, label: str) -> Path:
+    try:
+        return Path(resolve_local_model_directory(str(path), label))
+    except ValueError:
+        # A just-finished LoRA job may not be in the engine's short-lived index yet.
+        refresh_local_engine_asset_index()
+        return Path(resolve_local_model_directory(str(path), label))
+
+
 @mcp.tool()
 def axiom_training_job_start(
     model_path: str,
@@ -568,7 +589,7 @@ def axiom_training_job_start(
 ) -> dict:
     """Start a bounded local LoRA job using workspace inputs and an outputs/ destination."""
     ToolPermissionStore().require("axiom_training_job_start")
-    root = _training_workspace_root()
+    root = _mcp_workspace_root()
     try:
         model_target = resolve_workspace_input(model_path, root, "Model path")
         dataset_target = resolve_workspace_input(dataset_path, root, "Dataset path")
@@ -619,7 +640,7 @@ def axiom_training_job_start(
 def axiom_training_job_status(job_id: str | None = None, limit: int = 10) -> dict:
     """Read safe local LoRA job summaries for this workspace."""
     ToolPermissionStore().require("axiom_training_job_status")
-    root = _training_workspace_root()
+    root = _mcp_workspace_root()
     if job_id is not None:
         try:
             job = get_job(job_id)
@@ -639,7 +660,7 @@ def axiom_training_job_status(job_id: str | None = None, limit: int = 10) -> dic
 def axiom_training_job_cancel(job_id: str) -> dict:
     """Request safe-boundary cancellation for a local LoRA job in this workspace."""
     ToolPermissionStore().require("axiom_training_job_cancel")
-    root = _training_workspace_root()
+    root = _mcp_workspace_root()
     try:
         existing = get_job(job_id)
     except (FineTuningError, ValueError):
@@ -670,6 +691,104 @@ def axiom_training_job_cancel(job_id: str) -> dict:
         "scope": _training_job_scope(),
         "cancellation_accepted": status in {"queued", "running", "cancelling"},
         "note": note,
+    }
+
+
+@mcp.tool()
+def axiom_engine_generate(
+    model_path: str,
+    prompt: str,
+    adapter_path: str | None = None,
+    max_new_tokens: int = 128,
+    temperature: float = 0.7,
+    seed: int | None = None,
+) -> dict:
+    """Generate one bounded response; this synchronous call cannot be cancelled through MCP."""
+    ToolPermissionStore().require("axiom_engine_generate")
+    if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > _MCP_ENGINE_MAX_PROMPT_CHARS:
+        return {"error": f"Prompt must contain 1 to {_MCP_ENGINE_MAX_PROMPT_CHARS:,} characters."}
+    if (
+        isinstance(max_new_tokens, bool)
+        or not isinstance(max_new_tokens, int)
+        or not 1 <= max_new_tokens <= _MCP_ENGINE_MAX_NEW_TOKENS
+    ):
+        return {"error": f"max_new_tokens must be between 1 and {_MCP_ENGINE_MAX_NEW_TOKENS}."}
+    if (
+        isinstance(temperature, bool)
+        or not isinstance(temperature, (int, float))
+        or not math.isfinite(float(temperature))
+        or not 0 <= float(temperature) <= 2
+    ):
+        return {"error": "temperature must be between 0 and 2."}
+    if seed is not None and (
+        isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= 2**63 - 1
+    ):
+        return {"error": "seed must be an integer between 0 and 2^63-1."}
+
+    root = _mcp_workspace_root()
+    try:
+        model_target = resolve_workspace_input(model_path, root, "Model path")
+        if not model_target.is_dir():
+            raise ValueError("Model path must refer to a directory.")
+        validate_local_model_tree(model_target)
+        trusted_model = _resolve_engine_workspace_asset(model_target, "Base model")
+        if trusted_model != model_target:
+            raise ValueError("Model path changed during validation.")
+
+        trusted_adapter = None
+        adapter_target = None
+        if adapter_path is not None:
+            adapter_target = resolve_workspace_input(adapter_path, root, "Adapter path")
+            if not adapter_target.is_dir():
+                raise ValueError("Adapter path must refer to a directory.")
+            validate_local_model_tree(adapter_target)
+            trusted_adapter = _resolve_engine_workspace_asset(adapter_target, "LoRA adapter")
+            if trusted_adapter != adapter_target:
+                raise ValueError("Adapter path changed during validation.")
+
+        result = generate_local(
+            str(trusted_model),
+            prompt,
+            adapter_path=str(trusted_adapter) if trusted_adapter is not None else None,
+            max_new_tokens=max_new_tokens,
+            temperature=float(temperature),
+            seed=seed,
+        )
+    except (AxiomEngineError, OSError, RuntimeError, ValueError):
+        return {"error": "Local generation could not run; check model compatibility, adapter paths, and available memory."}
+
+    response = result.get("response")
+    if not isinstance(response, str):
+        return {"error": "Local generation ended without a text response."}
+    context = result.get("context_management")
+    context = context if isinstance(context, dict) else {}
+    return {
+        "response": response,
+        "model": trusted_model.name,
+        "adapter": adapter_target.name if adapter_target is not None else None,
+        "prompt_tokens": result.get("prompt_tokens"),
+        "prompt_truncated": context.get("token_truncation_applied") is True,
+        "prompt_tokens_before_truncation": context.get("prompt_tokens_before_token_truncation"),
+        "prompt_tokens_used": context.get("prompt_tokens_used"),
+        "completion_tokens": result.get("completion_tokens"),
+        "stop_reason": result.get("stop_reason"),
+        "elapsed_ms": result.get("elapsed_ms"),
+        "device": result.get("device"),
+        "precision": result.get("precision"),
+        "memory_mode": result.get("memory_mode"),
+        "scope": {
+            "engine": "axiom-native-engine",
+            "network_accessed": False,
+            "axiom_prompt_persisted": False,
+            "axiom_response_persisted": False,
+            "mcp_host_transcript_retention": "controlled by the MCP host",
+            "prompt_returned": False,
+            "response_returned": True,
+            "cancellation_supported": False,
+            "wall_clock_timeout_seconds": None,
+            "max_prompt_characters": _MCP_ENGINE_MAX_PROMPT_CHARS,
+            "max_new_tokens": _MCP_ENGINE_MAX_NEW_TOKENS,
+        },
     }
 
 

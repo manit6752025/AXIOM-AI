@@ -686,6 +686,12 @@ def _trusted_directory_index(
     return tuple(entries[key] for key in sorted(entries))
 
 
+def refresh_local_engine_asset_index() -> None:
+    """Drop metadata caches so newly written local models/adapters are discoverable."""
+    _trusted_directory_index.cache_clear()
+    _trusted_file_entry.cache_clear()
+
+
 def _resolve_model_directory(value: str, label: str) -> Path:
     """Resolve a request by matching it to an inventoried trusted model folder."""
     if not isinstance(value, str) or not value.strip():

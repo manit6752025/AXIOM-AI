@@ -121,7 +121,7 @@ def _resolve_existing(value: str, label: str) -> Path:
         raise ValueError(f"{label} must point to an existing local path.") from None
 
 
-def _validate_model_tree(model_path: Path) -> None:
+def validate_local_model_tree(model_path: Path) -> None:
     """Reject linked model assets and cap the metadata scan before loading weights."""
     try:
         if model_path.resolve(strict=True) != model_path or model_path.is_symlink():
@@ -143,7 +143,7 @@ def _validate_model_tree(model_path: Path) -> None:
                     path = Path(entry.path)
                     is_junction = getattr(path, "is_junction", lambda: False)
                     if entry.is_symlink() or is_junction():
-                        raise FineTuningError("Model directories cannot contain symbolic links or junctions.")
+                        raise FineTuningError("Local model assets cannot contain symbolic links or junctions.")
                     if entry.is_dir(follow_symlinks=False):
                         pending.append(path)
         except OSError:
@@ -156,7 +156,7 @@ def validate_training_text_field(text_field: str) -> None:
 
 
 def _parse_training_line(raw_line: bytes, line_number: int, text_field: str) -> str | None:
-    line = raw_line.decode("utf-8-sig" if line_number == 1 else "utf-8")
+    line = raw_line.decode("utf-8-sig" if line_number == 1 else "utf-8").strip()
     if not line.strip():
         return None
     try:
@@ -185,6 +185,11 @@ def _parse_training_line(raw_line: bytes, line_number: int, text_field: str) -> 
     return value.strip()
 
 
+def _training_line_byte_length(raw_line: bytes) -> int:
+    # TextIOWrapper's universal-newline mode represented CRLF as one newline.
+    return len(raw_line) - (1 if raw_line.endswith(b"\r\n") else 0)
+
+
 def iter_training_texts(dataset_path: Path, text_field: str = "text") -> Iterator[str]:
     """Yield trainer-accepted text values without retaining the full dataset."""
     with open_regular_file(dataset_path) as stream:
@@ -211,11 +216,14 @@ def iter_training_text_stream(
     pending = bytearray()
     try:
         while True:
-            chunk = stream.read(64 * 1024)
+            remaining_bytes = _MAX_DATASET_BYTES - actual_bytes
+            remaining_line_bytes = _MAX_LINE_BYTES - len(pending)
+            read_size = min(64 * 1024, remaining_bytes + 1, remaining_line_bytes + 1)
+            chunk = stream.read(max(1, read_size))
             if chunk:
-                actual_bytes += len(chunk)
-                if actual_bytes > _MAX_DATASET_BYTES:
+                if len(chunk) > remaining_bytes:
                     raise ValueError(f"Dataset exceeds the {_MAX_DATASET_BYTES // (1024 * 1024)} MiB limit.")
+                actual_bytes += len(chunk)
                 pending.extend(chunk)
             at_eof = not chunk
 
@@ -237,7 +245,7 @@ def iter_training_text_stream(
                 raw_line = bytes(pending[:end])
                 del pending[:end]
                 line_number += 1
-                if len(raw_line) > _MAX_LINE_BYTES:
+                if _training_line_byte_length(raw_line) > _MAX_LINE_BYTES:
                     raise ValueError(f"Dataset line {line_number} exceeds the 1 MiB line limit.")
                 value = _parse_training_line(raw_line, line_number, text_field)
                 if value is not None:
@@ -305,7 +313,7 @@ def validate_config(
             "dataset_path": str(dataset_path),
             "output_dir": str(output_dir),
         }, workspace_guard)
-    _validate_model_tree(model_path)
+    validate_local_model_tree(model_path)
     text_field = config.get("text_field", "text")
     validate_training_text_field(text_field)
     max_steps = config.get("max_steps", 20)
@@ -674,7 +682,7 @@ def _run_transformers(
     if workspace_guard_check:
         workspace_guard_check()
     model_path = config["model_path"]
-    _validate_model_tree(Path(model_path))
+    validate_local_model_tree(Path(model_path))
     output_dir = Path(config["output_dir"])
     if output_dir.exists() and any(output_dir.iterdir()):
         raise FineTuningError("Adapter output directory is no longer empty; refusing to overwrite existing files.")

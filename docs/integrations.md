@@ -1,7 +1,7 @@
 # AXIOM Agent Integrations
 
 AXIOM is designed to sit underneath external AI-agent runtimes as a local
-inspection and planning layer.
+inspection, planning, and bounded execution layer.
 
 ## Supported integration families
 
@@ -82,6 +82,22 @@ granting start permission itself gives the agent standing capability.
 axiom mcp allow axiom_training_job_start
 axiom mcp allow axiom_training_job_status
 axiom mcp allow axiom_training_job_cancel
+```
+
+The separately permissioned `axiom_engine_generate` tool runs one bounded
+request through AXIOM's native local model engine. It accepts workspace-relative
+trusted model and optional adapter paths, limits prompts to 8,000 characters
+and completions to 256 tokens, and returns the generated text with basic
+token/timing metadata. AXIOM does not persist the prompt or response, access
+the network, or write output files; an MCP host may retain the tool call in its
+own transcript. The result reports whether the native engine truncated the
+prompt to fit context. The tool runs synchronously without a wall-clock timeout
+or MCP cancellation, so model loading and generation can take time. Because it
+uses local compute and returns prompt-derived content, the server instructions
+require an explicit user request before invocation.
+
+```bash
+axiom mcp allow axiom_engine_generate
 ```
 
 The separately permissioned `axiom_dataset_clean_preview` reports bounded

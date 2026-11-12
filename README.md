@@ -463,6 +463,12 @@ axiom mcp allow axiom_training_job_status
 axiom mcp allow axiom_training_job_cancel
 ```
 
+`axiom_engine_generate` runs one request through AXIOM's native local model engine. It accepts a workspace-relative trusted model, an optional workspace-relative LoRA adapter, a prompt up to 8,000 characters, and up to 256 generated tokens. The result returns generated text, timing/token metadata, and whether token truncation shortened the prompt. AXIOM does not persist the prompt or response and does not access the network or write output files; an MCP host may retain the tool call in its own transcript. It runs synchronously without a wall-clock timeout or MCP cancellation, so model loading and generation can take time. It consumes local compute and returns prompt-derived content, so it has a separate default-deny permission and should be called only for an explicitly requested local response:
+
+```bash
+axiom mcp allow axiom_engine_generate
+```
+
 `axiom_dataset_clean_preview` reports bounded keep/remove counts and a proposed output path before cleanup. It accepts workspace-relative `.jsonl` paths, returns no row values, and never writes files. When `truncated` is true, counts describe only the scanned portion; overlong rows are unclassified because the cleaner may still keep them. CR-only line endings and invalid UTF-8 produce warnings when preview decisions may differ from cleaner behavior. The preview is advisory because the source can change between calls, so re-preview immediately before writing. `axiom_dataset_clean` is a separate write permission: it repeats the preview, refuses partial or mismatched previews, and enforces the same byte, row, and line limits while writing. It only accepts workspace-relative paths, writes a new output file, and refuses to overwrite an existing destination. The output parent directory must already exist. Review the preview counts and destination with the user before calling the write tool. Grant preview and writing separately:
 
 ```bash
@@ -516,6 +522,7 @@ axiom mcp profile use readonly
 | `axiom_training_job_start` | Start a user-requested bounded local LoRA job; writes adapter output under `outputs/` |
 | `axiom_training_job_status` | Read workspace-scoped local LoRA job progress without logs or absolute paths |
 | `axiom_training_job_cancel` | Request cancellation before adapter finalization |
+| `axiom_engine_generate` | Run one bounded local native inference request and return generated text |
 | `axiom_system_info` | Detected hardware |
 | `axiom_model_list` | Registered models |
 | `axiom_model_info` | Inspect a local model folder |

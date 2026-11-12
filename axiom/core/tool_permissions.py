@@ -30,6 +30,9 @@ TOOL_DESCRIPTIONS = {
     "axiom_training_job_cancel": (
         "Request cooperative cancellation before adapter finalization for a local LoRA job."
     ),
+    "axiom_engine_generate": (
+        "Run one user-requested bounded prompt through AXIOM's native local engine; returns generated text and uses local compute synchronously."
+    ),
     "axiom_model_list": "List locally registered models.",
     "axiom_model_info": "Inspect a local model path.",
     "axiom_dataset_inspect": (
