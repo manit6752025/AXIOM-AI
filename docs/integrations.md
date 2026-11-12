@@ -84,10 +84,31 @@ axiom mcp allow axiom_training_job_status
 axiom mcp allow axiom_training_job_cancel
 ```
 
+The separately permissioned `axiom_engine_preflight` checks a workspace-relative
+trusted model and optional LoRA adapter before inference. It accepts a prompt
+token target up to 8,192, an output limit up to 256 tokens, an optional device
+and precision, and optional caller-supplied RAM/VRAM budgets. It reads model
+metadata and, for a safetensors base with an adapter, checks adapter tensor
+shapes and base tensor names. For GGUF plus LoRA, compatibility remains
+`not_checked`; AXIOM's native loader checks adapter shapes when inference is
+explicitly run. The tool reports runtime readiness and estimates memory without
+loading model weights. No inference runs, files are written, network is
+accessed, or absolute paths returned. Pass the same device and precision to
+`axiom_engine_generate`. Use RAM budgets for CPU/MPS and VRAM budgets for
+CUDA/ROCm/XPU. Without a compatible adapter check, a budget relevant to the
+selected device, or an explicit precision, its assessment remains
+`review_needed`. A `preflight_clear` assessment is conditional on the supplied
+budget and never guarantees that the model will load or generate successfully.
+
+```bash
+axiom mcp allow axiom_engine_preflight
+```
+
 The separately permissioned `axiom_engine_generate` tool runs one bounded
 request through AXIOM's native local model engine. It accepts workspace-relative
 trusted model and optional adapter paths, limits prompts to 8,000 characters
-and completions to 256 tokens, and returns the generated text with basic
+and completions to 256 tokens, accepts optional device and precision choices,
+and returns the generated text with basic
 token/timing metadata. AXIOM does not persist the prompt or response, access
 the network, or write output files; an MCP host may retain the tool call in its
 own transcript. The result reports whether the native engine truncated the

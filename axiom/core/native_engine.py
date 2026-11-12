@@ -11,13 +11,16 @@ formats/configurations are explicitly rejected.
 from __future__ import annotations
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
-import json, math, re, threading, time
+import json, math, os, re, threading, time
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
 _MAX_CONFIG_BYTES = 1_048_576
 _MAX_TOKENIZER_BYTES = 64 * 1024 * 1024
 _MAX_INDEX_BYTES = 64 * 1024 * 1024
+_MAX_SAFETENSORS_HEADER_BYTES = 64 * 1024 * 1024
+_MAX_TOTAL_SAFETENSORS_HEADER_BYTES = 256 * 1024 * 1024
+_MAX_COMPATIBILITY_TENSOR_KEYS = 100_000
 _MAX_WEIGHT_SHARDS = 512
 _MAX_NATIVE_MICROBATCH_SIZE = 8
 _SUPPORTED_MODEL_TYPES = {"llama", "mistral", "qwen2", "qwen3"}
@@ -345,6 +348,29 @@ def _resolve_trusted_file(path: Path, trusted_roots: tuple[Path, ...], label: st
         raise NativeEngineError(f"{label} resolves outside the configured trusted model roots.")
     return resolved
 
+
+def _validate_safetensors_header(
+    path: Path,
+    trusted_roots: tuple[Path, ...],
+    label: str,
+) -> tuple[Path, int]:
+    """Bound metadata parsing before safetensors enumerates tensor keys."""
+    safe_path = _resolve_trusted_file(path, trusted_roots, label)
+    try:
+        with safe_path.open("rb") as stream:
+            prefix = stream.read(8)
+            file_size = os.fstat(stream.fileno()).st_size
+    except OSError:
+        raise NativeEngineError(f"{label} metadata could not be inspected safely.") from None
+    if len(prefix) != 8:
+        raise NativeEngineError(f"{label} has an invalid safetensors header.")
+    header_bytes = int.from_bytes(prefix, "little")
+    if header_bytes > _MAX_SAFETENSORS_HEADER_BYTES:
+        raise NativeEngineError("Safetensors header exceeds the 64 MiB compatibility-inspection limit.")
+    if header_bytes > max(0, file_size - 8):
+        raise NativeEngineError(f"{label} has an invalid safetensors header length.")
+    return safe_path, header_bytes
+
 def _read_json_object(
     path: Path,
     max_bytes: int,
@@ -405,12 +431,21 @@ def _safetensor_keys(files: list[Path], trusted_roots: tuple[Path, ...]) -> dict
     except (ImportError, OSError):
         raise NativeDependencyError("AXIOM Native Engine requires safetensors. Install the native-inference extra.") from None
     result: dict[str, str] = {}
+    total_header_bytes = 0
     for path in files:
+        safe_path, header_bytes = _validate_safetensors_header(path, trusted_roots, "Safetensors shard")
+        total_header_bytes += header_bytes
+        if total_header_bytes > _MAX_TOTAL_SAFETENSORS_HEADER_BYTES:
+            raise NativeEngineError("Checkpoint exceeds the 256 MiB total safetensors-header inspection limit.")
         try:
-            with safe_open(str(_resolve_trusted_file(path, trusted_roots, "Safetensors shard")), framework="pt", device="cpu") as handle:
+            with safe_open(str(safe_path), framework="pt", device="cpu") as handle:
                 keys = list(handle.keys())
         except Exception:
             raise NativeEngineError(f"Safetensors shard {path.name!r} could not be inspected safely.") from None
+        if len(keys) > _MAX_COMPATIBILITY_TENSOR_KEYS or len(result) + len(keys) > _MAX_COMPATIBILITY_TENSOR_KEYS:
+            raise NativeEngineError(
+                f"Checkpoint exceeds the {_MAX_COMPATIBILITY_TENSOR_KEYS:,}-tensor compatibility-inspection limit."
+            )
         for key in keys:
             if key in result:
                 raise NativeEngineError(f"Tensor {key!r} is duplicated across safetensors shards.")
@@ -502,12 +537,17 @@ def inspect_native_adapter_compatibility(
         issues.append("LoRA adapter config: " + str(exc))
 
     try:
-        adapter_file = _resolve_trusted_file(
+        adapter_file, _adapter_header_bytes = _validate_safetensors_header(
             adapter_dir / "adapter_model.safetensors", roots, "LoRA safetensors checkpoint"
         )
         from safetensors import safe_open
         with safe_open(str(adapter_file), framework="pt", device="cpu") as handle:
-            for key in handle.keys():
+            adapter_keys = list(handle.keys())
+            if len(adapter_keys) > _MAX_COMPATIBILITY_TENSOR_KEYS:
+                raise NativeEngineError(
+                    f"LoRA adapter exceeds the {_MAX_COMPATIBILITY_TENSOR_KEYS:,}-tensor compatibility-inspection limit."
+                )
+            for key in adapter_keys:
                 match = re.fullmatch(r"(.+)\.lora_([AB])(?:\.default)?\.weight", key)
                 if not match:
                     issues.append(f"Unsupported LoRA tensor key {key!r}.")

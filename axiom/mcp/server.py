@@ -10,9 +10,13 @@ from mcp.server import MCPServer
 
 from axiom.core.engine import (
     AxiomEngineError,
+    check_local_adapter_compatibility,
+    estimate_native_quantization,
     generate_local,
+    inspect_native_model_context,
     refresh_local_engine_asset_index,
     resolve_local_model_directory,
+    runtime_status,
 )
 from axiom.core.hardware import detect_hardware
 from axiom.core.fine_tuning import (
@@ -72,6 +76,7 @@ mcp = MCPServer(
         "Use axiom_dataset_inspect for bounded JSONL structure and schema checks. "
         "Sensitive field-name heuristics are included; content PII pattern scanning requires explicit opt-in. "
         "Use axiom_training_preflight for bounded, non-executing checks before local LoRA training. "
+        "Use axiom_engine_preflight before local inference to check model/adapter structure, the selected device/precision, and advisory memory estimates; it does not load weights or run inference. Pass the same settings to axiom_engine_generate. "
         "Run preflight and show the exact configuration before calling axiom_training_job_start; "
         "call it only after the user explicitly requests that run. It uses compute and writes an adapter under outputs/. "
         "Use the separate status/cancel tools to manage the job. "
@@ -576,6 +581,464 @@ def _resolve_engine_workspace_asset(path: Path, label: str) -> Path:
         return Path(resolve_local_model_directory(str(path), label))
 
 
+def _safe_preflight_reason(reason: str, known_paths: tuple[str, ...] = ()) -> str:
+    text = str(reason)
+    for path in sorted((item for item in known_paths if item), key=len, reverse=True):
+        text = text.replace(path, "[workspace path]")
+    text = re.sub(
+        r"(?i)(?<!\w)(?:[a-z]:[\\/]|\\\\[^\\/\s]+[\\/][^\\/\s]+[\\/]|/)[^\s,;]+",
+        "[local path]",
+        text,
+    )
+    return text[:512]
+
+
+def _engine_preflight_error(
+    check: str,
+    reason: str,
+    *,
+    known_paths: tuple[str, ...] = (),
+) -> dict:
+    return {
+        "schema_version": 1,
+        "assessment": "blocked",
+        "checks": {
+            "model": {"status": "not_checked"},
+            "adapter": {"status": "not_requested"},
+            "runtime": {"status": "not_checked"},
+            "resource_estimate": {"status": "not_checked"},
+            check: {"status": "blocked", "reason": _safe_preflight_reason(reason, known_paths)},
+        },
+        "scope": {
+            "read_only": True,
+            "network_accessed": False,
+            "files_written": False,
+            "model_weights_loaded": False,
+            "inference_run": False,
+            "absolute_paths_returned": False,
+        },
+    }
+
+
+@mcp.tool()
+def axiom_engine_preflight(
+    model_path: str,
+    adapter_path: str | None = None,
+    max_prompt_tokens: int = 4096,
+    max_new_tokens: int = 128,
+    device: str = "auto",
+    precision: str = "auto",
+    ram_budget_gib: float | None = None,
+    vram_budget_gib: float | None = None,
+) -> dict:
+    """Check native model/adapter metadata and advisory memory estimates without inference."""
+    ToolPermissionStore().require("axiom_engine_preflight")
+    if (
+        isinstance(max_prompt_tokens, bool)
+        or not isinstance(max_prompt_tokens, int)
+        or not 1 <= max_prompt_tokens <= 8192
+    ):
+        return {"error": "max_prompt_tokens must be an integer from 1 through 8192."}
+    if (
+        isinstance(max_new_tokens, bool)
+        or not isinstance(max_new_tokens, int)
+        or not 1 <= max_new_tokens <= _MCP_ENGINE_MAX_NEW_TOKENS
+    ):
+        return {"error": f"max_new_tokens must be an integer from 1 through {_MCP_ENGINE_MAX_NEW_TOKENS}."}
+    if not isinstance(device, str) or device not in {"auto", "cpu", "cuda", "rocm", "mps", "xpu"}:
+        return {"error": "device must be auto, cpu, cuda, rocm, mps, or xpu."}
+    if not isinstance(precision, str) or precision not in {"auto", "fp32", "fp16", "bf16"}:
+        return {"error": "precision must be auto, fp32, fp16, or bf16."}
+    for label, budget in (("RAM", ram_budget_gib), ("VRAM", vram_budget_gib)):
+        if budget is not None and (
+            isinstance(budget, bool)
+            or not isinstance(budget, (int, float))
+            or not 0.1 <= budget <= 2048
+            or not math.isfinite(float(budget))
+        ):
+            return {"error": f"{label} budget must be between 0.1 and 2048 GiB."}
+
+    root = _mcp_workspace_root()
+    try:
+        model_target = resolve_workspace_input(model_path, root, "Model path")
+        if not model_target.is_dir():
+            raise ValueError("Model path must refer to a local model directory.")
+        validate_local_model_tree(model_target)
+        trusted_model = _resolve_engine_workspace_asset(model_target, "Base model")
+        if trusted_model != model_target:
+            raise ValueError("Model path changed during validation.")
+    except (AxiomEngineError, FineTuningError, OSError, RuntimeError, ValueError) as exc:
+        return _engine_preflight_error("model", str(exc), known_paths=(str(root),))
+
+    trusted_adapter: Path | None = None
+    if adapter_path is not None:
+        try:
+            adapter_target = resolve_workspace_input(adapter_path, root, "Adapter path")
+            if not adapter_target.is_dir():
+                raise ValueError("Adapter path must refer to a local adapter directory.")
+            validate_local_model_tree(adapter_target)
+            trusted_adapter = _resolve_engine_workspace_asset(adapter_target, "LoRA adapter")
+            if trusted_adapter != adapter_target:
+                raise ValueError("Adapter path changed during validation.")
+        except (AxiomEngineError, FineTuningError, OSError, RuntimeError, ValueError) as exc:
+            result = _engine_preflight_error("adapter", str(exc), known_paths=(str(root),))
+            result["checks"]["model"] = {"status": "path_validated"}
+            return result
+
+    total_context_tokens = max_prompt_tokens + max_new_tokens
+    try:
+        model_context = inspect_native_model_context(str(trusted_model))
+    except (AxiomEngineError, OSError, RuntimeError, ValueError) as exc:
+        return _engine_preflight_error(
+            "model", str(exc), known_paths=(str(root), str(trusted_model))
+        )
+    effective_context_limit = model_context["effective_max_position_embeddings"]
+    if total_context_tokens > effective_context_limit:
+        result = _engine_preflight_error(
+            "request_context",
+            f"Requested total context is {total_context_tokens} tokens; this checkpoint supports at most {effective_context_limit}.",
+        )
+        result["request"] = {
+            "max_prompt_tokens": max_prompt_tokens,
+            "max_new_tokens": max_new_tokens,
+            "requested_total_context_tokens": total_context_tokens,
+        }
+        result["checks"]["model"] = {
+            "status": "config_valid",
+            "model_type": model_context["model_type"],
+            "architecture": model_context["architecture"],
+            "checkpoint_format": model_context["checkpoint_format"],
+            "effective_max_position_embeddings": effective_context_limit,
+        }
+        result["checks"]["adapter"] = {
+            "status": "path_validated" if trusted_adapter is not None else "not_requested"
+        }
+        result["checks"]["request_context"] = {
+            "status": "blocked",
+            "requested_total_tokens": total_context_tokens,
+            "supported_max_total_tokens": effective_context_limit,
+            "suggestion": "Reduce max_prompt_tokens, max_new_tokens, or both so their sum fits the checkpoint context limit.",
+        }
+        return result
+
+    try:
+        estimate = estimate_native_quantization(
+            str(trusted_model),
+            context_length=total_context_tokens,
+            batch_size=1,
+            ram_budget_gib=ram_budget_gib,
+            vram_budget_gib=vram_budget_gib,
+        )
+    except (AxiomEngineError, OSError, RuntimeError, ValueError) as exc:
+        return _engine_preflight_error(
+            "model", str(exc), known_paths=(str(root), str(trusted_model))
+        )
+
+    runtime = runtime_status()
+    resolved_device = runtime.get("recommended_device") if device == "auto" else device
+    runtime_devices = runtime.get("devices", [])
+    runtime_devices = runtime_devices if isinstance(runtime_devices, list) else []
+    selected_runtime_device = next(
+        (item for item in runtime_devices if isinstance(item, dict) and item.get("id") == resolved_device),
+        None,
+    )
+    selected_device_available = bool(selected_runtime_device and selected_runtime_device.get("available"))
+    request_check = {
+        "status": "pass" if selected_device_available else "review_needed",
+        "device": device,
+        "resolved_device": resolved_device,
+        "precision": precision,
+    }
+    if device != "auto" and not selected_device_available:
+        request_check.update({
+            "status": "blocked",
+            "reason": "The requested execution device is not available in the current AXIOM runtime.",
+        })
+    if precision == "bf16" and resolved_device == "mps":
+        request_check.update({
+            "status": "blocked",
+            "reason": "The AXIOM native engine does not support BF16 precision on Metal/MPS.",
+        })
+    if precision == "bf16" and resolved_device == "mps":
+        precision_check = {
+            "status": "blocked",
+            "reason": "The AXIOM native engine does not support BF16 precision on Metal/MPS.",
+        }
+    elif precision == "auto":
+        precision_check = {
+            "status": "unknown",
+            "reason": "Auto precision follows the checkpoint dtype; the stored dtype has not been inspected by this estimate.",
+        }
+    elif precision == "bf16" and resolved_device in {"cuda", "xpu"}:
+        precision_check = {
+            "status": "review_needed",
+            "reason": "BF16 support depends on the installed device backend and was not measured by this preflight.",
+        }
+    else:
+        precision_check = {
+            "status": "pass" if selected_device_available else "unknown",
+            "precision": precision,
+            "reason": "The requested precision is an AXIOM native precision option; checkpoint loading and device kernels remain unverified.",
+        }
+    model_issues: list[str] = []
+    adapter_issues: list[str] = []
+    adapter_check: dict = {"status": "not_requested", "compatible_on_selected_device": None}
+    base_tensor_inventory_checked = False
+    selected_adapter_compatible: bool | None = None
+    compatibility: dict | None = None
+    raw_model_issues: list[str] = []
+    if trusted_adapter is not None and model_context.get("checkpoint_format") == "gguf":
+        adapter_check = {
+            "status": "not_checked",
+            "compatible_on_selected_device": None,
+            "reason": (
+                "The metadata-only preflight cannot compare LoRA shapes with GGUF tensor metadata. "
+                "AXIOM's native loader checks adapter shapes when inference is explicitly run."
+            ),
+        }
+    elif trusted_adapter is not None:
+        try:
+            compatibility = check_local_adapter_compatibility(
+                str(trusted_model), str(trusted_adapter)
+            )
+        except (AxiomEngineError, OSError, RuntimeError, ValueError) as exc:
+            adapter_issues = [_safe_preflight_reason(str(exc), (str(root), str(trusted_model), str(trusted_adapter)))]
+            adapter_check = {
+                "status": "blocked",
+                "structurally_compatible": False,
+                "compatible_on_any_device": False,
+                "compatible_on_selected_device": False,
+                "issues": adapter_issues,
+                "issue_count": 1,
+                "issues_truncated": False,
+            }
+        if compatibility is not None:
+            base_tensor_inventory_checked = True
+            issues = compatibility.get("issues", [])
+            issues = [item for item in issues if isinstance(item, str)] if isinstance(issues, list) else []
+            raw_model_issues = [
+                item for item in issues
+                if item.startswith("Base model:") or item.startswith("Base checkpoint")
+            ]
+            raw_adapter_issues = [item for item in issues if item not in raw_model_issues]
+            model_issues = [
+                _safe_preflight_reason(item, (str(root), str(trusted_model), str(trusted_adapter)))
+                for item in raw_model_issues[:32]
+            ]
+            adapter_issues = [
+                _safe_preflight_reason(item, (str(root), str(trusted_model), str(trusted_adapter)))
+                for item in raw_adapter_issues[:32]
+            ]
+            compatibility_devices = compatibility.get("devices", [])
+            if not isinstance(compatibility_devices, list):
+                compatibility_devices = []
+            compatibility_device_name = {
+                "cpu": "CPU",
+                "cuda": "CUDA",
+                "rocm": "ROCm",
+                "mps": "Metal/MPS",
+                "xpu": "Intel XPU",
+            }.get(resolved_device)
+            selected_compatibility_device = next(
+                (
+                    item for item in compatibility_devices
+                    if isinstance(item, dict) and item.get("name") == compatibility_device_name
+                ),
+                None,
+            )
+            selected_adapter_compatible = bool(
+                selected_compatibility_device and selected_compatibility_device.get("compatible")
+            )
+            adapter_metadata = compatibility.get("adapter")
+            adapter_metadata = adapter_metadata if isinstance(adapter_metadata, dict) else {}
+            safe_target_modules = adapter_metadata.get("target_modules", [])
+            if not isinstance(safe_target_modules, list):
+                safe_target_modules = []
+            safe_target_modules = sorted({
+                item for item in safe_target_modules
+                if item in {"q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"}
+            })
+            adapter_check = {
+                "status": "pass" if compatibility.get("structurally_compatible") is True else "blocked",
+                "structurally_compatible": compatibility.get("structurally_compatible") is True,
+                "compatible_on_any_device": compatibility.get("compatible_on_any_device") is True,
+                "compatible_on_selected_device": selected_adapter_compatible,
+                "rank": adapter_metadata.get("rank"),
+                "target_modules": safe_target_modules,
+                "issues": adapter_issues,
+                "issue_count": len(raw_adapter_issues),
+                "issues_truncated": len(raw_adapter_issues) > 32,
+                "devices": [
+                    {
+                        key: device.get(key)
+                        for key in ("name", "available", "compatible", "status", "reason")
+                        if key in device
+                    }
+                    for device in compatibility_devices
+                    if isinstance(device, dict)
+                ],
+            }
+
+    supported_candidates = [
+        candidate
+        for candidate in estimate.get("candidates", [])
+        if isinstance(candidate, dict) and candidate.get("native_checkpoint_supported") is True
+    ]
+    supplied_budget = ram_budget_gib is not None or vram_budget_gib is not None
+    budget_fitting_candidates = (
+        [
+            candidate
+            for candidate in supported_candidates
+            if (ram_budget_gib is None or candidate.get("fits_ram_budget") is True)
+            and (vram_budget_gib is None or candidate.get("fits_vram_budget") is True)
+        ]
+        if supplied_budget
+        else []
+    )
+    fitting_candidates = (
+        budget_fitting_candidates
+        if precision == "auto"
+        else [candidate for candidate in budget_fitting_candidates if candidate.get("format") == precision]
+    )
+    accelerator_devices = {"cuda", "rocm", "xpu"}
+    relevant_budget_available = (
+        ram_budget_gib is not None
+        if resolved_device in {"cpu", "mps"}
+        else vram_budget_gib is not None
+        if resolved_device in accelerator_devices
+        else False
+    )
+    if precision == "auto" and supplied_budget:
+        resource_status = "review_needed"
+    elif fitting_candidates and relevant_budget_available:
+        resource_status = "estimated_fit"
+    elif supplied_budget:
+        resource_status = "review_needed"
+    else:
+        resource_status = "unknown"
+    resource_check = {
+        "status": resource_status,
+        "budget_assumptions_gib": {
+            "ram": ram_budget_gib,
+            "vram": vram_budget_gib,
+        },
+        "unbudgeted_dimensions": [
+            dimension
+            for dimension, budget in (("ram", ram_budget_gib), ("vram", vram_budget_gib))
+            if budget is None
+        ],
+        "resolved_device": resolved_device,
+        "selected_precision": precision,
+        "budget_relevant_to_selected_device": relevant_budget_available,
+        "estimated_native_precision_candidates": [
+            {
+                key: candidate.get(key)
+                for key in (
+                    "format",
+                    "estimated_weight_gib",
+                    "estimated_kv_cache_gib",
+                    "estimated_workspace_gib",
+                    "estimated_total_gib",
+                    "estimated_range_gib",
+                    "fits_ram_budget",
+                    "fits_vram_budget",
+                )
+            }
+            for candidate in supported_candidates
+        ],
+        "formats_within_supplied_budgets": [candidate.get("format") for candidate in fitting_candidates],
+        "note": (
+            "Advisory estimate only. It excludes adapter overhead, does not measure free memory, and does not account "
+            "for every device or memory mode. CPU and Metal/MPS budgeting uses RAM because separate device-memory "
+            "telemetry is unavailable for those paths. Auto precision follows the checkpoint dtype, so its actual candidate "
+            "fit remains unknown. A fit does not guarantee successful loading or inference."
+        ),
+    }
+
+    model_check = {
+        "status": "blocked" if model_issues else "config_valid",
+        "model_type": (estimate.get("model") or {}).get("model_type"),
+        "architecture": (estimate.get("model") or {}).get("architecture"),
+        "checkpoint_format": model_context["checkpoint_format"],
+        "effective_max_position_embeddings": effective_context_limit,
+        "estimated_parameter_count": (estimate.get("model") or {}).get("estimated_parameter_count"),
+        "base_tensor_inventory_checked": base_tensor_inventory_checked,
+        "issues": model_issues,
+        "issue_count": len(raw_model_issues) if trusted_adapter is not None and compatibility is not None else len(model_issues),
+        "issues_truncated": len(raw_model_issues) > 32 if trusted_adapter is not None and compatibility is not None else False,
+    }
+    runtime_check = {
+        "status": "available" if runtime.get("ready") is True else "unavailable",
+        "ready": runtime.get("ready") is True,
+        "recommended_device": runtime.get("recommended_device"),
+        "resolved_device": resolved_device,
+        "selected_device_available": selected_device_available,
+        "problems": runtime.get("problems", []),
+        "devices": [
+            {
+                key: device.get(key)
+                for key in ("id", "name", "available", "reason", "memory_free_gib", "memory_total_gib")
+                if key in device
+            }
+            for device in runtime.get("devices", [])
+            if isinstance(device, dict)
+        ],
+    }
+
+    structurally_clear = not model_issues and (
+        trusted_adapter is None or adapter_check.get("status") in {"pass", "not_checked"}
+    )
+    if not structurally_clear or request_check.get("status") == "blocked":
+        assessment = "blocked"
+    elif (
+        trusted_adapter is not None
+        and runtime_check["ready"]
+        and selected_device_available
+        and selected_adapter_compatible is True
+        and precision_check.get("status") == "pass"
+        and resource_status == "estimated_fit"
+    ):
+        assessment = "preflight_clear"
+    else:
+        assessment = "review_needed"
+
+    return {
+        "schema_version": 1,
+        "assessment": assessment,
+        "request": {
+            "max_prompt_tokens": max_prompt_tokens,
+            "max_new_tokens": max_new_tokens,
+            "estimated_total_context_tokens": total_context_tokens,
+            "device": device,
+            "resolved_device": resolved_device,
+            "precision": precision,
+        },
+        "checks": {
+            "model": model_check,
+            "adapter": adapter_check,
+            "runtime": runtime_check,
+            "request": request_check,
+            "precision": precision_check,
+            "resource_estimate": resource_check,
+        },
+        "scope": {
+            "read_only": True,
+            "network_accessed": False,
+            "files_written": False,
+            "model_weights_loaded": False,
+            "adapter_tensor_values_loaded": False,
+            "inference_run": False,
+            "absolute_paths_returned": False,
+            "memory_estimate_advisory": True,
+            "mcp_host_transcript_retention": "controlled by the MCP host",
+        },
+        "scope_note": (
+            "Preflight checks local model metadata and, for safetensors bases with an adapter, base tensor names "
+            "plus adapter tensor shapes. GGUF adapter shape compatibility is not checked until AXIOM's native loader "
+            "runs. Preflight does not load base-model weights or execute inference. Actual allocation, checkpoint dtype, "
+            "device kernels, free memory, and output quality remain unverified."
+        ),
+    }
 @mcp.tool()
 def axiom_training_job_start(
     model_path: str,
@@ -702,6 +1165,8 @@ def axiom_engine_generate(
     max_new_tokens: int = 128,
     temperature: float = 0.7,
     seed: int | None = None,
+    device: str = "auto",
+    precision: str = "auto",
 ) -> dict:
     """Generate one bounded response; this synchronous call cannot be cancelled through MCP."""
     ToolPermissionStore().require("axiom_engine_generate")
@@ -716,10 +1181,14 @@ def axiom_engine_generate(
     if (
         isinstance(temperature, bool)
         or not isinstance(temperature, (int, float))
+        or not 0 <= temperature <= 2
         or not math.isfinite(float(temperature))
-        or not 0 <= float(temperature) <= 2
     ):
         return {"error": "temperature must be between 0 and 2."}
+    if not isinstance(device, str) or device not in {"auto", "cpu", "cuda", "rocm", "mps", "xpu"}:
+        return {"error": "device must be auto, cpu, cuda, rocm, mps, or xpu."}
+    if not isinstance(precision, str) or precision not in {"auto", "fp32", "fp16", "bf16"}:
+        return {"error": "precision must be auto, fp32, fp16, or bf16."}
     if seed is not None and (
         isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= 2**63 - 1
     ):
@@ -753,6 +1222,8 @@ def axiom_engine_generate(
             max_new_tokens=max_new_tokens,
             temperature=float(temperature),
             seed=seed,
+            device_preference=device,
+            precision=precision,
         )
     except (AxiomEngineError, OSError, RuntimeError, ValueError):
         return {"error": "Local generation could not run; check model compatibility, adapter paths, and available memory."}

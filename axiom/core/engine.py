@@ -766,6 +766,22 @@ def check_local_adapter_compatibility(model_path: str, adapter_path: str) -> dic
     )
 
 
+def inspect_native_model_context(model_path: str) -> dict[str, Any]:
+    """Read native model architecture and context limits without loading weights."""
+    model_dir = _resolve_model_directory(model_path, "Base model")
+    inspected = _inspect_model_config(model_dir)
+    from axiom.core.native_engine import NativeLlamaConfig
+
+    config = NativeLlamaConfig.from_mapping(inspected["config"])
+    return {
+        "model_type": config.model_type,
+        "architecture": inspected["architecture"],
+        "checkpoint_format": inspected.get("checkpoint_format", "safetensors"),
+        "max_position_embeddings": config.max_position_embeddings,
+        "effective_max_position_embeddings": config.effective_max_position_embeddings,
+    }
+
+
 def estimate_native_quantization(
     model_path: str,
     *,

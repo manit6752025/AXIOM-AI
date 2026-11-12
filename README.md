@@ -463,7 +463,13 @@ axiom mcp allow axiom_training_job_status
 axiom mcp allow axiom_training_job_cancel
 ```
 
-`axiom_engine_generate` runs one request through AXIOM's native local model engine. It accepts a workspace-relative trusted model, an optional workspace-relative LoRA adapter, a prompt up to 8,000 characters, and up to 256 generated tokens. The result returns generated text, timing/token metadata, and whether token truncation shortened the prompt. AXIOM does not persist the prompt or response and does not access the network or write output files; an MCP host may retain the tool call in its own transcript. It runs synchronously without a wall-clock timeout or MCP cancellation, so model loading and generation can take time. It consumes local compute and returns prompt-derived content, so it has a separate default-deny permission and should be called only for an explicitly requested local response:
+`axiom_engine_preflight` checks a workspace-relative trusted model and optional LoRA adapter before inference. It accepts an estimated prompt-token target (up to 8,192), an output-token limit (up to 256), an optional device/precision, and optional caller-supplied RAM/VRAM budgets. It reads model metadata and, for a safetensors base with an adapter, checks adapter tensor shapes and base tensor names. For GGUF plus LoRA, it leaves adapter compatibility at `not_checked`; the native loader checks shapes only when inference runs. It reports runtime readiness and advisory memory estimates without loading model weights, running inference, accessing the network, or writing files; absolute paths are not returned. The agent should pass the same device and precision to `axiom_engine_generate`. Use RAM budgets for CPU/MPS and VRAM budgets for CUDA/ROCm/XPU. Without a compatible adapter check, relevant memory budget, or explicit precision, the overall assessment remains `review_needed`; `preflight_clear` is conditional on the caller's budget and never guarantees successful loading or generation. It has a separate default-deny permission:
+
+```bash
+axiom mcp allow axiom_engine_preflight
+```
+
+`axiom_engine_generate` runs one request through AXIOM's native local model engine. It accepts a workspace-relative trusted model, an optional workspace-relative LoRA adapter, a prompt up to 8,000 characters, up to 256 generated tokens, and optional `device` (`auto`, `cpu`, `cuda`, `rocm`, `mps`, `xpu`) and `precision` (`auto`, `fp16`, `bf16`, `fp32`) selections. The result returns generated text, timing/token metadata, and whether token truncation shortened the prompt. AXIOM does not persist the prompt or response and does not access the network or write output files; an MCP host may retain the tool call in its own transcript. It runs synchronously without a wall-clock timeout or MCP cancellation, so model loading and generation can take time. It consumes local compute and returns prompt-derived content, so it has a separate default-deny permission and should be called only for an explicitly requested local response:
 
 ```bash
 axiom mcp allow axiom_engine_generate
@@ -522,6 +528,7 @@ axiom mcp profile use readonly
 | `axiom_training_job_start` | Start a user-requested bounded local LoRA job; writes adapter output under `outputs/` |
 | `axiom_training_job_status` | Read workspace-scoped local LoRA job progress without logs or absolute paths |
 | `axiom_training_job_cancel` | Request cancellation before adapter finalization |
+| `axiom_engine_preflight` | Check local native model/adapter structure and advisory memory estimates without inference |
 | `axiom_engine_generate` | Run one bounded local native inference request and return generated text |
 | `axiom_system_info` | Detected hardware |
 | `axiom_model_list` | Registered models |
