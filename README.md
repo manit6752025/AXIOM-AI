@@ -658,6 +658,26 @@ file, AXIOM can compare them using the identical full-file fingerprint even
 though each comparison-corpus fingerprint omits a different prediction
 column.
 
+For a user-requested diagnosis of saved offline evaluations,
+`axiom_evaluation_compare_examples` inspects up to three first-in-file-order
+`fixed` or `regressed` rows from a completed baseline comparison. It verifies
+the saved reports and reopens each source under `data/`, then checks both full
+file hashes and the compatible comparison corpus before returning any result.
+Paired comparison supports sources up to 256 MiB, 500,000 rows, and 8 MiB per
+JSONL line; larger saved evaluations cannot be inspected by this tool.
+Row numbers are returned by default; this first-in-file-order sample may not
+represent the corpus. Only after explicit approval,
+`include_text=true` returns baseline/candidate prediction and reference
+excerpts capped at 2,000 characters each; the MCP host may retain returned
+text. Saved evaluation runs do not record a prompt field. These examples use
+raw exact match and may not explain the selected regression metric, such as
+token F1. They do not establish semantic quality. The tool has a separate
+default-deny permission and does no inference, network access, or file writes:
+
+```bash
+axiom mcp allow axiom_evaluation_compare_examples
+```
+
 To let the agent use additional AXIOM tools, allow only the ones you need:
 
 ```bash
@@ -721,6 +741,7 @@ axiom mcp profile use readonly
 | `axiom_dataset_clean` | Write a new cleaned JSONL copy inside the workspace |
 | `axiom_evaluation_run` | Score precomputed outputs offline and save aggregate metrics |
 | `axiom_evaluation_history` | Read saved aggregate evaluation metrics |
+| `axiom_evaluation_compare_examples` | Inspect paired examples from saved offline evaluations; text is off unless approved per call |
 | `axiom_training_plan` | Hardware-aware training plan |
 | `axiom_supercompress_status` | Whether SuperCompress is configured |
 | `axiom_supercompress` | Compress context before inference |

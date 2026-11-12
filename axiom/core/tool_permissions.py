@@ -70,6 +70,9 @@ TOOL_DESCRIPTIONS = {
     "axiom_dataset_clean": "Write a new cleaned dataset copy inside the workspace.",
     "axiom_evaluation_run": "Score local precomputed outputs, including completed prediction-job artifacts, and persist aggregate metrics plus bounded run provenance without row values.",
     "axiom_evaluation_history": "Read saved aggregate evaluation metrics and bounded run provenance without dataset values or local fingerprints.",
+    "axiom_evaluation_compare_examples": (
+        "Inspect up to three verified fixed/regressed examples between saved complete evaluations; row numbers are default and bounded prediction/reference text requires explicit per-call opt-in."
+    ),
     "axiom_system_info": "Read local hardware information.",
     "axiom_training_plan": "Create a hardware-aware training estimate.",
     "axiom_supercompress_status": "Read optional SuperCompress configuration status.",

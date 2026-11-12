@@ -36,6 +36,7 @@
 - Added a training-job-linked prediction comparison that verifies the saved base/adapter pairing and shared run settings before reporting bounded exact-match transitions.
 - Added hash-verified paired examples for selected prediction-job transitions; row numbers are the default and text requires a separately granted capability plus per-call approval.
 - Added offline-evaluator-compatible exact-match, normalized exact-match, and token-F1 scores with candidate-minus-baseline deltas to verified prediction-job comparisons.
+- Added a default-deny paired-example tool for saved offline evaluation comparisons; it revalidates report manifests and source snapshots, returns row numbers by default, and requires per-call approval for bounded text excerpts.
 - Added a job-linked training/evaluation overlap preflight that derives the training dataset and text field from a completed job and returns saved base/adapter paths; it reports the current-file snapshot and unverified artifact limitations.
 - Added `axiom_training_job_wait`, a bounded wait for local LoRA job outcomes that reuses the status permission; stale recovery verifies process identity and preserves newer job state.
 - Added a separately default-deny training/evaluation overlap preflight using the trainer's bounded text parser; it returns normalized exact-match counts and row numbers without text and never claims that no match proves held-out data.
