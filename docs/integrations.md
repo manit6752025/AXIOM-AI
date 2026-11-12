@@ -82,6 +82,19 @@ snapshots. The tool is read-only, loads no weights, and runs no inference:
 axiom mcp allow axiom_training_eval_overlap_preflight
 ```
 
+For a completed training run, `axiom_training_job_eval_overlap_preflight`
+accepts its job ID and an evaluation JSONL path. It derives the training
+dataset and text field from the job record, then returns the bounded overlap
+result plus workspace-relative base-model and adapter references for a later
+`axiom_engine_preflight`. It requires both `axiom_training_job_status` and
+`axiom_training_eval_overlap_preflight` permissions. The scan reads current
+contents at the saved training dataset path; no training-time dataset
+fingerprint was stored, so the tool cannot verify those contents match the
+training snapshot. No exact overlap still does not establish held-out data.
+The model and adapter references are saved paths only; run
+`axiom_engine_preflight` before inference because their contents are not
+verified by this overlap scan.
+
 The permission-checked `axiom_training_job_start`,
 `axiom_training_job_status`, `axiom_training_job_wait`, and
 `axiom_training_job_cancel` tools expose the

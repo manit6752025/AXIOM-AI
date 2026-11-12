@@ -473,6 +473,17 @@ axiom mcp allow axiom_training_eval_overlap_preflight
 
 `axiom_training_job_start`, `axiom_training_job_status`, `axiom_training_job_wait`, and `axiom_training_job_cancel` expose AXIOM's existing local LoRA trainer to agents. Start accepts workspace-relative model and JSONL paths, writes adapter output only under an existing `outputs/` directory, supports up to 1,000 steps, never downloads weights or executes remote code, and is serialized by AXIOM's single-job lock. The start tool creates a local job record and launches training; the adapter is written later when training finishes. It consumes local compute and writes model artifacts, so start remains default-deny. Status and wait use the status permission; cancel uses the cancel permission. The server instructions tell agents to run preflight, show the exact configuration, and wait for an explicit user request before starting that run. Tool permission itself grants standing capability. Status and wait return workspace-relative paths and omit local logs and detailed failure strings. Wait checks persisted state for at most 30 seconds and returns `completed`, `cancelled`, `failed`, `timed_out`, `not_found`, or `state_unavailable`. Call it again after `timed_out`; inspect status after `state_unavailable`. `state_unavailable` can mean the saved record could not be read, or that AXIOM cannot verify the active worker's process identity. A summary with `runner_state_available=false` means the worker may still be active; do not treat it as stopped or start a replacement job, and check status again later. Cancellation stops at the next safe training boundary; once `finalizing` begins, the adapter is saved and cancellation is no longer accepted.
 
+For a completed LoRA run, `axiom_training_job_eval_overlap_preflight` accepts
+the training job ID and an evaluation dataset path. It derives the training
+dataset and text field from the job record, runs the same bounded overlap
+check, and returns workspace-relative base-model and adapter references for a
+later `axiom_engine_preflight`. It requires both the training-job status and
+overlap-preflight permissions. It scans the current training file contents;
+AXIOM has no training-time dataset fingerprint, so it cannot verify that this
+file is unchanged from the data actually used to train. Model and adapter
+references are saved workspace-relative paths, not content-verified artifacts;
+run `axiom_engine_preflight` before inference.
+
 Training status also returns `loss_trace.samples`: up to 64 evenly spaced
 `{step, loss}` values persisted with the job for inspection after an MCP
 restart. Older jobs without saved samples report the trace as unavailable;
@@ -615,6 +626,7 @@ axiom mcp profile use readonly
 | `axiom_workspace_assets` | Find model directories and JSONL datasets with bounded, workspace-relative path scans |
 | `axiom_training_preflight` | Check local LoRA inputs and estimates without loading weights or starting a job |
 | `axiom_training_eval_overlap_preflight` | Check for normalized exact overlap between training and evaluation JSONL without returning text |
+| `axiom_training_job_eval_overlap_preflight` | Check overlap using the training dataset and text field recorded for a completed job; return safe base/adapter references |
 | `axiom_training_job_start` | Start a user-requested bounded local LoRA job; writes adapter output under `outputs/` |
 | `axiom_training_job_status` | Read local LoRA progress and a bounded training-loss trace without logs or absolute paths |
 | `axiom_training_job_wait` | Wait up to 30 seconds for a local LoRA job outcome; uses the status permission |

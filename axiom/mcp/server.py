@@ -26,9 +26,11 @@ from axiom.core.fine_tuning import (
     cancel_finetuning_job,
     get_job,
     list_jobs,
+    read_job_record,
     start_finetuning_job,
     training_loss_trace_summary,
     validate_local_model_tree,
+    validate_training_text_field,
     wait_finetuning_job,
 )
 from axiom.core.mcp_paths import (
@@ -93,6 +95,7 @@ mcp = MCPServer(
         "Sensitive field-name heuristics are included; content PII pattern scanning requires explicit opt-in. "
         "Use axiom_training_preflight for bounded, non-executing checks before local LoRA training. "
         "When the user asks whether evaluation data may overlap training data, use the separate default-deny axiom_training_eval_overlap_preflight. It normalizes case and whitespace and returns only exact-overlap counts and row numbers. A clear result does not prove the evaluation data is held out or leakage-free; paraphrases are not detected. It does not load model weights or run inference. "
+        "For a completed training run, axiom_training_job_eval_overlap_preflight derives the training dataset and text field from its job ID, then checks the selected evaluation file. It requires both the training-job status and overlap-preflight permissions. It reads the current training dataset contents; the job does not store a training-time fingerprint, so the scan cannot verify the original training snapshot or prove held-out data. It returns saved workspace-relative base-model and adapter paths only; run axiom_engine_preflight before inference because their file contents are not verified here. "
         "Use axiom_engine_preflight before local inference to check model/adapter structure, the selected device/precision, and advisory memory estimates; it does not load weights or run inference. Pass the same settings to axiom_engine_generate. "
         "Run preflight and show the exact configuration before calling axiom_training_job_start; "
         "call it only after the user explicitly requests that run. It uses compute and writes an adapter under outputs/. "
@@ -879,6 +882,135 @@ def _training_job_matches_workspace(job: dict, root: Path) -> bool:
         if not path.is_relative_to(root):
             return False
     return True
+
+
+@mcp.tool()
+def axiom_training_job_eval_overlap_preflight(
+    training_job_id: str,
+    evaluation_dataset_path: str,
+    evaluation_prompt_field: str = "prompt",
+    include_reference: bool = False,
+    evaluation_reference_field: str = "completion",
+    sample_limit: int = 5,
+) -> dict:
+    """Check current evaluation data against the dataset recorded by a completed training job."""
+    permissions = ToolPermissionStore()
+    permissions.require("axiom_training_job_status")
+    permissions.require("axiom_training_eval_overlap_preflight")
+    root = _mcp_workspace_root()
+
+    def inconclusive(reason_code: str, *, status: str | None = None) -> dict:
+        response = {
+            "schema_version": 1,
+            "assessment": "inconclusive",
+            "reason_code": reason_code,
+            "scope": {
+                "read_only": True,
+                "files_written": False,
+                "model_weights_loaded": False,
+                "inference_run": False,
+                "network_accessed": False,
+                "absolute_paths_returned": False,
+                "dataset_values_returned": False,
+                "dataset_hashes_returned": False,
+            },
+        }
+        if status is not None:
+            response["training_job_status"] = status
+        return response
+
+    try:
+        job = read_job_record(training_job_id)
+    except FineTuningError:
+        return inconclusive("training_job_state_unavailable")
+    except ValueError:
+        job = None
+    if job is not None and job.get("id") != training_job_id:
+        return inconclusive("training_job_state_unavailable")
+    if job is None or not _training_job_matches_workspace(job, root):
+        return inconclusive("training_job_not_found_in_workspace")
+    status = job.get("status")
+    if status != "completed":
+        if not isinstance(status, str) or status not in {
+            "queued",
+            "running",
+            "cancelling",
+            "finalizing",
+            "cancelled",
+            "failed",
+        }:
+            return inconclusive("training_job_state_unavailable")
+        return inconclusive("training_job_not_completed", status=status)
+
+    config = job.get("config")
+    result = job.get("result")
+    if not isinstance(config, dict) or not isinstance(result, dict):
+        return inconclusive("training_job_artifact_metadata_unavailable", status="completed")
+    try:
+        model_path = Path(config["model_path"]).resolve(strict=True)
+        training_dataset_path = Path(config["dataset_path"]).resolve(strict=True)
+        adapter_path = Path(config["output_dir"]).resolve(strict=True)
+        result_adapter_path = Path(result["output_dir"]).resolve(strict=True)
+        model_relative = model_path.relative_to(root).as_posix()
+        dataset_relative = training_dataset_path.relative_to(root).as_posix()
+        adapter_relative = adapter_path.relative_to(root).as_posix()
+        if (
+            result_adapter_path != adapter_path
+            or not model_path.is_dir()
+            or not training_dataset_path.is_file()
+            or not adapter_path.is_dir()
+        ):
+            raise ValueError("Saved training inputs or adapter are unavailable.")
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+        return inconclusive("training_job_asset_unavailable", status="completed")
+    try:
+        training_text_field = config["text_field"]
+        validate_training_text_field(training_text_field)
+    except (KeyError, ValueError):
+        return inconclusive("training_job_metadata_unavailable", status="completed")
+
+    overlap = run_training_evaluation_overlap_preflight(
+        dataset_relative,
+        evaluation_dataset_path,
+        training_text_field=training_text_field,
+        evaluation_prompt_field=evaluation_prompt_field,
+        include_reference=include_reference,
+        evaluation_reference_field=evaluation_reference_field,
+        sample_limit=sample_limit,
+    )
+    return {
+        "schema_version": 1,
+        "training_job": {
+            "id": training_job_id,
+            "status": "completed",
+            "base_model_path": model_relative,
+            "adapter_path": adapter_relative,
+            "training_dataset_path": dataset_relative,
+            "training_text_field": training_text_field,
+        },
+        "assessment": overlap.get("assessment", "inconclusive"),
+        "overlap_preflight": overlap,
+        "training_dataset_snapshot_verified": False,
+        "scope": {
+            "read_only": True,
+            "files_written": False,
+            "model_weights_loaded": False,
+            "inference_run": False,
+            "network_accessed": False,
+            "absolute_paths_returned": False,
+            "dataset_values_returned": False,
+            "dataset_hashes_returned": False,
+            "training_time_dataset_fingerprint_available": False,
+            "model_adapter_content_fingerprints_available": False,
+        },
+        "note": (
+            "The overlap scan uses the current contents at the training job's saved dataset path. "
+            "AXIOM did not store a training-time dataset fingerprint, so this cannot verify that those "
+            "contents match the examples used in training. No exact overlap does not prove held-out or "
+            "leakage-free evaluation data. The base-model and adapter references are saved paths only, "
+            "not content-verified artifacts; run axiom_engine_preflight before inference."
+        ),
+    }
 
 
 def _training_job_summary(job: dict, root: Path) -> dict:

@@ -486,7 +486,7 @@ def _read_job(job_id: str) -> dict[str, Any] | None:
         return None
     try:
         job = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError):
         raise FineTuningError("Saved fine-tuning job state could not be read.") from None
     return job if isinstance(job, dict) else None
 
@@ -526,6 +526,11 @@ def _recover_if_stale(job: dict[str, Any]) -> dict[str, Any]:
 def get_job(job_id: str) -> dict[str, Any] | None:
     job = _read_job(job_id)
     return _recover_if_stale(job) if job is not None else None
+
+
+def read_job_record(job_id: str) -> dict[str, Any] | None:
+    """Read a saved job record without stale recovery or other state mutation."""
+    return _read_job(job_id)
 
 
 def wait_finetuning_job(

@@ -44,6 +44,15 @@ The MCP server also exposes `axiom_training_job_start`, `axiom_training_job_stat
 
 MCP inputs are revalidated in the background worker, and the JSONL dataset is opened with descriptor-relative path checks. The adapter destination is checked again immediately before saving to refuse files added during model loading or training. Transformers still opens model weights by path, so a concurrent local process with write access to the workspace can race path checks while model files load or adapter files save. Avoid changing the model, dataset, or destination while a job is running.
 
+Use `axiom_training_job_eval_overlap_preflight` to check a completed run's
+recorded training dataset against an explicitly selected evaluation file. It
+reuses the training-job status and overlap-preflight permissions and returns
+safe base-model and adapter references for the next model preflight. It scans
+current training-file contents, not a stored training-time snapshot, so it
+cannot verify that the file remained unchanged since the run. The model and
+adapter references are paths only, not content-verified artifacts; run
+`axiom_engine_preflight` before inference.
+
 ## Limits and honest scope
 
 - Base model path must be a local Transformers model directory; no model is downloaded by AXIOM.
