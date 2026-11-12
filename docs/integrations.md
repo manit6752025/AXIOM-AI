@@ -84,6 +84,14 @@ axiom mcp allow axiom_training_job_status
 axiom mcp allow axiom_training_job_cancel
 ```
 
+Training status includes a persisted `loss_trace.samples` series with up to 64
+evenly spaced `{step, loss}` values, so completed jobs remain inspectable after
+an MCP restart. Records created before trace support may have no samples, and
+interrupted or cancelled jobs may have a partial trace. These values are the
+trainer's loss on one selected training record per step, so individual points
+can be noisy. They are not validation loss and do not establish generalization
+or adapter quality; use held-out evaluation to assess quality.
+
 The separately permissioned `axiom_engine_preflight` checks a workspace-relative
 trusted model and optional LoRA adapter before inference. It accepts a prompt
 token target up to 8,192, an output limit up to 256 tokens, an optional device

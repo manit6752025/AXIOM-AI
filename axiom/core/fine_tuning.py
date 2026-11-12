@@ -32,6 +32,7 @@ _MAX_LINE_BYTES = 1_048_576
 _MAX_TEXT_CHARS = 300_000
 _MAX_MODEL_ENTRIES = 50_000
 _MAX_STEPS = 1_000
+_MAX_LOSS_SAMPLES = 64
 _MAX_SEQUENCE_LENGTH = 2_048
 _TEXT_FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
 _PACKAGES = {"torch": "torch", "transformers": "transformers", "peft": "peft", "accelerate": "accelerate"}
@@ -53,6 +54,80 @@ class FineTuningCancelledError(FineTuningError):
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _training_loss_sample_steps(max_steps: Any) -> set[int]:
+    if isinstance(max_steps, bool) or not isinstance(max_steps, int) or not 1 <= max_steps <= _MAX_STEPS:
+        return set()
+    sample_count = min(max_steps, _MAX_LOSS_SAMPLES)
+    if sample_count == 1:
+        return {1}
+    return {
+        1 + ((max_steps - 1) * index) // (sample_count - 1)
+        for index in range(sample_count)
+    }
+
+
+def _validated_training_loss_samples(job: dict[str, Any]) -> list[dict[str, int | float]]:
+    config = job.get("config")
+    max_steps = config.get("max_steps") if isinstance(config, dict) else None
+    completed_steps = job.get("completed_steps")
+    if (
+        isinstance(max_steps, bool)
+        or not isinstance(max_steps, int)
+        or not 1 <= max_steps <= _MAX_STEPS
+        or isinstance(completed_steps, bool)
+        or not isinstance(completed_steps, int)
+        or not 0 <= completed_steps <= max_steps
+    ):
+        return []
+    raw_samples = job.get("loss_samples")
+    if not isinstance(raw_samples, list):
+        return []
+    samples: list[dict[str, int | float]] = []
+    previous_step = 0
+    sample_steps = _training_loss_sample_steps(max_steps)
+    for sample in raw_samples[:_MAX_LOSS_SAMPLES]:
+        if not isinstance(sample, dict):
+            continue
+        step = sample.get("step")
+        loss = sample.get("loss")
+        if isinstance(loss, bool) or not isinstance(loss, (int, float)):
+            continue
+        try:
+            loss_value = float(loss)
+        except (OverflowError, TypeError, ValueError):
+            continue
+        if (
+            isinstance(step, bool)
+            or not isinstance(step, int)
+            or step not in sample_steps
+            or not previous_step < step <= min(max_steps, completed_steps)
+            or not math.isfinite(loss_value)
+        ):
+            continue
+        samples.append({"step": step, "loss": loss_value})
+        previous_step = step
+    return samples
+
+
+def training_loss_trace_summary(job: dict[str, Any]) -> dict[str, Any]:
+    """Return a bounded, sanitized diagnostic trace for MCP job status."""
+    samples = _validated_training_loss_samples(job)
+    return {
+        "available": bool(samples),
+        "samples": samples,
+        "sample_count": len(samples),
+        "maximum_samples": _MAX_LOSS_SAMPLES,
+        "sampling_strategy": "evenly_spaced_across_configured_steps",
+        "scope_note": (
+            "Each point is the training loss for the single selected training record at that step, "
+            "so the trace can be noisy. It is not validation loss and does not establish "
+            "generalization or adapter quality; use held-out evaluation to assess quality."
+        ),
+        "validation_loss_available": False,
+        "generalization_assessed": False,
+    }
 
 
 def _clip(exc: BaseException, limit: int) -> str:
@@ -575,6 +650,7 @@ def _new_job(
         "cancel_requested": False,
         "completed_steps": 0,
         "loss": None,
+        "loss_samples": [],
         "error": None,
         "logs": ["Job queued. The base model and dataset are local inputs; no weights will be downloaded."],
     }
@@ -886,6 +962,11 @@ def execute_finetuning_job(
     job = _read_job(job_id)
     if job is None:
         return
+    loss_sample_steps = _training_loss_sample_steps(
+        (job.get("config") or {}).get("max_steps")
+        if isinstance(job.get("config"), dict)
+        else None
+    )
 
     def check_cancel() -> None:
         current = _read_job(job_id)
@@ -906,12 +987,25 @@ def execute_finetuning_job(
             if current is None:
                 return
             message = f"Step {max(0, step)}/{current['config']['max_steps']}" + (f" · loss {loss:.5f}" if loss is not None else "")
-            updated = _update_job(
-                job_id,
-                completed_steps=min(max(0, step), current["config"]["max_steps"]),
-                loss=loss,
-                logs=[*current.get("logs", []), message][-80:],
-            )
+            changes: dict[str, Any] = {
+                "completed_steps": min(max(0, step), current["config"]["max_steps"]),
+                "loss": loss,
+                "logs": [*current.get("logs", []), message][-80:],
+            }
+            if (
+                step in loss_sample_steps
+                and isinstance(loss, (int, float))
+                and not isinstance(loss, bool)
+                and math.isfinite(float(loss))
+            ):
+                loss_samples = _validated_training_loss_samples(current)
+                sample = {"step": step, "loss": float(loss)}
+                if loss_samples and loss_samples[-1]["step"] == step:
+                    loss_samples[-1] = sample
+                elif not loss_samples or loss_samples[-1]["step"] < step:
+                    loss_samples.append(sample)
+                changes["loss_samples"] = loss_samples[-_MAX_LOSS_SAMPLES:]
+            updated = _update_job(job_id, **changes)
             if on_progress:
                 on_progress(updated)
 

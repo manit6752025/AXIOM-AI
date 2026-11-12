@@ -455,6 +455,14 @@ axiom mcp allow axiom_training_preflight
 
 `axiom_training_job_start`, `axiom_training_job_status`, and `axiom_training_job_cancel` expose AXIOM's existing local LoRA trainer to agents. Start accepts workspace-relative model and JSONL paths, writes adapter output only under an existing `outputs/` directory, supports up to 1,000 steps, never downloads weights or executes remote code, and is serialized by AXIOM's single-job lock. The start tool creates a local job record and launches training; the adapter is written later when training finishes. It consumes local compute and writes model artifacts, so each tool is default-deny and has its own permission. The server instructions tell agents to run preflight, show the exact configuration, and wait for an explicit user request before starting that run. Tool permission itself grants standing capability. Status returns workspace-relative paths and omits local logs and detailed failure strings. Cancellation stops at the next safe training boundary; once `finalizing` begins, the adapter is saved and cancellation is no longer accepted.
 
+Training status also returns `loss_trace.samples`: up to 64 evenly spaced
+`{step, loss}` values persisted with the job for inspection after an MCP
+restart. Older jobs without saved samples report the trace as unavailable;
+unfinished jobs may have only a partial trace. Each point is the loss for one
+selected training record, so the trace can be noisy. It is not validation loss
+and does not establish generalization or adapter quality; use held-out
+evaluation to assess quality.
+
 Grant these capabilities only when needed:
 
 ```bash
@@ -589,7 +597,7 @@ axiom mcp profile use readonly
 | `axiom_workspace_assets` | Find model directories and JSONL datasets with bounded, workspace-relative path scans |
 | `axiom_training_preflight` | Check local LoRA inputs and estimates without loading weights or starting a job |
 | `axiom_training_job_start` | Start a user-requested bounded local LoRA job; writes adapter output under `outputs/` |
-| `axiom_training_job_status` | Read workspace-scoped local LoRA job progress without logs or absolute paths |
+| `axiom_training_job_status` | Read local LoRA progress and a bounded training-loss trace without logs or absolute paths |
 | `axiom_training_job_cancel` | Request cancellation before adapter finalization |
 | `axiom_engine_preflight` | Check local native model/adapter structure and advisory memory estimates without inference |
 | `axiom_engine_generate` | Run one bounded local native inference request and return generated text |

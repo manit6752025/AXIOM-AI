@@ -25,7 +25,7 @@ TOOL_DESCRIPTIONS = {
         "Start a local LoRA training job from workspace assets; consumes compute and writes an adapter under outputs/."
     ),
     "axiom_training_job_status": (
-        "Read local LoRA job progress and safe workspace-relative summaries."
+        "Read local LoRA job progress, up to 64 evenly spaced numeric training-loss samples, and safe workspace-relative summaries."
     ),
     "axiom_training_job_cancel": (
         "Request cooperative cancellation before adapter finalization for a local LoRA job."

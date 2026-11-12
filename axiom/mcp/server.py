@@ -27,6 +27,7 @@ from axiom.core.fine_tuning import (
     get_job,
     list_jobs,
     start_finetuning_job,
+    training_loss_trace_summary,
     validate_local_model_tree,
 )
 from axiom.core.mcp_paths import (
@@ -92,7 +93,7 @@ mcp = MCPServer(
         "Use axiom_engine_preflight before local inference to check model/adapter structure, the selected device/precision, and advisory memory estimates; it does not load weights or run inference. Pass the same settings to axiom_engine_generate. "
         "Run preflight and show the exact configuration before calling axiom_training_job_start; "
         "call it only after the user explicitly requests that run. It uses compute and writes an adapter under outputs/. "
-        "Use the separate status/cancel tools to manage the job. "
+        "Use the separate status/cancel tools to manage the job. Training status includes up to 64 evenly spaced loss samples; each point is one selected training record and may be noisy. Do not treat the trace as held-out validation or evidence of model quality/generalization; use held-out evaluation to assess quality. "
         "For local inference, use axiom_engine_generate only after the user requests a response; "
         "it runs one bounded prompt locally and AXIOM does not store the prompt or response. The MCP host may retain its tool transcript. "
         "For a dataset-to-evaluation workflow, when allowed, use axiom_engine_preflight before axiom_prediction_job_start. "
@@ -895,6 +896,7 @@ def _training_job_summary(job: dict, root: Path) -> dict:
         },
         "completed_steps": job.get("completed_steps", 0),
         "loss": job.get("loss"),
+        "loss_trace": training_loss_trace_summary(job),
         "result": safe_result,
         "error": (
             "Training failed; inspect the job in AXIOM for local details."
