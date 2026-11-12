@@ -41,11 +41,11 @@ be assumed available as completed end-to-end features.
 
 ## Documentation and support
 
-- [Project README](https://github.com/NetCore-Technologies/AXIOM-AI#readme)
-- [Roadmap](https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/ROADMAP.md)
-- [Release notes](https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/docs/releases/v0.3.0-beta.1.md)
-- [Wiki](https://github.com/NetCore-Technologies/AXIOM-AI/wiki)
-- [Issues](https://github.com/NetCore-Technologies/AXIOM-AI/issues)
+- [Project README](https://github.com/manit6752025/AXIOM-AI#readme)
+- [Roadmap](https://github.com/manit6752025/AXIOM-AI/blob/main/ROADMAP.md)
+- [Release notes](https://github.com/manit6752025/AXIOM-AI/blob/main/docs/releases/v0.3.0-beta.1.md)
+- [Wiki](https://github.com/manit6752025/AXIOM-AI/wiki)
+- [Issues](https://github.com/manit6752025/AXIOM-AI/issues)
 
 The npm launcher license is MIT. Consult the repository license and package
 metadata for licensing details of the complete application and dependencies.
