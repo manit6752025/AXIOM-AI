@@ -407,7 +407,9 @@ can still be compared when their complete full-file SHA-256 values match. Both
 hashes are persisted locally but omitted from MCP responses. These lexical
 metrics do not establish semantic quality, and a `model_label` is user-supplied
 metadata. Grant `axiom_evaluation_run` to create runs and
-`axiom_evaluation_history` separately to read stored aggregates.
+`axiom_evaluation_history` separately to read stored aggregates. History pages
+continue with `after_run_id` from the previous page's `next_cursor`; start a
+fresh listing to include newer runs saved during pagination.
 When a selected baseline has different examples or evaluation fields, the new
 run is still saved and its comparison is reported as unavailable.
 

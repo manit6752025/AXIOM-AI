@@ -649,7 +649,23 @@ axiom mcp allow axiom_dataset_clean_preview
 axiom mcp allow axiom_dataset_clean
 ```
 
-`axiom_evaluation_run` scores already-produced predictions in JSONL files under the workspace's `data/` directory. Pass either a returned `data/file.jsonl` asset path or a path relative to `data/`. It returns aggregate exact-match, normalized exact-match, token F1, counts, confidence intervals, and an optional baseline comparison; raw prediction/reference values are neither returned nor persisted. The MCP limits are 64 MiB, 100,000 rows, and 1 MiB per line. `baseline` defaults to false; partial runs cannot be marked as a baseline, and a partial or mismatched-corpus comparison returns `unavailable` rather than pass/fail while preserving the metrics. Baseline comparisons match row order and every non-prediction field, including references and prompt/context, across output files. The whole-file and comparison fingerprints are stored locally for integrity and baseline matching; MCP responses omit those hashes. These are lexical metrics, not semantic quality scores; `model_label` is user-supplied metadata. `axiom_evaluation_history` lists saved aggregate results or returns one run by ID. Evaluation and history have separate default-deny permissions:
+`axiom_evaluation_run` scores already-produced predictions in JSONL files
+under the MCP workspace's `data/` directory. Pass a returned `data/file.jsonl`
+asset path or a path relative to `data/`. It returns aggregate exact-match,
+normalized exact-match, token F1, counts, confidence intervals, and an optional
+baseline comparison; raw prediction/reference values are neither returned nor
+persisted. MCP limits are 64 MiB, 100,000 rows, and 1 MiB per line. Baseline
+marking is opt-in; partial runs cannot be marked as baselines, and partial or
+mismatched-corpus comparisons return `unavailable` rather than pass/fail while
+retaining aggregate metrics.
+Comparisons match row order and every non-prediction field, including
+references and prompt/context. Local fingerprints are used for integrity and
+baseline matching but omitted from MCP responses. These lexical metrics do not
+establish semantic quality, and `model_label` is user-supplied metadata.
+`axiom_evaluation_history` lists saved aggregate results or returns one run by
+ID. For additional pages, pass the previous response's `next_cursor` as
+`after_run_id`; start a fresh listing to include evaluations saved after
+paging began. Evaluation and history have separate default-deny permissions:
 
 ```bash
 axiom mcp allow axiom_evaluation_run

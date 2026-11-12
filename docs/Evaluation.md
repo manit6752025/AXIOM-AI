@@ -68,7 +68,18 @@ and comparison fingerprints are persisted for integrity and baseline matching,
 but MCP responses omit those hashes. Grant `axiom_evaluation_history`
 separately to read saved run summaries or reports. Baseline marking is opt-in;
 partial runs cannot be marked as baselines or produce a pass/fail comparison.
-These metrics measure lexical overlap, not semantic quality.
+These metrics measure lexical overlap, not semantic quality. History lists are
+bounded to 100 summaries per call. To continue, pass the previous page's
+`next_cursor` value as `after_run_id`; the cursor anchors after that saved run,
+so newly saved runs do not shift the continuation. Start a fresh first-page
+request to include runs saved after paging began. If the cursor run was deleted
+or aged out of retained history, start a fresh listing.
+
+For example, use the previous response's cursor in the next tool call:
+
+```json
+{"limit":20,"after_run_id":"<previous-next_cursor>"}
+```
 
 For a user-requested diagnosis of a saved offline comparison,
 `axiom_evaluation_compare_examples` accepts a baseline run ID, a current run
