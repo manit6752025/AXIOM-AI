@@ -12,7 +12,7 @@ test("Settings explains local data retention and links to runtime trace controls
   const guide = page.getByRole("link", { name: "Read the data retention and deletion guide" });
   await expect(guide).toHaveAttribute(
     "href",
-    "https://github.com/NetCore-Technologies/AXIOM-AI/blob/latest/development/docs/DATA-RETENTION.md",
+    "https://github.com/manit6752025/AXIOM-AI/blob/latest/development/docs/DATA-RETENTION.md",
   );
 
   await page.getByRole("button", { name: "Review traces" }).click();
