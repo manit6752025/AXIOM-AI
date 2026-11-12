@@ -58,11 +58,11 @@ test = [
 axiom = "axiom.cli.main:app"
 
 [project.urls]
-Homepage = "https://netcore-technologies.github.io/AXIOM-AI/"
-Repository = "https://github.com/NetCore-Technologies/AXIOM-AI"
-Documentation = "https://github.com/NetCore-Technologies/AXIOM-AI/wiki/Home"
-Issues = "https://github.com/NetCore-Technologies/AXIOM-AI/issues"
-Changelog = "https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/docs/CHANGELOG.md"
+Homepage = "https://manit6752025.github.io/AXIOM-AI/"
+Repository = "https://github.com/manit6752025/AXIOM-AI"
+Documentation = "https://github.com/manit6752025/AXIOM-AI/wiki/Home"
+Issues = "https://github.com/manit6752025/AXIOM-AI/issues"
+Changelog = "https://github.com/manit6752025/AXIOM-AI/blob/latest/development/docs/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["axiom*"]
