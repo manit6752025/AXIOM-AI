@@ -3,6 +3,7 @@ import AxiomQuantizer from "./components/AxiomQuantizer";
 import ApiPlayground from "./components/ApiPlayground";
 import RuntimeConnectorPanel from "./components/RuntimeConnectorPanel";
 import RuntimeTracePanel from "./components/RuntimeTracePanel";
+import EngineTelemetryMonitor from "./components/EngineTelemetryMonitor";
 import LocalAxiomEnginePanel from "./components/LocalAxiomEnginePanel";
 import LocalEngineFabricPanel from "./components/LocalEngineFabricPanel";
 import LocalInferencePanel from "./components/LocalInferencePanel";
@@ -3161,6 +3162,7 @@ function Runtime() {
     <LocalInferencePanel />
     <LLMClientPanel />
     <RuntimeTracePanel />
+    <EngineTelemetryMonitor />
     <RuntimeConnectorPanel />
   </FeaturePage>;
 }
