@@ -53,7 +53,7 @@ def test_linux_installer_verifies_the_published_bundle_before_user_path_update()
 
     assert installer_path.stat().st_mode & stat.S_IXUSR
     assert 'set -euo pipefail' in installer
-    assert 'REPO="NetCore-Technologies/AXIOM-AI"' in installer
+    assert 'REPO="manit6752025/AXIOM-AI"' in installer
     assert 'asset="AXIOM-${tag}-linux-x64.tar.gz"' in installer
     assert 'download_file "$download_base/SHA256SUMS"' in installer
     assert 'verify_checksum "$DOWNLOAD_DIR/$asset" "$asset"' in installer
