@@ -75,11 +75,16 @@ test("Runtime resource monitoring is opt-in, bounded, exportable, and clearable"
   const monitor = page.getByRole("region", { name: "Resource monitoring", exact: true });
   await expect(monitor.getByRole("heading", { name: "Resource monitoring" })).toBeVisible();
   await expect(monitor.getByText("No resource samples collected")).toBeVisible();
-  expect(telemetryCalls).toBe(0);
 
+  // The existing Native Engine panel takes a one-shot telemetry snapshot on
+  // mount. Assert that this monitor adds no periodic sampling until opted in.
   await monitor.getByLabel("Sample interval").selectOption("1");
+  const baselineTelemetryCalls = telemetryCalls;
+  await page.waitForTimeout(1_200);
+  expect(telemetryCalls).toBe(baselineTelemetryCalls);
+
   await monitor.getByRole("button", { name: "Start monitoring" }).click();
-  await expect.poll(() => telemetryCalls, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => telemetryCalls, { timeout: 10_000 }).toBeGreaterThan(baselineTelemetryCalls + 1);
   await expect(monitor.getByText(/\d+\/120/)).toBeVisible();
   await expect(monitor.getByRole("table", { name: "Resource telemetry samples" })).toBeVisible();
 
