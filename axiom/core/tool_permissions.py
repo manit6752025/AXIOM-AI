@@ -57,6 +57,9 @@ TOOL_DESCRIPTIONS = {
     "axiom_prediction_job_compare": (
         "Compare two completed prediction jobs on hash-verified artifacts; returns transition counts, bounded row-number samples, and workspace-relative model settings without dataset or output paths."
     ),
+    "axiom_prediction_job_compare_examples": (
+        "Inspect up to three hash-verified paired examples from one prediction-job transition; text is off by default and prompt excerpts require separate per-call opt-in."
+    ),
     "axiom_model_list": "List locally registered models.",
     "axiom_model_info": "Inspect a local model path.",
     "axiom_dataset_inspect": (

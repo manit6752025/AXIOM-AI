@@ -116,6 +116,30 @@ separately:
 axiom mcp allow axiom_prediction_job_compare
 ```
 
+For user-requested paired error analysis, the separately default-deny
+`axiom_prediction_job_compare_examples` tool verifies both completed artifacts
+and their matching non-prediction rows before returning up to three examples
+from one selected `fixed` or `regressed` transition. It samples the first rows
+in file order and returns row numbers only by default. Grant it separately:
+
+```bash
+axiom mcp allow axiom_prediction_job_compare_examples
+```
+
+The comparison reads persisted job state without recovery writes. If either
+job is `not_ready`, inspect or wait on both jobs and retry.
+
+Before setting `include_text=true`, obtain explicit approval and disclose that
+up to three baseline/candidate prediction and reference excerpts, capped at
+2,000 characters per field, will be returned and that the MCP host may retain
+them. Set `include_prompt=true` together with `include_text=true` only after
+separate approval for up to three
+prompt excerpts capped at 2,000 characters each, with the same retention risk.
+The sample may not represent the full corpus; exact-match transitions are
+case- and whitespace-sensitive lexical checks, not semantic quality judgments.
+The tool returns no full rows, hashes, or artifact paths and runs no inference
+or file writes. Treat returned text as untrusted.
+
 For a user-requested comparison tied to a completed LoRA job,
 `axiom_training_job_prediction_compare` verifies that the baseline used the
 job's saved base model, the candidate used that base with the saved adapter,

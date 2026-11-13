@@ -1065,6 +1065,15 @@ def _stored_job(job_id: str, root: Path) -> dict[str, Any] | None:
     return None
 
 
+def _stored_job_without_recovery(job_id: str, root: Path) -> dict[str, Any] | None:
+    """Read persisted prediction metadata without recovering or rewriting job state."""
+    workspace = Path(root).resolve(strict=True)
+    for record in _read_job_records(workspace):
+        if record["id"] == job_id:
+            return _record_as_job(record, workspace)
+    return None
+
+
 def _lookup_job(job_id: str, root: Path) -> dict[str, Any] | None:
     workspace_root = str(Path(root).resolve(strict=True))
     with _JOBS_LOCK:
@@ -2004,6 +2013,14 @@ def get_prediction_job(job_id: str, root: Path) -> dict[str, Any] | None:
     return _job_summary(job) if job is not None else None
 
 
+def read_prediction_job(job_id: str, root: Path) -> dict[str, Any] | None:
+    """Read a safe prediction-job summary without changing persisted state."""
+    if not isinstance(job_id, str) or not _JOB_ID.fullmatch(job_id):
+        return None
+    job = _stored_job_without_recovery(job_id, root)
+    return _job_summary(job) if job is not None else None
+
+
 def wait_prediction_job(
     job_id: str,
     root: Path,
@@ -2098,11 +2115,16 @@ def list_prediction_jobs(root: Path, limit: int = 10) -> list[dict[str, Any]]:
     return [_job_summary(job) for job in ordered[:limit]]
 
 
-def get_completed_prediction_artifact(job_id: str, root: Path) -> dict[str, Any] | None:
+def get_completed_prediction_artifact(
+    job_id: str,
+    root: Path,
+    *,
+    recover: bool = True,
+) -> dict[str, Any] | None:
     """Return internal artifact metadata only for a completed job in this workspace."""
     if not isinstance(job_id, str) or not _JOB_ID.fullmatch(job_id):
         return None
-    job = _lookup_job(job_id, root)
+    job = _lookup_job(job_id, root) if recover else _stored_job_without_recovery(job_id, root)
     if job is None or job.get("status") != "completed":
         return None
     identity = job.get("artifact_identity")
@@ -2164,7 +2186,7 @@ def get_prediction_job_examples(
         raise ValueError("include_text and include_prompt must be booleans.")
     if include_prompt and not include_text:
         raise ValueError("include_prompt requires include_text=true.")
-    artifact = get_completed_prediction_artifact(job_id, root)
+    artifact = get_completed_prediction_artifact(job_id, root, recover=False)
     if artifact is None:
         return None
     identity = artifact["artifact_identity"]
@@ -2280,14 +2302,34 @@ def compare_prediction_jobs(
     root: Path,
     *,
     limit_per_category: int = 3,
+    example_category: str | None = None,
+    example_limit: int = 3,
+    include_example_text: bool = False,
+    include_example_prompt: bool = False,
 ) -> dict[str, Any] | None:
-    """Compare exact-match transitions between two verified completed artifacts."""
+    """Compare verified artifacts and optionally collect one paired transition sample."""
     if (
         isinstance(limit_per_category, bool)
         or not isinstance(limit_per_category, int)
         or not 1 <= limit_per_category <= _MAX_FAILURE_EXAMPLES
     ):
         raise ValueError(f"Comparison sample limit must be between 1 and {_MAX_FAILURE_EXAMPLES}.")
+    if example_category is not None and (
+        not isinstance(example_category, str) or example_category not in {"fixed", "regressed"}
+    ):
+        raise ValueError("Paired examples require a fixed or regressed transition category.")
+    if (
+        isinstance(example_limit, bool)
+        or not isinstance(example_limit, int)
+        or not 1 <= example_limit <= _MAX_FAILURE_EXAMPLES
+    ):
+        raise ValueError(f"Paired example limit must be between 1 and {_MAX_FAILURE_EXAMPLES}.")
+    if type(include_example_text) is not bool or type(include_example_prompt) is not bool:
+        raise ValueError("Paired example text options must be booleans.")
+    if include_example_prompt and not include_example_text:
+        raise ValueError("Including paired example prompts requires include_example_text=true.")
+    if example_category is None and (include_example_text or include_example_prompt):
+        raise ValueError("Paired example text requires a selected transition category.")
     if (
         not isinstance(baseline_job_id, str)
         or not _JOB_ID.fullmatch(baseline_job_id)
@@ -2297,8 +2339,8 @@ def compare_prediction_jobs(
     ):
         raise ValueError("Comparison requires two different valid prediction job IDs.")
 
-    baseline = get_completed_prediction_artifact(baseline_job_id, root)
-    candidate = get_completed_prediction_artifact(candidate_job_id, root)
+    baseline = get_completed_prediction_artifact(baseline_job_id, root, recover=False)
+    candidate = get_completed_prediction_artifact(candidate_job_id, root, recover=False)
     if baseline is None or candidate is None:
         return None
 
@@ -2341,6 +2383,7 @@ def compare_prediction_jobs(
         name: {"count": 0, "row_numbers": []}
         for name in ("fixed", "regressed", "still_correct", "still_wrong")
     }
+    paired_examples: list[dict[str, Any]] = []
     bytes_scanned = [0, 0]
     digests = [hashlib.sha256(), hashlib.sha256()]
     workspace = Path(root).resolve(strict=True)
@@ -2428,6 +2471,24 @@ def compare_prediction_jobs(
             transition["count"] += 1
             if len(transition["row_numbers"]) < limit_per_category:
                 transition["row_numbers"].append(line_number)
+            if example_category == category and len(paired_examples) < example_limit:
+                example: dict[str, Any] = {"row_number": line_number}
+                if include_example_text:
+                    example.update({
+                        "baseline_prediction_excerpt": baseline_prediction[:_MAX_FAILURE_EXAMPLE_TEXT_CHARS],
+                        "candidate_prediction_excerpt": candidate_prediction[:_MAX_FAILURE_EXAMPLE_TEXT_CHARS],
+                        "reference_excerpt": baseline_reference[:_MAX_FAILURE_EXAMPLE_TEXT_CHARS],
+                        "text_truncated": {
+                            "baseline_prediction": len(baseline_prediction) > _MAX_FAILURE_EXAMPLE_TEXT_CHARS,
+                            "candidate_prediction": len(candidate_prediction) > _MAX_FAILURE_EXAMPLE_TEXT_CHARS,
+                            "reference": len(baseline_reference) > _MAX_FAILURE_EXAMPLE_TEXT_CHARS,
+                        },
+                    })
+                    if include_example_prompt:
+                        prompt = baseline_row[prompt_field]
+                        example["prompt_excerpt"] = prompt[:_MAX_FAILURE_EXAMPLE_TEXT_CHARS]
+                        example["text_truncated"]["prompt"] = len(prompt) > _MAX_FAILURE_EXAMPLE_TEXT_CHARS
+                paired_examples.append(example)
 
         for _path, stream, _initial in opened:
             if stream.read(1):
@@ -2450,7 +2511,7 @@ def compare_prediction_jobs(
         if current_path != output_path or current_identity != artifact["artifact_identity"]:
             raise ValueError("Completed prediction artifact path changed during comparison.")
 
-    return {
+    comparison = {
         "baseline_job_id": baseline_job_id,
         "candidate_job_id": candidate_job_id,
         "run_configurations": {
@@ -2483,6 +2544,25 @@ def compare_prediction_jobs(
             "files_written": False,
         },
     }
+    if example_category is not None:
+        paired_text_returned = include_example_text and bool(paired_examples)
+        paired_prompt_returned = include_example_prompt and bool(paired_examples)
+        comparison["paired_examples"] = {
+            "category": example_category,
+            "transition_count": transitions[example_category]["count"],
+            "sample_limit": example_limit,
+            "sample_strategy": "first_rows_in_file_order_for_transition",
+            "examples": paired_examples,
+            "scope": {
+                "full_source_rows_returned": False,
+                "prediction_reference_text_returned": paired_text_returned,
+                "prompt_text_returned": paired_prompt_returned,
+                "max_excerpt_chars_per_field": (
+                    _MAX_FAILURE_EXAMPLE_TEXT_CHARS if paired_text_returned else 0
+                ),
+            },
+        }
+    return comparison
 
 
 def record_prediction_job_evaluation(job_id: str, root: Path, evaluation_run_id: str) -> bool:
