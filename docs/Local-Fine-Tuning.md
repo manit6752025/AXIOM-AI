@@ -53,6 +53,23 @@ cannot verify that the file remained unchanged since the run. The model and
 adapter references are paths only, not content-verified artifacts; run
 `axiom_engine_preflight` before inference.
 
+For a full evaluation plan, `axiom_training_job_validation_preflight` combines
+the job-linked overlap check, base/adapter compatibility checks, and prompt
+truncation estimates. It accepts two new output paths directly under `data/`
+and returns both prediction configurations without starting jobs, loading
+weights, or writing files. It requires the existing status, overlap,
+engine-preflight, and prediction-preflight permissions. Review its results and
+show both configurations before running either prediction. By default, overlap
+checks prompts but not evaluation references; set
+`include_reference_in_overlap=true` to include references and confirm the
+returned `overlap_configuration.reference_checked` value. `plan_only` means a
+plan was assembled, not that a run is ready or approved. Never start a variant
+with a blocked engine check; resolve or recheck a blocked prompt preflight
+before either run. Explain review-needed or inconclusive checks,
+detected overlap, and expected or inconclusive truncation, then wait for an
+explicit informed decision to proceed. Run the predictions sequentially because
+AXIOM allows one local compute job at a time.
+
 ## Limits and honest scope
 
 - Base model path must be a local Transformers model directory; no model is downloaded by AXIOM.

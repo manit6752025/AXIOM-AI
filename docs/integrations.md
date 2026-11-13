@@ -95,6 +95,24 @@ The model and adapter references are saved paths only; run
 `axiom_engine_preflight` before inference because their contents are not
 verified by this overlap scan.
 
+`axiom_training_job_validation_preflight` builds a read-only plan for a
+completed LoRA job. Supply the evaluation dataset and two new direct-child
+outputs under `data/`. The tool composes the job-linked overlap check, base
+and adapter engine preflights, and the dataset prompt-truncation preflight; it
+returns both run configurations but does not load model weights, run
+inference, or write files. It requires the existing training-status,
+overlap-preflight, engine-preflight, and prediction-preflight permissions.
+Prediction-start permission is not needed for this plan. Its overlap check
+compares prompts by default; pass `include_reference_in_overlap=true` to
+include evaluation references, and inspect `overlap_configuration.reference_checked`.
+`plan_only` means a plan was assembled, not that a run is ready or approved.
+Never start a variant with a blocked engine check; resolve or recheck a
+blocked prompt preflight before either run. Surface review-needed,
+exact/inconclusive overlap, and expected/inconclusive truncation, then obtain
+the user's explicit informed decision to proceed. Start the baseline and
+adapter jobs sequentially because they share AXIOM's local compute slot.
+Output paths are rechecked when each job starts.
+
 The permission-checked `axiom_training_job_start`,
 `axiom_training_job_status`, `axiom_training_job_wait`, and
 `axiom_training_job_cancel` tools expose the

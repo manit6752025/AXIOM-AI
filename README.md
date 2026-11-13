@@ -484,6 +484,23 @@ file is unchanged from the data actually used to train. Model and adapter
 references are saved workspace-relative paths, not content-verified artifacts;
 run `axiom_engine_preflight` before inference.
 
+`axiom_training_job_validation_preflight` combines this overlap check with
+base-model and adapter compatibility checks plus dataset prompt-truncation
+estimates. It accepts two new direct-child output paths under `data/` and
+returns both planned prediction configurations. It needs the existing training
+status, overlap, engine-preflight, and prediction-preflight permissions; it
+does not need prediction-start permission because it writes no files or runs
+inference. Its overlap check compares prompts by default; set
+`include_reference_in_overlap=true` to check references too. The returned
+`overlap_configuration.reference_checked` makes that choice explicit. The
+`plan_only` assessment means a read-only plan was assembled, not that either
+run is ready or approved. Show all check outcomes: never start a variant with
+a blocked engine check, resolve a blocked prompt preflight, and disclose
+`review_needed`, exact or inconclusive overlap, and expected or inconclusive
+prompt truncation before getting the user's explicit decision to proceed. The
+prediction jobs must run sequentially because AXIOM has one local compute slot.
+Output paths are checked again at job start.
+
 Training status also returns `loss_trace.samples`: up to 64 evenly spaced
 `{step, loss}` values persisted with the job for inspection after an MCP
 restart. Older jobs without saved samples report the trace as unavailable;
@@ -627,6 +644,7 @@ axiom mcp profile use readonly
 | `axiom_training_preflight` | Check local LoRA inputs and estimates without loading weights or starting a job |
 | `axiom_training_eval_overlap_preflight` | Check for normalized exact overlap between training and evaluation JSONL without returning text |
 | `axiom_training_job_eval_overlap_preflight` | Check overlap using the training dataset and text field recorded for a completed job; return safe base/adapter references |
+| `axiom_training_job_validation_preflight` | Plan base-versus-adapter evaluation with overlap, model compatibility, and prompt-truncation checks; no inference or file writes |
 | `axiom_training_job_start` | Start a user-requested bounded local LoRA job; writes adapter output under `outputs/` |
 | `axiom_training_job_status` | Read local LoRA progress and a bounded training-loss trace without logs or absolute paths |
 | `axiom_training_job_wait` | Wait up to 30 seconds for a local LoRA job outcome; uses the status permission |
