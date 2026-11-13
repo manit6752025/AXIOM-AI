@@ -4,7 +4,7 @@ import { ensureAuthenticated } from "./helpers/auth";
 test("Runtime resource monitoring is opt-in, bounded, exportable, and clearable", async ({ page }) => {
   let telemetryCalls = 0;
 
-  await page.route("**/api/**", async (route) => {
+  await page.route((url) => url.pathname.startsWith("/api/"), async (route) => {
     const request = route.request();
     const url = new URL(request.url());
 
