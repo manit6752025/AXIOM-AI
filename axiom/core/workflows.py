@@ -105,7 +105,12 @@ class WorkflowStore:
             raise ValueError(f"Invalid workflow store: {self.records_file}") from exc
         if not isinstance(records, list) or any(not isinstance(item, dict) for item in records):
             raise ValueError(f"Invalid workflow store: {self.records_file}")
+        seen_ids: set[str] = set()
         for record in records:
+            workflow_id = record.get("id")
+            if not isinstance(workflow_id, str) or not workflow_id or workflow_id in seen_ids:
+                raise ValueError(f"Invalid or duplicate workflow ID in {self.records_file}")
+            seen_ids.add(workflow_id)
             record.setdefault("schema_version", WORKFLOW_SCHEMA_VERSION)
             record.setdefault("revision", 1)
             record.setdefault("versions", [])
@@ -125,6 +130,38 @@ class WorkflowStore:
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
             raise ValueError("Workflow list limit must be between 1 and 1000.")
         return self._read()[:limit]
+
+    def list_page(
+        self,
+        *,
+        limit: int = 20,
+        after_workflow_id: str | None = None,
+    ) -> dict[str, Any]:
+        if type(limit) is not int or not 1 <= limit <= 50:
+            raise ValueError("Workflow page limit must be between 1 and 50.")
+        if after_workflow_id is not None and (
+            not isinstance(after_workflow_id, str) or not after_workflow_id
+        ):
+            raise ValueError("Workflow history cursor must be a non-empty workflow ID.")
+        records = self._read()
+        if len(records) > WORKFLOW_RECORD_LIMIT:
+            raise ValueError("Workflow history exceeds the supported record limit.")
+        offset = 0
+        if after_workflow_id is not None:
+            cursor_index = next(
+                (index for index, record in enumerate(records) if record.get("id") == after_workflow_id),
+                None,
+            )
+            if cursor_index is None:
+                raise KeyError("Workflow history cursor was not found.")
+            offset = cursor_index + 1
+        return {
+            "workflows": records[offset:offset + limit],
+            "total": len(records),
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + limit < len(records),
+        }
 
     def get(self, workflow_id: str) -> dict[str, Any] | None:
         return next((item for item in self._read() if item.get("id") == workflow_id), None)

@@ -24,6 +24,15 @@ The tool response includes the saved `workflow.id` and graph. To inspect that
 design later, use `axiom workflow show <workflow.id>` or
 `axiom workflow validate <workflow.id>` from the same workspace.
 
+MCP agents can also use `axiom_workflow_read` with its own default-deny
+permission to list bounded summaries or fetch one validated graph by ID. Pass
+the returned `next_cursor` as `after_workflow_id` with the same `limit` to
+continue; start a fresh listing to include designs saved after paging began.
+Read access does not grant the separate write permission; every response
+labels a saved design `execution_status: not_executable`:
+
+    axiom mcp allow axiom_workflow_read
+
 ## Design is not execution
 
 A valid design or successful dry run does not prove a workload ran. These design tools do not themselves start training/fine-tuning, run inference, create checkpoints, provide production model serving, or prove an external framework is installed and connected.
