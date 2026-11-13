@@ -1,7 +1,7 @@
 # AXIOM Agent Integrations
 
 AXIOM is designed to sit underneath external AI-agent runtimes as a local
-inspection and planning layer.
+inspection, planning, and bounded execution layer.
 
 ## Supported integration families
 
@@ -63,6 +63,64 @@ supports LoRA, not QLoRA, and the generic planner may suggest a QLoRA fallback.
 Hardware status `warn` means only the generic estimate predicts a fit; actual
 loading was not tested. The estimate also cannot verify Apple MPS or CPU fit.
 
+The separately permissioned `axiom_training_job_start`,
+`axiom_training_job_status`, and `axiom_training_job_cancel` tools expose the
+existing local LoRA trainer to agents. Start accepts workspace-relative model
+and JSONL paths plus an adapter destination below an existing `outputs/`
+directory. It creates a local job record and launches training, which consumes
+compute and later writes adapter files; it does not download models or execute
+remote code. It retains the trainer's dataset/step limits and single-active-job
+lock. Model directories with symbolic links or junctions are rejected. MCP job
+responses include workspace-relative paths and selected progress/result fields;
+local logs, absolute paths, and detailed failure text are omitted. Cancellation
+is cooperative at training boundaries and remains available until adapter
+finalization begins. The server instructions ask agents to run preflight, show
+the exact configuration, and wait for an explicit user request before starting;
+granting start permission itself gives the agent standing capability.
+
+```bash
+axiom mcp allow axiom_training_job_start
+axiom mcp allow axiom_training_job_status
+axiom mcp allow axiom_training_job_cancel
+```
+
+The separately permissioned `axiom_engine_preflight` checks a workspace-relative
+trusted model and optional LoRA adapter before inference. It accepts a prompt
+token target up to 8,192, an output limit up to 256 tokens, an optional device
+and precision, and optional caller-supplied RAM/VRAM budgets. It reads model
+metadata and, for a safetensors base with an adapter, checks adapter tensor
+shapes and base tensor names. For GGUF plus LoRA, compatibility remains
+`not_checked`; AXIOM's native loader checks adapter shapes when inference is
+explicitly run. The tool reports runtime readiness and estimates memory without
+loading model weights. No inference runs, files are written, network is
+accessed, or absolute paths returned. Pass the same device and precision to
+`axiom_engine_generate`. Use RAM budgets for CPU/MPS and VRAM budgets for
+CUDA/ROCm/XPU. Without a compatible adapter check, a budget relevant to the
+selected device, or an explicit precision, its assessment remains
+`review_needed`. A `preflight_clear` assessment is conditional on the supplied
+budget and never guarantees that the model will load or generate successfully.
+
+```bash
+axiom mcp allow axiom_engine_preflight
+```
+
+The separately permissioned `axiom_engine_generate` tool runs one bounded
+request through AXIOM's native local model engine. It accepts workspace-relative
+trusted model and optional adapter paths, limits prompts to 8,000 characters
+and completions to 256 tokens, accepts optional device and precision choices,
+and returns the generated text with basic
+token/timing metadata. AXIOM does not persist the prompt or response, access
+the network, or write output files; an MCP host may retain the tool call in its
+own transcript. The result reports whether the native engine truncated the
+prompt to fit context. The tool runs synchronously without a wall-clock timeout
+or MCP cancellation, so model loading and generation can take time. Because it
+uses local compute and returns prompt-derived content, the server instructions
+require an explicit user request before invocation.
+
+```bash
+axiom mcp allow axiom_engine_generate
+```
+
 The separately permissioned `axiom_dataset_clean_preview` reports bounded
 keep/remove counts and a proposed output path for a workspace-relative JSONL
 file. It returns no row values and writes no file. A partial scan includes its
@@ -115,7 +173,8 @@ Future versions can expose agent-to-agent capabilities for systems that support 
 
 ## Philosophy
 
-AXIOM should make local AI preflight work legible.
+AXIOM should make local AI work legible and give agents bounded access to
+supported local operations.
 
 External agents decide:
 
@@ -128,10 +187,15 @@ AXIOM currently handles:
 - model metadata and local model inspection;
 - JSONL dataset inspection, validation, statistics, and cleaning;
 - hardware detection and conservative training-plan estimates;
+- opt-in local LoRA training jobs with status and cooperative cancellation;
+- bounded offline evaluation and supported local inference;
 - local project state and developer-tool discovery.
 
-External runtimes handle training, evaluation, inference, and deployment. AXIOM
-does not claim that a plan ran or that a detected tool is authenticated.
+External runtimes still decide what the user wants, which tools to call, and
+how to communicate. Work outside AXIOM's supported local operations—such as
+hosted model training or deployment—remains with those runtimes. A training
+plan does not mean a job ran, offline lexical metrics do not establish semantic
+quality, and discovered developer tools are not evidence of authentication.
 
 ## Optional Headroom proxy
 

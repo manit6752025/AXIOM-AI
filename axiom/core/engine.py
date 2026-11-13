@@ -686,6 +686,12 @@ def _trusted_directory_index(
     return tuple(entries[key] for key in sorted(entries))
 
 
+def refresh_local_engine_asset_index() -> None:
+    """Drop metadata caches so newly written local models/adapters are discoverable."""
+    _trusted_directory_index.cache_clear()
+    _trusted_file_entry.cache_clear()
+
+
 def _resolve_model_directory(value: str, label: str) -> Path:
     """Resolve a request by matching it to an inventoried trusted model folder."""
     if not isinstance(value, str) or not value.strip():
@@ -758,6 +764,22 @@ def check_local_adapter_compatibility(model_path: str, adapter_path: str) -> dic
         adapter_dir,
         trusted_roots=_allowed_model_roots(),
     )
+
+
+def inspect_native_model_context(model_path: str) -> dict[str, Any]:
+    """Read native model architecture and context limits without loading weights."""
+    model_dir = _resolve_model_directory(model_path, "Base model")
+    inspected = _inspect_model_config(model_dir)
+    from axiom.core.native_engine import NativeLlamaConfig
+
+    config = NativeLlamaConfig.from_mapping(inspected["config"])
+    return {
+        "model_type": config.model_type,
+        "architecture": inspected["architecture"],
+        "checkpoint_format": inspected.get("checkpoint_format", "safetensors"),
+        "max_position_embeddings": config.max_position_embeddings,
+        "effective_max_position_embeddings": config.effective_max_position_embeddings,
+    }
 
 
 def estimate_native_quantization(

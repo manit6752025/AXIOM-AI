@@ -769,9 +769,9 @@ export type FineTuningConfig = {
   max_steps: number; sequence_length: number; learning_rate: number; lora_rank: number;
 };
 export type FineTuningJob = {
-  schema_version: 1; id: string; status: "queued" | "running" | "completed" | "failed";
+  schema_version: 1; id: string; status: "queued" | "running" | "cancelling" | "finalizing" | "completed" | "cancelled" | "failed";
   created_at: string; updated_at: string; started_at: string | null; finished_at: string | null;
-  config: FineTuningConfig; completed_steps: number; loss: number | null; error: string | null;
+  config: FineTuningConfig; cancel_requested?: boolean; completed_steps: number; loss: number | null; error: string | null;
   logs: string[]; result?: { output_dir: string; adapter_files: string[]; target_modules: string[]; dataset_rows: number; max_steps: number; device?: string; engine?: string; trainable_parameters?: number };
 };
 
@@ -1435,6 +1435,7 @@ export const axiomApi = {
   fineTuningRuntime: () => requestJson<FineTuningRuntime>("/api/fine-tuning/runtime"),
   fineTuningJobs: (limit = 20) => requestJson<{ jobs: FineTuningJob[] }>(`/api/fine-tuning/jobs?limit=${limit}`),
   fineTuningJob: (id: string) => requestJson<FineTuningJob>(`/api/fine-tuning/jobs/${encodeURIComponent(id)}`),
+  cancelFineTuningJob: (id: string) => requestJson<FineTuningJob>(`/api/fine-tuning/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST", body: JSON.stringify({}) }),
   startFineTuningJob: (config: FineTuningConfig) => requestJson<FineTuningJob>("/api/fine-tuning/jobs", {
     method: "POST", body: JSON.stringify(config),
   }),
