@@ -18,6 +18,9 @@ TOOL_DESCRIPTIONS = {
     "axiom_workspace_assets": (
         "List workspace-relative model and JSONL paths without reading contents."
     ),
+    "axiom_workflow_save": (
+        "Validate and save a bounded non-executable workflow design after explicit user approval; writes to the workspace workflow store."
+    ),
     "axiom_training_preflight": (
         "Check local LoRA inputs and estimates without loading weights or starting a job."
     ),

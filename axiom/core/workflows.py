@@ -15,7 +15,12 @@ WORKFLOW_NODE_TYPES = frozenset(
 )
 WORKFLOW_SCHEMA_VERSION = 1
 WORKFLOW_VERSION_HISTORY_LIMIT = 10
+WORKFLOW_RECORD_LIMIT = 200
 _NODE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+class WorkflowStoreFullError(ValueError):
+    """Raised instead of silently discarding an older workflow design."""
 
 
 def validate_workflow_graph(
@@ -134,6 +139,10 @@ class WorkflowStore:
             records = self._read()
             if any(existing.get("id") == record["id"] for existing in records):
                 raise ValueError(f"Workflow already exists: {record['id']}")
+            if len(records) >= WORKFLOW_RECORD_LIMIT:
+                raise WorkflowStoreFullError(
+                    f"Workflow history is full ({WORKFLOW_RECORD_LIMIT} designs); remove one before saving."
+                )
             stored = {
                 **record,
                 "schema_version": WORKFLOW_SCHEMA_VERSION,
@@ -192,6 +201,10 @@ class WorkflowStore:
             source = next((record for record in records if record.get("id") == workflow_id), None)
             if source is None:
                 return None
+            if len(records) >= WORKFLOW_RECORD_LIMIT:
+                raise WorkflowStoreFullError(
+                    f"Workflow history is full ({WORKFLOW_RECORD_LIMIT} designs); remove one before duplicating."
+                )
             timestamp = now or datetime.now(UTC).isoformat()
             duplicate = {
                 **source,
@@ -219,7 +232,7 @@ class WorkflowStore:
             raise ValueError(f"Invalid workflow store path: {self.records_file}")
 
     def _write_records(self, records: list[dict[str, Any]]) -> None:
-        serialized = json.dumps(records[:200], indent=2, ensure_ascii=False, allow_nan=False)
+        serialized = json.dumps(records, indent=2, ensure_ascii=False, allow_nan=False)
         if len(serialized.encode("utf-8")) > 4_000_000:
             raise ValueError("Workflow history exceeds the 4 MB workspace limit.")
         atomic_write_text(self.records_file, serialized + "\n")

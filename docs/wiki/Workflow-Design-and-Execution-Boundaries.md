@@ -10,6 +10,20 @@ Beta.4 improves workflow design discoverability, templates, versioned saves, dup
 
 Use `axiom workflow <command> --help` to check flags supported by the installed version.
 
+An MCP agent may also save a validated graph with `axiom_workflow_save`. The
+tool is separately default-deny and writes the approved design to the local
+`.axiom/workflows.json` store. It accepts only the existing design node types
+and reports `execution_status: not_executable`; it does not run nodes or create
+jobs. The workspace retains up to 200 designs and rejects new saves at the
+limit rather than silently removing older designs. The agent should show the
+exact graph and get explicit user approval before calling it:
+
+    axiom mcp allow axiom_workflow_save
+
+The tool response includes the saved `workflow.id` and graph. To inspect that
+design later, use `axiom workflow show <workflow.id>` or
+`axiom workflow validate <workflow.id>` from the same workspace.
+
 ## Design is not execution
 
 A valid design or successful dry run does not prove a workload ran. These design tools do not themselves start training/fine-tuning, run inference, create checkpoints, provide production model serving, or prove an external framework is installed and connected.

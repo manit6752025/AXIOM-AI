@@ -11,7 +11,12 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from axiom.core.workflows import WORKFLOW_SCHEMA_VERSION, WorkflowStore, validate_workflow_graph
+from axiom.core.workflows import (
+    WORKFLOW_SCHEMA_VERSION,
+    WorkflowStore,
+    WorkflowStoreFullError,
+    validate_workflow_graph,
+)
 from axiom.core.hardware import detect_hardware
 from axiom.training.planner import create_training_plan
 from axiom.version import __version__
@@ -133,6 +138,8 @@ def create_workflow(request: WorkflowInput) -> dict[str, Any]:
     }
     try:
         WorkflowStore().save(record)
+    except WorkflowStoreFullError as exc:
+        raise HTTPException(status_code=409, detail="Workflow history is full.") from exc
     except (OSError, TimeoutError, ValueError) as exc:
         raise HTTPException(status_code=500, detail="Workflow could not be saved.") from exc
     from axiom.api.workspace import record_workspace_event
@@ -197,6 +204,8 @@ def duplicate_workflow(workflow_id: str) -> dict[str, Any]:
             new_id=uuid.uuid4().hex,
             name=f"{source['name']} (copy)"[:120],
         )
+    except WorkflowStoreFullError as exc:
+        raise HTTPException(status_code=409, detail="Workflow history is full.") from exc
     except (OSError, TimeoutError, ValueError) as exc:
         raise HTTPException(status_code=500, detail="Workflow could not be duplicated.") from exc
     if record is None:

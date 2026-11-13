@@ -353,6 +353,23 @@ axiom workflow list
 axiom workflow validate WORKFLOW_ID
 ```
 
+An MCP agent can also save a validated graph with the separately default-deny
+`axiom_workflow_save` tool. Ask for the exact graph to be saved and obtain the
+user's approval before calling it. It accepts up to 64 nodes and 128
+connections from the existing `dataset.profile`, `model.inspect`,
+`training.plan`, `evaluation.run`, and `report.export` design types. Saved
+records have `execution_status: not_executable`; the tool creates no job and
+never runs a node. The workspace keeps up to 200 workflow designs; at that
+limit, new saves are rejected and older designs are preserved. Grant it separately:
+
+```bash
+axiom mcp allow axiom_workflow_save
+```
+
+The save response includes `workflow.id` and the persisted graph. To inspect or
+validate that saved design later, use `axiom workflow show <workflow.id>` or
+`axiom workflow validate <workflow.id>` from the same workspace.
+
 Agent task profiles describe what a task is allowed to be about. They do not grant tool permissions.
 
 ```bash
@@ -811,6 +828,7 @@ axiom mcp profile use readonly
 | `axiom_info` | AXIOM version and capabilities |
 | `axiom_workspace_context` | Read a privacy-bounded project, hardware, and developer-tool snapshot; command suggestions need user approval |
 | `axiom_workspace_assets` | Find model directories and JSONL datasets with bounded, workspace-relative path scans |
+| `axiom_workflow_save` | Save a user-approved, validated workflow graph as a non-executable design |
 | `axiom_training_preflight` | Check local LoRA inputs and estimates without loading weights or starting a job |
 | `axiom_training_eval_overlap_preflight` | Check for normalized exact overlap between training and evaluation JSONL without returning text |
 | `axiom_training_job_eval_overlap_preflight` | Check overlap using the training dataset and text field recorded for a completed job; return safe base/adapter references |
