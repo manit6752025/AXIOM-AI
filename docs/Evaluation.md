@@ -70,6 +70,32 @@ separately to read saved run summaries or reports. Baseline marking is opt-in;
 partial runs cannot be marked as baselines or produce a pass/fail comparison.
 These metrics measure lexical overlap, not semantic quality.
 
+For a user-requested diagnosis of a saved offline comparison,
+`axiom_evaluation_compare_examples` accepts a baseline run ID, a current run
+ID, and one transition category. `fixed`/`regressed` use raw exact match;
+`token_f1_improved`/`token_f1_worsened` rank rows by the largest positive or
+most negative per-row token-F1 delta and return the per-row baseline score,
+candidate score, and delta. The current run must have been saved against that
+baseline, and both reports must be complete and intact. The tool reopens the
+reports' workspace-relative sources under `data/`, verifies their saved report
+manifests and full content hashes, and confirms the comparison corpus before
+returning examples. It returns exact-match transition counts and token-F1
+change counts separately, plus up to three row numbers by default.
+Exact-match examples are first in file order; F1-ranked extremes
+are intentionally not representative. Per-row token-F1 deltas do not add up
+to the corpus-level micro-F1 delta. Paired comparison supports sources up to
+256 MiB, 500,000 rows, and 8 MiB per JSONL line; larger saved evaluations
+cannot be inspected by this tool.
+After explicit approval, `include_text=true` returns paired baseline/candidate
+prediction and reference excerpts capped at 2,000 characters each; the MCP
+host may retain returned text. Saved offline evaluations do not record a
+prompt field, so this tool never returns prompt text. These diagnostics do not
+establish semantic quality. It has a separate default-deny permission:
+
+```bash
+axiom mcp allow axiom_evaluation_compare_examples
+```
+
 The separately exposed `axiom_prediction_job_evaluate` tool uses the same
 `axiom_evaluation_run` permission to evaluate a completed prediction job by ID.
 It reads the job's saved field names and verifies the artifact's publication
