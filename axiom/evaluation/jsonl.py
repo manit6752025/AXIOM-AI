@@ -360,11 +360,28 @@ def compare_to_baseline(
         or baseline_fields.get("selected_split") != current_fields.get("selected_split")
     ):
         raise BaselineCorpusMismatchError("evaluation_configuration_mismatch")
+    baseline_comparison_digest = baseline_manifest.get("comparison_corpus_sha256")
+    current_comparison_digest = current_manifest.get("comparison_corpus_sha256")
+    same_comparison_corpus = (
+        baseline_manifest.get("comparison_corpus_fully_hashed") is True
+        and current_manifest.get("comparison_corpus_fully_hashed") is True
+        and isinstance(baseline_comparison_digest, str)
+        and len(baseline_comparison_digest) == 64
+        and all(character in "0123456789abcdef" for character in baseline_comparison_digest)
+        and baseline_comparison_digest == current_comparison_digest
+    )
+    baseline_input_digest = baseline_manifest.get("sha256")
+    current_input_digest = current_manifest.get("sha256")
+    same_full_input_snapshot = (
+        baseline_manifest.get("full_content_hashed") is True
+        and current_manifest.get("full_content_hashed") is True
+        and isinstance(baseline_input_digest, str)
+        and len(baseline_input_digest) == 64
+        and all(character in "0123456789abcdef" for character in baseline_input_digest)
+        and baseline_input_digest == current_input_digest
+    )
     if (
-        baseline_manifest.get("comparison_corpus_sha256")
-        != current_manifest.get("comparison_corpus_sha256")
-        or not baseline_manifest.get("comparison_corpus_fully_hashed")
-        or not current_manifest.get("comparison_corpus_fully_hashed")
+        not (same_comparison_corpus or same_full_input_snapshot)
         or baseline_report.get("truncated")
         or report.get("truncated")
         or baseline_counts.get("invalid_json_rows") != current_counts.get("invalid_json_rows")

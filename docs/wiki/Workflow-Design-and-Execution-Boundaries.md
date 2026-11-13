@@ -22,7 +22,7 @@ Hardware-aware sizing uses detected hardware and assumptions. It is useful for c
 
 ## Evaluation is not inference
 
-`axiom evaluation run` scores predictions already present in the evaluation data. It does not call a model to generate predictions.
+`axiom evaluation run` scores predictions already present in the evaluation data and does not call a model. Separately, the permissioned MCP prediction-job tools can generate a bounded local artifact for that offline evaluator.
 
 ## Roadmap integrity
 

@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+import re
+import stat
 from pathlib import Path
 from typing import Any
 
 from axiom.api.safe_paths import safe_child
 from axiom.core.fine_tuning import (
+    TRAINING_MAX_DATASET_BYTES,
+    TRAINING_MAX_LINE_BYTES,
+    TRAINING_MAX_RECORDS,
+    TRAINING_MAX_TEXT_CHARS,
     iter_training_text_stream,
     runtime_status,
     validate_training_text_field,
 )
 from axiom.core.hardware import detect_hardware
+from axiom.core.mcp_paths import open_mcp_workspace_file
 from axiom.models.inspector import inspect_model
 from axiom.path_safety import open_regular_file
 from axiom.training.planner import create_training_plan
@@ -29,6 +38,72 @@ _SCOPE = {
     "absolute_paths_returned": False,
     "hardware_detection": "Local detection may query nvidia-smi when available.",
 }
+_MAX_OVERLAP_EVALUATION_BYTES = 64 * 1024 * 1024
+_MAX_OVERLAP_EVALUATION_ROWS = 100_000
+_MAX_OVERLAP_EVALUATION_LINE_BYTES = 1024 * 1024
+_MAX_OVERLAP_ROW_SAMPLES = 5
+
+
+def _normalize_overlap_text(value: str) -> str:
+    return " ".join(value.split()).casefold()
+
+
+def _reject_overlap_json_constant(value: str) -> None:
+    raise ValueError(f"Unsupported JSON constant: {value}")
+
+
+def _file_snapshot_identity(info: os.stat_result) -> tuple[int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+
+class _DigestingReader:
+    def __init__(self, stream: Any) -> None:
+        self.stream = stream
+        self.digest = hashlib.sha256()
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self.stream.read(size)
+        self.digest.update(chunk)
+        return chunk
+
+
+def _validate_input_snapshot(
+    raw_path: str,
+    root: Path,
+    path: Path,
+    expected_identity: tuple[int, int, int, int],
+    expected_digest: str,
+    max_bytes: int,
+) -> bool:
+    try:
+        current_path, stream = open_mcp_workspace_file(raw_path, root)
+        with stream:
+            initial = os.fstat(stream.fileno())
+            if (
+                not stat.S_ISREG(initial.st_mode)
+                or current_path != path
+                or _file_snapshot_identity(initial) != expected_identity
+                or initial.st_size > max_bytes
+            ):
+                return False
+            digest = hashlib.sha256()
+            bytes_read = 0
+            while True:
+                chunk = stream.read(min(64 * 1024, max_bytes - bytes_read + 1))
+                if not chunk:
+                    break
+                bytes_read += len(chunk)
+                if bytes_read > max_bytes:
+                    return False
+                digest.update(chunk)
+            final = os.fstat(stream.fileno())
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return (
+        _file_snapshot_identity(final) == expected_identity
+        and bytes_read == initial.st_size
+        and digest.hexdigest() == expected_digest
+    )
 
 
 def _path_failure(field: str, reason: str) -> dict[str, Any]:
@@ -402,3 +477,331 @@ def run_training_preflight(
         "next_steps": next_steps,
         "scope": dict(_SCOPE),
     }
+
+
+def run_training_evaluation_overlap_preflight(
+    training_dataset_path: str,
+    evaluation_dataset_path: str,
+    *,
+    training_text_field: str = "text",
+    evaluation_prompt_field: str = "prompt",
+    include_reference: bool = False,
+    evaluation_reference_field: str = "completion",
+    sample_limit: int = _MAX_OVERLAP_ROW_SAMPLES,
+    expected_training_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Check bounded, normalized exact overlap without returning text or hashes."""
+    scope = {
+        "read_only": True,
+        "network_accessed": False,
+        "files_written": False,
+        "model_weights_loaded": False,
+        "dataset_values_returned": False,
+        "dataset_hashes_returned": False,
+        "absolute_paths_returned": False,
+        "dataset_content_rechecked_after_scan": False,
+        "training_dataset_snapshot_verified": False,
+        "paraphrase_overlap_detected": False,
+        "leakage_free_claimed": False,
+    }
+
+    training_snapshot_status = "unavailable" if expected_training_sha256 is not None else "not_checked"
+
+    def inconclusive(
+        reason_code: str,
+        *,
+        training_records_scanned: int = 0,
+        evaluation_rows_scanned: int = 0,
+        snapshot_status: str | None = None,
+    ) -> dict[str, Any]:
+        response = {
+            "schema_version": 1,
+            "assessment": "inconclusive",
+            "reason_code": reason_code,
+            "scan_complete": False,
+            "training_records_scanned": training_records_scanned,
+            "evaluation_rows_scanned": evaluation_rows_scanned,
+            "scope": scope,
+        }
+        if expected_training_sha256 is not None:
+            response["training_dataset_snapshot_status"] = snapshot_status or training_snapshot_status
+        return response
+
+    if expected_training_sha256 is not None and (
+        not isinstance(expected_training_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", expected_training_sha256) is None
+    ):
+        return inconclusive("training_dataset_fingerprint_invalid", snapshot_status="unavailable")
+
+    if type(include_reference) is not bool:
+        return inconclusive("include_reference_must_be_boolean")
+    if (
+        isinstance(sample_limit, bool)
+        or not isinstance(sample_limit, int)
+        or not 1 <= sample_limit <= _MAX_OVERLAP_ROW_SAMPLES
+    ):
+        return inconclusive("sample_limit_out_of_range")
+    try:
+        validate_training_text_field(training_text_field)
+        validate_training_text_field(evaluation_prompt_field)
+        if include_reference:
+            validate_training_text_field(evaluation_reference_field)
+            if evaluation_reference_field == evaluation_prompt_field:
+                return inconclusive("evaluation_fields_must_be_different")
+    except ValueError:
+        return inconclusive("field_name_invalid")
+
+    try:
+        root = Path.cwd().resolve(strict=True)
+    except (OSError, RuntimeError):
+        return inconclusive("workspace_unavailable")
+    try:
+        training_has_jsonl_suffix = Path(training_dataset_path).suffix.lower() == ".jsonl"
+        evaluation_has_jsonl_suffix = Path(evaluation_dataset_path).suffix.lower() == ".jsonl"
+    except (TypeError, ValueError):
+        return inconclusive("dataset_path_invalid")
+    if not training_has_jsonl_suffix or not evaluation_has_jsonl_suffix:
+        return inconclusive("datasets_must_be_jsonl_files")
+
+    training_records = 0
+    training_texts: set[str] = set()
+    training_digest = ""
+    try:
+        training_target, stream = open_mcp_workspace_file(training_dataset_path, root)
+        with stream:
+            initial = os.fstat(stream.fileno())
+            if not stat.S_ISREG(initial.st_mode):
+                return inconclusive("training_dataset_not_regular")
+            initial_identity = _file_snapshot_identity(initial)
+            digesting_stream = _DigestingReader(stream)
+            for text in iter_training_text_stream(
+                digesting_stream,
+                file_size_bytes=initial.st_size,
+                text_field=training_text_field,
+            ):
+                training_records += 1
+                normalized = _normalize_overlap_text(text)
+                if normalized:
+                    training_texts.add(normalized)
+            training_digest = digesting_stream.digest.hexdigest()
+            final = os.fstat(stream.fileno())
+            if _file_snapshot_identity(final) != initial_identity:
+                return inconclusive(
+                    "training_dataset_changed_during_scan",
+                    training_records_scanned=training_records,
+                    snapshot_status="unavailable",
+                )
+    except (OSError, RuntimeError, ValueError):
+        return inconclusive("training_dataset_scan_incomplete", training_records_scanned=training_records)
+    if not training_records or not training_texts:
+        return inconclusive("training_dataset_has_no_records", training_records_scanned=training_records)
+    if expected_training_sha256 is not None:
+        if training_digest != expected_training_sha256:
+            return inconclusive(
+                "training_dataset_changed_since_training",
+                training_records_scanned=training_records,
+                snapshot_status="changed_since_training",
+            )
+
+    evaluation_rows = 0
+    evaluation_bytes = 0
+    prompt_matches = 0
+    prompt_match_rows: list[int] = []
+    prompt_reference_matches = 0
+    prompt_reference_match_rows: list[int] = []
+    evaluation_digest = hashlib.sha256()
+    evaluation_identity: tuple[int, int, int, int]
+    try:
+        evaluation_target, stream = open_mcp_workspace_file(evaluation_dataset_path, root)
+        with stream:
+            initial = os.fstat(stream.fileno())
+            if not stat.S_ISREG(initial.st_mode):
+                return inconclusive(
+                    "evaluation_dataset_not_regular",
+                    training_records_scanned=training_records,
+                )
+            if initial.st_size > _MAX_OVERLAP_EVALUATION_BYTES:
+                return inconclusive(
+                    "evaluation_dataset_size_limit",
+                    training_records_scanned=training_records,
+                )
+            evaluation_identity = _file_snapshot_identity(initial)
+            while True:
+                remaining_bytes = _MAX_OVERLAP_EVALUATION_BYTES - evaluation_bytes
+                read_limit = min(_MAX_OVERLAP_EVALUATION_LINE_BYTES, remaining_bytes) + 1
+                raw_line = stream.readline(read_limit)
+                if not raw_line:
+                    break
+                evaluation_rows += 1
+                evaluation_bytes += len(raw_line)
+                if evaluation_rows > _MAX_OVERLAP_EVALUATION_ROWS:
+                    return inconclusive(
+                        "evaluation_dataset_row_limit",
+                        training_records_scanned=training_records,
+                        evaluation_rows_scanned=evaluation_rows,
+                    )
+                if len(raw_line) > _MAX_OVERLAP_EVALUATION_LINE_BYTES:
+                    return inconclusive(
+                        "evaluation_dataset_line_limit",
+                        training_records_scanned=training_records,
+                        evaluation_rows_scanned=evaluation_rows,
+                    )
+                if evaluation_bytes > _MAX_OVERLAP_EVALUATION_BYTES:
+                    return inconclusive(
+                        "evaluation_dataset_size_limit",
+                        training_records_scanned=training_records,
+                        evaluation_rows_scanned=evaluation_rows,
+                    )
+                evaluation_digest.update(raw_line)
+                if not raw_line.strip():
+                    return inconclusive(
+                        "evaluation_dataset_contains_blank_line",
+                        training_records_scanned=training_records,
+                        evaluation_rows_scanned=evaluation_rows,
+                    )
+                try:
+                    row = json.loads(
+                        raw_line.decode("utf-8"),
+                        parse_constant=_reject_overlap_json_constant,
+                    )
+                except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError):
+                    return inconclusive(
+                        "evaluation_dataset_invalid_json",
+                        training_records_scanned=training_records,
+                        evaluation_rows_scanned=evaluation_rows,
+                    )
+                if not isinstance(row, dict):
+                    return inconclusive(
+                        "evaluation_dataset_row_not_object",
+                        training_records_scanned=training_records,
+                        evaluation_rows_scanned=evaluation_rows,
+                    )
+                prompt = row.get(evaluation_prompt_field)
+                if not isinstance(prompt, str) or not prompt.strip():
+                    return inconclusive(
+                        "evaluation_prompt_field_invalid",
+                        training_records_scanned=training_records,
+                        evaluation_rows_scanned=evaluation_rows,
+                    )
+                normalized_prompt = _normalize_overlap_text(prompt)
+                if normalized_prompt in training_texts:
+                    prompt_matches += 1
+                    if len(prompt_match_rows) < sample_limit:
+                        prompt_match_rows.append(evaluation_rows)
+
+                if include_reference:
+                    reference = row.get(evaluation_reference_field)
+                    if not isinstance(reference, str):
+                        return inconclusive(
+                            "evaluation_reference_field_invalid",
+                            training_records_scanned=training_records,
+                            evaluation_rows_scanned=evaluation_rows,
+                        )
+                    normalized_pair = _normalize_overlap_text(f"{prompt}\n{reference}")
+                    if normalized_pair in training_texts:
+                        prompt_reference_matches += 1
+                        if len(prompt_reference_match_rows) < sample_limit:
+                            prompt_reference_match_rows.append(evaluation_rows)
+
+            final = os.fstat(stream.fileno())
+            if (
+                _file_snapshot_identity(final) != evaluation_identity
+                or evaluation_bytes != initial.st_size
+            ):
+                return inconclusive(
+                    "evaluation_dataset_changed_during_scan",
+                    training_records_scanned=training_records,
+                    evaluation_rows_scanned=evaluation_rows,
+                )
+    except (OSError, RuntimeError, ValueError):
+        return inconclusive(
+            "evaluation_dataset_scan_incomplete",
+            training_records_scanned=training_records,
+            evaluation_rows_scanned=evaluation_rows,
+        )
+    if not evaluation_rows:
+        return inconclusive(
+            "evaluation_dataset_has_no_records",
+            training_records_scanned=training_records,
+            evaluation_rows_scanned=evaluation_rows,
+        )
+    training_snapshot_valid = _validate_input_snapshot(
+        training_dataset_path,
+        root,
+        training_target,
+        initial_identity,
+        training_digest,
+        initial_identity[2],
+    )
+    evaluation_snapshot_valid = _validate_input_snapshot(
+        evaluation_dataset_path,
+        root,
+        evaluation_target,
+        evaluation_identity,
+        evaluation_digest.hexdigest(),
+        _MAX_OVERLAP_EVALUATION_BYTES,
+    )
+    if not training_snapshot_valid:
+        training_snapshot_status = "unavailable"
+    elif expected_training_sha256 is not None:
+        training_snapshot_status = "matches"
+    scope["training_dataset_snapshot_verified"] = training_snapshot_status == "matches"
+    if not training_snapshot_valid or not evaluation_snapshot_valid:
+        return inconclusive(
+            "dataset_path_changed_during_scan",
+            training_records_scanned=training_records,
+            evaluation_rows_scanned=evaluation_rows,
+            snapshot_status=training_snapshot_status,
+        )
+
+    scope["dataset_content_rechecked_after_scan"] = True
+    overlaps = {
+        "prompt": {
+            "matching_rows": prompt_matches,
+            "sample_row_numbers": prompt_match_rows,
+        },
+    }
+    if include_reference:
+        overlaps["prompt_and_reference"] = {
+            "matching_rows": prompt_reference_matches,
+            "sample_row_numbers": prompt_reference_match_rows,
+        }
+    overlap_found = prompt_matches > 0 or (include_reference and prompt_reference_matches > 0)
+    response = {
+        "schema_version": 1,
+        "assessment": "exact_overlap_found" if overlap_found else "no_exact_overlap_detected",
+        "scan_complete": True,
+        "normalization": "casefold_and_collapse_whitespace",
+        "scan_limits": {
+            "training_dataset_max_bytes": TRAINING_MAX_DATASET_BYTES,
+            "training_records_max": TRAINING_MAX_RECORDS,
+            "training_line_max_bytes": TRAINING_MAX_LINE_BYTES,
+            "training_record_text_max_chars": TRAINING_MAX_TEXT_CHARS,
+            "evaluation_dataset_max_bytes": _MAX_OVERLAP_EVALUATION_BYTES,
+            "evaluation_rows_max": _MAX_OVERLAP_EVALUATION_ROWS,
+            "evaluation_line_max_bytes": _MAX_OVERLAP_EVALUATION_LINE_BYTES,
+        },
+        "training_dataset": {
+            "path": training_target.relative_to(root).as_posix(),
+            "text_field": training_text_field,
+            "records_scanned": training_records,
+        },
+        "evaluation_dataset": {
+            "path": evaluation_target.relative_to(root).as_posix(),
+            "prompt_field": evaluation_prompt_field,
+            "reference_checked": include_reference,
+            "reference_field": evaluation_reference_field if include_reference else None,
+            "rows_scanned": evaluation_rows,
+        },
+        "overlaps": overlaps,
+        "limitations": [
+            "Only case- and whitespace-normalized exact text is detected; paraphrases are not checked.",
+            "No exact overlap does not prove that the evaluation data is held out or leakage-free.",
+            "The result applies to the scanned file snapshots; files may change afterward.",
+        ],
+        "sample_limit_per_overlap": sample_limit,
+        "scope": scope,
+    }
+    if expected_training_sha256 is not None:
+        response["training_dataset_snapshot_status"] = training_snapshot_status
+    return response

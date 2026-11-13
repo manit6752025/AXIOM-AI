@@ -342,6 +342,7 @@ def inspect_gguf_checkpoint(model_dir: Path, trusted_roots: tuple[Path, ...] | N
             "gguf_path": str(paths[0]) if len(paths) == 1 else None,
             "gguf_paths": [str(path) for path in paths],
             "tokenizer_source": tokenizer_source,
+            "add_bos_token": bool(_field(reader, "tokenizer.ggml.add_bos_token", config.get("bos_token_id") is not None)),
             "tensor_type_counts": type_counts,
             # Count native-mapped tensor elements without dequantizing them.
             # Memory planning multiplies this by the chosen floating-point dtype,

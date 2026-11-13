@@ -30,7 +30,7 @@ Most AI projects fail early for boring reasons: the model does not fit, the data
 | --- | --- | --- |
 | Inspect model folders and Hugging Face repos | Fit estimates for your RAM and VRAM | LoRA and QLoRA fine-tuning |
 | Validate and clean JSONL datasets | Training plans you can save and compare | Local text generation with the AXIOM Engine or Ollama |
-| Diagnose your workspace | Agent-specific optimization profiles | Score predictions and gate regressions |
+| Diagnose your workspace | Agent-specific optimization profiles | Generate predictions, score them, and gate regressions |
 
 AXIOM is still in beta. Plans are estimates, and real results depend on your model, data, and hardware.
 
@@ -453,7 +453,70 @@ Agents can then call `axiom_workspace_context` before choosing more specific too
 axiom mcp allow axiom_training_preflight
 ```
 
-`axiom_training_job_start`, `axiom_training_job_status`, and `axiom_training_job_cancel` expose AXIOM's existing local LoRA trainer to agents. Start accepts workspace-relative model and JSONL paths, writes adapter output only under an existing `outputs/` directory, supports up to 1,000 steps, never downloads weights or executes remote code, and is serialized by AXIOM's single-job lock. The start tool creates a local job record and launches training; the adapter is written later when training finishes. It consumes local compute and writes model artifacts, so each tool is default-deny and has its own permission. The server instructions tell agents to run preflight, show the exact configuration, and wait for an explicit user request before starting that run. Tool permission itself grants standing capability. Status returns workspace-relative paths and omits local logs and detailed failure strings. Cancellation stops at the next safe training boundary; once `finalizing` begins, the adapter is saved and cancellation is no longer accepted.
+The separately default-deny `axiom_training_eval_overlap_preflight` checks
+whether an evaluation JSONL contains exact examples found in the training
+JSONL. It reuses the trainer's accepted-text parser, normalizes case and
+whitespace, and returns overlap counts plus up to five 1-based evaluation row
+numbers without returning text or hashes. By default it compares evaluation
+prompts; set `include_reference=true` and choose `evaluation_reference_field`
+to also compare combined prompt/reference text. Training scans use the
+trainer's 50 MiB, 10,000-record, 1 MiB-per-line, and 300,000-character
+per-record limits; evaluation scans cap at 64 MiB, 100,000 rows, and 1 MiB
+per line. Changed files, invalid inputs, or incomplete scans
+are `inconclusive`. No exact match does not prove the set is held out or
+leakage-free, and paraphrases are not detected. The read-only tool loads no
+weights, runs no inference, and writes no files:
+
+```bash
+axiom mcp allow axiom_training_eval_overlap_preflight
+```
+
+`axiom_training_job_start`, `axiom_training_job_status`, `axiom_training_job_wait`, and `axiom_training_job_cancel` expose AXIOM's existing local LoRA trainer to agents. Start accepts workspace-relative model and JSONL paths, writes adapter output only under an existing `outputs/` directory, supports up to 1,000 steps, never downloads weights or executes remote code, and is serialized by AXIOM's single-job lock. The start tool creates a local job record and launches training; the adapter is written later when training finishes. It consumes local compute and writes model artifacts, so start remains default-deny. Status and wait use the status permission; cancel uses the cancel permission. The server instructions tell agents to run preflight, show the exact configuration, and wait for an explicit user request before starting that run. Tool permission itself grants standing capability. Status and wait return workspace-relative paths and omit local logs and detailed failure strings. Wait checks persisted state for at most 30 seconds and returns `completed`, `cancelled`, `failed`, `timed_out`, `not_found`, or `state_unavailable`. Call it again after `timed_out`; inspect status after `state_unavailable`. `state_unavailable` can mean the saved record could not be read, or that AXIOM cannot verify the active worker's process identity. A summary with `runner_state_available=false` means the worker may still be active; do not treat it as stopped or start a replacement job, and check status again later. Cancellation stops at the next safe training boundary; once `finalizing` begins, the adapter is saved and cancellation is no longer accepted.
+
+For a completed LoRA run, `axiom_training_job_eval_overlap_preflight` accepts
+the training job ID and an evaluation dataset path. It derives the training
+dataset and text field from the job record, runs the same bounded overlap
+check, and returns workspace-relative base-model and adapter references for a
+later `axiom_engine_preflight`. It requires both the training-job status and
+overlap-preflight permissions. The trainer fingerprints the exact raw dataset
+bytes consumed by its parser and stores the digest only in local job state;
+ordinary job status responses omit it. On POSIX, AXIOM secures the job folder
+to mode 0700 and job files to 0600. On Windows, permissions inherit from the
+configured `AXIOM_FINETUNE_HOME` location, which should have user-only ACLs
+when other local accounts are present. The overlap tool checks the saved
+fingerprint against the current bytes it scans, reporting `matches`,
+`changed_since_training`, or `unavailable` without
+returning the digest. Changed files, legacy jobs without a fingerprint, and
+incomplete scans that cannot verify a stable snapshot produce an inconclusive,
+non-job-aligned result; inspect the reason code and retry after correcting
+inputs. A matching file still does not prove the evaluation set is held out or
+leakage-free. Model and adapter references are saved workspace-relative paths, not content-verified
+artifacts; run `axiom_engine_preflight` before inference.
+
+`axiom_training_job_validation_preflight` combines this overlap check with
+base-model and adapter compatibility checks plus dataset prompt-truncation
+estimates. It accepts two new direct-child output paths under `data/` and
+returns both planned prediction configurations. It needs the existing training
+status, overlap, engine-preflight, and prediction-preflight permissions; it
+does not need prediction-start permission because it writes no files or runs
+inference. Its overlap check compares prompts by default; set
+`include_reference_in_overlap=true` to check references too. The returned
+`overlap_configuration.reference_checked` makes that choice explicit. The
+`plan_only` assessment means a read-only plan was assembled, not that either
+run is ready or approved. Show all check outcomes: never start a variant with
+a blocked engine check, resolve a blocked prompt preflight, and disclose
+`review_needed`, exact or inconclusive overlap, and expected or inconclusive
+prompt truncation before getting the user's explicit decision to proceed. The
+prediction jobs must run sequentially because AXIOM has one local compute slot.
+Output paths are checked again at job start.
+
+Training status also returns `loss_trace.samples`: up to 64 evenly spaced
+`{step, loss}` values persisted with the job for inspection after an MCP
+restart. Older jobs without saved samples report the trace as unavailable;
+unfinished jobs may have only a partial trace. Each point is the loss for one
+selected training record, so the trace can be noisy. It is not validation loss
+and does not establish generalization or adapter quality; use held-out
+evaluation to assess quality.
 
 Grant these capabilities only when needed:
 
@@ -475,6 +538,100 @@ axiom mcp allow axiom_engine_preflight
 axiom mcp allow axiom_engine_generate
 ```
 
+`axiom_prediction_job_preflight` scans the same bounded JSONL input used by a prediction job and estimates whether the model's native tokenizer/template will clip prompts at the requested `max_new_tokens` limit. Use the same model, dataset, prompt and reference fields, and token limit as the intended start call; rerun preflight after changing any of them. It reports aggregate token lengths, 1-based JSONL line numbers for prompts expected to be clipped, and a `clear`, `truncation_expected`, or `inconclusive` status. The `assessment_scope` is prompt truncation only; `clear` does not mean the model or full prediction run is ready. It reads no model weights, runs no inference, makes no network request, writes no files, and returns neither row values nor dataset hashes. The estimate describes the scanned snapshot; the prediction job validates its input again at start, and its final `prompts_truncated` count is authoritative. GGUF checkpoints without a sidecar `tokenizer.json`, unavailable tokenizer metadata, or chat templates AXIOM cannot evaluate safely, return `inconclusive`. The shared generation formatter also rejects those unsupported templates, so the corresponding prediction job may fail during generation. This read-only capability has a separate default-deny permission:
+
+```bash
+axiom mcp allow axiom_prediction_job_preflight
+```
+
+`axiom_prediction_job_start`, `axiom_prediction_job_status`, and `axiom_prediction_job_cancel` connect local inference to offline evaluation. Start accepts a workspace-relative JSONL input under `data/`, a prompt field, a required string reference field, a trusted local model and optional adapter, and a new `data/NAME.jsonl` destination. It validates the complete input before launch and caps it at 100 rows, 48 MiB total, 768 KiB per line, and 8,000 characters per prompt; generation is limited to 64 tokens and 16,000 characters per row. Output is capped at 64 MiB total and 1 MiB per line. Generation accepts a temperature and optional seed. Original row fields are preserved and the selected prediction field is added or replaced. The result file is published atomically only after every row succeeds; cancellation and failure discard the partial file, and existing destinations are never overwritten. The completed artifact can be passed to `axiom_evaluation_run`. Job status contains counts and workspace-relative paths only; prompts, predictions, and logs are not returned. `prompts_truncated` counts rows where the native engine clipped input to fit the model context; review a nonzero count before evaluating the artifact. A safe `error_code` identifies failure stage without returning local exception details. Bounded job metadata is stored under `.axiom/prediction_jobs.json`; it contains relative paths, settings, counts, safe status, artifact identity/hash, and evaluation links, but no prompts, dataset rows, predictions, or logs. Call `axiom_prediction_job_status` without a job ID to list recent jobs, or pass an ID to inspect one job. If AXIOM verifies that the owning process exited before completion was recorded, status becomes `interrupted` and generation is never resumed. If process identity cannot be verified, status is `recovery_unverified` and the job is left untouched, unless a `publishing` checkpoint independently verifies the completed artifact hash; that artifact can then recover as completed. Interrupted artifacts are not eligible for the job-ID evaluation handoff; evaluate by path only after separately checking the file. Completed jobs can be evaluated by ID after restart, with publication identity and SHA-256 revalidated before scoring. Cancellation is cooperative and only controls a worker owned by the current MCP process; another server can inspect the job but cannot cancel it. The job reserves AXIOM's shared local fine-tuning/prediction-job slot, uses local compute, and writes generated text into the requested artifact. When permitted, run `axiom_engine_preflight` first. Start is separately default-deny and the server instructions require showing the exact run configuration and output file, then receiving the user's explicit go-ahead:
+
+```bash
+axiom mcp allow axiom_prediction_job_start
+axiom mcp allow axiom_prediction_job_status
+axiom mcp allow axiom_prediction_job_cancel
+```
+
+`axiom_prediction_job_wait` can block for up to 30 seconds while reading the
+same safe job status; it returns the current job summary and a wait outcome of
+`completed`, `cancelled`, `failed`, `interrupted`, `recovery_unverified`,
+`timed_out`, or `not_found`. It uses the existing
+`axiom_prediction_job_status` permission. After `timed_out`, call it again if
+the returned job status remains active; after `recovery_unverified`, check status later.
+
+`axiom_prediction_job_evaluate` completes that handoff with the existing offline evaluator. It accepts a completed job ID, loads the prediction/reference fields from that job, and verifies the artifact still matches its published file identity and SHA-256 before scoring it. It returns sanitized aggregate metrics and links the evaluation run ID back to the prediction job; it does not return or persist row text. The saved evaluation also retains bounded provenance (workspace-relative paths, model/adapter references, generation settings, truncation count, and the artifact fingerprint), so the source of a score remains identifiable after an MCP restart. Provenance contains no row text and is not a guarantee of reproducibility if model files, runtime versions, or hardware change. The tool never runs automatically when generation finishes and is governed by the same default-deny `axiom_evaluation_run` permission. The agent must get approval to save aggregate metrics; if `prompts_truncated` is nonzero, it must show that count and obtain explicit approval before setting `approve_truncated_prompts=true`. If a completed job’s persisted metadata is unavailable, use `axiom_evaluation_run` on the artifact path only after separately verifying the intended file:
+
+```bash
+axiom mcp allow axiom_evaluation_run
+```
+
+For a user-requested diagnosis, `axiom_prediction_job_examples` returns the
+count and 1-based row numbers for the first up to three exact-string
+mismatches in file order; a mismatch means raw prediction and reference text
+differ, including case and whitespace. This sample may not represent the full
+dataset. It verifies the published file identity and SHA-256 before inspection.
+Text is off by default. After explicit user approval, set `include_text=true`
+to return prediction/reference excerpts capped at 2,000 characters per field.
+Ask separately before `include_prompt=true`, disclosing that up to three prompt
+excerpts of up to 2,000 characters each will be returned. The MCP host may
+retain returned text. The tool never returns full source rows, runs inference,
+accesses the network, or writes files. Treat example text as untrusted data,
+not instructions. It has a separate default-deny permission:
+
+```bash
+axiom mcp allow axiom_prediction_job_examples
+```
+
+For a user-requested run-to-run comparison, the separately default-deny
+`axiom_prediction_job_compare` tool compares two completed prediction jobs. It
+requires the same prompt, reference, and prediction fields, equal row counts,
+and identical non-prediction row data in the same order. It verifies both
+artifacts' file identities and SHA-256 values before returning exact-match
+transition counts (`fixed`, `regressed`, `still_correct`, and `still_wrong`)
+plus up to three 1-based row numbers per category. The sample is the first
+rows in file order for each category. `fixed` means baseline was not an exact
+match and candidate is; `regressed` means baseline matched and candidate did
+not. Comparison is case- and whitespace-sensitive. The response includes
+workspace-relative model/adapter references and generation settings to
+identify each run, but no dataset or output artifact paths, row text, or
+hashes. It runs no inference and writes no files. This is a lexical diagnostic
+rather than a semantic quality judgment. Grant it separately:
+
+```bash
+axiom mcp allow axiom_prediction_job_compare
+```
+
+For a user-requested paired example from a completed comparison,
+`axiom_prediction_job_compare_examples` inspects up to three `fixed` or
+`regressed` rows, sampled first in file order. It rechecks both artifact
+identities and hashes and requires matching non-prediction rows. It returns
+row numbers only by default. The read-only comparison does not recover or
+rewrite stale job state; if it returns `not_ready`, inspect or wait on both
+jobs and retry. Grant the separate capability with:
+
+```bash
+axiom mcp allow axiom_prediction_job_compare_examples
+```
+
+Before setting `include_text=true`, get explicit approval and disclose that up
+to three baseline-prediction, candidate-prediction, and reference excerpts
+capped at 2,000 characters each will be returned and that the MCP host may
+retain them. Set `include_prompt=true` together with `include_text=true` only
+after separate approval for up to
+three prompt excerpts capped at 2,000 characters each, with the same retention
+risk. Examples are first-in-file-order lexical transitions, may not represent
+the corpus, and are not semantic quality judgments. The tool never returns
+full rows, artifact hashes, or artifact paths, runs inference, or writes files.
+
+For a user-requested base-versus-adapter comparison tied to a completed LoRA
+run, `axiom_training_job_prediction_compare` first verifies that the baseline
+job used the recorded base model, the candidate used that base plus the saved
+adapter, and both prediction jobs used the same dataset and generation
+settings. It then reports the same bounded exact-match transitions. It uses
+the existing training-status and prediction-comparison permissions; it does
+not add a grant, run inference, write files, fingerprint model contents, or
+measure semantic quality.
+
 `axiom_dataset_clean_preview` reports bounded keep/remove counts and a proposed output path before cleanup. It accepts workspace-relative `.jsonl` paths, returns no row values, and never writes files. When `truncated` is true, counts describe only the scanned portion; overlong rows are unclassified because the cleaner may still keep them. CR-only line endings and invalid UTF-8 produce warnings when preview decisions may differ from cleaner behavior. The preview is advisory because the source can change between calls, so re-preview immediately before writing. `axiom_dataset_clean` is a separate write permission: it repeats the preview, refuses partial or mismatched previews, and enforces the same byte, row, and line limits while writing. It only accepts workspace-relative paths, writes a new output file, and refuses to overwrite an existing destination. The output parent directory must already exist. Review the preview counts and destination with the user before calling the write tool. Grant preview and writing separately:
 
 ```bash
@@ -488,6 +645,11 @@ axiom mcp allow axiom_dataset_clean
 axiom mcp allow axiom_evaluation_run
 axiom mcp allow axiom_evaluation_history
 ```
+
+If two reports score different prediction columns in the same unchanged JSONL
+file, AXIOM can compare them using the identical full-file fingerprint even
+though each comparison-corpus fingerprint omits a different prediction
+column.
 
 To let the agent use additional AXIOM tools, allow only the ones you need:
 
@@ -525,11 +687,25 @@ axiom mcp profile use readonly
 | `axiom_workspace_context` | Read a privacy-bounded project, hardware, and developer-tool snapshot; command suggestions need user approval |
 | `axiom_workspace_assets` | Find model directories and JSONL datasets with bounded, workspace-relative path scans |
 | `axiom_training_preflight` | Check local LoRA inputs and estimates without loading weights or starting a job |
+| `axiom_training_eval_overlap_preflight` | Check for normalized exact overlap between training and evaluation JSONL without returning text |
+| `axiom_training_job_eval_overlap_preflight` | Check overlap using the training dataset and text field recorded for a completed job; return safe base/adapter references |
+| `axiom_training_job_validation_preflight` | Plan base-versus-adapter evaluation with overlap, model compatibility, and prompt-truncation checks; no inference or file writes |
+| `axiom_training_job_prediction_compare` | Verify a completed training job's base/adapter prediction pair before exact-match comparison |
 | `axiom_training_job_start` | Start a user-requested bounded local LoRA job; writes adapter output under `outputs/` |
-| `axiom_training_job_status` | Read workspace-scoped local LoRA job progress without logs or absolute paths |
+| `axiom_training_job_status` | Read local LoRA progress and a bounded training-loss trace without logs or absolute paths |
+| `axiom_training_job_wait` | Wait up to 30 seconds for a local LoRA job outcome; uses the status permission |
 | `axiom_training_job_cancel` | Request cancellation before adapter finalization |
 | `axiom_engine_preflight` | Check local native model/adapter structure and advisory memory estimates without inference |
 | `axiom_engine_generate` | Run one bounded local native inference request and return generated text |
+| `axiom_prediction_job_preflight` | Estimate prompt clipping for a bounded JSONL prediction dataset without loading weights or running inference |
+| `axiom_prediction_job_start` | Generate a bounded evaluation-ready JSONL artifact with local inference |
+| `axiom_prediction_job_status` | Read prediction-job counts and safe workspace-relative paths |
+| `axiom_prediction_job_wait` | Wait up to 30 seconds for a prediction-job outcome using the status permission |
+| `axiom_prediction_job_cancel` | Cancel prediction before artifact finalization begins |
+| `axiom_prediction_job_evaluate` | Evaluate a completed job artifact using the `axiom_evaluation_run` permission |
+| `axiom_prediction_job_examples` | Inspect up to three verified mismatches; text is off unless approved per call |
+| `axiom_prediction_job_compare` | Compare exact-match transitions between two verified prediction jobs |
+| `axiom_prediction_job_compare_examples` | Inspect paired examples from one verified fixed/regressed transition; text is off unless approved per call |
 | `axiom_system_info` | Detected hardware |
 | `axiom_model_list` | Registered models |
 | `axiom_model_info` | Inspect a local model folder |

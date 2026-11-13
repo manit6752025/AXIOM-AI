@@ -21,11 +21,14 @@ TOOL_DESCRIPTIONS = {
     "axiom_training_preflight": (
         "Check local LoRA inputs and estimates without loading weights or starting a job."
     ),
+    "axiom_training_eval_overlap_preflight": (
+        "Read bounded local training and evaluation JSONL to detect case- and whitespace-normalized exact overlap; returns counts and row numbers without text or hashes."
+    ),
     "axiom_training_job_start": (
         "Start a local LoRA training job from workspace assets; consumes compute and writes an adapter under outputs/."
     ),
     "axiom_training_job_status": (
-        "Read local LoRA job progress and safe workspace-relative summaries."
+        "Read local LoRA job progress, wait up to 30 seconds for an outcome, and inspect safe summaries with up to 64 evenly spaced training-loss samples."
     ),
     "axiom_training_job_cancel": (
         "Request cooperative cancellation before adapter finalization for a local LoRA job."
@@ -36,6 +39,27 @@ TOOL_DESCRIPTIONS = {
     "axiom_engine_generate": (
         "Run one user-requested bounded prompt through AXIOM's native local engine; returns generated text and uses local compute synchronously."
     ),
+    "axiom_prediction_job_start": (
+        "Run a user-requested bounded local prediction job over a JSONL dataset and write source rows plus generated predictions to a new artifact under data/."
+    ),
+    "axiom_prediction_job_preflight": (
+        "Predict bounded local JSONL prompt truncation with tokenizer-only checks; no model weights are loaded and no row values are returned."
+    ),
+    "axiom_prediction_job_status": (
+        "List, inspect, or wait up to 30 seconds for persisted local prediction jobs; returns safe counts and paths without prompts, predictions, or logs."
+    ),
+    "axiom_prediction_job_cancel": (
+        "Request cooperative cancellation of a local prediction job before artifact finalization begins."
+    ),
+    "axiom_prediction_job_examples": (
+        "Inspect the first up to three identity- and hash-verified raw exact mismatches; text is off by default and bounded excerpts require explicit per-call opt-in."
+    ),
+    "axiom_prediction_job_compare": (
+        "Compare two completed prediction jobs on hash-verified artifacts; returns transition counts, bounded row-number samples, and workspace-relative model settings without dataset or output paths."
+    ),
+    "axiom_prediction_job_compare_examples": (
+        "Inspect up to three hash-verified paired examples from one prediction-job transition; text is off by default and prompt excerpts require separate per-call opt-in."
+    ),
     "axiom_model_list": "List locally registered models.",
     "axiom_model_info": "Inspect a local model path.",
     "axiom_dataset_inspect": (
@@ -44,8 +68,8 @@ TOOL_DESCRIPTIONS = {
     ),
     "axiom_dataset_clean_preview": "Preview bounded dataset cleaning counts without writing files.",
     "axiom_dataset_clean": "Write a new cleaned dataset copy inside the workspace.",
-    "axiom_evaluation_run": "Score local precomputed outputs and persist aggregate metrics only.",
-    "axiom_evaluation_history": "Read saved aggregate evaluation metrics without dataset values.",
+    "axiom_evaluation_run": "Score local precomputed outputs, including completed prediction-job artifacts, and persist aggregate metrics plus bounded run provenance without row values.",
+    "axiom_evaluation_history": "Read saved aggregate evaluation metrics and bounded run provenance without dataset values or local fingerprints.",
     "axiom_system_info": "Read local hardware information.",
     "axiom_training_plan": "Create a hardware-aware training estimate.",
     "axiom_supercompress_status": "Read optional SuperCompress configuration status.",

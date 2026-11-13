@@ -811,6 +811,29 @@ export type WorkspaceEvaluationRun = {
   name: string;
   created_at: string;
   model_label: string | null;
+  provenance?: {
+    schema_version: 1;
+    kind: "axiom_prediction_job";
+    prediction_job_id: string;
+    dataset_path: string;
+    output_path: string;
+    model_path: string;
+    adapter_path: string | null;
+    prompt_field: string;
+    prediction_field: string;
+    reference_field: string;
+    generation: {
+      max_new_tokens: number;
+      temperature: number;
+      seed: number | null;
+      device_preference: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu";
+      precision_preference: "auto" | "fp32" | "fp16" | "bf16";
+    };
+    rows_completed: number;
+    prompts_truncated: number;
+    artifact_sha256: string;
+    reproducibility_note: string;
+  };
   baseline: boolean;
   status: "complete" | "partial";
   execution_status: "precomputed_outputs_only";

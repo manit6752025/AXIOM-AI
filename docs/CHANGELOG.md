@@ -31,6 +31,23 @@
 ## Unreleased — latest/development
 
 ### Added
+- Persisted a training dataset fingerprint in local job state, hardened POSIX job-storage permissions, and made job-linked overlap checks inconclusive when the current file differs, a stable scan is unavailable, or a legacy job has no fingerprint; status responses omit the digest.
+- Added a read-only training-job validation plan that composes overlap, base/adapter compatibility, and prompt-truncation checks and returns two proposed prediction runs without starting inference.
+- Added a training-job-linked prediction comparison that verifies the saved base/adapter pairing and shared run settings before reporting bounded exact-match transitions.
+- Added hash-verified paired examples for selected prediction-job transitions; row numbers are the default and text requires a separately granted capability plus per-call approval.
+- Added a job-linked training/evaluation overlap preflight that derives the training dataset and text field from a completed job and returns saved base/adapter paths; it reports the current-file snapshot and unverified artifact limitations.
+- Added `axiom_training_job_wait`, a bounded wait for local LoRA job outcomes that reuses the status permission; stale recovery verifies process identity and preserves newer job state.
+- Added a separately default-deny training/evaluation overlap preflight using the trainer's bounded text parser; it returns normalized exact-match counts and row numbers without text and never claims that no match proves held-out data.
+- Added a persisted, bounded training-loss trace to local LoRA job status for post-run agent diagnosis; the response labels it as training-only, not validation or quality evidence.
+- Added a separately default-deny prediction-job comparison that verifies two completed artifacts and reports bounded exact-match transition counts and row-number samples without returning row text.
+- Added a bounded MCP wait operation for asynchronous prediction jobs using the existing status permission, avoiding rapid status polling.
+- Ensure an unexpectedly exited prediction worker thread cannot leave persisted job state active; recover a publishing artifact only after identity and hash verification.
+- Added a separately default-deny prediction-job mismatch inspector that verifies the completed artifact hash and returns up to three bounded text excerpts only after explicit per-call approval.
+- Persisted bounded prediction-job state and completed artifact identity per workspace so agents can recover status and the evaluation handoff after MCP restarts; interrupted jobs are never resumed.
+- Added a job-ID MCP handoff to evaluate completed prediction artifacts against their published file identity and SHA-256 using the existing evaluation permission.
+- Persisted bounded prediction-job provenance in saved evaluation reports so job settings remain attributable after an MCP restart; MCP history returns an allowlisted view and omits the artifact fingerprint.
+- Added a separately default-deny MCP dataset preflight that estimates native prompt clipping before a prediction job without loading weights, returning row values, or writing files; unsupported tokenizer paths report inconclusive.
+- Added separately default-deny MCP start/status/cancel tools for cancellable local JSONL prediction jobs that publish evaluation-ready artifacts only after complete success.
 - Add a separately default-deny MCP generation tool for one bounded AXIOM-native local prompt, with workspace-trusted model/adapter paths and no prompt/response persistence.
 - Add separate default-deny MCP start/status/cancel tools for local LoRA jobs, workspace-scoped redacted job summaries, cooperative cancellation through training boundaries, and a finalization state shared by the API and Control Center.
 - Add native LoRA adapter compatibility preflight to the Runtime GUI and API: inspect target modules and tensor shapes without loading full base weights, and report CPU/CUDA/ROCm/MPS availability separately.
@@ -54,6 +71,10 @@
 
 ### Fixed
 
+- Keep evaluation baseline comparisons available when both reports
+  fingerprint the same complete source file, even when they score different
+  prediction fields. Update the existing MCP tool inventory contract to cover
+  the current tool surface.
 - Aligned LoRA optional dependency minimums with Transformers 5 and blocked training when installed dependency versions are too old.
 - Improved local model/adapter loading errors without enabling remote model code or model downloads.
 
