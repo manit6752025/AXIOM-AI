@@ -293,6 +293,25 @@ snapshot, so the job validates its input again at start and its final
 axiom mcp allow axiom_prediction_job_preflight
 ```
 
+`axiom_prediction_job_validation_preflight` composes that prompt check with
+base and optional adapter engine preflights for the intended run. It requires
+the existing `axiom_prediction_job_preflight` and `axiom_engine_preflight`
+permissions, but not prediction-start permission. It returns a `plan_only`
+result and `actionability.status`; a clear result still requires showing the
+configuration and getting explicit user approval. Prompt results apply only
+to the scanned snapshot; rerun immediately before start if model, adapter, or
+dataset files change. Start validates current inputs independently and does
+not prove they match that snapshot. The plan checks whether the output name is
+unoccupied in its workspace parent and reports `unoccupied`, `occupied`,
+`uninspectable`, or `not_checked` in `checks.output_destination.status`;
+`not_checked` means an earlier input check blocked before destination
+inspection. Occupied or uninspectable destinations block the plan. It does not
+verify write permission or reserve the path. Start rechecks the destination
+and active compute slot.
+If start rejects a destination that changed, choose a new path, rerun preflight,
+show the revised configuration, and obtain approval again. The plan does not
+load weights, run inference, or write files.
+
 `axiom_prediction_job_evaluate` accepts a completed job ID, reads the saved
 prediction/reference fields from that job, and verifies the artifact's
 published file identity and SHA-256 before scoring it. It returns sanitized
@@ -392,6 +411,22 @@ parent directory can race the path checks; the fallback is scoped against
 static traversal and refuses existing outputs, but does not pin directory
 handles against another process changing the workspace at the same time.
 
+The separately permissioned `axiom_evaluation_preflight` tool previews bounded
+offline metrics and data-quality counts for precomputed prediction JSONL under
+`data/`. Use the same fields, split, and limits planned for the later run. It
+returns no row values, paths, or hashes and saves no report. Partial scans and
+quality-skipped rows require review; rows filtered by the requested split do
+not. Metrics use `valid_samples`. The scan checks file identity metadata before
+and after reading but does not bind a later run to that content; the run
+rescans the current path. Rerun preflight immediately before seeking approval
+if the file may have changed. Show changed results and obtain approval again.
+Grant it separately with
+`axiom mcp allow axiom_evaluation_preflight`. Show the result and obtain
+explicit approval before persisting metrics. `clear_for_user_approval` means no
+known scan or data-quality blockers, not a model-quality judgment or approval.
+`baseline_eligible` reflects complete-scan fingerprint criteria only; review
+findings still apply.
+
 The separately permissioned `axiom_evaluation_run` tool scores precomputed
 prediction JSONL under the workspace's `data/` directory and saves a local
 aggregate report. It does not load a model, run inference, or access the
@@ -408,8 +443,13 @@ hashes are persisted locally but omitted from MCP responses. These lexical
 metrics do not establish semantic quality, and a `model_label` is user-supplied
 metadata. Grant `axiom_evaluation_run` to create runs and
 `axiom_evaluation_history` separately to read stored aggregates. History pages
-continue with `after_run_id` from the previous page's `next_cursor`; start a
-fresh listing to include newer runs saved during pagination.
+continue with `after_run_id` from the previous page's `next_cursor`; set
+`baselines_only=true` to list only marked baselines, in which case counts and
+cursors refer to that filtered list. Keep the same filter for each page, and
+start a fresh listing to include newer runs saved during pagination. To compare
+two saved complete reports after the fact, use `axiom_evaluation_compare` with a
+marked baseline and the `axiom_evaluation_history` permission; it returns
+aggregate lexical scores without reopening the source files.
 When a selected baseline has different examples or evaluation fields, the new
 run is still saved and its comparison is reported as unavailable.
 
