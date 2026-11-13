@@ -17,8 +17,7 @@ from axiom.core.workflows import (
     WorkflowStoreFullError,
     validate_workflow_graph,
 )
-from axiom.core.hardware import detect_hardware
-from axiom.training.planner import create_training_plan
+from axiom.core.workflow_planning import build_workflow_planning_preview
 from axiom.version import __version__
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
@@ -227,18 +226,18 @@ def dry_run_workflow(workflow_id: str, request: WorkflowDryRunInput) -> dict[str
         raise HTTPException(status_code=404, detail="Workflow not found.")
 
     try:
-        validate_workflow_graph(workflow["name"], workflow["nodes"], workflow["edges"])
-        hardware = detect_hardware()
-        has_training_plan = any(node["type"] == "training.plan" for node in workflow["nodes"])
-        plan = create_training_plan(request.parameter_billions, hardware, request.method) if has_training_plan else None
+        preview = build_workflow_planning_preview(
+            workflow_id,
+            workflow,
+            parameter_billions=request.parameter_billions,
+            method=request.method,
+        )
+        hardware = preview.hardware
+        plan = preview.training_plan
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail="Workflow cannot be dry-run until graph validation passes.") from exc
 
-    unresolved_inputs = [
-        {"node_id": node["id"], "type": node["type"], "reason": "No dataset/model/evaluation path or configuration is saved on this design node."}
-        for node in workflow["nodes"]
-        if node["type"] in {"dataset.profile", "model.inspect", "evaluation.run", "report.export"}
-    ]
+    unresolved_inputs = preview.unresolved_inputs
     summary = {
         "available_hardware": hardware.__dict__,
         "estimated_training_plan": plan.__dict__ if plan is not None else None,
@@ -250,9 +249,9 @@ def dry_run_workflow(workflow_id: str, request: WorkflowDryRunInput) -> dict[str
     graph_digest = hashlib.sha256(json.dumps(
         {
             "id": workflow_id,
-            "revision": workflow["revision"],
-            "nodes": workflow["nodes"],
-            "edges": workflow["edges"],
+            "revision": preview.workflow_revision,
+            "nodes": preview.nodes,
+            "edges": preview.edges,
         },
         sort_keys=True,
         ensure_ascii=True,
@@ -289,16 +288,16 @@ def dry_run_workflow(workflow_id: str, request: WorkflowDryRunInput) -> dict[str
     }
     result = {
         "workflow_id": workflow_id,
-        "workflow_revision": workflow["revision"],
-        "schema_version": workflow["schema_version"],
+        "workflow_revision": preview.workflow_revision,
+        "schema_version": preview.schema_version,
         "status": "planning_only",
         "execution_status": "not_executable",
         "executed": False,
         "job_created": False,
-        "node_count": len(workflow["nodes"]),
+        "node_count": len(preview.nodes),
         "steps": [
             {"node_id": node["id"], "type": node["type"], "state": "not_run"}
-            for node in workflow["nodes"]
+            for node in preview.nodes
         ],
         "unresolved_inputs": unresolved_inputs,
         "resource_summary": summary,

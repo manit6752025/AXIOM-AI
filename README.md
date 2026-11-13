@@ -381,6 +381,19 @@ Read access does not grant write access, and every response marks the design
 axiom mcp allow axiom_workflow_read
 ```
 
+To preview a saved design's planning estimate, use the default-deny
+`axiom_workflow_dry_run` tool. It requires both `axiom_workflow_read` and
+`axiom_training_plan` permissions. It estimates only `training.plan` nodes
+using currently detected hardware; nodes without saved paths or configuration
+are returned as unresolved. The estimate is advisory, does not reserve
+capacity, and is not approval to train. The tool writes no files or workspace
+events and executes no nodes:
+
+```bash
+axiom mcp allow axiom_workflow_read
+axiom mcp allow axiom_training_plan
+```
+
 Agent task profiles describe what a task is allowed to be about. They do not grant tool permissions.
 
 ```bash
@@ -840,6 +853,7 @@ axiom mcp profile use readonly
 | `axiom_workspace_context` | Read a privacy-bounded project, hardware, and developer-tool snapshot; command suggestions need user approval |
 | `axiom_workspace_assets` | Find model directories and JSONL datasets with bounded, workspace-relative path scans |
 | `axiom_workflow_read` | List saved workflow summaries or retrieve a validated non-executable design |
+| `axiom_workflow_dry_run` | Estimate a saved design's training plan without running nodes or creating jobs |
 | `axiom_workflow_save` | Save a user-approved, validated workflow graph as a non-executable design |
 | `axiom_training_preflight` | Check local LoRA inputs and estimates without loading weights or starting a job |
 | `axiom_training_eval_overlap_preflight` | Check for normalized exact overlap between training and evaluation JSONL without returning text |
