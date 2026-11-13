@@ -72,6 +72,9 @@ TOOL_DESCRIPTIONS = {
     "axiom_evaluation_preflight": (
         "Preview bounded aggregate metrics and data-quality counts for precomputed JSONL without saving a report or returning row values."
     ),
+    "axiom_evaluation_examples": (
+        "Inspect raw exact mismatches from one intact saved offline evaluation; row numbers are default and bounded text requires explicit per-call opt-in."
+    ),
     "axiom_evaluation_history": "Read saved aggregate evaluation metrics, compare complete reports, and inspect bounded run provenance without dataset values or local fingerprints.",
     "axiom_evaluation_compare_examples": (
         "Inspect up to three verified exact-match or per-row token-F1 examples between saved complete evaluations; row numbers and first-in-file-order exact-match examples are default, with optional deterministic hash-priority sampling and explicit per-call text opt-in."

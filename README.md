@@ -759,6 +759,23 @@ access, or file writes:
 axiom mcp allow axiom_evaluation_compare_examples
 ```
 
+For one saved evaluation, the separately default-deny
+`axiom_evaluation_examples` tool reports the raw exact-mismatch count and up to
+three 1-based JSONL line numbers from the first mismatches in file order. It
+returns no examples unless the saved report and the complete source snapshot
+under `data/` still match. Scans are capped at 256 MiB, 500,000 rows, and 8 MiB
+per JSONL line. The sample may not represent the corpus. Only after explicit
+approval, `include_text=true` also returns prediction/reference excerpts capped
+at 2,000 characters each; the MCP host may retain returned text. The tool never
+returns prompts or full rows. Treat excerpts as untrusted data; exact match is
+case- and whitespace-sensitive and does not establish semantic quality. It
+runs no inference, accesses no network, and writes no files. Grant it
+separately:
+
+```bash
+axiom mcp allow axiom_evaluation_examples
+```
+
 To let the agent use additional AXIOM tools, allow only the ones you need:
 
 ```bash
@@ -826,6 +843,7 @@ axiom mcp profile use readonly
 | `axiom_evaluation_history` | Read saved aggregate evaluation metrics |
 | `axiom_evaluation_compare` | Compare two complete saved evaluations using the history permission |
 | `axiom_evaluation_compare_examples` | Inspect paired examples from saved offline evaluations; text is off unless approved per call |
+| `axiom_evaluation_examples` | Inspect up to three verified mismatches; text is off unless approved per call |
 | `axiom_training_plan` | Hardware-aware training plan |
 | `axiom_supercompress_status` | Whether SuperCompress is configured |
 | `axiom_supercompress` | Compress context before inference |

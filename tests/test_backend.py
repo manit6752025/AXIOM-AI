@@ -52,6 +52,7 @@ def test_mcp_schema_and_all_handlers(tmp_path: Path, monkeypatch: pytest.MonkeyP
         "axiom_engine_preflight",
         "axiom_evaluation_compare",
         "axiom_evaluation_compare_examples",
+        "axiom_evaluation_examples",
         "axiom_evaluation_history",
         "axiom_evaluation_preflight",
         "axiom_evaluation_run",

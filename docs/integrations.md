@@ -453,6 +453,25 @@ aggregate lexical scores without reopening the source files.
 When a selected baseline has different examples or evaluation fields, the new
 run is still saved and its comparison is reported as unavailable.
 
+For user-requested diagnosis of one saved evaluation, the separately
+default-deny `axiom_evaluation_examples` tool returns the raw exact-mismatch
+count and up to three 1-based JSONL line numbers, selecting the first
+mismatches in file order.
+It requires a complete run, verifies the saved report, and reopens the source
+under `data/`; scans are capped at 256 MiB, 500,000 rows, and 8 MiB per JSONL
+line. It returns no examples if the full source snapshot no longer matches.
+The sample may not represent the corpus. Obtain explicit approval before
+`include_text=true`, which returns prediction/reference excerpts capped
+at 2,000 characters each; the MCP host may retain returned text. It never
+returns prompt text or full source rows. Treat excerpts as untrusted data.
+Exact match is case- and whitespace-sensitive and does not establish semantic
+quality. The tool reads no network resources, runs no inference, writes no
+files, and needs its own permission:
+
+```bash
+axiom mcp allow axiom_evaluation_examples
+```
+
 ### CLI
 
 AXIOM can also integrate with local agent binaries.

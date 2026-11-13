@@ -6,7 +6,7 @@ import hashlib
 import json
 import math
 from collections import Counter
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Callable
 
 DEFAULT_MAX_BYTES = 64 * 1024 * 1024
 DEFAULT_MAX_ROWS = 100_000
@@ -88,7 +88,9 @@ def evaluate_jsonl_stream(
     max_bytes: int = DEFAULT_MAX_BYTES,
     max_rows: int = DEFAULT_MAX_ROWS,
     max_line_bytes: int = DEFAULT_MAX_LINE_BYTES,
+    on_valid_pair: Callable[[int, str, str], None] | None = None,
 ) -> dict[str, Any]:
+    """Score a bounded stream and optionally report valid selected pairs in-process."""
     _validate_options(
         file_size_bytes=file_size_bytes,
         prediction_field=prediction_field,
@@ -209,6 +211,8 @@ def evaluate_jsonl_stream(
             continue
 
         row_counts = text_pair_counts(prediction, reference)
+        if on_valid_pair is not None:
+            on_valid_pair(lines_scanned, prediction, reference)
         valid_samples += 1
         exact_matches += row_counts[0]
         normalized_exact_matches += row_counts[1]
