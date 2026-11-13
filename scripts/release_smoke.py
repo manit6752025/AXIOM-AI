@@ -379,7 +379,7 @@ def resource_monitoring_issues(cli_source: str, panel_source: str, app_source: s
             "<EngineTelemetryMonitor />",
         )),
         ("Browser acceptance", e2e_source, (
-            "expect(telemetryCalls).toBe(0)",
+            "const baselineTelemetryCalls = telemetryCalls", "expect(telemetryCalls).toBe(baselineTelemetryCalls)",
             'name: "Start monitoring"',
             'name: "Stop monitoring"',
             "axiom-resource-telemetry.json",
