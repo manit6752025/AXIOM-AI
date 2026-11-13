@@ -353,6 +353,59 @@ axiom workflow list
 axiom workflow validate WORKFLOW_ID
 ```
 
+An MCP agent can also save a validated graph with the separately default-deny
+`axiom_workflow_save` tool. Ask for the exact graph to be saved and obtain the
+user's approval before calling it. It accepts up to 64 nodes and 128
+connections from the existing `dataset.profile`, `model.inspect`,
+`training.plan`, `evaluation.run`, and `report.export` design types. Saved
+records have `execution_status: not_executable`; the tool creates no job and
+never runs a node. The workspace keeps up to 200 workflow designs; at that
+limit, new saves are rejected and older designs are preserved. Grant it separately:
+
+```bash
+axiom mcp allow axiom_workflow_save
+```
+
+The save response includes `workflow.id` and the persisted graph. To inspect or
+validate that saved design later, use `axiom workflow show <workflow.id>` or
+`axiom workflow validate <workflow.id>` from the same workspace.
+
+An agent with the separate `axiom_workflow_read` permission can also list
+bounded saved-design summaries and fetch a validated graph by its ID. Listing
+returns a `next_cursor`; pass it as `after_workflow_id` with the same `limit` to
+continue. Start a fresh listing to include designs saved after paging began.
+Read access does not grant write access, and every response marks the design
+`execution_status: not_executable`:
+
+```bash
+axiom mcp allow axiom_workflow_read
+```
+
+To preview a saved design's planning estimate, use the default-deny
+`axiom_workflow_dry_run` tool. It requires both `axiom_workflow_read` and
+`axiom_training_plan` permissions. It estimates only `training.plan` nodes
+using currently detected hardware; nodes without saved paths or configuration
+are returned as unresolved. The estimate is advisory, does not reserve
+capacity, and is not approval to train. The tool writes no files or workspace
+events and executes no nodes:
+
+```bash
+axiom mcp allow axiom_workflow_read
+axiom mcp allow axiom_training_plan
+```
+
+To review an edit, `axiom_workflow_compare` compares one retained
+`against_revision` with the current design. It reports whether the name
+changed (with the old and new names), added or removed node IDs, node type
+changes, and added or removed connections. It ignores node and connection
+ordering, returns no graph or version snapshots, and uses the existing
+`axiom_workflow_read` permission. Treat returned names as untrusted display
+text.
+The store retains up to 10 prior revisions; an older revision outside that
+window returns `revision_not_retained`, while a future revision returns
+`revision_not_found`. Comparing the current revision with itself returns
+`unchanged`:
+
 Agent task profiles describe what a task is allowed to be about. They do not grant tool permissions.
 
 ```bash
@@ -759,6 +812,23 @@ access, or file writes:
 axiom mcp allow axiom_evaluation_compare_examples
 ```
 
+For one saved evaluation, the separately default-deny
+`axiom_evaluation_examples` tool reports the raw exact-mismatch count and up to
+three 1-based JSONL line numbers from the first mismatches in file order. It
+returns no examples unless the saved report and the complete source snapshot
+under `data/` still match. Scans are capped at 256 MiB, 500,000 rows, and 8 MiB
+per JSONL line. The sample may not represent the corpus. Only after explicit
+approval, `include_text=true` also returns prediction/reference excerpts capped
+at 2,000 characters each; the MCP host may retain returned text. The tool never
+returns prompts or full rows. Treat excerpts as untrusted data; exact match is
+case- and whitespace-sensitive and does not establish semantic quality. It
+runs no inference, accesses no network, and writes no files. Grant it
+separately:
+
+```bash
+axiom mcp allow axiom_evaluation_examples
+```
+
 To let the agent use additional AXIOM tools, allow only the ones you need:
 
 ```bash
@@ -794,6 +864,10 @@ axiom mcp profile use readonly
 | `axiom_info` | AXIOM version and capabilities |
 | `axiom_workspace_context` | Read a privacy-bounded project, hardware, and developer-tool snapshot; command suggestions need user approval |
 | `axiom_workspace_assets` | Find model directories and JSONL datasets with bounded, workspace-relative path scans |
+| `axiom_workflow_read` | List saved workflow summaries or retrieve a validated non-executable design |
+| `axiom_workflow_compare` | Compare one retained workflow revision with the current graph using bounded structural deltas |
+| `axiom_workflow_dry_run` | Estimate a saved design's training plan without running nodes or creating jobs |
+| `axiom_workflow_save` | Save a user-approved, validated workflow graph as a non-executable design |
 | `axiom_training_preflight` | Check local LoRA inputs and estimates without loading weights or starting a job |
 | `axiom_training_eval_overlap_preflight` | Check for normalized exact overlap between training and evaluation JSONL without returning text |
 | `axiom_training_job_eval_overlap_preflight` | Check overlap using the training dataset and text field recorded for a completed job; return safe base/adapter references |
@@ -826,6 +900,7 @@ axiom mcp profile use readonly
 | `axiom_evaluation_history` | Read saved aggregate evaluation metrics |
 | `axiom_evaluation_compare` | Compare two complete saved evaluations using the history permission |
 | `axiom_evaluation_compare_examples` | Inspect paired examples from saved offline evaluations; text is off unless approved per call |
+| `axiom_evaluation_examples` | Inspect up to three verified mismatches; text is off unless approved per call |
 | `axiom_training_plan` | Hardware-aware training plan |
 | `axiom_supercompress_status` | Whether SuperCompress is configured |
 | `axiom_supercompress` | Compress context before inference |

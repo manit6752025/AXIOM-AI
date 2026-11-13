@@ -18,6 +18,12 @@ TOOL_DESCRIPTIONS = {
     "axiom_workspace_assets": (
         "List workspace-relative model and JSONL paths without reading contents."
     ),
+    "axiom_workflow_save": (
+        "Validate and save a non-executable workflow design of up to 64 nodes and 128 connections after explicit user approval; writes to the workspace workflow store."
+    ),
+    "axiom_workflow_read": (
+        "Read bounded summaries or a validated non-executable workflow design from the workspace store without changing files; separate permission from workflow saving."
+    ),
     "axiom_training_preflight": (
         "Check local LoRA inputs and estimates without loading weights or starting a job."
     ),
@@ -71,6 +77,9 @@ TOOL_DESCRIPTIONS = {
     "axiom_evaluation_run": "Score local precomputed outputs, including completed prediction-job artifacts, and persist aggregate metrics plus bounded run provenance without row values.",
     "axiom_evaluation_preflight": (
         "Preview bounded aggregate metrics and data-quality counts for precomputed JSONL without saving a report or returning row values."
+    ),
+    "axiom_evaluation_examples": (
+        "Inspect raw exact mismatches from one intact saved offline evaluation; row numbers are default and bounded text requires explicit per-call opt-in."
     ),
     "axiom_evaluation_history": "Read saved aggregate evaluation metrics, compare complete reports, and inspect bounded run provenance without dataset values or local fingerprints.",
     "axiom_evaluation_compare_examples": (

@@ -15,7 +15,12 @@ WORKFLOW_NODE_TYPES = frozenset(
 )
 WORKFLOW_SCHEMA_VERSION = 1
 WORKFLOW_VERSION_HISTORY_LIMIT = 10
+WORKFLOW_RECORD_LIMIT = 200
 _NODE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+class WorkflowStoreFullError(ValueError):
+    """Raised instead of silently discarding an older workflow design."""
 
 
 def validate_workflow_graph(
@@ -100,7 +105,12 @@ class WorkflowStore:
             raise ValueError(f"Invalid workflow store: {self.records_file}") from exc
         if not isinstance(records, list) or any(not isinstance(item, dict) for item in records):
             raise ValueError(f"Invalid workflow store: {self.records_file}")
+        seen_ids: set[str] = set()
         for record in records:
+            workflow_id = record.get("id")
+            if not isinstance(workflow_id, str) or not workflow_id or workflow_id in seen_ids:
+                raise ValueError(f"Invalid or duplicate workflow ID in {self.records_file}")
+            seen_ids.add(workflow_id)
             record.setdefault("schema_version", WORKFLOW_SCHEMA_VERSION)
             record.setdefault("revision", 1)
             record.setdefault("versions", [])
@@ -121,6 +131,38 @@ class WorkflowStore:
             raise ValueError("Workflow list limit must be between 1 and 1000.")
         return self._read()[:limit]
 
+    def list_page(
+        self,
+        *,
+        limit: int = 20,
+        after_workflow_id: str | None = None,
+    ) -> dict[str, Any]:
+        if type(limit) is not int or not 1 <= limit <= 50:
+            raise ValueError("Workflow page limit must be between 1 and 50.")
+        if after_workflow_id is not None and (
+            not isinstance(after_workflow_id, str) or not after_workflow_id
+        ):
+            raise ValueError("Workflow history cursor must be a non-empty workflow ID.")
+        records = self._read()
+        if len(records) > WORKFLOW_RECORD_LIMIT:
+            raise ValueError("Workflow history exceeds the supported record limit.")
+        offset = 0
+        if after_workflow_id is not None:
+            cursor_index = next(
+                (index for index, record in enumerate(records) if record.get("id") == after_workflow_id),
+                None,
+            )
+            if cursor_index is None:
+                raise KeyError("Workflow history cursor was not found.")
+            offset = cursor_index + 1
+        return {
+            "workflows": records[offset:offset + limit],
+            "total": len(records),
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + limit < len(records),
+        }
+
     def get(self, workflow_id: str) -> dict[str, Any] | None:
         return next((item for item in self._read() if item.get("id") == workflow_id), None)
 
@@ -134,6 +176,10 @@ class WorkflowStore:
             records = self._read()
             if any(existing.get("id") == record["id"] for existing in records):
                 raise ValueError(f"Workflow already exists: {record['id']}")
+            if len(records) >= WORKFLOW_RECORD_LIMIT:
+                raise WorkflowStoreFullError(
+                    f"Workflow history is full ({WORKFLOW_RECORD_LIMIT} designs); remove one before saving."
+                )
             stored = {
                 **record,
                 "schema_version": WORKFLOW_SCHEMA_VERSION,
@@ -192,6 +238,10 @@ class WorkflowStore:
             source = next((record for record in records if record.get("id") == workflow_id), None)
             if source is None:
                 return None
+            if len(records) >= WORKFLOW_RECORD_LIMIT:
+                raise WorkflowStoreFullError(
+                    f"Workflow history is full ({WORKFLOW_RECORD_LIMIT} designs); remove one before duplicating."
+                )
             timestamp = now or datetime.now(UTC).isoformat()
             duplicate = {
                 **source,
@@ -219,7 +269,7 @@ class WorkflowStore:
             raise ValueError(f"Invalid workflow store path: {self.records_file}")
 
     def _write_records(self, records: list[dict[str, Any]]) -> None:
-        serialized = json.dumps(records[:200], indent=2, ensure_ascii=False, allow_nan=False)
+        serialized = json.dumps(records, indent=2, ensure_ascii=False, allow_nan=False)
         if len(serialized.encode("utf-8")) > 4_000_000:
             raise ValueError("Workflow history exceeds the 4 MB workspace limit.")
         atomic_write_text(self.records_file, serialized + "\n")

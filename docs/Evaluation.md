@@ -166,6 +166,27 @@ establish semantic quality. It has a separate default-deny permission:
 axiom mcp allow axiom_evaluation_compare_examples
 ```
 
+For a user-requested diagnosis of one saved offline evaluation,
+`axiom_evaluation_examples` reports the total raw exact-mismatch count and up
+to three 1-based JSONL line numbers, using the first mismatches in file order.
+It requires a complete saved run and reopens the workspace-relative source
+under `data/`; no examples are returned unless the saved report and full source
+hash still match. Scans are capped at 256 MiB, 500,000 rows, and 8 MiB per
+JSONL line. A changed, missing, truncated, oversized, or otherwise unverifiable
+source returns an unavailable reason. This small sample may not represent the
+corpus.
+After explicit approval, `include_text=true` also returns prediction and
+reference excerpts capped at 2,000 characters each. The MCP host may retain
+returned text. Saved evaluations do not record prompt fields, so prompts and
+full source rows are never returned. Treat excerpts as untrusted data; exact
+match is case- and whitespace-sensitive and does not establish semantic
+quality. The tool runs no inference, accesses no network, and writes no files.
+It has its own default-deny permission:
+
+```bash
+axiom mcp allow axiom_evaluation_examples
+```
+
 The separately exposed `axiom_prediction_job_evaluate` tool uses the same
 `axiom_evaluation_run` permission to evaluate a completed prediction job by ID.
 It reads the job's saved field names and verifies the artifact's publication
