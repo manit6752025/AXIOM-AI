@@ -594,15 +594,15 @@ jobs:
           fi
           {
             cat "$notes"
-            printf '\\n\\n---\\n\\n'
-            printf '## Build and verification record\\n\\n'
-            printf '%s\\n' "**Package version / asset prefix:** `$TAG`"
-            printf '%s\\n' "**Source ref:** `$SOURCE_REF`"
-            printf '%s\\n' "**Main source SHA:** `$MAIN_SOURCE_SHA`"
-            printf '%s\\n' "**Latest development SHA:** `$DEVELOPMENT_SOURCE_SHA`"
-            printf '%s\\n' "**Verified integration SHA:** `$INTEGRATION_SOURCE_SHA`"
-            printf '\\n%s\\n' "$VERIFICATION_SUMMARY"
-            printf '\\n[Workflow run](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)\\n'
+            printf '\n\n---\n\n'
+            printf '## Build and verification record\n\n'
+            printf '%s\n' "**Package version / asset prefix:** `$TAG`"
+            printf '%s\n' "**Source ref:** `$SOURCE_REF`"
+            printf '%s\n' "**Main source SHA:** `$MAIN_SOURCE_SHA`"
+            printf '%s\n' "**Latest development SHA:** `$DEVELOPMENT_SOURCE_SHA`"
+            printf '%s\n' "**Verified integration SHA:** `$INTEGRATION_SOURCE_SHA`"
+            printf '\n%s\n' "$VERIFICATION_SUMMARY"
+            printf '\n[Workflow run](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)\n'
           } > "$RUNNER_TEMP/axiom-release-body.md"
 
       - name: Publish GitHub Release
