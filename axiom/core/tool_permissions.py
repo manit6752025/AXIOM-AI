@@ -21,11 +21,31 @@ TOOL_DESCRIPTIONS = {
     "axiom_training_preflight": (
         "Check local LoRA inputs and estimates without loading weights or starting a job."
     ),
+    "axiom_training_job_start": (
+        "Start a local LoRA training job from workspace assets; consumes compute and writes an adapter under outputs/."
+    ),
+    "axiom_training_job_status": (
+        "Read local LoRA job progress and safe workspace-relative summaries."
+    ),
+    "axiom_training_job_cancel": (
+        "Request cooperative cancellation before adapter finalization for a local LoRA job."
+    ),
+    "axiom_engine_preflight": (
+        "Check local native model/adapter compatibility and advisory memory estimates without loading model weights or running inference."
+    ),
+    "axiom_engine_generate": (
+        "Run one user-requested bounded prompt through AXIOM's native local engine; returns generated text and uses local compute synchronously."
+    ),
     "axiom_model_list": "List locally registered models.",
     "axiom_model_info": "Inspect a local model path.",
-    "axiom_dataset_inspect": "Inspect a local dataset.",
+    "axiom_dataset_inspect": (
+        "Profile bounded workspace JSONL with values withheld. "
+        "Sensitive-name heuristics run by default; value PII scans are opt-in."
+    ),
     "axiom_dataset_clean_preview": "Preview bounded dataset cleaning counts without writing files.",
     "axiom_dataset_clean": "Write a new cleaned dataset copy inside the workspace.",
+    "axiom_evaluation_run": "Score local precomputed outputs and persist aggregate metrics only.",
+    "axiom_evaluation_history": "Read saved aggregate evaluation metrics without dataset values.",
     "axiom_system_info": "Read local hardware information.",
     "axiom_training_plan": "Create a hardware-aware training estimate.",
     "axiom_supercompress_status": "Read optional SuperCompress configuration status.",

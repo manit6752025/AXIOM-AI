@@ -43,7 +43,7 @@ def _path_failure(field: str, reason: str) -> dict[str, Any]:
     }
 
 
-def _resolve_workspace_input(raw: str, root: Path, label: str) -> Path:
+def resolve_workspace_input(raw: str, root: Path, label: str) -> Path:
     if (
         not isinstance(raw, str)
         or not raw
@@ -62,19 +62,82 @@ def _resolve_workspace_input(raw: str, root: Path, label: str) -> Path:
     ):
         raise ValueError(f"{label} must be a safe workspace-relative path.")
 
-    current = root
+    try:
+        workspace = Path(root).resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise ValueError("The workspace root is unavailable.") from None
+    if workspace != Path(root) or not workspace.is_dir():
+        raise ValueError("The workspace root changed or is not a directory.")
+
+    current = workspace
     for part in parts:
         current = current / part
-        if current.is_symlink():
+        is_junction = getattr(current, "is_junction", lambda: False)
+        if current.is_symlink() or is_junction():
             raise ValueError(f"{label} cannot contain symbolic links.")
 
     try:
-        target = safe_child(root, raw, must_exist=True)
+        target = safe_child(workspace, raw, must_exist=True)
     except (FileNotFoundError, OSError, RuntimeError, ValueError):
         raise ValueError(f"{label} was not found inside the workspace.") from None
-    if not target.is_relative_to(root):
+    if not target.is_relative_to(workspace):
         raise ValueError(f"{label} must stay inside the workspace.")
     return target
+
+
+def resolve_workspace_output(raw: str, root: Path) -> Path:
+    """Resolve a new or empty adapter directory under an existing outputs folder."""
+    if (
+        not isinstance(raw, str)
+        or not raw
+        or raw != raw.strip()
+        or len(raw) > 4096
+        or raw.startswith("/")
+        or "\\" in raw
+        or any(ord(character) < 32 or ord(character) == 127 for character in raw)
+    ):
+        raise ValueError("Adapter output must be a workspace-relative path under outputs/.")
+
+    parts = raw.split("/")
+    if (
+        len(parts) < 2
+        or parts[0] != "outputs"
+        or any(part in {"", ".", ".."} for part in parts)
+        or (len(parts[0]) >= 2 and parts[0][1] == ":")
+    ):
+        raise ValueError("Adapter output must be a safe path below outputs/.")
+
+    try:
+        workspace = Path(root).resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise ValueError("The workspace root is unavailable.") from None
+    if workspace != Path(root) or not workspace.is_dir():
+        raise ValueError("The workspace root changed or is not a directory.")
+    parent = workspace
+    for part in parts[:-1]:
+        parent = parent / part
+        is_junction = getattr(parent, "is_junction", lambda: False)
+        if parent.is_symlink() or is_junction() or not parent.is_dir():
+            raise ValueError("Adapter output parent directories must exist and cannot contain links.")
+
+    target = parent / parts[-1]
+    is_junction = getattr(target, "is_junction", lambda: False)
+    if target.is_symlink() or is_junction():
+        raise ValueError("Adapter output cannot be a symbolic link.")
+    if target.exists():
+        if not target.is_dir():
+            raise ValueError("Adapter output must be a directory.")
+        try:
+            next(target.iterdir())
+        except StopIteration:
+            pass
+        else:
+            raise ValueError("Adapter output directory must be new or empty.")
+
+    resolved = target.resolve(strict=target.exists())
+    if not resolved.is_relative_to(workspace):
+        raise ValueError("Adapter output must stay inside the workspace.")
+    return resolved
 
 
 def _model_metadata(inspection: Any, relative_path: str) -> dict[str, Any]:
@@ -109,14 +172,14 @@ def run_training_preflight(
         return _path_failure("workspace", "The current workspace could not be resolved safely.")
 
     try:
-        model_target = _resolve_workspace_input(model_path, root, "Model path")
+        model_target = resolve_workspace_input(model_path, root, "Model path")
     except ValueError as exc:
         return _path_failure("model_path", str(exc))
     if not model_target.is_dir():
         return _path_failure("model_path", "Model path must refer to a local model directory.")
 
     try:
-        dataset_target = _resolve_workspace_input(dataset_path, root, "Dataset path")
+        dataset_target = resolve_workspace_input(dataset_path, root, "Dataset path")
     except ValueError as exc:
         return _path_failure("dataset_path", str(exc))
     if not dataset_target.is_file() or dataset_target.suffix.lower() != ".jsonl":
