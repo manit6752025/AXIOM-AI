@@ -557,12 +557,18 @@ approval for `clear_for_user_approval`. Clear only means no known blockers or
 review findings; it does not guarantee loading, fit, or quality. The tool uses
 the existing engine-preflight and prediction-preflight permissions, not
 prediction-start permission. It checks that the output path is a direct
-`data/*.jsonl` destination but does not check whether it already exists or
-reserve compute. Prompt results apply only to the scanned snapshot: rerun the
-composite preflight immediately before start if the model, adapter, or dataset
-changes. Start validates its current inputs independently and does not prove
-they match the preflight snapshot. It never loads weights, runs inference, or
-writes files.
+`data/*.jsonl` destination and checks whether its name is unoccupied in the
+workspace parent in `checks.output_destination.status`. An occupied or
+uninspectable destination blocks the plan; `not_checked` means an earlier
+input check blocked before destination inspection. The check does not verify
+write permission or reserve the path; start rechecks the destination and
+active compute slot. If start rejects a destination that changed, choose a new path,
+rerun preflight, show the revised configuration, and obtain approval again.
+Prompt results apply only to the
+scanned snapshot: rerun the composite preflight immediately before start if
+the model, adapter, or dataset changes. Start validates its current inputs
+independently and does not prove they match the preflight snapshot. It never
+loads weights, runs inference, or writes files.
 
 `axiom_prediction_job_start`, `axiom_prediction_job_status`, and `axiom_prediction_job_cancel` connect local inference to offline evaluation. Start accepts a workspace-relative JSONL input under `data/`, a prompt field, a required string reference field, a trusted local model and optional adapter, and a new `data/NAME.jsonl` destination. It validates the complete input before launch and caps it at 100 rows, 48 MiB total, 768 KiB per line, and 8,000 characters per prompt; generation is limited to 64 tokens and 16,000 characters per row. Output is capped at 64 MiB total and 1 MiB per line. Generation accepts a temperature and optional seed. Original row fields are preserved and the selected prediction field is added or replaced. The result file is published atomically only after every row succeeds; cancellation and failure discard the partial file, and existing destinations are never overwritten. The completed artifact can be passed to `axiom_evaluation_run`. Job status contains counts and workspace-relative paths only; prompts, predictions, and logs are not returned. `prompts_truncated` counts rows where the native engine clipped input to fit the model context; review a nonzero count before evaluating the artifact. A safe `error_code` identifies failure stage without returning local exception details. Bounded job metadata is stored under `.axiom/prediction_jobs.json`; it contains relative paths, settings, counts, safe status, artifact identity/hash, and evaluation links, but no prompts, dataset rows, predictions, or logs. Call `axiom_prediction_job_status` without a job ID to list recent jobs, or pass an ID to inspect one job. If AXIOM verifies that the owning process exited before completion was recorded, status becomes `interrupted` and generation is never resumed. If process identity cannot be verified, status is `recovery_unverified` and the job is left untouched, unless a `publishing` checkpoint independently verifies the completed artifact hash; that artifact can then recover as completed. Interrupted artifacts are not eligible for the job-ID evaluation handoff; evaluate by path only after separately checking the file. Completed jobs can be evaluated by ID after restart, with publication identity and SHA-256 revalidated before scoring. Cancellation is cooperative and only controls a worker owned by the current MCP process; another server can inspect the job but cannot cancel it. The job reserves AXIOM's shared local fine-tuning/prediction-job slot, uses local compute, and writes generated text into the requested artifact. When permitted, run `axiom_engine_preflight` first. Start is separately default-deny and the server instructions require showing the exact run configuration and output file, then receiving the user's explicit go-ahead:
 
@@ -664,6 +670,28 @@ write files, fingerprint model contents, or measure semantic quality.
 ```bash
 axiom mcp allow axiom_dataset_clean_preview
 axiom mcp allow axiom_dataset_clean
+```
+
+`axiom_evaluation_preflight` previews an offline evaluation of already-produced
+predictions without saving a report. Use the same prediction/reference fields,
+optional split, and scan limits planned for `axiom_evaluation_run`. It returns
+aggregate metrics, confidence intervals, sample and skipped-row counts, and
+whether the scan reached the initial file size; it never returns row values or
+hashes. Metrics use `valid_samples`. Rows excluded by the requested split are
+intentional; malformed, non-object, overlong, missing-value, and non-string
+rows need review. `clear_for_user_approval` means no known scan or data-quality
+blockers, not a model-quality judgment or approval. `baseline_eligible` reflects
+complete-scan fingerprint criteria only; review findings still apply. The
+source file's device, inode, size, and modification time are checked before
+and after reading; this does not bind a later run to the same content. Rerun
+preflight immediately before seeking approval if the file may have changed.
+Show any changed results and obtain approval again. The preview and saved
+evaluation each have a default-deny permission. Get explicit user approval
+before saving metrics through `axiom_evaluation_run`; grant the preview
+capability with:
+
+```bash
+axiom mcp allow axiom_evaluation_preflight
 ```
 
 `axiom_evaluation_run` scores already-produced predictions in JSONL files
@@ -793,6 +821,7 @@ axiom mcp profile use readonly
 | `axiom_dataset_inspect` | Bounded JSONL profile; sensitive-name heuristics run by default, value PII scanning is opt-in |
 | `axiom_dataset_clean_preview` | Preview bounded cleanup counts without returning row contents or writing files |
 | `axiom_dataset_clean` | Write a new cleaned JSONL copy inside the workspace |
+| `axiom_evaluation_preflight` | Preview bounded offline evaluation metrics and data quality without saving a report |
 | `axiom_evaluation_run` | Score precomputed outputs offline and save aggregate metrics |
 | `axiom_evaluation_history` | Read saved aggregate evaluation metrics |
 | `axiom_evaluation_compare` | Compare two complete saved evaluations using the history permission |

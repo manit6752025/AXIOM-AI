@@ -113,9 +113,9 @@ mcp = MCPServer(
         "Training status includes up to 64 evenly spaced loss samples; each point is one selected training record and may be noisy. Do not treat the trace as held-out validation or evidence of model quality/generalization; use held-out evaluation to assess quality. "
         "For local inference, use axiom_engine_generate only after the user requests a response; "
         "it runs one bounded prompt locally and AXIOM does not store the prompt or response. The MCP host may retain its tool transcript. "
-        "For a normal dataset prediction, prefer axiom_prediction_job_validation_preflight when the engine-preflight and prediction-preflight capabilities are allowed; it composes prompt-truncation and base/optional-adapter engine checks for the intended settings without prediction-start permission. Use actionability.status: resolve and rerun blocked findings; disclose review_required findings and wait for the user's decision; clear_for_user_approval means show the intended run and still get explicit approval before starting. The plan does not start a job, reserve compute, or check output-path availability. "
+        "For a normal dataset prediction, prefer axiom_prediction_job_validation_preflight when the engine-preflight and prediction-preflight capabilities are allowed; it composes prompt-truncation and base/optional-adapter engine checks for the intended settings without prediction-start permission. Use actionability.status: resolve and rerun blocked findings; for an output_path_availability blocker, choose a new direct data/*.jsonl destination or resolve the workspace path issue, then rerun; disclose review_required findings and wait for the user's decision; clear_for_user_approval means show the intended run and still get explicit approval before starting. checks.output_destination.status reports unoccupied, occupied, uninspectable, or not_checked. Occupancy checks do not verify write permission or reserve the path; active compute-slot availability is checked at start. "
         "Use axiom_engine_preflight and axiom_prediction_job_preflight separately for focused diagnostics. The prediction preflight estimates actual prompt clipping with the model tokenizer; use the same model, dataset, prompt_field, reference_field, and max_new_tokens as the intended start call. Rerun the composite preflight immediately before start if the model, adapter, or dataset changes; start validates current inputs independently and does not bind them to the checked snapshot. "
-        "Before starting, show the exact model, adapter, input/output paths, fields, and generation limits; disclose that the local JSONL artifact preserves source rows and adds generated predictions, and that AXIOM saves bounded job metadata under workspace .axiom/prediction_jobs.json (relative paths, settings, counts, status, and artifact fingerprint; no dataset rows, prompts, predictions, or logs); then wait for the user's explicit go-ahead. Start revalidates inputs and output availability and checks for active compute jobs. "
+        "Before starting, show the exact model, adapter, input/output paths, fields, and generation limits; disclose that the local JSONL artifact preserves source rows and adds generated predictions, and that AXIOM saves bounded job metadata under workspace .axiom/prediction_jobs.json (relative paths, settings, counts, status, and artifact fingerprint; no dataset rows, prompts, predictions, or logs); then wait for the user's explicit go-ahead. Start revalidates inputs and output availability and checks for active compute jobs. If the destination changed and start rejects it, choose a new path, rerun preflight, show the revised configuration, and obtain approval for that configuration. "
         "If the composite preflight expects clipped prompts, show the count and 1-based JSONL line numbers, then discuss whether to shorten those prompts before the run; if it is inconclusive, disclose that clipping could not be assessed and use the completed job's prompts_truncated count only if the job completes. Templates AXIOM cannot evaluate safely may also fail during generation. A clear_for_user_approval status means only that no known blockers or review findings were detected; it does not guarantee loading, fit, or quality. "
         "Use axiom_prediction_job_status to list persisted job history or inspect one job, axiom_prediction_job_wait to wait up to 30 seconds for a job outcome without polling, and axiom_prediction_job_cancel to cancel a worker owned by this process. The wait tool uses the axiom_prediction_job_status permission; repeat it after timed_out, and check status later after recovery_unverified. Prediction metadata is stored under the workspace .axiom directory; if AXIOM verifies that the worker process exited, the job becomes interrupted and generation is never resumed automatically. If process identity cannot be verified, status is recovery_unverified and the job is left untouched unless its publishing checkpoint independently verifies the completed artifact hash. Only a completed job with verified publication metadata can use the job-ID evaluation handoff. "
         "Do not evaluate a prediction job automatically when it completes. Call axiom_prediction_job_evaluate only after the user approves saving aggregate evaluation metrics; it requires the axiom_evaluation_run permission. "
@@ -129,6 +129,7 @@ mcp = MCPServer(
         "Use AXIOM tools to inspect models, datasets, and hardware; preview dataset cleaning "
         "and show the counts and proposed output path before writing a new copy. "
         "Re-preview immediately before cleaning because previews are advisory. "
+        "Use the separate default-deny axiom_evaluation_preflight before preparing a new offline evaluation. It scans bounded precomputed outputs, returns aggregate metrics and data-quality counts, and saves nothing. Metrics use valid_samples; filtered_split_rows are intentionally excluded by the selected split and do not trigger review, while invalid-JSON, non-object, overlong, missing-value, and non-string rows do. Follow actionability and disclose partial scans or quality-skipped rows. clear_for_user_approval means no known scan/data-quality blockers, not a model-quality judgment or approval. Show the fields, split, sample count, metrics, and completeness; get explicit approval before calling axiom_evaluation_run to persist the report. The run rescans current input and is not bound to the preview; rerun preflight immediately before seeking approval if the file may have changed, and show changed results and obtain approval again. "
         "Use axiom_evaluation_run for bounded, offline lexical metrics on completed outputs; "
         "use axiom_evaluation_history to retrieve saved runs or set baselines_only=true to focus on marked baselines; if next_cursor is present, pass it as after_run_id with the same filters to continue; "
         "use axiom_evaluation_compare when asked to compare two saved complete reports, with a marked baseline, metric, and tolerance; it uses the evaluation-history permission, does not reopen source files, and returns aggregate lexical scores only. These metrics do not establish semantic quality. "
@@ -370,6 +371,242 @@ def axiom_info() -> dict:
             "mcp",
             "agent_integrations",
         ],
+    }
+
+
+@mcp.tool()
+def axiom_evaluation_preflight(
+    path: str,
+    prediction_field: str,
+    reference_field: str,
+    split_field: str | None = None,
+    split_value: str | None = None,
+    max_bytes: int = DEFAULT_EVALUATION_MAX_BYTES,
+    max_rows: int = DEFAULT_EVALUATION_MAX_ROWS,
+    max_line_bytes: int = DEFAULT_EVALUATION_MAX_LINE_BYTES,
+) -> dict:
+    """Preview bounded offline metrics and data quality without saving a report."""
+    ToolPermissionStore().require("axiom_evaluation_preflight")
+    _validate_evaluation_limits(max_bytes, max_rows, max_line_bytes)
+
+    if (
+        not isinstance(prediction_field, str)
+        or not prediction_field.strip()
+        or len(prediction_field) > 160
+        or not isinstance(reference_field, str)
+        or not reference_field.strip()
+        or len(reference_field) > 160
+    ):
+        raise ValueError("Prediction and reference fields must contain 1 to 160 characters.")
+    prediction_field = prediction_field.strip()
+    reference_field = reference_field.strip()
+    if prediction_field == reference_field:
+        raise ValueError("Prediction and reference fields must be different.")
+    if (split_field is None) != (split_value is None):
+        raise ValueError("Split field and split value must be supplied together.")
+    if split_field is not None:
+        if (
+            not isinstance(split_field, str)
+            or not split_field.strip()
+            or len(split_field) > 160
+            or not isinstance(split_value, str)
+            or len(split_value) > 160
+        ):
+            raise ValueError("Split field and value must contain at most 160 characters.")
+        split_field = split_field.strip()
+
+    def blocked(reason_code: str, next_action: str) -> dict:
+        return {
+            "schema_version": 1,
+            "assessment": "inconclusive",
+            "reason_code": reason_code,
+            "actionability": {
+                "status": "blocked",
+                "findings": [{
+                    "check": "evaluation_source",
+                    "status": "blocked",
+                    "reason_code": reason_code,
+                }],
+                "next_action": next_action,
+                "user_approval_required": True,
+            },
+            "scope": {
+                "read_only": True,
+                "evaluation_saved": False,
+                "files_written": False,
+                "model_inference_run": False,
+                "network_accessed": False,
+                "row_values_returned": False,
+                "source_hash_returned": False,
+                "absolute_paths_returned": False,
+            },
+        }
+
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("Evaluation path cannot be empty.")
+    relative_path = path
+    if relative_path.startswith("data/"):
+        relative_path = relative_path[5:]
+    root = _mcp_workspace_root()
+    try:
+        data_root = _evaluation_dataset_root(root)
+        source, source_stream = open_mcp_workspace_file(relative_path, data_root)
+    except (OSError, RuntimeError, ValueError):
+        return blocked(
+            "evaluation_source_unavailable",
+            "Choose a readable workspace JSONL file under data/ and rerun the preflight.",
+        )
+    if source.suffix.lower() != ".jsonl":
+        source_stream.close()
+        return blocked(
+            "evaluation_source_not_jsonl",
+            "Choose a workspace JSONL file under data/ and rerun the preflight.",
+        )
+
+    def file_identity(value: os.stat_result) -> tuple[int, int, int, int]:
+        return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns
+
+    try:
+        with source_stream:
+            initial = os.fstat(source_stream.fileno())
+            if not stat.S_ISREG(initial.st_mode):
+                return blocked(
+                    "evaluation_source_unavailable",
+                    "Choose a readable regular JSONL file under data/ and rerun the preflight.",
+                )
+            try:
+                report = evaluate_jsonl_stream(
+                    source_stream,
+                    path=source.relative_to(data_root).as_posix(),
+                    file_name=source.name,
+                    file_size_bytes=initial.st_size,
+                    prediction_field=prediction_field,
+                    reference_field=reference_field,
+                    split_field=split_field,
+                    split_value=split_value,
+                    max_bytes=max_bytes,
+                    max_rows=max_rows,
+                    max_line_bytes=max_line_bytes,
+                )
+            except ValueError as exc:
+                if str(exc).startswith("No rows with string prediction and reference values"):
+                    return blocked(
+                        "evaluation_no_valid_samples",
+                        "Check the selected fields and split, then rerun the preflight.",
+                    )
+                return blocked(
+                    "evaluation_scan_unavailable",
+                    "Resolve the source or scan-limit issue, then rerun the preflight.",
+                )
+            final = os.fstat(source_stream.fileno())
+        current_path, current_stream = open_mcp_workspace_file(relative_path, data_root)
+        with current_stream:
+            current = os.fstat(current_stream.fileno())
+        if (
+            file_identity(initial) != file_identity(final)
+            or file_identity(initial) != file_identity(current)
+            or current_path != source
+        ):
+            return blocked(
+                "evaluation_source_changed",
+                "The source changed during the preflight; retry with the stable current file.",
+            )
+    except (OSError, RuntimeError, ValueError, RecursionError):
+        source_stream.close()
+        return blocked(
+            "evaluation_source_unavailable",
+            "Resolve the workspace source issue and rerun the preflight.",
+        )
+
+    manifest = report.get("dataset_manifest", {})
+    counts = report.get("counts", {})
+    limits = report.get("limits", {})
+    if not isinstance(manifest, dict) or not isinstance(counts, dict) or not isinstance(limits, dict):
+        return blocked(
+            "evaluation_report_unavailable",
+            "Resolve the evaluation report issue and rerun the preflight.",
+        )
+    complete = manifest.get("full_content_hashed") is True and report.get("truncated") is False
+    quality_issue_count = sum(
+        counts.get(key, 0)
+        for key in (
+            "invalid_json_rows",
+            "non_object_rows",
+            "overlong_rows",
+            "missing_value_rows",
+            "non_string_value_rows",
+        )
+    )
+    requires_review = not complete or quality_issue_count > 0
+    actionability_status = "review_required" if requires_review else "clear_for_user_approval"
+    if not complete:
+        next_action = (
+            "Show the partial scan limits and counts; obtain explicit approval before saving partial metrics. "
+            "Partial evaluations cannot be marked as baselines."
+        )
+    elif quality_issue_count:
+        next_action = (
+            "Show the skipped-row counts and explain those rows were excluded; "
+            "obtain explicit approval before saving the evaluation."
+        )
+    else:
+        next_action = (
+            "Show the selected fields, valid sample count, and aggregate metrics; "
+            "obtain explicit approval before saving the evaluation."
+        )
+    return {
+        "schema_version": 1,
+        "assessment": "partial_scan" if not complete else "complete_scan",
+        "file_name": source.name,
+        "fields": {
+            "prediction": prediction_field,
+            "reference": reference_field,
+            "split": split_field,
+            "selected_split": split_value,
+        },
+        "counts": counts,
+        "data_quality": {
+            "metrics_use_valid_samples": True,
+            "filtered_split_rows_excluded_by_request": counts.get("filtered_split_rows", 0),
+            "rows_requiring_review": quality_issue_count,
+        },
+        "metrics": report.get("metrics"),
+        "confidence_intervals": report.get("confidence_intervals"),
+        "truncated": report.get("truncated"),
+        "truncation_reasons": report.get("truncation_reasons", []),
+        "limits": limits,
+        "baseline_eligible": complete and manifest.get("comparison_corpus_fully_hashed") is True,
+        "actionability": {
+            "status": actionability_status,
+            "findings": ([
+                {
+                    "check": "evaluation_data_quality",
+                    "status": "review_required",
+                    "reason_code": "partial_scan" if not complete else "rows_skipped",
+                }
+            ] if requires_review else []),
+            "next_action": next_action,
+            "user_approval_required": True,
+            "note": (
+                "clear_for_user_approval means no known scan or data-quality blockers; it does not establish semantic or model quality and does not count as approval."
+            ),
+        },
+        "note": (
+            "Metrics use valid_samples. Rows excluded by the requested split are reported separately and do not require review; malformed JSON, non-object, overlong, missing-value, and non-string rows are excluded and require review. "
+            "Aggregate metrics describe the bytes read and include no row values or content hashes. baseline_eligible reflects complete-scan fingerprint criteria only; data-quality findings may still require review. File identity metadata (device, inode, size, and modification time) was unchanged across the scan and path reopen, but the later evaluation run rescans current input and is not bound to these results."
+        ),
+        "scope": {
+            "read_only": True,
+            "evaluation_saved": False,
+            "files_written": False,
+            "model_inference_run": False,
+            "network_accessed": False,
+            "row_values_returned": False,
+            "source_file_identity_unchanged_during_scan": True,
+            "full_content_scanned": complete,
+            "source_hash_returned": False,
+            "absolute_paths_returned": False,
+        },
     }
 
 
@@ -2278,7 +2515,26 @@ def axiom_prediction_job_validation_preflight(
     permissions.require("axiom_engine_preflight")
     root = _mcp_workspace_root()
 
-    def blocked(reason_code: str) -> dict:
+    def blocked(
+        reason_code: str,
+        *,
+        check: str = "preflight_inputs",
+        next_action: str = "Resolve the reported input issue, then rerun this preflight.",
+        scope_updates: dict[str, bool] | None = None,
+        output_destination_status: str = "not_checked",
+    ) -> dict:
+        scope = {
+            "read_only": True,
+            "files_written": False,
+            "model_weights_loaded": False,
+            "inference_run": False,
+            "network_accessed": False,
+            "dataset_values_returned": False,
+            "absolute_paths_returned": False,
+            "output_path_write_permission_checked": False,
+        }
+        if scope_updates:
+            scope.update(scope_updates)
         return {
             "schema_version": 1,
             "assessment": "inconclusive",
@@ -2286,22 +2542,22 @@ def axiom_prediction_job_validation_preflight(
             "actionability": {
                 "status": "blocked",
                 "findings": [{
-                    "check": "preflight_inputs",
+                    "check": check,
                     "status": "blocked",
                     "reason_code": reason_code,
                 }],
-                "next_action": "Resolve the reported input issue, then rerun this preflight.",
+                "next_action": next_action,
                 "user_approval_required": True,
             },
-            "scope": {
-                "read_only": True,
-                "files_written": False,
-                "model_weights_loaded": False,
-                "inference_run": False,
-                "network_accessed": False,
-                "dataset_values_returned": False,
-                "absolute_paths_returned": False,
+            "checks": {
+                "output_destination": {
+                    "status": output_destination_status,
+                    "write_permission_checked": False,
+                    "reserved": False,
+                    "start_revalidates_destination": True,
+                },
             },
+            "scope": scope,
         }
 
     if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens <= 64:
@@ -2403,6 +2659,59 @@ def axiom_prediction_job_validation_preflight(
 
     if path_key(output_path) == path_key(dataset_relative):
         return blocked("prediction_output_must_differ_from_dataset")
+
+    output_parent_fd: int | None = None
+    try:
+        output_target, output_parent_fd, _output_name, output_unoccupied = (
+            open_mcp_workspace_output_parent(output_path, root)
+        )
+        if not output_target.is_relative_to(root):
+            return blocked(
+                "prediction_output_path_uninspectable",
+                check="output_path_availability",
+                output_destination_status="uninspectable",
+                scope_updates={
+                    "output_path_shape_checked": True,
+                    "output_path_availability_checked": False,
+                    "output_path_reserved": False,
+                },
+            )
+        if not output_unoccupied:
+            return blocked(
+                "prediction_output_already_exists",
+                check="output_path_availability",
+                next_action="Choose a new data/*.jsonl destination, then rerun this preflight.",
+                output_destination_status="occupied",
+                scope_updates={
+                    "output_path_shape_checked": True,
+                    "output_path_availability_checked": True,
+                    "output_path_unoccupied_at_preflight": False,
+                    "output_path_reserved": False,
+                    "job_start_revalidates_current_inputs_and_output_path": True,
+                },
+            )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return blocked(
+            "prediction_output_path_uninspectable",
+            check="output_path_availability",
+            next_action=(
+                "Use an existing, accessible workspace data/ directory and a safe direct-child output path, "
+                "then rerun this preflight."
+            ),
+            output_destination_status="uninspectable",
+            scope_updates={
+                "output_path_shape_checked": True,
+                "output_path_availability_checked": False,
+                "output_path_reserved": False,
+                "job_start_revalidates_current_inputs_and_output_path": True,
+            },
+        )
+    finally:
+        if output_parent_fd is not None:
+            try:
+                os.close(output_parent_fd)
+            except OSError:
+                pass
 
     prompt_preflight = axiom_prediction_job_preflight(
         model_path=model_relative,
@@ -2576,7 +2885,8 @@ def axiom_prediction_job_validation_preflight(
     else:
         actionability_status = "clear_for_user_approval"
         next_action = (
-            "Show the planned configuration, explain output and active-compute availability are checked at start, "
+            "Show the planned configuration, explain the output name was unoccupied when checked but is not reserved, "
+            "that write permission was not checked, and that active-compute availability is checked at start, "
             "and obtain explicit approval before starting the job."
         )
     return {
@@ -2588,7 +2898,7 @@ def axiom_prediction_job_validation_preflight(
             "next_action": next_action,
             "user_approval_required": True,
             "note": (
-                "Clear means no known blockers or review findings. Prompt results apply only to the scanned snapshot; output-path and active compute-slot availability are not checked. "
+                "Clear means no known blockers or review findings. Prompt results apply only to the scanned snapshot; output-name occupancy is a read-only check and is not reserved, write permission is not checked, and active compute-slot availability is not checked. "
                 "It does not guarantee model loading, fit, or output quality."
             ),
         },
@@ -2611,6 +2921,12 @@ def axiom_prediction_job_validation_preflight(
             "prompt_budget_source": prompt_budget_source,
         },
         "checks": {
+            "output_destination": {
+                "status": "unoccupied",
+                "write_permission_checked": False,
+                "reserved": False,
+                "start_revalidates_destination": True,
+            },
             "prompt_truncation": prompt_preflight,
             "base_engine": base_engine,
             "adapter_engine": adapter_engine,
@@ -2623,15 +2939,18 @@ def axiom_prediction_job_validation_preflight(
             "network_accessed": False,
             "dataset_values_returned": False,
             "absolute_paths_returned": False,
+            "output_path_write_permission_checked": False,
             "output_path_shape_checked": True,
-            "output_path_availability_checked": False,
+            "output_path_availability_checked": True,
+            "output_path_unoccupied_at_preflight": True,
+            "output_path_reserved": False,
             "compute_slot_availability_checked": False,
             "preflight_snapshot_bound_to_job_start": False,
             "job_start_revalidates_current_inputs_and_output_path": True,
         },
         "note": (
             "Prompt checks apply only to the scanned snapshot. Rerun if the model, adapter, or dataset changes; job start validates current inputs independently and does not verify they match this snapshot. "
-            "Output-path and active compute-slot availability are not checked or reserved; prediction-job start validates the output and checks active jobs again."
+            "The destination name was unoccupied in the inspected parent at preflight time. This check does not verify write permission or reserve the path. Start rechecks the destination and refuses to overwrite an existing file."
         ),
     }
 
