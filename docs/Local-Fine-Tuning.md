@@ -38,7 +38,11 @@ axiom --no-banner train status JOB_ID
 
 ## Control Center and API
 
-Open **Training** in the Control Center. The **Local LoRA fine-tuning** panel lets you supply local paths and bounded training settings, start a job, and inspect progress. The API endpoints are `GET /api/fine-tuning/runtime`, `GET /api/fine-tuning/jobs`, `GET /api/fine-tuning/jobs/{job_id}`, and `POST /api/fine-tuning/jobs`.
+Open **Training** in the Control Center. The **Local LoRA fine-tuning** panel lets you supply local paths and bounded training settings, start a job, inspect progress, and request cancellation. Cancellation stops at a safe training boundary; the panel shows `cancelling` until the worker confirms `cancelled`. After training steps finish, the job enters `finalizing` while adapter files are saved, and cancellation is no longer accepted. The API endpoints are `GET /api/fine-tuning/runtime`, `GET /api/fine-tuning/jobs`, `GET /api/fine-tuning/jobs/{job_id}`, `POST /api/fine-tuning/jobs`, and `POST /api/fine-tuning/jobs/{job_id}/cancel`.
+
+The MCP server also exposes `axiom_training_job_start`, `axiom_training_job_status`, and `axiom_training_job_cancel`. Each is default-deny and needs its own explicit workspace permission. MCP start accepts workspace-relative inputs and an output under an existing `outputs/` folder. Its instructions tell agents to run preflight, present the exact configuration, and wait for the user's explicit request before starting; granting the start tool permission gives the agent standing capability.
+
+MCP inputs are revalidated in the background worker, and the JSONL dataset is opened with descriptor-relative path checks. The adapter destination is checked again immediately before saving to refuse files added during model loading or training. Transformers still opens model weights by path, so a concurrent local process with write access to the workspace can race path checks while model files load or adapter files save. Avoid changing the model, dataset, or destination while a job is running.
 
 ## Limits and honest scope
 
@@ -47,6 +51,7 @@ Open **Training** in the Control Center. The **Local LoRA fine-tuning** panel le
 - Dataset is limited to 50 MiB, 10,000 rows, and 1 MiB per line; individual text values are limited to 300,000 characters.
 - Steps: 1–1,000; sequence length: 32–2,048 tokens; LoRA rank: 1–64; learning rate: 0.000001–0.01.
 - A single local fine-tuning job is allowed at a time to avoid accidental competing CPU/GPU workloads.
+- The MCP trainer rejects symbolic links and junctions inside model directories and limits its directory metadata scan to 50,000 entries.
 - The output must be new or empty. Only the generated adapter and tokenizer files are written to the output directory; the base-model directory and dataset are inputs.
 - These limits do not guarantee that a model fits available memory. Start with a small model, short sequence length, and a few steps. GPU capability and architecture-specific LoRA compatibility are checked by the installed runtime, not inferred from the planning estimate.
 - This is supervised causal-LM LoRA fine-tuning, not full-weight training, QLoRA, preference training, or a general workflow executor.

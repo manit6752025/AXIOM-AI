@@ -34,14 +34,17 @@ def preview_jsonl_cleaning(
     rewritten = estimated_output_bytes = 0
     truncated = False
     scan_budget_exhausted = False
+    newline_semantics_mismatch = False
+    encoding_semantics_mismatch = False
     truncation_reasons: set[str] = set()
     seen: set[str] = set()
 
     while lines < max_rows:
         remaining = max_bytes - read_bytes
         if remaining <= 0:
-            truncated = True
-            truncation_reasons.add("max_bytes")
+            if stream.read(1):
+                truncated = True
+                truncation_reasons.add("max_bytes")
             break
         raw = stream.readline(min(max_line_bytes + 1, remaining + 1))
         if not raw:
@@ -54,6 +57,16 @@ def preview_jsonl_cleaning(
 
         read_bytes += len(raw)
         lines += 1
+        newline_free_body = (
+            raw.removesuffix(b"\r\n")
+            .removesuffix(b"\n")
+            .removesuffix(b"\r")
+        )
+        if b"\r" in newline_free_body:
+            # The cleaner opens text files with universal-newline handling,
+            # while this bounded binary preview splits on LF. Flag CR-only
+            # separators so agents do not treat these counts as exact.
+            newline_semantics_mismatch = True
         if len(raw) > max_line_bytes:
             overlong += 1
             truncated = True
@@ -61,9 +74,10 @@ def preview_jsonl_cleaning(
             while raw and not raw.endswith(b"\n"):
                 remaining = max_bytes - read_bytes
                 if remaining <= 0:
-                    truncated = True
-                    scan_budget_exhausted = True
-                    truncation_reasons.add("max_bytes")
+                    if stream.read(1):
+                        truncated = True
+                        scan_budget_exhausted = True
+                        truncation_reasons.add("max_bytes")
                     break
                 raw = stream.readline(min(65536, remaining + 1))
                 if len(raw) > remaining:
@@ -82,6 +96,7 @@ def preview_jsonl_cleaning(
             line = line_body.decode("utf-8").strip()
         except UnicodeDecodeError:
             invalid += 1
+            encoding_semantics_mismatch = True
             continue
         if not line:
             empty += 1
@@ -116,7 +131,9 @@ def preview_jsonl_cleaning(
         truncated = True
         truncation_reasons.add("max_bytes")
 
-    removed_rows = empty + invalid + non_object + schema + duplicates + overlong
+    # Overlong rows are unknown, not necessarily removed: the cleaner has no
+    # line-size cap and may keep them. Keep them outside the decision counts.
+    removed_rows = empty + invalid + non_object + schema + duplicates
     changes = [
         {"operation": "remove_blank_rows", "rows": empty},
         {"operation": "remove_invalid_json_rows", "rows": invalid},
@@ -131,6 +148,15 @@ def preview_jsonl_cleaning(
         warnings.append("Limit causes: " + ", ".join(sorted(truncation_reasons)) + ".")
     if overlong:
         warnings.append("Overlong rows were skipped by the preview limits; raise the line limit to inspect them.")
+    if newline_semantics_mismatch:
+        warnings.append(
+            "CR-only line endings are interpreted differently by the cleaner; row counts may differ."
+        )
+    if encoding_semantics_mismatch:
+        warnings.append(
+            "Invalid UTF-8 makes the cleaner fail rather than remove individual rows; "
+            "preview counts may differ."
+        )
 
     return {
         "file_name": file_name,
@@ -140,6 +166,7 @@ def preview_jsonl_cleaning(
         "bytes_scanned": read_bytes,
         "lines_scanned": lines,
         "kept_rows": kept,
+        "classified_rows": kept + removed_rows,
         "removed_rows": removed_rows,
         "removed_empty_rows": empty,
         "removed_invalid_rows": invalid,
@@ -147,11 +174,22 @@ def preview_jsonl_cleaning(
         "removed_schema_rows": schema,
         "removed_duplicate_rows": duplicates,
         "overlong_rows": overlong,
+        "unclassified_rows": overlong,
+        "cleaner_semantics_match": not (
+            truncated
+            or overlong
+            or newline_semantics_mismatch
+            or encoding_semantics_mismatch
+        ),
         "rewritten_rows": rewritten,
         "estimated_output_bytes": estimated_output_bytes,
         "truncated": truncated,
         "truncation_reasons": sorted(truncation_reasons),
         "changes": changes,
         "warnings": warnings,
-        "limits": {"max_bytes": max_bytes, "max_rows": max_rows, "max_line_bytes": max_line_bytes},
+        "limits": {
+            "max_bytes": max_bytes,
+            "max_rows": max_rows,
+            "max_line_bytes": max_line_bytes,
+        },
     }

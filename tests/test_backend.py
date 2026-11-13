@@ -48,9 +48,13 @@ def test_mcp_schema_and_all_handlers(tmp_path: Path, monkeypatch: pytest.MonkeyP
         "axiom_info",
         "axiom_workspace_context",
         "axiom_workspace_assets",
+        "axiom_training_preflight",
+        "axiom_evaluation_run",
+        "axiom_evaluation_history",
         "axiom_model_list",
         "axiom_model_info",
         "axiom_dataset_inspect",
+        "axiom_dataset_clean_preview",
         "axiom_dataset_clean",
         "axiom_system_info",
         "axiom_training_plan",
@@ -103,16 +107,18 @@ def test_mcp_schema_and_all_handlers(tmp_path: Path, monkeypatch: pytest.MonkeyP
     )
     inspected, _ = _call_tool(
         "axiom_dataset_inspect",
-        {"path": str(dataset)},
+        {"path": "records.jsonl"},
     )
-    assert inspected["valid"] == 2
-    assert inspected["invalid"] == 2
-    assert inspected["duplicates"] == 1
+    assert inspected["profile"]["valid_rows"] == 2
+    assert inspected["profile"]["invalid_rows"] == 2
+    assert inspected["profile"]["duplicate_rows"] == 1
+    assert inspected["scope"]["dataset_values_returned"] is False
+    assert inspected["scope"]["absolute_paths_returned"] is False
 
     cleaned_path = tmp_path / "cleaned.jsonl"
     cleaned, _ = _call_tool(
         "axiom_dataset_clean",
-        {"path": str(dataset), "output": str(cleaned_path)},
+        {"path": "records.jsonl", "output": "cleaned.jsonl"},
     )
     assert cleaned["kept"] == 1
     if not (dataset.read_text(encoding="utf-8").count("not json") == 1):

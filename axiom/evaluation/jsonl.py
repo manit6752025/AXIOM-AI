@@ -15,6 +15,14 @@ MAX_EVALUATION_BYTES = 256 * 1024 * 1024
 METRIC_SCHEMA_VERSION = 1
 
 
+class BaselineCorpusMismatchError(ValueError):
+    """A report cannot be gated against a baseline from a different corpus."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
+
+
 def evaluate_jsonl_stream(
     stream: BinaryIO,
     *,
@@ -42,6 +50,7 @@ def evaluate_jsonl_stream(
 
     stream.seek(0)
     digest = hashlib.sha256()
+    comparison_corpus_digest = hashlib.sha256()
     bytes_scanned = 0
     lines_scanned = 0
     invalid_json_rows = 0
@@ -51,12 +60,33 @@ def evaluate_jsonl_stream(
     non_string_value_rows = 0
     filtered_split_rows = 0
     valid_samples = 0
+    comparison_rows = 0
+    comparison_corpus_hashable = True
     exact_matches = 0
     normalized_exact_matches = 0
     prediction_tokens = 0
     reference_tokens = 0
     overlapping_tokens = 0
     truncation_reasons: set[str] = set()
+
+    def digest_comparison_row(row_index: int, status: str, sample: Any = None) -> None:
+        nonlocal comparison_rows, comparison_corpus_hashable
+        if not comparison_corpus_hashable:
+            return
+        try:
+            payload = json.dumps(
+                [row_index, status, sample],
+                ensure_ascii=True,
+                allow_nan=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        except RecursionError:
+            comparison_corpus_hashable = False
+            return
+        comparison_corpus_digest.update(len(payload).to_bytes(8, "big"))
+        comparison_corpus_digest.update(payload)
+        comparison_rows += 1
 
     while lines_scanned < max_rows and bytes_scanned < max_bytes:
         read_limit = min(max_line_bytes + 1, max_bytes - bytes_scanned)
@@ -69,6 +99,7 @@ def evaluate_jsonl_stream(
         lines_scanned += 1
         overlong = len(raw_line) > max_line_bytes
         if overlong:
+            digest_comparison_row(lines_scanned, "overlong")
             overlong_rows += 1
             truncation_reasons.add("max_line_bytes")
             if not raw_line.endswith(b"\n"):
@@ -87,22 +118,37 @@ def evaluate_jsonl_stream(
             break
 
         if not raw_line.strip():
+            digest_comparison_row(lines_scanned, "blank", hashlib.sha256(raw_line).hexdigest())
             continue
         try:
             row = json.loads(raw_line.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+            digest_comparison_row(lines_scanned, "invalid_json", hashlib.sha256(raw_line).hexdigest())
             invalid_json_rows += 1
             continue
         if not isinstance(row, dict):
+            digest_comparison_row(lines_scanned, "non_object", hashlib.sha256(raw_line).hexdigest())
             non_object_rows += 1
             continue
 
+        # Predictions differ between candidate runs. Hash every other field so
+        # prompt/context changes cannot masquerade as an identical corpus.
+        comparison_sample = {key: value for key, value in row.items() if key != prediction_field}
+
         if split_field is not None and row.get(split_field) != split_value:
+            digest_comparison_row(lines_scanned, "filtered", comparison_sample)
             filtered_split_rows += 1
             continue
 
         prediction = row.get(prediction_field)
         reference = row.get(reference_field)
+        if isinstance(reference, str):
+            status = "selected"
+        elif reference is None:
+            status = "missing_reference"
+        else:
+            status = "non_string_reference"
+        digest_comparison_row(lines_scanned, status, comparison_sample)
         if prediction is None or reference is None:
             missing_value_rows += 1
             continue
@@ -137,6 +183,9 @@ def evaluate_jsonl_stream(
     recall = overlapping_tokens / reference_tokens if reference_tokens else float(prediction_tokens == 0)
     token_f1 = (2 * precision * recall / (precision + recall)) if precision + recall else 0.0
     complete_hash = bytes_scanned == file_size_bytes
+    complete_comparison_corpus = (
+        complete_hash and not truncation_reasons and comparison_corpus_hashable
+    )
     exact_interval = _wilson_interval(exact_matches, valid_samples)
     normalized_interval = _wilson_interval(normalized_exact_matches, valid_samples)
     return {
@@ -150,6 +199,11 @@ def evaluate_jsonl_stream(
             "bytes_hashed": bytes_scanned,
             "file_size_bytes": file_size_bytes,
             "full_content_hashed": complete_hash,
+            "comparison_corpus_sha256": (
+                comparison_corpus_digest.hexdigest() if complete_comparison_corpus else None
+            ),
+            "comparison_corpus_fully_hashed": complete_comparison_corpus,
+            "comparison_corpus_rows_hashed": comparison_rows,
         },
         "fields": {
             "prediction": prediction_field,
@@ -190,6 +244,7 @@ def evaluate_jsonl_stream(
         "privacy": {
             "raw_values_returned": False,
             "raw_values_persisted": False,
+            "content_fingerprints_persisted_locally": True,
         },
     }
 
@@ -262,11 +317,15 @@ def compare_to_baseline(
         raise ValueError("Baseline report is malformed.")
     if metric not in {"exact_match", "normalized_exact_match", "token_f1_micro"}:
         raise ValueError("Unsupported regression metric.")
+    try:
+        tolerance = float(regression_tolerance)
+    except (OverflowError, TypeError, ValueError):
+        tolerance = float("nan")
     if (
         isinstance(regression_tolerance, bool)
         or not isinstance(regression_tolerance, (int, float))
-        or not math.isfinite(regression_tolerance)
-        or not 0 <= regression_tolerance <= 1
+        or not math.isfinite(tolerance)
+        or not 0 <= tolerance <= 1
     ):
         raise ValueError("Regression tolerance must be between 0 and 1.")
 
@@ -296,22 +355,28 @@ def compare_to_baseline(
     ):
         raise ValueError("Baseline report is malformed.")
     if (
-        baseline_report.get("path") != report.get("path")
-        or baseline_fields.get("reference") != current_fields.get("reference")
+        baseline_fields.get("reference") != current_fields.get("reference")
         or baseline_fields.get("split") != current_fields.get("split")
         or baseline_fields.get("selected_split") != current_fields.get("selected_split")
-        or baseline_manifest.get("sha256") != current_manifest.get("sha256")
-        or not baseline_manifest.get("full_content_hashed")
-        or not current_manifest.get("full_content_hashed")
+    ):
+        raise BaselineCorpusMismatchError("evaluation_configuration_mismatch")
+    if (
+        baseline_manifest.get("comparison_corpus_sha256")
+        != current_manifest.get("comparison_corpus_sha256")
+        or not baseline_manifest.get("comparison_corpus_fully_hashed")
+        or not current_manifest.get("comparison_corpus_fully_hashed")
         or baseline_report.get("truncated")
         or report.get("truncated")
+        or baseline_counts.get("invalid_json_rows") != current_counts.get("invalid_json_rows")
+        or baseline_counts.get("non_object_rows") != current_counts.get("non_object_rows")
+        or baseline_counts.get("filtered_split_rows") != current_counts.get("filtered_split_rows")
         or baseline_counts.get("missing_value_rows")
         or current_counts.get("missing_value_rows")
         or baseline_counts.get("non_string_value_rows")
         or current_counts.get("non_string_value_rows")
         or baseline_counts.get("valid_samples") != current_counts.get("valid_samples")
     ):
-        raise ValueError("Baseline comparisons require complete reports over the same fully hashed dataset, reference field, split, and sample set.")
+        raise BaselineCorpusMismatchError("sample_corpus_mismatch")
 
     current_score = current_metrics.get(metric)
     baseline_score = baseline_metrics.get(metric)
@@ -327,6 +392,6 @@ def compare_to_baseline(
         "baseline_score": baseline_score,
         "current_score": current_score,
         "delta": delta,
-        "regression_tolerance": regression_tolerance,
-        "status": "regression" if delta < -regression_tolerance else "passed",
+        "regression_tolerance": tolerance,
+        "status": "regression" if delta < -tolerance else "passed",
     }

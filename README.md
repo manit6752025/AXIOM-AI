@@ -443,7 +443,51 @@ axiom mcp allow axiom_workspace_context
 
 Agents can then call `axiom_workspace_context` before choosing more specific tools. It reports which AXIOM MCP tools the active profile permits. External developer-tool availability does not establish sign-in or credential status.
 
-`axiom_workspace_assets` locates workspace-relative model directories and JSONL datasets. It returns paths only, with up to 200 results per category and a 50,000-entry scan budget per category; its response separates result-limit and scan-truncation status. The context and asset tools use the MCP server's working directory as the workspace root; start the server from the target project, or set the client's working-directory option where supported. MCP permissions are stored under that workspace's `.axiom/` directory, so run the `axiom mcp allow` commands from the same project root. Pass returned paths to `axiom_model_info` or `axiom_dataset_inspect`.
+`axiom_workspace_assets` locates workspace-relative model directories and JSONL datasets. It returns paths only, with up to 200 results per category and a 50,000-entry scan budget per category; its response separates result-limit and scan-truncation status. The context and asset tools use the MCP server's working directory as the workspace root; start the server from the target project, or set the client's working-directory option where supported. MCP permissions are stored under that workspace's `.axiom/` directory, so run the `axiom mcp allow` commands from the same project root. Pass returned paths to `axiom_model_info`, `axiom_dataset_inspect`, or `axiom_dataset_clean_preview`.
+
+`axiom_dataset_inspect` accepts a workspace-relative `.jsonl` path and returns a bounded structural profile with row counts, field types/null rates, duplicate summaries, warnings, and truncation status. It scans at most 64 MiB, 100,000 rows, and 1 MiB per line; row values and absolute paths are never returned. Optional `required_fields` and `expected_types` checks cover schema presence across the profiled file, not presence in every row; truncated scans, invalid rows, truncated field names, or field-tracking limits return `validation.status: inconclusive`. Pass `duplicate_key_fields` and `duplicate_rate_threshold` to summarize repeated IDs, or `text_fields` to request token-length histograms. Sensitive-looking field names are always flagged heuristically; scanning values for PII patterns stays off unless the call explicitly sets `scan_pii=true`.
+
+`axiom_training_preflight` combines local model metadata, the LoRA trainer's own bounded JSONL text validation, training-package metadata, and a rough hardware estimate. It accepts workspace-relative model and dataset paths plus an optional `text_field` (default `text`). The data is read locally for validation, but no dataset values or model weights are returned or loaded. The tool does not create a job, write files, or access the network. Package checks inspect version metadata but do not import or initialize the runtime. It reports `blockers_found`, `review_needed`, or `no_known_blockers`; the last status is not a promise that training will load or fit. A hardware check marked `warn` means the generic planner estimated a fit, not that the actual training loop was tested. The actual trainer is LoRA-only, while the generic planner may estimate a QLoRA fallback, and the hardware estimate does not verify Apple MPS or CPU fit. Grant it separately:
+
+```bash
+axiom mcp allow axiom_training_preflight
+```
+
+`axiom_training_job_start`, `axiom_training_job_status`, and `axiom_training_job_cancel` expose AXIOM's existing local LoRA trainer to agents. Start accepts workspace-relative model and JSONL paths, writes adapter output only under an existing `outputs/` directory, supports up to 1,000 steps, never downloads weights or executes remote code, and is serialized by AXIOM's single-job lock. The start tool creates a local job record and launches training; the adapter is written later when training finishes. It consumes local compute and writes model artifacts, so each tool is default-deny and has its own permission. The server instructions tell agents to run preflight, show the exact configuration, and wait for an explicit user request before starting that run. Tool permission itself grants standing capability. Status returns workspace-relative paths and omits local logs and detailed failure strings. Cancellation stops at the next safe training boundary; once `finalizing` begins, the adapter is saved and cancellation is no longer accepted.
+
+Grant these capabilities only when needed:
+
+```bash
+axiom mcp allow axiom_training_job_start
+axiom mcp allow axiom_training_job_status
+axiom mcp allow axiom_training_job_cancel
+```
+
+`axiom_engine_preflight` checks a workspace-relative trusted model and optional LoRA adapter before inference. It accepts an estimated prompt-token target (up to 8,192), an output-token limit (up to 256), an optional device/precision, and optional caller-supplied RAM/VRAM budgets. It reads model metadata and, for a safetensors base with an adapter, checks adapter tensor shapes and base tensor names. For GGUF plus LoRA, it leaves adapter compatibility at `not_checked`; the native loader checks shapes only when inference runs. It reports runtime readiness and advisory memory estimates without loading model weights, running inference, accessing the network, or writing files; absolute paths are not returned. The agent should pass the same device and precision to `axiom_engine_generate`. Use RAM budgets for CPU/MPS and VRAM budgets for CUDA/ROCm/XPU. Without a compatible adapter check, relevant memory budget, or explicit precision, the overall assessment remains `review_needed`; `preflight_clear` is conditional on the caller's budget and never guarantees successful loading or generation. It has a separate default-deny permission:
+
+```bash
+axiom mcp allow axiom_engine_preflight
+```
+
+`axiom_engine_generate` runs one request through AXIOM's native local model engine. It accepts a workspace-relative trusted model, an optional workspace-relative LoRA adapter, a prompt up to 8,000 characters, up to 256 generated tokens, and optional `device` (`auto`, `cpu`, `cuda`, `rocm`, `mps`, `xpu`) and `precision` (`auto`, `fp16`, `bf16`, `fp32`) selections. The result returns generated text, timing/token metadata, and whether token truncation shortened the prompt. AXIOM does not persist the prompt or response and does not access the network or write output files; an MCP host may retain the tool call in its own transcript. It runs synchronously without a wall-clock timeout or MCP cancellation, so model loading and generation can take time. It consumes local compute and returns prompt-derived content, so it has a separate default-deny permission and should be called only for an explicitly requested local response:
+
+```bash
+axiom mcp allow axiom_engine_generate
+```
+
+`axiom_dataset_clean_preview` reports bounded keep/remove counts and a proposed output path before cleanup. It accepts workspace-relative `.jsonl` paths, returns no row values, and never writes files. When `truncated` is true, counts describe only the scanned portion; overlong rows are unclassified because the cleaner may still keep them. CR-only line endings and invalid UTF-8 produce warnings when preview decisions may differ from cleaner behavior. The preview is advisory because the source can change between calls, so re-preview immediately before writing. `axiom_dataset_clean` is a separate write permission: it repeats the preview, refuses partial or mismatched previews, and enforces the same byte, row, and line limits while writing. It only accepts workspace-relative paths, writes a new output file, and refuses to overwrite an existing destination. The output parent directory must already exist. Review the preview counts and destination with the user before calling the write tool. Grant preview and writing separately:
+
+```bash
+axiom mcp allow axiom_dataset_clean_preview
+axiom mcp allow axiom_dataset_clean
+```
+
+`axiom_evaluation_run` scores already-produced predictions in JSONL files under the workspace's `data/` directory. Pass either a returned `data/file.jsonl` asset path or a path relative to `data/`. It returns aggregate exact-match, normalized exact-match, token F1, counts, confidence intervals, and an optional baseline comparison; raw prediction/reference values are neither returned nor persisted. The MCP limits are 64 MiB, 100,000 rows, and 1 MiB per line. `baseline` defaults to false; partial runs cannot be marked as a baseline, and a partial or mismatched-corpus comparison returns `unavailable` rather than pass/fail while preserving the metrics. Baseline comparisons match row order and every non-prediction field, including references and prompt/context, across output files. The whole-file and comparison fingerprints are stored locally for integrity and baseline matching; MCP responses omit those hashes. These are lexical metrics, not semantic quality scores; `model_label` is user-supplied metadata. `axiom_evaluation_history` lists saved aggregate results or returns one run by ID. Evaluation and history have separate default-deny permissions:
+
+```bash
+axiom mcp allow axiom_evaluation_run
+axiom mcp allow axiom_evaluation_history
+```
 
 To let the agent use additional AXIOM tools, allow only the ones you need:
 
@@ -480,11 +524,20 @@ axiom mcp profile use readonly
 | `axiom_info` | AXIOM version and capabilities |
 | `axiom_workspace_context` | Read a privacy-bounded project, hardware, and developer-tool snapshot; command suggestions need user approval |
 | `axiom_workspace_assets` | Find model directories and JSONL datasets with bounded, workspace-relative path scans |
+| `axiom_training_preflight` | Check local LoRA inputs and estimates without loading weights or starting a job |
+| `axiom_training_job_start` | Start a user-requested bounded local LoRA job; writes adapter output under `outputs/` |
+| `axiom_training_job_status` | Read workspace-scoped local LoRA job progress without logs or absolute paths |
+| `axiom_training_job_cancel` | Request cancellation before adapter finalization |
+| `axiom_engine_preflight` | Check local native model/adapter structure and advisory memory estimates without inference |
+| `axiom_engine_generate` | Run one bounded local native inference request and return generated text |
 | `axiom_system_info` | Detected hardware |
 | `axiom_model_list` | Registered models |
 | `axiom_model_info` | Inspect a local model folder |
-| `axiom_dataset_inspect` | Dataset quality report |
-| `axiom_dataset_clean` | Write a cleaned copy of a JSONL dataset |
+| `axiom_dataset_inspect` | Bounded JSONL profile; sensitive-name heuristics run by default, value PII scanning is opt-in |
+| `axiom_dataset_clean_preview` | Preview bounded cleanup counts without returning row contents or writing files |
+| `axiom_dataset_clean` | Write a new cleaned JSONL copy inside the workspace |
+| `axiom_evaluation_run` | Score precomputed outputs offline and save aggregate metrics |
+| `axiom_evaluation_history` | Read saved aggregate evaluation metrics |
 | `axiom_training_plan` | Hardware-aware training plan |
 | `axiom_supercompress_status` | Whether SuperCompress is configured |
 | `axiom_supercompress` | Compress context before inference |

@@ -21,6 +21,8 @@ class ModelInspection:
     has_safetensors: bool
     has_gguf: bool
     has_pytorch_weights: bool
+    has_transformers_weights: bool
+    transformers_weight_size_bytes: int
     capabilities: list[str]
     estimated_vram_gb: float | None
     status: str
@@ -135,6 +137,12 @@ def inspect_model(path: str) -> ModelInspection:
     ]
 
     weight_size = sum(file.stat().st_size for file in weight_files)
+    transformers_weight_files = [
+        file
+        for file in weight_files
+        if file.suffix.lower() in {".safetensors", ".bin", ".pt", ".pth"}
+    ]
+    transformers_weight_size = sum(file.stat().st_size for file in transformers_weight_files)
 
     tokenizer_files = {
         "tokenizer.json",
@@ -181,6 +189,8 @@ def inspect_model(path: str) -> ModelInspection:
         has_safetensors=safetensors,
         has_gguf=gguf,
         has_pytorch_weights=pytorch,
+        has_transformers_weights=transformers_weight_size > 0,
+        transformers_weight_size_bytes=transformers_weight_size,
         capabilities=_detect_capabilities(config),
         estimated_vram_gb=estimated_vram_gb,
         status=status,
