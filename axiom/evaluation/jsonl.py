@@ -304,9 +304,10 @@ def compare_evaluation_examples_streams(
     include_text: bool = False,
     max_excerpt_chars: int = 2_000,
 ) -> dict[str, Any]:
-    """Verify two saved evaluation snapshots and sample raw exact-match transitions."""
-    if not isinstance(category, str) or category not in {"fixed", "regressed"}:
-        raise ValueError("Choose a fixed or regressed exact-match transition.")
+    """Verify saved evaluation snapshots and inspect exact-match or token-F1 examples."""
+    categories = {"fixed", "regressed", "token_f1_improved", "token_f1_worsened"}
+    if not isinstance(category, str) or category not in categories:
+        raise ValueError("Choose a fixed/regressed exact-match or token-F1 transition.")
     if type(limit) is not int or not 1 <= limit <= 3:
         raise ValueError("Evaluation example limit must be between 1 and 3.")
     if type(include_text) is not bool:
@@ -460,7 +461,9 @@ def compare_evaluation_examples_streams(
         for _ in range(2)
     ]
     transitions = {"fixed": 0, "regressed": 0}
+    token_f1_changes = {"improved": 0, "worsened": 0}
     examples: list[dict[str, Any]] = []
+    ranked_examples: list[tuple[float, int, dict[str, Any]]] = []
 
     def read_row(raw: bytes, state: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
         if not raw.strip():
@@ -474,6 +477,10 @@ def compare_evaluation_examples_streams(
         if state["split_field"] is not None and row.get(state["split_field"]) != state["split_value"]:
             return "filtered", row
         return "selected", row
+
+    def row_token_f1(pair_counts: tuple[bool, bool, int, int, int]) -> float:
+        token_total = pair_counts[2] + pair_counts[3]
+        return 2 * pair_counts[4] / token_total if token_total else 1.0
 
     for line_number in range(1, min(baseline["limits"]["max_rows"], candidate["limits"]["max_rows"]) + 1):
         raw_lines: list[bytes] = []
@@ -564,17 +571,43 @@ def compare_evaluation_examples_streams(
             raise ValueError("A selected evaluation row no longer has string fields.")
         if baseline_reference != candidate_reference:
             raise ValueError("Evaluation files do not contain the same reference values.")
-        baseline_correct = text_pair_counts(baseline_prediction, baseline_reference)[0]
-        candidate_correct = text_pair_counts(candidate_prediction, candidate_reference)[0]
+        baseline_pair = text_pair_counts(baseline_prediction, baseline_reference)
+        candidate_pair = text_pair_counts(candidate_prediction, candidate_reference)
+        baseline_correct = baseline_pair[0]
+        candidate_correct = candidate_pair[0]
+        baseline_token_f1 = row_token_f1(baseline_pair)
+        candidate_token_f1 = row_token_f1(candidate_pair)
+        token_f1_delta = candidate_token_f1 - baseline_token_f1
         if not baseline_correct and candidate_correct:
-            row_category = "fixed"
+            transitions["fixed"] += 1
         elif baseline_correct and not candidate_correct:
-            row_category = "regressed"
-        else:
-            continue
-        transitions[row_category] += 1
-        if row_category == category and len(examples) < limit:
+            transitions["regressed"] += 1
+        if token_f1_delta > 0:
+            token_f1_changes["improved"] += 1
+        elif token_f1_delta < 0:
+            token_f1_changes["worsened"] += 1
+
+        if category in {"fixed", "regressed"}:
+            row_matches_category = (
+                (category == "fixed" and not baseline_correct and candidate_correct)
+                or (category == "regressed" and baseline_correct and not candidate_correct)
+            )
+            if not row_matches_category or len(examples) >= limit:
+                continue
             example: dict[str, Any] = {"row_number": line_number}
+        else:
+            row_matches_category = (
+                (category == "token_f1_improved" and token_f1_delta > 0)
+                or (category == "token_f1_worsened" and token_f1_delta < 0)
+            )
+            if not row_matches_category:
+                continue
+            example = {
+                "row_number": line_number,
+                "baseline_token_f1_per_row": baseline_token_f1,
+                "current_token_f1_per_row": candidate_token_f1,
+                "token_f1_per_row_delta": token_f1_delta,
+            }
             if include_text:
                 example.update({
                     "baseline_prediction_excerpt": baseline_prediction[:max_excerpt_chars],
@@ -586,7 +619,27 @@ def compare_evaluation_examples_streams(
                         "reference": len(baseline_reference) > max_excerpt_chars,
                     },
                 })
-            examples.append(example)
+            if category == "token_f1_improved":
+                priority = -token_f1_delta
+            else:
+                priority = token_f1_delta
+            ranked_examples.append((priority, line_number, example))
+            ranked_examples.sort(key=lambda item: (item[0], item[1]))
+            if len(ranked_examples) > limit:
+                ranked_examples.pop()
+            continue
+        if include_text:
+            example.update({
+                "baseline_prediction_excerpt": baseline_prediction[:max_excerpt_chars],
+                "candidate_prediction_excerpt": candidate_prediction[:max_excerpt_chars],
+                "reference_excerpt": baseline_reference[:max_excerpt_chars],
+                "text_truncated": {
+                    "baseline_prediction": len(baseline_prediction) > max_excerpt_chars,
+                    "candidate_prediction": len(candidate_prediction) > max_excerpt_chars,
+                    "reference": len(baseline_reference) > max_excerpt_chars,
+                },
+            })
+        examples.append(example)
 
     for index, state in enumerate(states):
         if (
@@ -599,12 +652,21 @@ def compare_evaluation_examples_streams(
         ):
             raise ValueError("Evaluation source no longer matches its saved complete snapshot.")
 
+    if category in {"fixed", "regressed"}:
+        sample_strategy = "first_in_file_order_for_raw_exact_match_transition"
+    elif category == "token_f1_improved":
+        sample_strategy = "largest_per_row_token_f1_delta"
+        examples = [item[2] for item in ranked_examples]
+    else:
+        sample_strategy = "smallest_per_row_token_f1_delta"
+        examples = [item[2] for item in ranked_examples]
     return {
         "rows_compared": actual_counts[0]["valid_samples"],
         "transition_counts": transitions,
+        "token_f1_change_counts": token_f1_changes,
         "examples": examples,
         "sample_limit": limit,
-        "sample_strategy": "first_rows_in_file_order_for_raw_exact_match_transition",
+        "sample_strategy": sample_strategy,
         "scope": {
             "complete_source_snapshots_verified": True,
             "prediction_reference_text_returned": include_text and bool(examples),
