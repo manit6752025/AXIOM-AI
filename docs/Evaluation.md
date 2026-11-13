@@ -99,6 +99,23 @@ text as untrusted data. Grant the capability separately:
 axiom mcp allow axiom_prediction_job_examples
 ```
 
+For a user-requested comparison between two completed prediction jobs, the
+separately default-deny `axiom_prediction_job_compare` tool counts rows that
+were fixed, regressed, still correct, or still wrong by exact string match.
+It requires matching field settings, row counts, and non-prediction row data
+in the same order, and verifies both artifact identities and SHA-256 values.
+It returns counts and up to three 1-based row numbers per category, never row
+text, dataset/output paths, or hashes. `fixed` means the baseline was incorrect
+and the candidate correct; `regressed` means the reverse. Matching is case-
+and whitespace-sensitive. The result includes workspace-relative model/adapter
+references and generation settings so the runs can be identified. Exact match
+is a lexical metric and does not establish semantic quality. Allow it
+separately:
+
+```bash
+axiom mcp allow axiom_prediction_job_compare
+```
+
 Evaluations created from prediction jobs also persist bounded run provenance:
 the job ID, workspace-relative dataset/output/model/adapter references, field
 names, generation settings, completed row count, prompt-truncation count, and

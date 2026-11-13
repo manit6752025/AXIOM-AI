@@ -6,6 +6,7 @@ model directory and all from_pretrained calls set local_files_only=True.
 
 from __future__ import annotations
 
+import errno
 import importlib.metadata
 import importlib.util
 import json
@@ -14,7 +15,9 @@ import math
 import os
 import random
 import re
+import subprocess
 import threading
+import time
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -30,8 +33,13 @@ _MAX_DATASET_BYTES = 50 * 1024 * 1024
 _MAX_ROWS = 10_000
 _MAX_LINE_BYTES = 1_048_576
 _MAX_TEXT_CHARS = 300_000
+TRAINING_MAX_DATASET_BYTES = _MAX_DATASET_BYTES
+TRAINING_MAX_RECORDS = _MAX_ROWS
+TRAINING_MAX_LINE_BYTES = _MAX_LINE_BYTES
+TRAINING_MAX_TEXT_CHARS = _MAX_TEXT_CHARS
 _MAX_MODEL_ENTRIES = 50_000
 _MAX_STEPS = 1_000
+_MAX_LOSS_SAMPLES = 64
 _MAX_SEQUENCE_LENGTH = 2_048
 _TEXT_FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
 _PACKAGES = {"torch": "torch", "transformers": "transformers", "peft": "peft", "accelerate": "accelerate"}
@@ -53,6 +61,80 @@ class FineTuningCancelledError(FineTuningError):
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _training_loss_sample_steps(max_steps: Any) -> set[int]:
+    if isinstance(max_steps, bool) or not isinstance(max_steps, int) or not 1 <= max_steps <= _MAX_STEPS:
+        return set()
+    sample_count = min(max_steps, _MAX_LOSS_SAMPLES)
+    if sample_count == 1:
+        return {1}
+    return {
+        1 + ((max_steps - 1) * index) // (sample_count - 1)
+        for index in range(sample_count)
+    }
+
+
+def _validated_training_loss_samples(job: dict[str, Any]) -> list[dict[str, int | float]]:
+    config = job.get("config")
+    max_steps = config.get("max_steps") if isinstance(config, dict) else None
+    completed_steps = job.get("completed_steps")
+    if (
+        isinstance(max_steps, bool)
+        or not isinstance(max_steps, int)
+        or not 1 <= max_steps <= _MAX_STEPS
+        or isinstance(completed_steps, bool)
+        or not isinstance(completed_steps, int)
+        or not 0 <= completed_steps <= max_steps
+    ):
+        return []
+    raw_samples = job.get("loss_samples")
+    if not isinstance(raw_samples, list):
+        return []
+    samples: list[dict[str, int | float]] = []
+    previous_step = 0
+    sample_steps = _training_loss_sample_steps(max_steps)
+    for sample in raw_samples[:_MAX_LOSS_SAMPLES]:
+        if not isinstance(sample, dict):
+            continue
+        step = sample.get("step")
+        loss = sample.get("loss")
+        if isinstance(loss, bool) or not isinstance(loss, (int, float)):
+            continue
+        try:
+            loss_value = float(loss)
+        except (OverflowError, TypeError, ValueError):
+            continue
+        if (
+            isinstance(step, bool)
+            or not isinstance(step, int)
+            or step not in sample_steps
+            or not previous_step < step <= min(max_steps, completed_steps)
+            or not math.isfinite(loss_value)
+        ):
+            continue
+        samples.append({"step": step, "loss": loss_value})
+        previous_step = step
+    return samples
+
+
+def training_loss_trace_summary(job: dict[str, Any]) -> dict[str, Any]:
+    """Return a bounded, sanitized diagnostic trace for MCP job status."""
+    samples = _validated_training_loss_samples(job)
+    return {
+        "available": bool(samples),
+        "samples": samples,
+        "sample_count": len(samples),
+        "maximum_samples": _MAX_LOSS_SAMPLES,
+        "sampling_strategy": "evenly_spaced_across_configured_steps",
+        "scope_note": (
+            "Each point is the training loss for the single selected training record at that step, "
+            "so the trace can be noisy. It is not validation loss and does not establish "
+            "generalization or adapter quality; use held-out evaluation to assess quality."
+        ),
+        "validation_loss_available": False,
+        "generalization_assessed": False,
+    }
 
 
 def _clip(exc: BaseException, limit: int) -> str:
@@ -409,19 +491,98 @@ def _read_job(job_id: str) -> dict[str, Any] | None:
     return job if isinstance(job, dict) else None
 
 
+def _recover_if_stale_locked(job: dict[str, Any]) -> dict[str, Any]:
+    """Recover an exited job while the cross-process job-state lock is held."""
+    job_id = job.get("id")
+    if not isinstance(job_id, str):
+        return job
+    current = _read_job(job_id)
+    if current is None:
+        return job
+    if current.get("status") in {"queued", "running", "cancelling", "finalizing"}:
+        runner_state = _process_state(current.get("runner_pid"), current.get("runner_identity"))
+        if runner_state == "exited":
+            current = dict(current)
+            reason = "The AXIOM process exited before this training job completed. Start a new job after checking resources."
+            current.update(status="failed", error=reason, finished_at=_now(), updated_at=_now())
+            logs = current.get("logs")
+            current["logs"] = [*(logs if isinstance(logs, list) else []), f"Failed: {reason}"][-80:]
+            _write_job(current)
+        elif runner_state == "unknown":
+            current = dict(current)
+            current["_runner_state"] = "unknown"
+    return current
+
+
 def _recover_if_stale(job: dict[str, Any]) -> dict[str, Any]:
-    if job.get("status") in {"queued", "running", "cancelling", "finalizing"} and not _pid_is_alive(job.get("runner_pid")):
-        job = dict(job)
-        reason = "The AXIOM process exited before this training job completed. Start a new job after checking resources."
-        job.update(status="failed", error=reason, finished_at=_now(), updated_at=_now())
-        job["logs"] = [*job.get("logs", []), f"Failed: {reason}"][-80:]
-        _write_job(job)
-    return job
+    if job.get("status") not in {"queued", "running", "cancelling", "finalizing"}:
+        return job
+    if _process_state(job.get("runner_pid"), job.get("runner_identity")) == "alive":
+        return job
+    with _LOCAL_LOCK, file_lock(jobs_directory() / ".job-state.lock"):
+        return _recover_if_stale_locked(job)
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:
     job = _read_job(job_id)
     return _recover_if_stale(job) if job is not None else None
+
+
+def wait_finetuning_job(
+    job_id: str,
+    *,
+    timeout_seconds: int | float = 30,
+) -> dict[str, Any]:
+    """Wait briefly for a local fine-tuning job outcome."""
+    try:
+        timeout = float(timeout_seconds)
+    except (OverflowError, TypeError, ValueError):
+        timeout = float("nan")
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not math.isfinite(timeout)
+        or not 0 <= timeout <= 30
+    ):
+        raise ValueError("Training job wait must be between 0 and 30 seconds.")
+
+    started = time.monotonic()
+    deadline = started + timeout
+    terminal_statuses = {"completed", "cancelled", "failed"}
+    active_statuses = {"queued", "running", "cancelling", "finalizing"}
+    job: dict[str, Any] | None = None
+    while True:
+        try:
+            job = get_job(job_id)
+        except FineTuningError:
+            outcome = "state_unavailable"
+            break
+        if job is None:
+            outcome = "not_found"
+            break
+        if job.get("_runner_state") == "unknown":
+            outcome = "state_unavailable"
+            break
+        status = job.get("status")
+        if status in terminal_statuses:
+            outcome = status
+            break
+        if status not in active_statuses:
+            outcome = "state_unavailable"
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            outcome = "timed_out"
+            break
+        time.sleep(min(0.5, remaining))
+
+    waited_seconds = round(max(0.0, time.monotonic() - started), 3)
+    return {
+        "job": job,
+        "wait_outcome": outcome,
+        "timed_out": outcome == "timed_out",
+        "waited_seconds": waited_seconds,
+    }
 
 
 def cancel_finetuning_job(job_id: str) -> dict[str, Any] | None:
@@ -430,7 +591,7 @@ def cancel_finetuning_job(job_id: str) -> dict[str, Any] | None:
         job = _read_job(job_id)
         if job is None:
             return None
-        job = _recover_if_stale(job)
+        job = _recover_if_stale_locked(job)
         if job.get("status") not in {"queued", "running", "cancelling"}:
             return job
         if job.get("status") != "cancelling":
@@ -478,18 +639,115 @@ def _job_belongs_to_workspace(job: dict[str, Any], root: Path) -> bool:
     return True
 
 
-def _pid_is_alive(pid: Any) -> bool:
+def _windows_process_state(pid: int) -> tuple[str, str | None]:
+    """Inspect Windows process liveness without using os.kill, which is unsafe there."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel.WaitForSingleObject.restype = wintypes.DWORD
+        kernel.GetProcessTimes.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        ]
+        kernel.GetProcessTimes.restype = wintypes.BOOL
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel.OpenProcess(0x1000 | 0x00100000, False, pid)
+        if not handle:
+            return ("exited", None) if ctypes.get_last_error() == 87 else ("unknown", None)
+        try:
+            wait_result = kernel.WaitForSingleObject(handle, 0)
+            if wait_result == 0:  # WAIT_OBJECT_0: the process has exited.
+                return "exited", None
+            if wait_result != 258:  # WAIT_TIMEOUT: the process is still running.
+                return "unknown", None
+            created = wintypes.FILETIME()
+            exited = wintypes.FILETIME()
+            kernel_time = wintypes.FILETIME()
+            user_time = wintypes.FILETIME()
+            if not kernel.GetProcessTimes(
+                handle,
+                ctypes.byref(created),
+                ctypes.byref(exited),
+                ctypes.byref(kernel_time),
+                ctypes.byref(user_time),
+            ):
+                return "unknown", None
+            identity = str((created.dwHighDateTime << 32) | created.dwLowDateTime)
+            return "alive", identity
+        finally:
+            kernel.CloseHandle(handle)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return "unknown", None
+
+
+def _process_start_identity(pid: int) -> str | None:
+    """Return an OS process start token so reused PIDs are not mistaken for owners."""
+    if os.name == "nt":
+        state, identity = _windows_process_state(pid)
+        return identity if state == "alive" else None
+    proc_stat = Path(f"/proc/{pid}/stat")
+    if proc_stat.is_file() and not proc_stat.is_symlink():
+        try:
+            stat_text = proc_stat.read_text(encoding="ascii")
+            end_of_command = stat_text.rfind(")")
+            fields = stat_text[end_of_command + 2 :].split()
+            if end_of_command >= 0 and len(fields) > 19:
+                return f"linux:{fields[19]}"
+        except (OSError, UnicodeError, IndexError):
+            return None
+    try:
+        result = subprocess.run(
+            ["/bin/ps", "-p", str(pid), "-o", "lstart="],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=2,
+            env={"LC_ALL": "C"},
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    token = result.stdout.strip()
+    return token[:128] if token else None
+
+
+def _process_state(pid: Any, identity: Any) -> str:
+    """Return alive, exited, or unknown without treating query failure as exit."""
     if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
-        return False
+        return "exited"
+    if os.name == "nt":
+        state, observed_identity = _windows_process_state(pid)
+        if state != "alive":
+            return state
+        if not isinstance(identity, str) or not identity:
+            return "unknown"
+        return "alive" if observed_identity == identity else "exited"
     try:
         os.kill(pid, 0)
-        return True
     except ProcessLookupError:
-        return False
+        return "exited"
     except PermissionError:
-        return True
-    except OSError:
-        return False
+        pass
+    except OSError as exc:
+        if exc.errno == errno.ESRCH:
+            return "exited"
+        if exc.errno != errno.EPERM:
+            return "unknown"
+    if not isinstance(identity, str) or not identity:
+        return "unknown"
+    observed_identity = _process_start_identity(pid)
+    if observed_identity is None:
+        return "unknown"
+    return "alive" if observed_identity == identity else "exited"
 
 
 def _acquire_lock(
@@ -499,25 +757,48 @@ def _acquire_lock(
 ) -> None:
     lock = _lock_path()
     lock.parent.mkdir(parents=True, exist_ok=True)
-    with _LOCAL_LOCK:
+    guard = lock.with_name(f"{lock.name}.guard")
+    with _LOCAL_LOCK, file_lock(guard):
         if lock.exists():
             try:
                 current = json.loads(lock.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
-                current = {}
-            if _pid_is_alive(current.get("pid")):
+                current = None
+            pid = current.get("pid") if isinstance(current, dict) else None
+            owner_state = (
+                _process_state(pid, current.get("process_identity"))
+                if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0
+                else "unknown"
+            )
+            if owner_state != "exited":
                 raise ActiveFineTuningJobError(conflict_message)
             try:
                 lock.unlink(missing_ok=True)
             except OSError:
                 raise ActiveFineTuningJobError("The fine-tuning lock could not be recovered safely.") from None
-        payload = json.dumps({"job_id": job_id, "pid": os.getpid(), "created_at": _now()})
+        payload = json.dumps({
+            "job_id": job_id,
+            "pid": os.getpid(),
+            "process_identity": _process_start_identity(os.getpid()),
+            "created_at": _now(),
+        })
+        temporary = lock.with_name(f".{lock.name}.{uuid.uuid4().hex}.tmp")
         try:
-            fd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
-            raise ActiveFineTuningJobError(conflict_message) from None
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(payload)
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+            try:
+                os.link(temporary, lock)
+            except FileExistsError:
+                raise ActiveFineTuningJobError(conflict_message) from None
+            except OSError:
+                raise ActiveFineTuningJobError("The fine-tuning lock could not be established safely.") from None
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _release_lock(job_id: str) -> None:
@@ -566,6 +847,7 @@ def _new_job(
         "schema_version": 1,
         "id": job_id,
         "runner_pid": os.getpid(),
+        "runner_identity": _process_start_identity(os.getpid()),
         "status": "queued",
         "created_at": now,
         "updated_at": now,
@@ -575,6 +857,7 @@ def _new_job(
         "cancel_requested": False,
         "completed_steps": 0,
         "loss": None,
+        "loss_samples": [],
         "error": None,
         "logs": ["Job queued. The base model and dataset are local inputs; no weights will be downloaded."],
     }
@@ -886,6 +1169,11 @@ def execute_finetuning_job(
     job = _read_job(job_id)
     if job is None:
         return
+    loss_sample_steps = _training_loss_sample_steps(
+        (job.get("config") or {}).get("max_steps")
+        if isinstance(job.get("config"), dict)
+        else None
+    )
 
     def check_cancel() -> None:
         current = _read_job(job_id)
@@ -906,12 +1194,25 @@ def execute_finetuning_job(
             if current is None:
                 return
             message = f"Step {max(0, step)}/{current['config']['max_steps']}" + (f" · loss {loss:.5f}" if loss is not None else "")
-            updated = _update_job(
-                job_id,
-                completed_steps=min(max(0, step), current["config"]["max_steps"]),
-                loss=loss,
-                logs=[*current.get("logs", []), message][-80:],
-            )
+            changes: dict[str, Any] = {
+                "completed_steps": min(max(0, step), current["config"]["max_steps"]),
+                "loss": loss,
+                "logs": [*current.get("logs", []), message][-80:],
+            }
+            if (
+                step in loss_sample_steps
+                and isinstance(loss, (int, float))
+                and not isinstance(loss, bool)
+                and math.isfinite(float(loss))
+            ):
+                loss_samples = _validated_training_loss_samples(current)
+                sample = {"step": step, "loss": float(loss)}
+                if loss_samples and loss_samples[-1]["step"] == step:
+                    loss_samples[-1] = sample
+                elif not loss_samples or loss_samples[-1]["step"] < step:
+                    loss_samples.append(sample)
+                changes["loss_samples"] = loss_samples[-_MAX_LOSS_SAMPLES:]
+            updated = _update_job(job_id, **changes)
             if on_progress:
                 on_progress(updated)
 
