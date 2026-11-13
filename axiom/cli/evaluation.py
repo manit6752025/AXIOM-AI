@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 import math
 import os
-import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,13 +16,11 @@ from axiom.evaluation.jsonl import (
     DEFAULT_MAX_BYTES,
     DEFAULT_MAX_LINE_BYTES,
     DEFAULT_MAX_ROWS,
-    compare_to_baseline,
-    create_output_manifest,
     evaluate_jsonl_stream,
 )
+from axiom.evaluation.service import persist_evaluation_run
 from axiom.evaluation.store import EvaluationStore
 from axiom.path_safety import open_regular_file
-from axiom.version import __version__
 
 console = Console()
 
@@ -90,43 +86,22 @@ def register_evaluation_cli(app: typer.Typer) -> None:
                 ):
                     _error("Dataset changed during evaluation; retry against a stable file.")
 
-            store = EvaluationStore()
-            comparison = None
-            if baseline_run_id:
-                baseline_record = store.get(baseline_run_id)
-                if baseline_record is None:
-                    _error(f"Baseline evaluation run not found: {baseline_run_id}")
-                if baseline_record.get("baseline") is not True:
-                    _error("Only a run explicitly marked as a baseline can be compared.")
-                comparison = compare_to_baseline(
-                    report,
-                    baseline_record,
-                    baseline_run_id=baseline_run_id,
-                    metric=metric,
-                    regression_tolerance=tolerance,
-                )
         except (OSError, TimeoutError, ValueError) as exc:
             _error(str(exc))
 
-        now = datetime.now(UTC).isoformat()
-        record = {
-            "schema_version": EvaluationStore.SCHEMA_VERSION,
-            "id": uuid.uuid4().hex,
-            "name": name or f"{source.stem} offline evaluation",
-            "created_at": now,
-            "model_label": model_label,
-            "baseline": baseline,
-            "comparison": comparison,
-            "status": "partial" if report["truncated"] else "complete",
-            "execution_status": "precomputed_outputs_only",
-            "software": {"axiom": __version__},
-            "output_manifest": create_output_manifest(report),
-            "report": report,
-        }
         try:
-            EvaluationStore().add(record)
-        except (OSError, TimeoutError, ValueError) as exc:
+            record = persist_evaluation_run(
+                report,
+                name=name or f"{source.stem} offline evaluation",
+                model_label=model_label,
+                baseline=baseline,
+                baseline_run_id=baseline_run_id,
+                regression_metric=metric,
+                regression_tolerance=tolerance,
+            )
+        except (OSError, TimeoutError, ValueError, RuntimeError) as exc:
             _error(f"Evaluation report could not be saved: {exc}")
+        comparison = record.get("comparison")
         if json_output:
             console.print_json(json.dumps({"run": record}, ensure_ascii=False, allow_nan=False))
             return
@@ -135,7 +110,10 @@ def register_evaluation_cli(app: typer.Typer) -> None:
         for metric_name, score in report["metrics"].items():
             console.print(f"{metric_name}: {score:.4f}")
         if comparison:
-            console.print(f"Baseline gate: {comparison['status']} ({comparison['delta']:+.4f})")
+            if comparison["status"] == "unavailable":
+                console.print(f"Baseline gate: unavailable ({comparison['reason']})")
+            else:
+                console.print(f"Baseline gate: {comparison['status']} ({comparison['delta']:+.4f})")
         console.print("No model inference was run; only precomputed outputs were scored.")
 
     @app.command("list")
@@ -164,12 +142,23 @@ def register_evaluation_cli(app: typer.Typer) -> None:
         table.add_column("Status")
         for run in runs:
             report = run.get("report", {})
+            comparison = run.get("comparison")
+            if run.get("baseline"):
+                status = "baseline"
+            elif run.get("status") == "partial":
+                status = "partial · gate unavailable" if isinstance(comparison, dict) else "partial"
+            elif isinstance(comparison, dict) and comparison.get("status") == "unavailable":
+                status = f"gate unavailable: {comparison.get('reason', 'unknown reason')}"
+            elif isinstance(comparison, dict):
+                status = str(comparison.get("status", run.get("status", "unknown")))
+            else:
+                status = str(run.get("status", "unknown"))
             table.add_row(
                 str(run.get("id", ""))[:12],
                 str(run.get("name", "Unnamed")),
                 str(report.get("counts", {}).get("valid_samples", 0)),
                 f"{report.get('metrics', {}).get('token_f1_micro', 0):.4f}",
-                "baseline" if run.get("baseline") else run.get("comparison", {}).get("status", run.get("status", "unknown")),
+                status,
             )
         console.print(table)
 

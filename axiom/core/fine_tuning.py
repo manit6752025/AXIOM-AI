@@ -16,9 +16,13 @@ import random
 import re
 import threading
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, BinaryIO, Callable
+
+from axiom.core.storage import file_lock
+from axiom.path_safety import open_regular_file
 
 _LOG = logging.getLogger(__name__)
 
@@ -26,6 +30,7 @@ _MAX_DATASET_BYTES = 50 * 1024 * 1024
 _MAX_ROWS = 10_000
 _MAX_LINE_BYTES = 1_048_576
 _MAX_TEXT_CHARS = 300_000
+_MAX_MODEL_ENTRIES = 50_000
 _MAX_STEPS = 1_000
 _MAX_SEQUENCE_LENGTH = 2_048
 _TEXT_FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
@@ -40,6 +45,10 @@ class FineTuningError(RuntimeError):
 
 class ActiveFineTuningJobError(FineTuningError):
     """Another fine-tuning job already holds the local training lock."""
+
+
+class FineTuningCancelledError(FineTuningError):
+    """A local fine-tuning job received a cooperative cancellation request."""
 
 
 def _now() -> str:
@@ -112,51 +121,166 @@ def _resolve_existing(value: str, label: str) -> Path:
         raise ValueError(f"{label} must point to an existing local path.") from None
 
 
-def _load_texts(dataset_path: Path, text_field: str) -> list[str]:
-    if dataset_path.stat().st_size > _MAX_DATASET_BYTES:
-        raise ValueError(f"Dataset exceeds the {_MAX_DATASET_BYTES // (1024 * 1024)} MiB limit.")
-    texts: list[str] = []
+def validate_local_model_tree(model_path: Path) -> None:
+    """Reject linked model assets and cap the metadata scan before loading weights."""
     try:
-        with dataset_path.open("r", encoding="utf-8-sig") as handle:
-            for line_number, line in enumerate(handle, start=1):
-                if len(line.encode("utf-8")) > _MAX_LINE_BYTES:
+        if model_path.resolve(strict=True) != model_path or model_path.is_symlink():
+            raise FineTuningError("The local model directory changed or is no longer safe.")
+    except (OSError, RuntimeError):
+        raise FineTuningError("The local model directory changed or is no longer safe.") from None
+    pending = [model_path]
+    seen = 0
+    while pending:
+        directory = pending.pop()
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    seen += 1
+                    if seen > _MAX_MODEL_ENTRIES:
+                        raise FineTuningError(
+                            f"Model directory exceeds the {_MAX_MODEL_ENTRIES:,}-entry safety limit."
+                        )
+                    path = Path(entry.path)
+                    is_junction = getattr(path, "is_junction", lambda: False)
+                    if entry.is_symlink() or is_junction():
+                        raise FineTuningError("Local model assets cannot contain symbolic links or junctions.")
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(path)
+        except OSError:
+            raise FineTuningError("Local model files could not be inspected safely.") from None
+
+
+def validate_training_text_field(text_field: str) -> None:
+    if not isinstance(text_field, str) or not _TEXT_FIELD.fullmatch(text_field):
+        raise ValueError("Text field must be a simple JSON field name (letters, digits, underscore, dot, or hyphen).")
+
+
+def _parse_training_line(raw_line: bytes, line_number: int, text_field: str) -> str | None:
+    line = raw_line.decode("utf-8-sig" if line_number == 1 else "utf-8").strip()
+    if not line.strip():
+        return None
+    try:
+        record = json.loads(line)
+    except (json.JSONDecodeError, RecursionError):
+        raise ValueError(f"Dataset line {line_number} is not valid JSON.") from None
+    if not isinstance(record, dict):
+        raise ValueError(f"Dataset line {line_number} must contain a JSON object.")
+    value = record.get(text_field)
+    if value is None and isinstance(record.get("prompt"), str) and isinstance(record.get("completion"), str):
+        value = record["prompt"] + "\n" + record["completion"]
+    if value is None and isinstance(record.get("messages"), list):
+        parts: list[str] = []
+        for message in record["messages"]:
+            if isinstance(message, dict) and isinstance(message.get("content"), str):
+                role = message.get("role")
+                parts.append((f"{role}: " if isinstance(role, str) and role else "") + message["content"])
+        value = "\n".join(parts) if parts else None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            f"Dataset line {line_number} needs a non-empty string in '{text_field}', "
+            "or string prompt/completion fields, or messages with content strings."
+        )
+    if len(value) > _MAX_TEXT_CHARS:
+        raise ValueError(f"Dataset line {line_number} text exceeds the {_MAX_TEXT_CHARS:,}-character limit.")
+    return value.strip()
+
+
+def _training_line_byte_length(raw_line: bytes) -> int:
+    # TextIOWrapper's universal-newline mode represented CRLF as one newline.
+    return len(raw_line) - (1 if raw_line.endswith(b"\r\n") else 0)
+
+
+def iter_training_texts(dataset_path: Path, text_field: str = "text") -> Iterator[str]:
+    """Yield trainer-accepted text values without retaining the full dataset."""
+    with open_regular_file(dataset_path) as stream:
+        yield from iter_training_text_stream(
+            stream,
+            file_size_bytes=os.fstat(stream.fileno()).st_size,
+            text_field=text_field,
+        )
+
+
+def iter_training_text_stream(
+    stream: BinaryIO,
+    *,
+    file_size_bytes: int,
+    text_field: str = "text",
+) -> Iterator[str]:
+    """Validate and yield accepted trainer text from an already-open stream."""
+    validate_training_text_field(text_field)
+    if file_size_bytes > _MAX_DATASET_BYTES:
+        raise ValueError(f"Dataset exceeds the {_MAX_DATASET_BYTES // (1024 * 1024)} MiB limit.")
+    accepted = 0
+    actual_bytes = 0
+    line_number = 0
+    pending = bytearray()
+    try:
+        while True:
+            remaining_bytes = _MAX_DATASET_BYTES - actual_bytes
+            remaining_line_bytes = _MAX_LINE_BYTES - len(pending)
+            read_size = min(64 * 1024, remaining_bytes + 1, remaining_line_bytes + 1)
+            chunk = stream.read(max(1, read_size))
+            if chunk:
+                if len(chunk) > remaining_bytes:
+                    raise ValueError(f"Dataset exceeds the {_MAX_DATASET_BYTES // (1024 * 1024)} MiB limit.")
+                actual_bytes += len(chunk)
+                pending.extend(chunk)
+            at_eof = not chunk
+
+            while pending:
+                newline = pending.find(b"\n")
+                carriage_return = pending.find(b"\r")
+                positions = [position for position in (newline, carriage_return) if position >= 0]
+                if not positions:
+                    if len(pending) > _MAX_LINE_BYTES:
+                        raise ValueError(f"Dataset line {line_number + 1} exceeds the 1 MiB line limit.")
+                    break
+
+                separator = min(positions)
+                if pending[separator] == 13 and separator + 1 == len(pending) and not at_eof:
+                    break
+                end = separator + 1
+                if pending[separator] == 13 and end < len(pending) and pending[end] == 10:
+                    end += 1
+                raw_line = bytes(pending[:end])
+                del pending[:end]
+                line_number += 1
+                if _training_line_byte_length(raw_line) > _MAX_LINE_BYTES:
                     raise ValueError(f"Dataset line {line_number} exceeds the 1 MiB line limit.")
-                if not line.strip():
-                    continue
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError:
-                    raise ValueError(f"Dataset line {line_number} is not valid JSON.") from None
-                if not isinstance(record, dict):
-                    raise ValueError(f"Dataset line {line_number} must contain a JSON object.")
-                value = record.get(text_field)
-                if value is None and isinstance(record.get("prompt"), str) and isinstance(record.get("completion"), str):
-                    value = record["prompt"] + "\n" + record["completion"]
-                if value is None and isinstance(record.get("messages"), list):
-                    parts: list[str] = []
-                    for message in record["messages"]:
-                        if isinstance(message, dict) and isinstance(message.get("content"), str):
-                            role = message.get("role")
-                            parts.append((f"{role}: " if isinstance(role, str) and role else "") + message["content"])
-                    value = "\n".join(parts) if parts else None
-                if not isinstance(value, str) or not value.strip():
-                    raise ValueError(
-                        f"Dataset line {line_number} needs a non-empty string in '{text_field}', "
-                        "or string prompt/completion fields, or messages with content strings."
-                    )
-                if len(value) > _MAX_TEXT_CHARS:
-                    raise ValueError(f"Dataset line {line_number} text exceeds the {_MAX_TEXT_CHARS:,}-character limit.")
-                texts.append(value.strip())
-                if len(texts) > _MAX_ROWS:
-                    raise ValueError(f"Dataset exceeds the {_MAX_ROWS:,}-row limit.")
+                value = _parse_training_line(raw_line, line_number, text_field)
+                if value is not None:
+                    accepted += 1
+                    if accepted > _MAX_ROWS:
+                        raise ValueError(f"Dataset exceeds the {_MAX_ROWS:,}-row limit.")
+                    yield value
+            if at_eof:
+                if pending:
+                    line_number += 1
+                    if len(pending) > _MAX_LINE_BYTES:
+                        raise ValueError(f"Dataset line {line_number} exceeds the 1 MiB line limit.")
+                    value = _parse_training_line(bytes(pending), line_number, text_field)
+                    if value is not None:
+                        accepted += 1
+                        if accepted > _MAX_ROWS:
+                            raise ValueError(f"Dataset exceeds the {_MAX_ROWS:,}-row limit.")
+                        yield value
+                return
     except UnicodeDecodeError:
         raise ValueError("Dataset must be UTF-8 encoded JSONL.") from None
+
+
+def _load_texts(dataset_path: Path, text_field: str) -> list[str]:
+    texts = list(iter_training_texts(dataset_path, text_field))
     if not texts:
         raise ValueError("Dataset contains no non-empty training records.")
     return texts
 
 
-def validate_config(config: dict[str, Any]) -> dict[str, Any]:
+def validate_config(
+    config: dict[str, Any],
+    *,
+    workspace_guard: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Validate user-supplied paths and conservative LoRA controls before creating a job."""
     if not isinstance(config, dict):
         raise ValueError("Fine-tuning configuration must be a mapping.")
@@ -183,9 +307,15 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     if output_dir.exists():
         if not output_dir.is_dir() or any(output_dir.iterdir()):
             raise ValueError("Adapter output must be a new directory or an existing empty directory.")
+    if workspace_guard is not None:
+        _validate_workspace_guard({
+            "model_path": str(model_path),
+            "dataset_path": str(dataset_path),
+            "output_dir": str(output_dir),
+        }, workspace_guard)
+    validate_local_model_tree(model_path)
     text_field = config.get("text_field", "text")
-    if not isinstance(text_field, str) or not _TEXT_FIELD.fullmatch(text_field):
-        raise ValueError("Text field must be a simple JSON field name (letters, digits, underscore, dot, or hyphen).")
+    validate_training_text_field(text_field)
     max_steps = config.get("max_steps", 20)
     sequence_length = config.get("sequence_length", 512)
     lora_rank = config.get("lora_rank", 8)
@@ -208,8 +338,49 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         "learning_rate": float(learning_rate),
         "lora_rank": lora_rank,
     }
-    _load_texts(dataset_path, text_field)
+    _load_training_texts(
+        {"dataset_path": str(dataset_path), "text_field": text_field},
+        workspace_guard,
+    )
     return result
+
+
+def _validate_workspace_guard(config: dict[str, Any], guard: dict[str, Any] | None) -> None:
+    if guard is None:
+        return
+    if not isinstance(guard, dict) or not isinstance(guard.get("root"), str) or not isinstance(guard.get("paths"), dict):
+        raise FineTuningError("The MCP workspace training guard is invalid.")
+    root = Path(guard["root"])
+    try:
+        resolved_root = root.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise FineTuningError("The MCP workspace changed after the training request.") from None
+    if resolved_root != root or not resolved_root.is_dir():
+        raise FineTuningError("The MCP workspace changed after the training request.")
+
+    from axiom.core.training_preflight import resolve_workspace_input, resolve_workspace_output
+
+    paths = guard["paths"]
+    for key, label in (("model_path", "Model path"), ("dataset_path", "Dataset path")):
+        relative = paths.get(key)
+        if not isinstance(relative, str):
+            raise FineTuningError("The MCP workspace training paths are invalid.")
+        try:
+            current = resolve_workspace_input(relative, root, label)
+        except (OSError, RuntimeError, ValueError):
+            raise FineTuningError(f"{label} changed or is no longer safe inside the workspace.") from None
+        if current != Path(config[key]):
+            raise FineTuningError(f"{label} changed after the training request.")
+
+    output_relative = paths.get("output_dir")
+    if not isinstance(output_relative, str):
+        raise FineTuningError("The MCP workspace training output is invalid.")
+    try:
+        current_output = resolve_workspace_output(output_relative, root)
+    except (OSError, RuntimeError, ValueError):
+        raise FineTuningError("Adapter output changed or is no longer safe inside outputs/.") from None
+    if current_output != Path(config["output_dir"]):
+        raise FineTuningError("Adapter output changed after the training request.")
 
 
 def _job_path(job_id: str) -> Path:
@@ -239,7 +410,7 @@ def _read_job(job_id: str) -> dict[str, Any] | None:
 
 
 def _recover_if_stale(job: dict[str, Any]) -> dict[str, Any]:
-    if job.get("status") in {"queued", "running"} and not _pid_is_alive(job.get("runner_pid")):
+    if job.get("status") in {"queued", "running", "cancelling", "finalizing"} and not _pid_is_alive(job.get("runner_pid")):
         job = dict(job)
         reason = "The AXIOM process exited before this training job completed. Start a new job after checking resources."
         job.update(status="failed", error=reason, finished_at=_now(), updated_at=_now())
@@ -253,9 +424,28 @@ def get_job(job_id: str) -> dict[str, Any] | None:
     return _recover_if_stale(job) if job is not None else None
 
 
-def list_jobs(limit: int = 20) -> list[dict[str, Any]]:
+def cancel_finetuning_job(job_id: str) -> dict[str, Any] | None:
+    """Request cancellation at the next safe training-step boundary."""
+    with _LOCAL_LOCK, file_lock(jobs_directory() / ".job-state.lock"):
+        job = _read_job(job_id)
+        if job is None:
+            return None
+        job = _recover_if_stale(job)
+        if job.get("status") not in {"queued", "running", "cancelling"}:
+            return job
+        if job.get("status") != "cancelling":
+            job["cancel_requested"] = True
+            job["status"] = "cancelling"
+            job["updated_at"] = _now()
+            job["logs"] = [*job.get("logs", []), "Cancellation requested; stopping at the next safe training boundary."][-80:]
+            _write_job(job)
+        return job
+
+
+def list_jobs(limit: int = 20, *, workspace_root: Path | None = None) -> list[dict[str, Any]]:
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
         raise ValueError("Job list limit must be between 1 and 100.")
+    root = Path(workspace_root).resolve(strict=True) if workspace_root is not None else None
     folder = jobs_directory()
     if not folder.is_dir():
         return []
@@ -264,11 +454,28 @@ def list_jobs(limit: int = 20) -> list[dict[str, Any]]:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(value, dict) and re.fullmatch(r"[0-9a-f]{32}", str(value.get("id", ""))):
-                records.append(_recover_if_stale(value))
+                if root is None or _job_belongs_to_workspace(value, root):
+                    records.append(_recover_if_stale(value))
         except (OSError, json.JSONDecodeError):
             continue
     records.sort(key=lambda item: str(item.get("created_at", "")), reverse=True)
     return records[:limit]
+
+
+def _job_belongs_to_workspace(job: dict[str, Any], root: Path) -> bool:
+    config = job.get("config")
+    if not isinstance(config, dict):
+        return False
+    for key in ("model_path", "dataset_path", "output_dir"):
+        raw = config.get(key)
+        if not isinstance(raw, str) or not raw:
+            return False
+        try:
+            if not Path(raw).resolve(strict=False).is_relative_to(root):
+                return False
+        except (OSError, RuntimeError):
+            return False
+    return True
 
 
 def _pid_is_alive(pid: Any) -> bool:
@@ -324,8 +531,12 @@ def _release_lock(job_id: str) -> None:
             )
 
 
-def _new_job(config: dict[str, Any]) -> dict[str, Any]:
-    validated = validate_config(config)
+def _new_job(
+    config: dict[str, Any],
+    *,
+    workspace_guard: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    validated = validate_config(config, workspace_guard=workspace_guard)
     require_runtime()
     job_id = uuid.uuid4().hex
     _acquire_lock(job_id)
@@ -340,6 +551,7 @@ def _new_job(config: dict[str, Any]) -> dict[str, Any]:
         "started_at": None,
         "finished_at": None,
         "config": validated,
+        "cancel_requested": False,
         "completed_steps": 0,
         "loss": None,
         "error": None,
@@ -353,10 +565,20 @@ def _new_job(config: dict[str, Any]) -> dict[str, Any]:
     return job
 
 
-def start_finetuning_job(config: dict[str, Any]) -> dict[str, Any]:
+def start_finetuning_job(
+    config: dict[str, Any],
+    *,
+    workspace_guard: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Validate inputs, persist a job, and run it in a single background thread."""
-    job = _new_job(config)
-    worker = threading.Thread(target=execute_finetuning_job, args=(job["id"],), name=f"axiom-lora-{job['id'][:8]}", daemon=True)
+    job = _new_job(config, workspace_guard=workspace_guard)
+    worker = threading.Thread(
+        target=execute_finetuning_job,
+        args=(job["id"],),
+        kwargs={"workspace_guard": workspace_guard},
+        name=f"axiom-lora-{job['id'][:8]}",
+        daemon=True,
+    )
     try:
         worker.start()
     except RuntimeError:
@@ -374,22 +596,77 @@ def run_finetuning_inline(config: dict[str, Any], on_progress: Callable[[dict[st
 
 
 def _update_job(job_id: str, **changes: Any) -> dict[str, Any]:
-    with _LOCAL_LOCK:
+    with _LOCAL_LOCK, file_lock(jobs_directory() / ".job-state.lock"):
         job = _read_job(job_id)
         if job is None:
             raise FineTuningError("Fine-tuning job was not found.")
+        if changes.get("status") == "running" and job.get("cancel_requested") is True:
+            changes.pop("status")
         job.update(changes)
         job["updated_at"] = _now()
         _write_job(job)
         return job
 
 
-def _load_training_texts(config: dict[str, Any]) -> list[str]:
-    return _load_texts(Path(config["dataset_path"]), config["text_field"])
+def _begin_finalizing(job_id: str) -> None:
+    """Atomically close the cancellation window before adapter files are saved."""
+    with _LOCAL_LOCK, file_lock(jobs_directory() / ".job-state.lock"):
+        job = _read_job(job_id)
+        if job is None:
+            raise FineTuningError("Fine-tuning job was not found.")
+        if job.get("cancel_requested") is True or job.get("status") == "cancelling":
+            raise FineTuningCancelledError("Local fine-tuning stopped at a safe training boundary.")
+        job.update(status="finalizing", updated_at=_now())
+        job["logs"] = [*job.get("logs", []), "Training steps finished; writing the local adapter."][-80:]
+        _write_job(job)
 
 
-def _run_transformers(config: dict[str, Any], progress: Callable[[int, float | None], None]) -> dict[str, Any]:
+def _load_training_texts(
+    config: dict[str, Any],
+    workspace_guard: dict[str, Any] | None = None,
+) -> list[str]:
+    if workspace_guard is None:
+        return _load_texts(Path(config["dataset_path"]), config["text_field"])
+    from axiom.core.mcp_paths import open_mcp_workspace_file
+
+    root = Path(workspace_guard["root"])
+    relative = workspace_guard["paths"]["dataset_path"]
+    _, stream = open_mcp_workspace_file(relative, root)
+    try:
+        size = os.fstat(stream.fileno()).st_size
+        texts = list(iter_training_text_stream(stream, file_size_bytes=size, text_field=config["text_field"]))
+        if not texts:
+            raise ValueError("Dataset contains no non-empty training records.")
+        return texts
+    finally:
+        stream.close()
+
+
+def _assert_output_empty(output_dir: Path) -> None:
+    if output_dir.is_symlink() or not output_dir.is_dir():
+        raise FineTuningError("Adapter output directory changed or is no longer a safe directory.")
+    try:
+        next(output_dir.iterdir())
+    except StopIteration:
+        return
+    except OSError:
+        raise FineTuningError("Adapter output directory could not be inspected safely.") from None
+    raise FineTuningError("Adapter output directory is no longer empty; refusing to overwrite existing files.")
+
+
+def _run_transformers(
+    config: dict[str, Any],
+    progress: Callable[[int, float | None], None],
+    cancel_check: Callable[[], None] | None = None,
+    begin_finalizing: Callable[[], None] | None = None,
+    workspace_guard_check: Callable[[], None] | None = None,
+    workspace_guard: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Train a local causal-LM LoRA adapter with AXIOM's own bounded PyTorch loop."""
+    if cancel_check:
+        cancel_check()
+    if workspace_guard_check:
+        workspace_guard_check()
     try:
         import torch
         from peft import LoraConfig, TaskType, get_peft_model
@@ -399,17 +676,30 @@ def _run_transformers(config: dict[str, Any], progress: Callable[[int, float | N
             "Local LoRA dependencies could not be imported. Upgrade the optional training tools with: python -m pip install -e '.[training]'"
         ) from None
 
-    texts = _load_training_texts(config)
+    texts = _load_training_texts(config, workspace_guard)
+    if cancel_check:
+        cancel_check()
+    if workspace_guard_check:
+        workspace_guard_check()
     model_path = config["model_path"]
+    validate_local_model_tree(Path(model_path))
     output_dir = Path(config["output_dir"])
     if output_dir.exists() and any(output_dir.iterdir()):
         raise FineTuningError("Adapter output directory is no longer empty; refusing to overwrite existing files.")
 
     try:
+        if workspace_guard_check:
+            workspace_guard_check()
         tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True, trust_remote_code=False)
+        if cancel_check:
+            cancel_check()
+        if workspace_guard_check:
+            workspace_guard_check()
         model = AutoModelForCausalLM.from_pretrained(
             model_path, local_files_only=True, trust_remote_code=False
         )
+    except FineTuningCancelledError:
+        raise
     except Exception as exc:
         message = _clip(exc, 300)
         raise FineTuningError(
@@ -469,13 +759,19 @@ def _run_transformers(config: dict[str, Any], progress: Callable[[int, float | N
         device = torch.device("cpu")
 
     try:
+        if cancel_check:
+            cancel_check()
         model.to(device)
+    except FineTuningCancelledError:
+        raise
     except Exception as exc:
         message = _clip(exc, 240)
         raise FineTuningError(
             f"Could not place the local model on {device}. The model may exceed available memory." + (f" Detail: {message}" if message else "")
         ) from None
 
+    if cancel_check:
+        cancel_check()
     output_dir.mkdir(parents=True, exist_ok=True)
     optimizer = torch.optim.AdamW(trainable_parameters, lr=config["learning_rate"])
     rng = random.Random(AXIOM_TRAINING_SEED)
@@ -485,6 +781,8 @@ def _run_transformers(config: dict[str, Any], progress: Callable[[int, float | N
     optimizer.zero_grad(set_to_none=True)
 
     for step in range(1, config["max_steps"] + 1):
+        if cancel_check:
+            cancel_check()
         if position >= len(order):
             order = list(range(len(texts)))
             rng.shuffle(order)
@@ -528,6 +826,13 @@ def _run_transformers(config: dict[str, Any], progress: Callable[[int, float | N
             ) from None
         progress(step, loss_value)
 
+    if begin_finalizing:
+        begin_finalizing()
+    elif cancel_check:
+        cancel_check()
+    if workspace_guard_check:
+        workspace_guard_check()
+    _assert_output_empty(output_dir)
     try:
         model.save_pretrained(str(output_dir), safe_serialization=True)
         tokenizer.save_pretrained(str(output_dir))
@@ -552,14 +857,30 @@ def _run_transformers(config: dict[str, Any], progress: Callable[[int, float | N
     }
 
 
-def execute_finetuning_job(job_id: str, on_progress: Callable[[dict[str, Any]], None] | None = None) -> None:
+def execute_finetuning_job(
+    job_id: str,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
+    workspace_guard: dict[str, Any] | None = None,
+) -> None:
     job = _read_job(job_id)
     if job is None:
         return
+
+    def check_cancel() -> None:
+        current = _read_job(job_id)
+        if current is not None and current.get("cancel_requested") is True:
+            raise FineTuningCancelledError("Local fine-tuning stopped at a safe boundary.")
+
+    def check_workspace() -> None:
+        _validate_workspace_guard(job["config"], workspace_guard)
+
     try:
+        check_cancel()
+        check_workspace()
         _update_job(job_id, status="running", started_at=_now(), error=None, logs=[*job.get("logs", []), "Loading local tokenizer/model and preparing LoRA adapters."][-80:])
 
         def progress(step: int, loss: float | None) -> None:
+            check_cancel()
             current = _read_job(job_id)
             if current is None:
                 return
@@ -573,7 +894,14 @@ def execute_finetuning_job(job_id: str, on_progress: Callable[[dict[str, Any]], 
             if on_progress:
                 on_progress(updated)
 
-        result = _run_transformers(job["config"], progress)
+        result = _run_transformers(
+            job["config"],
+            progress,
+            cancel_check=check_cancel,
+            begin_finalizing=lambda: _begin_finalizing(job_id),
+            workspace_guard_check=check_workspace,
+            workspace_guard=workspace_guard,
+        )
         current = _read_job(job_id) or job
         _update_job(
             job_id,
@@ -584,6 +912,23 @@ def execute_finetuning_job(job_id: str, on_progress: Callable[[dict[str, Any]], 
             error=None,
             logs=[*current.get("logs", []), "Training completed; PEFT adapter files were written to the selected output directory."][-80:],
         )
+    except FineTuningCancelledError as exc:
+        try:
+            current = _read_job(job_id) or job
+            _update_job(
+                job_id,
+                status="cancelled",
+                cancel_requested=True,
+                finished_at=_now(),
+                error=None,
+                logs=[*current.get("logs", []), str(exc)][-80:],
+            )
+        except Exception:
+            _LOG.warning(
+                "Could not record the cancelled state for fine-tuning job %s",
+                job_id,
+                exc_info=True,
+            )
     except Exception as exc:
         reason = _clip(exc, 500) or type(exc).__name__
         try:
