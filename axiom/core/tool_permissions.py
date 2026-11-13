@@ -21,11 +21,14 @@ TOOL_DESCRIPTIONS = {
     "axiom_training_preflight": (
         "Check local LoRA inputs and estimates without loading weights or starting a job."
     ),
+    "axiom_training_eval_overlap_preflight": (
+        "Read bounded local training and evaluation JSONL to detect case- and whitespace-normalized exact overlap; returns counts and row numbers without text or hashes."
+    ),
     "axiom_training_job_start": (
         "Start a local LoRA training job from workspace assets; consumes compute and writes an adapter under outputs/."
     ),
     "axiom_training_job_status": (
-        "Read local LoRA job progress and safe workspace-relative summaries."
+        "Read local LoRA job progress, wait up to 30 seconds for an outcome, and inspect safe summaries with up to 64 evenly spaced training-loss samples."
     ),
     "axiom_training_job_cancel": (
         "Request cooperative cancellation before adapter finalization for a local LoRA job."
@@ -50,6 +53,9 @@ TOOL_DESCRIPTIONS = {
     ),
     "axiom_prediction_job_examples": (
         "Inspect the first up to three identity- and hash-verified raw exact mismatches; text is off by default and bounded excerpts require explicit per-call opt-in."
+    ),
+    "axiom_prediction_job_compare": (
+        "Compare two completed prediction jobs on hash-verified artifacts; returns transition counts, bounded row-number samples, and workspace-relative model settings without dataset or output paths."
     ),
     "axiom_model_list": "List locally registered models.",
     "axiom_model_info": "Inspect a local model path.",

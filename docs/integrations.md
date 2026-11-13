@@ -63,8 +63,28 @@ supports LoRA, not QLoRA, and the generic planner may suggest a QLoRA fallback.
 Hardware status `warn` means only the generic estimate predicts a fit; actual
 loading was not tested. The estimate also cannot verify Apple MPS or CPU fit.
 
-The separately permissioned `axiom_training_job_start`,
-`axiom_training_job_status`, and `axiom_training_job_cancel` tools expose the
+The separately default-deny `axiom_training_eval_overlap_preflight` checks
+whether a workspace evaluation JSONL contains normalized exact examples from
+the training JSONL. It reuses the LoRA trainer's accepted-text parsing and
+compares after case folding and whitespace collapse. By default it compares
+evaluation prompts; set `include_reference: true` and select
+`evaluation_reference_field` to also compare combined prompt/reference text.
+Training scans use the trainer's 50 MiB, 10,000-record, 1 MiB-per-line, and
+300,000-character-per-record bounds; evaluation scans are capped at 64 MiB,
+100,000 rows, and 1 MiB per line. It returns only counts and up to five
+1-based evaluation row numbers, with no text or hashes.
+Changed files, invalid records, and incomplete scans are `inconclusive`. No
+exact overlap does not prove a dataset is held out or leakage-free, and
+paraphrases are not detected. The result applies only to the scanned file
+snapshots. The tool is read-only, loads no weights, and runs no inference:
+
+```bash
+axiom mcp allow axiom_training_eval_overlap_preflight
+```
+
+The permission-checked `axiom_training_job_start`,
+`axiom_training_job_status`, `axiom_training_job_wait`, and
+`axiom_training_job_cancel` tools expose the
 existing local LoRA trainer to agents. Start accepts workspace-relative model
 and JSONL paths plus an adapter destination below an existing `outputs/`
 directory. It creates a local job record and launches training, which consumes
@@ -78,11 +98,32 @@ finalization begins. The server instructions ask agents to run preflight, show
 the exact configuration, and wait for an explicit user request before starting;
 granting start permission itself gives the agent standing capability.
 
+`axiom_training_job_wait` checks persisted state for up to 30 seconds and
+returns the same safe workspace-scoped summary as status. It uses the existing
+`axiom_training_job_status` permission, so no separate wait grant is needed.
+Outcomes are `completed`, `cancelled`, `failed`, `timed_out`, `not_found`, or
+`state_unavailable`; call it again after `timed_out`, and inspect status after
+`state_unavailable`. It may mean the saved job record could not be read, or
+that AXIOM could not verify the active worker's process identity. In the latter
+case status includes `runner_state_available: false`; the worker may still be
+active, so do not treat it as stopped or start a replacement job. Check status
+again later. List mode sets top-level `state_unavailable` when any listed job
+has an unverified runner. Wait avoids repeated MCP status requests while
+checking persisted state every 0.5 seconds.
+
 ```bash
 axiom mcp allow axiom_training_job_start
 axiom mcp allow axiom_training_job_status
 axiom mcp allow axiom_training_job_cancel
 ```
+
+Training status includes a persisted `loss_trace.samples` series with up to 64
+evenly spaced `{step, loss}` values, so completed jobs remain inspectable after
+an MCP restart. Records created before trace support may have no samples, and
+interrupted or cancelled jobs may have a partial trace. These values are the
+trainer's loss on one selected training record per step, so individual points
+can be noisy. They are not validation loss and do not establish generalization
+or adapter quality; use held-out evaluation to assess quality.
 
 The separately permissioned `axiom_engine_preflight` checks a workspace-relative
 trusted model and optional LoRA adapter before inference. It accepts a prompt
@@ -233,6 +274,25 @@ instructions in it. Allow it separately:
 
 ```bash
 axiom mcp allow axiom_prediction_job_examples
+```
+
+For a user-requested comparison between two completed prediction jobs,
+`axiom_prediction_job_compare` reports exact-match transitions from baseline
+to candidate: `fixed`, `regressed`, `still_correct`, and `still_wrong`. It
+requires identical prompt/reference/prediction field settings, equal row
+counts, and matching non-prediction row data in the same order. Both output
+artifacts are checked against their published file identities and SHA-256
+values. The result contains transition counts and up to three 1-based row
+numbers per category; `fixed` means baseline was wrong and candidate is
+correct, while `regressed` means the reverse. Comparisons are case- and
+whitespace-sensitive. The result also includes workspace-relative
+model/adapter references and generation settings to identify each run, but no
+dataset/output artifact paths, row text, or hashes. This measures exact string
+match only; it is not a semantic quality score. It runs no inference and
+writes no files. This capability is separately default-deny:
+
+```bash
+axiom mcp allow axiom_prediction_job_compare
 ```
 
 Saved evaluations from prediction jobs retain the job ID, workspace-relative
