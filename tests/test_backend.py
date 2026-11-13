@@ -84,6 +84,10 @@ def test_mcp_schema_and_all_handlers(tmp_path: Path, monkeypatch: pytest.MonkeyP
         "axiom_training_preflight",
         "axiom_workspace_assets",
         "axiom_workspace_context",
+        "axiom_workflow_compare",
+        "axiom_workflow_dry_run",
+        "axiom_workflow_read",
+        "axiom_workflow_save",
     }
 
     monkeypatch.chdir(tmp_path)

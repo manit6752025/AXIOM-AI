@@ -18,6 +18,12 @@ TOOL_DESCRIPTIONS = {
     "axiom_workspace_assets": (
         "List workspace-relative model and JSONL paths without reading contents."
     ),
+    "axiom_workflow_save": (
+        "Validate and save a non-executable workflow design of up to 64 nodes and 128 connections after explicit user approval; writes to the workspace workflow store."
+    ),
+    "axiom_workflow_read": (
+        "Read bounded summaries or a validated non-executable workflow design from the workspace store without changing files; separate permission from workflow saving."
+    ),
     "axiom_training_preflight": (
         "Check local LoRA inputs and estimates without loading weights or starting a job."
     ),
