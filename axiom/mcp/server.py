@@ -129,6 +129,7 @@ mcp = MCPServer(
         "Use AXIOM tools to inspect models, datasets, and hardware; preview dataset cleaning "
         "and show the counts and proposed output path before writing a new copy. "
         "Re-preview immediately before cleaning because previews are advisory. "
+        "Use the separate default-deny axiom_evaluation_preflight before preparing a new offline evaluation. It scans bounded precomputed outputs, returns aggregate metrics and data-quality counts, and saves nothing. Metrics use valid_samples; filtered_split_rows are intentionally excluded by the selected split and do not trigger review, while invalid-JSON, non-object, overlong, missing-value, and non-string rows do. Follow actionability and disclose partial scans or quality-skipped rows. clear_for_user_approval means no known scan/data-quality blockers, not a model-quality judgment or approval. Show the fields, split, sample count, metrics, and completeness; get explicit approval before calling axiom_evaluation_run to persist the report. The run rescans current input and is not bound to the preview; rerun preflight immediately before seeking approval if the file may have changed, and show changed results and obtain approval again. "
         "Use axiom_evaluation_run for bounded, offline lexical metrics on completed outputs; "
         "use axiom_evaluation_history to retrieve saved runs or set baselines_only=true to focus on marked baselines; if next_cursor is present, pass it as after_run_id with the same filters to continue; "
         "use axiom_evaluation_compare when asked to compare two saved complete reports, with a marked baseline, metric, and tolerance; it uses the evaluation-history permission, does not reopen source files, and returns aggregate lexical scores only. These metrics do not establish semantic quality. "
@@ -370,6 +371,242 @@ def axiom_info() -> dict:
             "mcp",
             "agent_integrations",
         ],
+    }
+
+
+@mcp.tool()
+def axiom_evaluation_preflight(
+    path: str,
+    prediction_field: str,
+    reference_field: str,
+    split_field: str | None = None,
+    split_value: str | None = None,
+    max_bytes: int = DEFAULT_EVALUATION_MAX_BYTES,
+    max_rows: int = DEFAULT_EVALUATION_MAX_ROWS,
+    max_line_bytes: int = DEFAULT_EVALUATION_MAX_LINE_BYTES,
+) -> dict:
+    """Preview bounded offline metrics and data quality without saving a report."""
+    ToolPermissionStore().require("axiom_evaluation_preflight")
+    _validate_evaluation_limits(max_bytes, max_rows, max_line_bytes)
+
+    if (
+        not isinstance(prediction_field, str)
+        or not prediction_field.strip()
+        or len(prediction_field) > 160
+        or not isinstance(reference_field, str)
+        or not reference_field.strip()
+        or len(reference_field) > 160
+    ):
+        raise ValueError("Prediction and reference fields must contain 1 to 160 characters.")
+    prediction_field = prediction_field.strip()
+    reference_field = reference_field.strip()
+    if prediction_field == reference_field:
+        raise ValueError("Prediction and reference fields must be different.")
+    if (split_field is None) != (split_value is None):
+        raise ValueError("Split field and split value must be supplied together.")
+    if split_field is not None:
+        if (
+            not isinstance(split_field, str)
+            or not split_field.strip()
+            or len(split_field) > 160
+            or not isinstance(split_value, str)
+            or len(split_value) > 160
+        ):
+            raise ValueError("Split field and value must contain at most 160 characters.")
+        split_field = split_field.strip()
+
+    def blocked(reason_code: str, next_action: str) -> dict:
+        return {
+            "schema_version": 1,
+            "assessment": "inconclusive",
+            "reason_code": reason_code,
+            "actionability": {
+                "status": "blocked",
+                "findings": [{
+                    "check": "evaluation_source",
+                    "status": "blocked",
+                    "reason_code": reason_code,
+                }],
+                "next_action": next_action,
+                "user_approval_required": True,
+            },
+            "scope": {
+                "read_only": True,
+                "evaluation_saved": False,
+                "files_written": False,
+                "model_inference_run": False,
+                "network_accessed": False,
+                "row_values_returned": False,
+                "source_hash_returned": False,
+                "absolute_paths_returned": False,
+            },
+        }
+
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("Evaluation path cannot be empty.")
+    relative_path = path
+    if relative_path.startswith("data/"):
+        relative_path = relative_path[5:]
+    root = _mcp_workspace_root()
+    try:
+        data_root = _evaluation_dataset_root(root)
+        source, source_stream = open_mcp_workspace_file(relative_path, data_root)
+    except (OSError, RuntimeError, ValueError):
+        return blocked(
+            "evaluation_source_unavailable",
+            "Choose a readable workspace JSONL file under data/ and rerun the preflight.",
+        )
+    if source.suffix.lower() != ".jsonl":
+        source_stream.close()
+        return blocked(
+            "evaluation_source_not_jsonl",
+            "Choose a workspace JSONL file under data/ and rerun the preflight.",
+        )
+
+    def file_identity(value: os.stat_result) -> tuple[int, int, int, int]:
+        return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns
+
+    try:
+        with source_stream:
+            initial = os.fstat(source_stream.fileno())
+            if not stat.S_ISREG(initial.st_mode):
+                return blocked(
+                    "evaluation_source_unavailable",
+                    "Choose a readable regular JSONL file under data/ and rerun the preflight.",
+                )
+            try:
+                report = evaluate_jsonl_stream(
+                    source_stream,
+                    path=source.relative_to(data_root).as_posix(),
+                    file_name=source.name,
+                    file_size_bytes=initial.st_size,
+                    prediction_field=prediction_field,
+                    reference_field=reference_field,
+                    split_field=split_field,
+                    split_value=split_value,
+                    max_bytes=max_bytes,
+                    max_rows=max_rows,
+                    max_line_bytes=max_line_bytes,
+                )
+            except ValueError as exc:
+                if str(exc).startswith("No rows with string prediction and reference values"):
+                    return blocked(
+                        "evaluation_no_valid_samples",
+                        "Check the selected fields and split, then rerun the preflight.",
+                    )
+                return blocked(
+                    "evaluation_scan_unavailable",
+                    "Resolve the source or scan-limit issue, then rerun the preflight.",
+                )
+            final = os.fstat(source_stream.fileno())
+        current_path, current_stream = open_mcp_workspace_file(relative_path, data_root)
+        with current_stream:
+            current = os.fstat(current_stream.fileno())
+        if (
+            file_identity(initial) != file_identity(final)
+            or file_identity(initial) != file_identity(current)
+            or current_path != source
+        ):
+            return blocked(
+                "evaluation_source_changed",
+                "The source changed during the preflight; retry with the stable current file.",
+            )
+    except (OSError, RuntimeError, ValueError, RecursionError):
+        source_stream.close()
+        return blocked(
+            "evaluation_source_unavailable",
+            "Resolve the workspace source issue and rerun the preflight.",
+        )
+
+    manifest = report.get("dataset_manifest", {})
+    counts = report.get("counts", {})
+    limits = report.get("limits", {})
+    if not isinstance(manifest, dict) or not isinstance(counts, dict) or not isinstance(limits, dict):
+        return blocked(
+            "evaluation_report_unavailable",
+            "Resolve the evaluation report issue and rerun the preflight.",
+        )
+    complete = manifest.get("full_content_hashed") is True and report.get("truncated") is False
+    quality_issue_count = sum(
+        counts.get(key, 0)
+        for key in (
+            "invalid_json_rows",
+            "non_object_rows",
+            "overlong_rows",
+            "missing_value_rows",
+            "non_string_value_rows",
+        )
+    )
+    requires_review = not complete or quality_issue_count > 0
+    actionability_status = "review_required" if requires_review else "clear_for_user_approval"
+    if not complete:
+        next_action = (
+            "Show the partial scan limits and counts; obtain explicit approval before saving partial metrics. "
+            "Partial evaluations cannot be marked as baselines."
+        )
+    elif quality_issue_count:
+        next_action = (
+            "Show the skipped-row counts and explain those rows were excluded; "
+            "obtain explicit approval before saving the evaluation."
+        )
+    else:
+        next_action = (
+            "Show the selected fields, valid sample count, and aggregate metrics; "
+            "obtain explicit approval before saving the evaluation."
+        )
+    return {
+        "schema_version": 1,
+        "assessment": "partial_scan" if not complete else "complete_scan",
+        "file_name": source.name,
+        "fields": {
+            "prediction": prediction_field,
+            "reference": reference_field,
+            "split": split_field,
+            "selected_split": split_value,
+        },
+        "counts": counts,
+        "data_quality": {
+            "metrics_use_valid_samples": True,
+            "filtered_split_rows_excluded_by_request": counts.get("filtered_split_rows", 0),
+            "rows_requiring_review": quality_issue_count,
+        },
+        "metrics": report.get("metrics"),
+        "confidence_intervals": report.get("confidence_intervals"),
+        "truncated": report.get("truncated"),
+        "truncation_reasons": report.get("truncation_reasons", []),
+        "limits": limits,
+        "baseline_eligible": complete and manifest.get("comparison_corpus_fully_hashed") is True,
+        "actionability": {
+            "status": actionability_status,
+            "findings": ([
+                {
+                    "check": "evaluation_data_quality",
+                    "status": "review_required",
+                    "reason_code": "partial_scan" if not complete else "rows_skipped",
+                }
+            ] if requires_review else []),
+            "next_action": next_action,
+            "user_approval_required": True,
+            "note": (
+                "clear_for_user_approval means no known scan or data-quality blockers; it does not establish semantic or model quality and does not count as approval."
+            ),
+        },
+        "note": (
+            "Metrics use valid_samples. Rows excluded by the requested split are reported separately and do not require review; malformed JSON, non-object, overlong, missing-value, and non-string rows are excluded and require review. "
+            "Aggregate metrics describe the bytes read and include no row values or content hashes. baseline_eligible reflects complete-scan fingerprint criteria only; data-quality findings may still require review. File identity metadata (device, inode, size, and modification time) was unchanged across the scan and path reopen, but the later evaluation run rescans current input and is not bound to these results."
+        ),
+        "scope": {
+            "read_only": True,
+            "evaluation_saved": False,
+            "files_written": False,
+            "model_inference_run": False,
+            "network_accessed": False,
+            "row_values_returned": False,
+            "source_file_identity_unchanged_during_scan": True,
+            "full_content_scanned": complete,
+            "source_hash_returned": False,
+            "absolute_paths_returned": False,
+        },
     }
 
 
