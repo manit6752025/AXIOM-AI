@@ -28,7 +28,7 @@
 - Update delivery status for native engine discovery, runtime benchmarking, trace lifecycle, connector discovery, API Playground, and release smoke coverage after the existing end-to-end checks passed.
 
 
-## Unreleased — latest/development
+## 0.3.0-beta.7 — Beta prerelease
 
 ### Added
 - Persisted a training dataset fingerprint in local job state, hardened POSIX job-storage permissions, and made job-linked overlap checks inconclusive when the current file differs, a stable scan is unavailable, or a legacy job has no fingerprint; status responses omit the digest.
@@ -77,6 +77,14 @@
   the current tool surface.
 - Aligned LoRA optional dependency minimums with Transformers 5 and blocked training when installed dependency versions are too old.
 - Improved local model/adapter loading errors without enabling remote model code or model downloads.
+
+### Release engineering
+
+- Synchronized active Python, Control Center, npm launcher, Scoop, and WinGet version metadata to beta.7.
+- Corrected active source and installer links to the canonical GitHub repository while retaining historical beta.6 release records.
+- Expanded the source roadmap and its audit/acceptance contract to 140 deliverables. New R121–R140 items are not marked complete without implementation and validation evidence.
+- Added explicit opt-in, bounded resource monitoring in the Engine CLI and Runtime page, including JSON/JSONL export and clear controls. Browser history remains in memory only.
+- Repaired the weekly integration workflow's malformed YAML tail and its beta-version preparation step.
 
 ### Scope
 

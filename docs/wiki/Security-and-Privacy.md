@@ -9,4 +9,4 @@ Filesystem access should reject traversal, unsafe symlinks and paths outside
 the intended workspace.
 
 Report vulnerabilities using the repository security policy:
-https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/SECURITY.md
+https://github.com/manit6752025/AXIOM-AI/blob/main/SECURITY.md

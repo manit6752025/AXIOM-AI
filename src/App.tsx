@@ -3,6 +3,7 @@ import AxiomQuantizer from "./components/AxiomQuantizer";
 import ApiPlayground from "./components/ApiPlayground";
 import RuntimeConnectorPanel from "./components/RuntimeConnectorPanel";
 import RuntimeTracePanel from "./components/RuntimeTracePanel";
+import EngineTelemetryMonitor from "./components/EngineTelemetryMonitor";
 import LocalAxiomEnginePanel from "./components/LocalAxiomEnginePanel";
 import LocalEngineFabricPanel from "./components/LocalEngineFabricPanel";
 import LocalInferencePanel from "./components/LocalInferencePanel";
@@ -270,12 +271,12 @@ const pageMeta: Record<
 > = {
   optimizer: {
     label: "Agent Optimizer",
-    kicker: "BETA 6 / MODEL OPTIMIZATION",
+    kicker: "BETA 7 / MODEL OPTIMIZATION",
     description: "Interactive questionnaire, hardware detection and quantization planning.",
   },
   quantizer: {
     label: "Quantization Lab",
-    kicker: "BETA 6 / HARDWARE OPTIMIZATION",
+    kicker: "BETA 7 / HARDWARE OPTIMIZATION",
     description: "Choose an agent profile and hardware target to select a model quantization plan.",
   },
   dashboard: {
@@ -335,8 +336,8 @@ const pageMeta: Record<
   },
   roadmap: {
     label: "Roadmap",
-    kicker: "DELIVERY STATUS / R001–R120",
-    description: "Read the source roadmap, inspect unchecked work, and verify the 120-item scope without guessing status.",
+    kicker: "DELIVERY STATUS / R001–R140",
+    description: "Read the source roadmap, inspect unchecked work, and verify the 140-item scope without guessing status.",
   },
   modules: {
     label: "Module Explorer",
@@ -374,7 +375,7 @@ const platformModules: Array<{
     page: "optimizer",
     title: "Agent Optimizer",
     description: "Questionnaire-driven model sizing, quantization and benchmark planning",
-    state: "Beta 6",
+    state: "Beta 7",
     tone: "success",
     icon: Zap,
   },
@@ -1052,7 +1053,7 @@ function Welcome({
       </div>
 
       <div className="auth-footer">
-        <span>AXIOM / 0.3.0-beta.6</span>
+        <span>AXIOM / 0.3.0-beta.7</span>
         <span>LOCAL · PRIVATE · ENGINEERED FOR AI</span>
       </div>
     </div>
@@ -3165,6 +3166,7 @@ function Runtime() {
     <LocalInferencePanel />
     <LLMClientPanel />
     <RuntimeTracePanel />
+    <EngineTelemetryMonitor />
     <RuntimeConnectorPanel />
   </FeaturePage>;
 }
@@ -3425,7 +3427,7 @@ function ModulesPage({ setPage }: { setPage: (page: Page) => void }) {
     { id: "project", title: "Project and configuration tools", description: "Initialize and validate local project structure, inspect config mappings, and review environment summaries.", scope: "CLI foundations", availability: "CLI surface", tone: "neutral", icon: FileCode2, command: "axiom project --help" },
     { id: "session", title: "Interactive CLI session tools", description: "Inspect the local CLI session-command family; the browser deliberately does not launch shell processes.", scope: "CLI foundations", availability: "CLI surface", tone: "neutral", icon: TerminalSquare, command: "axiom session --help" },
     { id: "api", title: "HTTP API reference", description: "Open the running service's OpenAPI explorer to inspect the endpoints actually exposed by this build.", scope: "Developer API", availability: "API docs", tone: "neutral", icon: Network, href: "/api/docs" },
-    { id: "roadmap", title: "120-item product roadmap", description: "Inspect delivery labels from ROADMAP.md, search backlog items, and check ID/status integrity.", scope: "Governance", availability: "Source audit", tone: "neutral", icon: FileCode2, page: "roadmap", command: "axiom roadmap audit --json" },
+    { id: "roadmap", title: "140-item product roadmap", description: "Inspect delivery labels from ROADMAP.md, search backlog items, and check ID/status integrity.", scope: "Governance", availability: "Source audit", tone: "neutral", icon: FileCode2, page: "roadmap", command: "axiom roadmap audit --json" },
   ];
   const queryTerms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const filtered = entries.filter((entry) => {
@@ -3680,7 +3682,7 @@ function SettingsPage({
         <div className="setting-row"><div><b>Runtime request traces</b><span>Review trace metadata or clear the in-memory history from the Runtime page.</span></div><button type="button" className="button secondary-button" onClick={() => setPage("runtime")}>Review traces</button></div>
         <div className="surface-divider" />
         <p className="quiet-note">Deleting a registry entry or saved plan does not delete a checkpoint, dataset, or run output. Files at chosen output paths remain until you remove them yourself.</p>
-        <a href="https://github.com/NetCore-Technologies/AXIOM-AI/blob/latest/development/docs/DATA-RETENTION.md" target="_blank" rel="noreferrer">Read the data retention and deletion guide</a>
+        <a href="https://github.com/manit6752025/AXIOM-AI/blob/latest/development/docs/DATA-RETENTION.md" target="_blank" rel="noreferrer">Read the data retention and deletion guide</a>
       </Surface>
       <Surface title="CLI feature map" eyebrow="COMMANDS → GUI">
         <p className="quiet-note">Open the matching AXIOM Control Center page for each command family. Use Copy to keep the corresponding CLI command handy; terminal-only actions such as shell completion remain accessible through the CLI.</p>

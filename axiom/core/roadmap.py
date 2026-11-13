@@ -1,4 +1,4 @@
-"""Parse and validate AXIOM's scoped 120-item roadmap without guessing status."""
+"""Parse and validate AXIOM's scoped 140-item roadmap without guessing status."""
 from __future__ import annotations
 
 import re
@@ -18,7 +18,8 @@ _ALLOWED = {
     "In progress; validation pending": "in_progress",
     "In progress": "in_progress",
 }
-_EXPECTED_IDS = tuple(f"R{number:03d}" for number in range(1, 121))
+_EXPECTED_TOTAL = 140
+_EXPECTED_IDS = tuple(f"R{number:03d}" for number in range(1, _EXPECTED_TOTAL + 1))
 
 
 def default_roadmap_path() -> Path:
@@ -32,7 +33,7 @@ def default_roadmap_path() -> Path:
 
 
 def audit_roadmap(path: str | Path | None = None) -> dict[str, Any]:
-    """Return the 120 roadmap rows, a status roll-up and integrity diagnostics."""
+    """Return the 140 roadmap rows, a status roll-up and integrity diagnostics."""
     if path is None:
         source = default_roadmap_path()
     else:
@@ -104,7 +105,7 @@ def audit_roadmap(path: str | Path | None = None) -> dict[str, Any]:
     complete = counts["implemented"]
     in_progress = counts["in_progress"]
     planned = counts["planned"]
-    integrity_ok = total == 120 and not duplicates and not missing and not unexpected and not unknown_statuses
+    integrity_ok = total == _EXPECTED_TOTAL and not duplicates and not missing and not unexpected and not unknown_statuses
 
     return {
         "schema_version": _SCHEMA_VERSION,
@@ -112,7 +113,7 @@ def audit_roadmap(path: str | Path | None = None) -> dict[str, Any]:
         "source": source.name,
         "integrity": {
             "ok": integrity_ok,
-            "expected_items": 120,
+            "expected_items": _EXPECTED_TOTAL,
             "parsed_items": total,
             "missing_ids": missing,
             "duplicate_ids": duplicates,

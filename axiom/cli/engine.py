@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import typer
@@ -198,44 +199,93 @@ def engine_estimate(
 @engine_app.command("telemetry")
 def engine_telemetry(
     json_output: bool = typer.Option(False, "--json", help="Print machine-readable resource telemetry."),
+    watch: bool = typer.Option(False, "--watch", help="Explicitly opt in to a bounded series of local resource samples."),
+    interval_seconds: float = typer.Option(2.0, "--interval-seconds", min=0.5, max=60.0, help="Delay between watched samples (0.5–60 seconds)."),
+    samples: int = typer.Option(30, "--samples", min=1, max=300, help="Number of watched samples (1–300)."),
+    output: Path | None = typer.Option(None, "--output", help="Create a new JSONL file containing the sampled resource snapshots; existing files are never overwritten."),
 ) -> None:
-    """Inspect local CPU, RAM, device allocator and trusted model-storage resources."""
-    report = runtime_telemetry()
-    if json_output:
-        typer.echo(json.dumps(report, indent=2, ensure_ascii=False))
+    """Inspect a point-in-time snapshot or explicitly watch bounded local resource telemetry."""
+    if not watch:
+        if output is not None:
+            _fail("--output requires explicit opt-in with --watch.")
+        report = runtime_telemetry()
+        if json_output:
+            typer.echo(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+        table = Table(title="AXIOM Engine resource telemetry")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Current sample")
+        table.add_row("Sampled at", report["sampled_at"])
+        table.add_row("CPU cores", str(report["cpu"].get("logical_cores") or "not exposed"))
+        table.add_row("System CPU", str(report["cpu"].get("system_percent")) + "%" if report["cpu"].get("system_percent") is not None else "not exposed")
+        table.add_row("Process CPU", str(report["cpu"].get("process_percent")) + "%" if report["cpu"].get("process_percent") is not None else "not exposed")
+        table.add_row("System RAM total", str(report["memory"].get("total_bytes")) + " bytes" if report["memory"].get("total_bytes") is not None else "not exposed")
+        table.add_row("System RAM available", str(report["memory"].get("available_bytes")) + " bytes" if report["memory"].get("available_bytes") is not None else "not exposed")
+        table.add_row("Process RSS", str(report["process"].get("rss_bytes")) + " bytes" if report["process"].get("rss_bytes") is not None else "not exposed")
+        table.add_row("Model loaded", "yes" if report["loaded_runtime"]["loaded"] else "no")
+        table.add_row("Active device", str(report["loaded_runtime"].get("device") or "none"))
+        console.print(table)
+        device_table = Table(title="Device memory")
+        device_table.add_column("Device", style="cyan")
+        device_table.add_column("Available")
+        device_table.add_column("Free / total")
+        for item in report["devices"]:
+            free = item.get("memory_free_gib")
+            total = item.get("memory_total_gib")
+            memory_text = f"{free} / {total} GiB" if free is not None and total is not None else "not exposed"
+            device_table.add_row(str(item.get("name") or item.get("id")), "yes" if item.get("available") else "no", memory_text)
+        console.print(device_table)
+        if report["disks"]:
+            disk_table = Table(title="Trusted model storage (paths hidden)")
+            disk_table.add_column("Root")
+            disk_table.add_column("Free bytes")
+            disk_table.add_column("Total bytes")
+            for disk in report["disks"]:
+                disk_table.add_row(disk["label"], str(disk["free_bytes"]), str(disk["total_bytes"]))
+            console.print(disk_table)
+        console.print(report["scope_note"])
         return
-    table = Table(title="AXIOM Engine resource telemetry")
-    table.add_column("Metric", style="cyan")
-    table.add_column("Current sample")
-    table.add_row("Sampled at", report["sampled_at"])
-    table.add_row("CPU cores", str(report["cpu"].get("logical_cores") or "not exposed"))
-    table.add_row("System CPU", str(report["cpu"].get("system_percent")) + "%" if report["cpu"].get("system_percent") is not None else "not exposed")
-    table.add_row("Process CPU", str(report["cpu"].get("process_percent")) + "%" if report["cpu"].get("process_percent") is not None else "not exposed")
-    table.add_row("System RAM total", str(report["memory"].get("total_bytes")) + " bytes" if report["memory"].get("total_bytes") is not None else "not exposed")
-    table.add_row("System RAM available", str(report["memory"].get("available_bytes")) + " bytes" if report["memory"].get("available_bytes") is not None else "not exposed")
-    table.add_row("Process RSS", str(report["process"].get("rss_bytes")) + " bytes" if report["process"].get("rss_bytes") is not None else "not exposed")
-    table.add_row("Model loaded", "yes" if report["loaded_runtime"]["loaded"] else "no")
-    table.add_row("Active device", str(report["loaded_runtime"].get("device") or "none"))
-    console.print(table)
-    device_table = Table(title="Device memory")
-    device_table.add_column("Device", style="cyan")
-    device_table.add_column("Available")
-    device_table.add_column("Free / total")
-    for item in report["devices"]:
-        free = item.get("memory_free_gib")
-        total = item.get("memory_total_gib")
-        memory_text = f"{free} / {total} GiB" if free is not None and total is not None else "not exposed"
-        device_table.add_row(str(item.get("name") or item.get("id")), "yes" if item.get("available") else "no", memory_text)
-    console.print(device_table)
-    if report["disks"]:
-        disk_table = Table(title="Trusted model storage (paths hidden)")
-        disk_table.add_column("Root")
-        disk_table.add_column("Free bytes")
-        disk_table.add_column("Total bytes")
-        for disk in report["disks"]:
-            disk_table.add_row(disk["label"], str(disk["free_bytes"]), str(disk["total_bytes"]))
-        console.print(disk_table)
-    console.print(report["scope_note"])
+
+    collected: list[dict[str, object]] = []
+    try:
+        for index in range(samples):
+            collected.append(runtime_telemetry())
+            if not json_output:
+                report = collected[-1]
+                cpu = report["cpu"].get("system_percent")
+                rss = report["process"].get("rss_bytes")
+                console.print(
+                    f"{index + 1}/{samples} · {report['sampled_at']} · "
+                    f"CPU {str(cpu) + '%' if cpu is not None else 'n/a'} · "
+                    f"RSS {str(rss) + ' bytes' if rss is not None else 'n/a'}"
+                )
+            if index + 1 < samples:
+                time.sleep(interval_seconds)
+
+        if output is not None:
+            # Exclusive creation avoids silently replacing a user's existing report.
+            with output.open("x", encoding="utf-8", newline="\n") as handle:
+                for report in collected:
+                    handle.write(json.dumps(report, ensure_ascii=False, separators=(",", ":")) + "\n")
+    except FileExistsError:
+        _fail("Telemetry output already exists; choose a new path to avoid overwriting it.")
+    except (OSError, ValueError) as exc:
+        _fail(f"Telemetry sampling or export failed: {exc}")
+
+    if json_output:
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "sample_count": len(collected),
+            "interval_seconds": interval_seconds,
+            "samples": collected,
+        }, indent=2, ensure_ascii=False))
+    else:
+        console.print(
+            f"Captured {len(collected)} opt-in telemetry samples at {interval_seconds:g}-second intervals. "
+            "Samples were kept in memory only."
+        )
+        if output is not None:
+            console.print(f"Created telemetry export: {output}")
 
 
 @engine_app.command("pull")

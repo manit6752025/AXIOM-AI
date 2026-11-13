@@ -1,11 +1,11 @@
 {
   "name": "@netcore-technologies/axiom-cli",
-  "version": "0.3.0-beta.6",
+  "version": "0.3.0-beta.7",
   "description": "Node.js launcher for the AXIOM AI engineering CLI",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/NetCore-Technologies/AXIOM-AI.git"
+    "url": "git+https://github.com/manit6752025/AXIOM-AI.git"
   },
   "bin": {
     "axiom": "bin/axiom.mjs"
@@ -16,8 +16,8 @@
   "publishConfig": {
     "access": "public"
   },
-  "homepage": "https://github.com/NetCore-Technologies/AXIOM-AI#readme",
+  "homepage": "https://github.com/manit6752025/AXIOM-AI#readme",
   "bugs": {
-    "url": "https://github.com/NetCore-Technologies/AXIOM-AI/issues"
+    "url": "https://github.com/manit6752025/AXIOM-AI/issues"
   }
 }

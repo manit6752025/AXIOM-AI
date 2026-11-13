@@ -15,7 +15,7 @@ set -euo pipefail
 # All path overrides must be absolute paths. The x86_64 Linux path downloads
 # and verifies the onedir bundle because it starts faster on repeated runs.
 
-REPO="NetCore-Technologies/AXIOM-AI"
+REPO="manit6752025/AXIOM-AI"
 USER_HOME="${HOME:-}"
 INSTALL_DIR="${AXIOM_INSTALL_DIR:-${USER_HOME}/.local/share/axiom}"
 BIN_DIR="${AXIOM_BIN_DIR:-${USER_HOME}/.local/bin}"
@@ -34,7 +34,7 @@ show_help() {
 AXIOM installer
 
 Usage:
-  curl -fsSL https://raw.githubusercontent.com/NetCore-Technologies/AXIOM-AI/main/installers/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/manit6752025/AXIOM-AI/main/installers/install.sh | bash
 
 Optional environment overrides:
   AXIOM_RELEASE_TAG=v0.3.0-beta.6  Install one exact GitHub release.
