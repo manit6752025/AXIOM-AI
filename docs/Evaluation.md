@@ -60,23 +60,86 @@ records and 4 MB. Deleting a report never changes its dataset.
 
 ## MCP
 
-Agents can call `axiom_evaluation_run` on JSONL files under the MCP workspace's
-`data/` directory after the permission is explicitly granted. It uses bounded
+Agents can call `axiom_evaluation_preflight` on JSONL files under the MCP
+workspace's `data/` directory before preparing a saved evaluation. It uses the
+same prediction/reference fields, optional split, and bounded scan limits as
+`axiom_evaluation_run`. It returns aggregate metrics, confidence intervals,
+sample counts, skipped-row counts, and whether the scan reached the initial
+file size. Metrics use `valid_samples`; rows excluded by the selected split are
+intentional, while malformed JSON, non-object, overlong, missing-value, and
+non-string rows require review. It returns no row values, paths, or content
+hashes and saves no report. The scan checks device, inode, size, and modification
+time before and after reading; those metadata checks do not bind a later run to
+the same content. The run scans the current file again. Rerun preflight just
+before seeking approval if the source may have changed; show changed results
+and obtain approval again. `clear_for_user_approval` means no known scan or
+data-quality blockers, not a model-quality judgment or approval.
+`baseline_eligible` reflects complete-scan fingerprint criteria only; review
+findings still apply.
+Grant the preview permission separately:
+
+```bash
+axiom mcp allow axiom_evaluation_preflight
+```
+
+After showing the preflight results, get explicit approval before calling
+`axiom_evaluation_run` to save aggregate metrics. That tool scores JSONL files
+under the MCP workspace's `data/` directory after its permission is granted.
+It uses bounded
 64 MiB, 100,000-row, and 1 MiB-per-line limits and persists aggregate reports
 only. Prediction/reference text is not returned or persisted. Local whole-file
 and comparison fingerprints are persisted for integrity and baseline matching,
 but MCP responses omit those hashes. Grant `axiom_evaluation_history`
-separately to read saved run summaries or reports. Baseline marking is opt-in;
+separately to read saved run summaries or reports. Grant evaluation and history
+separately:
+
+```bash
+axiom mcp allow axiom_evaluation_run
+axiom mcp allow axiom_evaluation_history
+```
+
+Baseline marking is opt-in;
 partial runs cannot be marked as baselines or produce a pass/fail comparison.
-These metrics measure lexical overlap, not semantic quality.
+These metrics measure lexical overlap, not semantic quality. History lists are
+bounded to 100 summaries per call. Set `baselines_only=true` to list only runs
+explicitly marked as baselines; it returns every marked baseline and does not
+select an active or latest baseline. This filter applies to history listings
+and cannot be combined with `run_id`; comparisons still require an explicit
+baseline run ID. `total` and `has_more` describe the filtered list. To continue,
+pass the previous page's `next_cursor` value as
+`after_run_id` and keep the same filter; the cursor anchors after that saved
+run, so newly saved runs do not shift the continuation. Start a fresh first-page
+request to include runs saved after paging began. If the cursor run was deleted
+or aged out of retained history, start a fresh listing.
+
+For example, request the first baseline page, then use that response's cursor
+for the next page with the same filter:
+
+```json
+{"limit":20,"baselines_only":true}
+{"limit":20,"baselines_only":true,"after_run_id":"<previous-next_cursor>"}
+```
+
+To compare saved runs after the fact, call `axiom_evaluation_compare` with a
+marked baseline run ID, a current run ID, a metric (`exact_match`,
+`normalized_exact_match`, or `token_f1_micro`), and a regression tolerance from
+0 to 1. It returns baseline/current scores, the current-minus-baseline delta,
+and `passed` or `regression` status. The tool uses the evaluation-history
+permission, verifies the saved report manifests and saved corpus metadata, but
+does not reopen source files or return row values. Corpus/configuration mismatch
+returns `comparison_returned: false` with a reason code. Scores are lexical and
+do not establish semantic quality or statistical significance.
 
 For a user-requested diagnosis of a saved offline comparison,
 `axiom_evaluation_compare_examples` accepts a baseline run ID, a current run
 ID, and one transition category. `fixed`/`regressed` use raw exact match;
 `token_f1_improved`/`token_f1_worsened` rank rows by the largest positive or
 most negative per-row token-F1 delta and return the per-row baseline score,
-candidate score, and delta. The current run must have been saved against that
-baseline, and both reports must be complete and intact. The tool reopens the
+candidate score, and delta. It also returns baseline/current corpus scores
+(0–1), the current-minus-baseline delta, and saved tolerance status for the
+selected regression metric across all `rows_compared` rows. These aggregate
+values are separate from the returned examples. The current run must have been
+saved against that baseline, and both reports must be complete and intact. The tool reopens the
 reports' workspace-relative sources under `data/`, verifies their saved report
 manifests and full content hashes, and confirms the comparison corpus before
 returning examples. It returns exact-match transition counts and token-F1
@@ -87,8 +150,9 @@ seeded with the baseline run ID, current run ID, and category, then list the
 selected examples by row number. `sample_strategy` applies only to exact-match
 categories; F1 categories always use metric ranking, so `uniform_hash` is
 unavailable for them. At most three examples are illustrative, not
-statistically representative. F1-ranked extremes are also intentionally not representative.
-Per-row token-F1 deltas do not add up to the corpus-level micro-F1 delta.
+statistically representative. F1-ranked extremes are also intentionally not
+representative. Per-row token-F1 deltas do not add up to the corpus-level
+micro-F1 delta; the selected `token_f1_micro` score covers all compared rows.
 Paired comparison supports sources up to
 256 MiB, 500,000 rows, and 8 MiB per JSONL line; larger saved evaluations
 cannot be inspected by this tool.

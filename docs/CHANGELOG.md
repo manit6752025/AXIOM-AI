@@ -33,9 +33,14 @@
 ### Added
 - Persisted a training dataset fingerprint in local job state, hardened POSIX job-storage permissions, and made job-linked overlap checks inconclusive when the current file differs, a stable scan is unavailable, or a legacy job has no fingerprint; status responses omit the digest.
 - Added a read-only training-job validation plan that composes overlap, base/adapter compatibility, and prompt-truncation checks and returns two proposed prediction runs without starting inference.
+- Added an `actionability` summary to the training-job validation preflight, separating blocked checks, findings that need user review, and plans that still require explicit approval before starting.
 - Added a training-job-linked prediction comparison that verifies the saved base/adapter pairing and shared run settings before reporting bounded exact-match transitions.
 - Added hash-verified paired examples for selected prediction-job transitions; row numbers are the default and text requires a separately granted capability plus per-call approval.
 - Added offline-evaluator-compatible exact-match, normalized exact-match, and token-F1 scores with candidate-minus-baseline deltas to verified prediction-job comparisons.
+- Added run-ID cursor pagination to MCP evaluation history so agents can continue through bounded saved summaries as new evaluations are recorded.
+- Added verified baseline/current corpus scores for the selected regression metric to paired offline-evaluation example diagnostics.
+- Added a read-only MCP tool to compare two saved complete evaluation reports without requiring a comparison link at scoring time or reopening source files.
+- Added a read-only prediction validation plan that composes dataset prompt-truncation and base/adapter engine checks into one actionability result before explicit approval.
 - Added a default-deny paired-example tool for saved offline evaluation comparisons; it revalidates report manifests and source snapshots, diagnoses raw exact-match transitions or ranks per-row token-F1 changes, supports deterministic hash-priority samples, returns row numbers by default, and requires per-call approval for bounded text excerpts.
 - Added a job-linked training/evaluation overlap preflight that derives the training dataset and text field from a completed job and returns saved base/adapter paths; it reports the current-file snapshot and unverified artifact limitations.
 - Added `axiom_training_job_wait`, a bounded wait for local LoRA job outcomes that reuses the status permission; stale recovery verifies process identity and preserves newer job state.
