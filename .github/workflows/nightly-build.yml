@@ -34,9 +34,9 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Fetch all source branches and release tags
+      - name: Fetch all source branches without rewriting local tags
         shell: bash
-        run: git fetch origin main latest/development latest/nightly --tags
+        run: git fetch --no-tags origin main latest/development latest/nightly
 
       - name: Record exact source SHAs
         id: source_refs
@@ -75,25 +75,40 @@ jobs:
           set -euo pipefail
           VERSION="$(python - <<'PYVERSION'
           from pathlib import Path
+          import json
           import re
           import subprocess
           import tomllib
 
           project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           current = str(project["project"]["version"])
-          match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:-(?:beta|b)\.(\d+))?", current)
+          match = re.fullmatch(r"(\d+\.\d+\.\d+)-(?:beta|b)\.(\d+)", current)
           if not match:
               raise SystemExit(f"Unsupported project version for automated beta releases: {current}")
           base = match.group(1)
-          current_number = int(match.group(2) or 0)
+          current_number = int(match.group(2))
           tag_pattern = re.compile(r"^v" + re.escape(base) + r"-beta\.(\d+)$")
-          tags = subprocess.run(
-              ["git", "tag", "--list", f"v{base}-beta.*"],
+          remote = subprocess.run(
+              ["git", "ls-remote", "--tags", "origin", f"refs/tags/v{base}-beta.*"],
               check=True, capture_output=True, text=True,
           ).stdout.splitlines()
-          tagged_numbers = [int(m.group(1)) for tag in tags if (m := tag_pattern.fullmatch(tag))]
+          tagged_numbers = []
+          for line in remote:
+              fields = line.split("\t", 1)
+              if len(fields) != 2 or fields[1].endswith("^{}"):
+                  continue
+              tag_name = fields[1].removeprefix("refs/tags/")
+              found = tag_pattern.fullmatch(tag_name)
+              if found:
+                  tagged_numbers.append(int(found.group(1)))
           number = max([current_number, *tagged_numbers], default=0) + 1
           version = f"{base}-beta.{number}"
+
+          def update_version_json(path: str, field: str) -> None:
+              file_path = Path(path)
+              data = json.loads(file_path.read_text(encoding="utf-8"))
+              data[field] = version
+              file_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
           pyproject_path = Path("pyproject.toml")
           pyproject = pyproject_path.read_text(encoding="utf-8")
@@ -113,10 +128,22 @@ jobs:
               raise SystemExit("Could not update __version__ in axiom/version.py")
           runtime_path.write_text(runtime, encoding="utf-8")
 
+          update_version_json("package.json", "version")
+          lock_path = Path("package-lock.json")
+          lock = json.loads(lock_path.read_text(encoding="utf-8"))
+          lock["version"] = version
+          if not isinstance(lock.get("packages"), dict) or not isinstance(lock["packages"].get(""), dict):
+              raise SystemExit("package-lock.json has no root package entry")
+          lock["packages"][""]["version"] = version
+          lock_path.write_text(json.dumps(lock, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+          update_version_json("packaging/npm/package.json", "version")
+          update_version_json("packaging/scoop/axiom.json.template", "version")
+          update_version_json("packaging/winget/NetCoreTechnologies.AXIOM.yaml.template", "PackageVersion")
+
           release_workflow_path = Path(".github/workflows/release-assets.yml")
           release_workflow = release_workflow_path.read_text(encoding="utf-8")
           release_workflow, count = re.subn(
-              r'(?m)^( *default: *)"v[0-9]+[.][0-9]+[.][0-9]+(?:-(?:beta|b)[.][0-9]+)?" *$',
+              r'(?m)^( *default: *)"v[0-9]+[.]\d+[.]\d+(?:-(?:beta|b)[.]\d+)?" *$',
               lambda m: m.group(1) + f'"v{version}"',
               release_workflow,
               count=1,
@@ -125,6 +152,7 @@ jobs:
               raise SystemExit("Could not update workflow_dispatch tag default in release-assets.yml")
           release_workflow_path.write_text(release_workflow, encoding="utf-8")
 
+          readme_path = Path("README.md")
           if readme_path.exists():
               readme = readme_path.read_text(encoding="utf-8")
               readme, count = re.subn(
@@ -133,11 +161,20 @@ jobs:
               )
               if count:
                   readme_path.write_text(readme, encoding="utf-8")
+
+          app_path = Path("src/App.tsx")
+          if app_path.exists():
+              app = app_path.read_text(encoding="utf-8")
+              app = re.sub(r"\bBETA\s+\d+\b", f"BETA {number}", app)
+              app = re.sub(r"\bBeta\s+\d+\b", f"Beta {number}", app)
+              app = re.sub(r"(?<=AXIOM / )" + re.escape(current), version, app)
+              app_path.write_text(app, encoding="utf-8")
+
           print(version)
           PYVERSION
           )"
           echo "package_tag=v${VERSION}" >> "$GITHUB_OUTPUT"
-          git add pyproject.toml axiom/version.py README.md .github/workflows/release-assets.yml
+          git add pyproject.toml axiom/version.py package.json package-lock.json packaging/npm/package.json packaging/scoop/axiom.json.template packaging/winget/NetCoreTechnologies.AXIOM.yaml.template README.md src/App.tsx .github/workflows/release-assets.yml
           git commit -m "chore: prepare verified weekly build v${VERSION}"
 
       - name: Record integration commit
