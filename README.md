@@ -370,6 +370,17 @@ The save response includes `workflow.id` and the persisted graph. To inspect or
 validate that saved design later, use `axiom workflow show <workflow.id>` or
 `axiom workflow validate <workflow.id>` from the same workspace.
 
+An agent with the separate `axiom_workflow_read` permission can also list
+bounded saved-design summaries and fetch a validated graph by its ID. Listing
+returns a `next_cursor`; pass it as `after_workflow_id` with the same `limit` to
+continue. Start a fresh listing to include designs saved after paging began.
+Read access does not grant write access, and every response marks the design
+`execution_status: not_executable`:
+
+```bash
+axiom mcp allow axiom_workflow_read
+```
+
 Agent task profiles describe what a task is allowed to be about. They do not grant tool permissions.
 
 ```bash
@@ -828,6 +839,7 @@ axiom mcp profile use readonly
 | `axiom_info` | AXIOM version and capabilities |
 | `axiom_workspace_context` | Read a privacy-bounded project, hardware, and developer-tool snapshot; command suggestions need user approval |
 | `axiom_workspace_assets` | Find model directories and JSONL datasets with bounded, workspace-relative path scans |
+| `axiom_workflow_read` | List saved workflow summaries or retrieve a validated non-executable design |
 | `axiom_workflow_save` | Save a user-approved, validated workflow graph as a non-executable design |
 | `axiom_training_preflight` | Check local LoRA inputs and estimates without loading weights or starting a job |
 | `axiom_training_eval_overlap_preflight` | Check for normalized exact overlap between training and evaluation JSONL without returning text |
