@@ -159,6 +159,7 @@ feature exists or a delivery-date promise.
 - [R119 · Planned] Add migration/rollback notes for every persisted-data schema change.
 - [R120 · Planned] Add end-to-end acceptance coverage for each shipped workflow.
 
+<<<<<<< HEAD
 ### 11 · Applied AI workflows and knowledge infrastructure
 
 - [R121 · Planned] Add reproducible hardware-specific benchmark profiles with environment and provenance records.
@@ -181,6 +182,33 @@ feature exists or a delivery-date promise.
 - [R138 · Planned] Add workspace backup and restore with manifests, checksums, and safe path validation.
 - [R139 · In progress; validation pending] Add opt-in resource sampling and history with clear, export, and retention controls. The CLI now supports an explicit bounded watch and create-only JSONL export; the Runtime page now supports opt-in, 120-sample browser-memory history with a CPU trend, JSON export, and clear. Persistent server-side history and broader retention settings remain outstanding pending acceptance checks.
 - [R140 · Planned] Publish stable Python and TypeScript SDKs verified against the supported API schema.
+=======
+
+### 11 · Intelligence, knowledge, and production workflows
+
+All deliverables are planned until genuinely implemented and verified.
+
+- [R121 · Planned] Reproducible hardware-specific model benchmark profiles and provenance.
+- [R122 · Planned] Prompt Studio with versioned templates, variables, validation and history.
+- [R123 · Planned] JSON Schema constrained inference and explicit validation errors.
+- [R124 · Planned] Local embedding engine with model management, batching and dimension validation.
+- [R125 · Planned] Local reranking with documented scoring and bounded resources.
+- [R126 · Planned] Workspace-local knowledge bases and secure document ingestion.
+- [R127 · Planned] Hybrid retrieval, chunking, metadata filters, citations and configurable ranking.
+- [R128 · Planned] Local multimodal image understanding with capability checks.
+- [R129 · Planned] Optional local-first speech-to-text and text-to-speech integrations.
+- [R130 · Planned] Dataset snapshots, lineage, integrity hashes and reproducibility.
+- [R131 · Planned] Training and evaluation experiment comparison.
+- [R132 · Planned] Reusable local model-serving profiles.
+- [R133 · Planned] Bounded cancellable and resumable batch inference.
+- [R134 · Planned] Runtime request queues, concurrency limits and backpressure.
+- [R135 · Planned] Model provenance and security inspection.
+- [R136 · Planned] SBOM generation and dependency vulnerability reporting.
+- [R137 · Planned] Versioned default-deny plugin integrations.
+- [R138 · Planned] Workspace backup, restore and integrity verification.
+- [R139 · Planned] Opt-in historical CPU, RAM, VRAM and inference monitoring.
+- [R140 · Planned] Stable typed Python and TypeScript SDKs.
+>>>>>>> 0a01e53 (feat: update roadmap)
 
 ### Delivery gates
 
