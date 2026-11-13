@@ -60,13 +60,45 @@ records and 4 MB. Deleting a report never changes its dataset.
 
 ## MCP
 
-Agents can call `axiom_evaluation_run` on JSONL files under the MCP workspace's
-`data/` directory after the permission is explicitly granted. It uses bounded
+Agents can call `axiom_evaluation_preflight` on JSONL files under the MCP
+workspace's `data/` directory before preparing a saved evaluation. It uses the
+same prediction/reference fields, optional split, and bounded scan limits as
+`axiom_evaluation_run`. It returns aggregate metrics, confidence intervals,
+sample counts, skipped-row counts, and whether the scan reached the initial
+file size. Metrics use `valid_samples`; rows excluded by the selected split are
+intentional, while malformed JSON, non-object, overlong, missing-value, and
+non-string rows require review. It returns no row values, paths, or content
+hashes and saves no report. The scan checks device, inode, size, and modification
+time before and after reading; those metadata checks do not bind a later run to
+the same content. The run scans the current file again. Rerun preflight just
+before seeking approval if the source may have changed; show changed results
+and obtain approval again. `clear_for_user_approval` means no known scan or
+data-quality blockers, not a model-quality judgment or approval.
+`baseline_eligible` reflects complete-scan fingerprint criteria only; review
+findings still apply.
+Grant the preview permission separately:
+
+```bash
+axiom mcp allow axiom_evaluation_preflight
+```
+
+After showing the preflight results, get explicit approval before calling
+`axiom_evaluation_run` to save aggregate metrics. That tool scores JSONL files
+under the MCP workspace's `data/` directory after its permission is granted.
+It uses bounded
 64 MiB, 100,000-row, and 1 MiB-per-line limits and persists aggregate reports
 only. Prediction/reference text is not returned or persisted. Local whole-file
 and comparison fingerprints are persisted for integrity and baseline matching,
 but MCP responses omit those hashes. Grant `axiom_evaluation_history`
-separately to read saved run summaries or reports. Baseline marking is opt-in;
+separately to read saved run summaries or reports. Grant evaluation and history
+separately:
+
+```bash
+axiom mcp allow axiom_evaluation_run
+axiom mcp allow axiom_evaluation_history
+```
+
+Baseline marking is opt-in;
 partial runs cannot be marked as baselines or produce a pass/fail comparison.
 These metrics measure lexical overlap, not semantic quality. History lists are
 bounded to 100 summaries per call. Set `baselines_only=true` to list only runs

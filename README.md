@@ -672,6 +672,28 @@ axiom mcp allow axiom_dataset_clean_preview
 axiom mcp allow axiom_dataset_clean
 ```
 
+`axiom_evaluation_preflight` previews an offline evaluation of already-produced
+predictions without saving a report. Use the same prediction/reference fields,
+optional split, and scan limits planned for `axiom_evaluation_run`. It returns
+aggregate metrics, confidence intervals, sample and skipped-row counts, and
+whether the scan reached the initial file size; it never returns row values or
+hashes. Metrics use `valid_samples`. Rows excluded by the requested split are
+intentional; malformed, non-object, overlong, missing-value, and non-string
+rows need review. `clear_for_user_approval` means no known scan or data-quality
+blockers, not a model-quality judgment or approval. `baseline_eligible` reflects
+complete-scan fingerprint criteria only; review findings still apply. The
+source file's device, inode, size, and modification time are checked before
+and after reading; this does not bind a later run to the same content. Rerun
+preflight immediately before seeking approval if the file may have changed.
+Show any changed results and obtain approval again. The preview and saved
+evaluation each have a default-deny permission. Get explicit user approval
+before saving metrics through `axiom_evaluation_run`; grant the preview
+capability with:
+
+```bash
+axiom mcp allow axiom_evaluation_preflight
+```
+
 `axiom_evaluation_run` scores already-produced predictions in JSONL files
 under the MCP workspace's `data/` directory. Pass a returned `data/file.jsonl`
 asset path or a path relative to `data/`. It returns aggregate exact-match,
@@ -799,6 +821,7 @@ axiom mcp profile use readonly
 | `axiom_dataset_inspect` | Bounded JSONL profile; sensitive-name heuristics run by default, value PII scanning is opt-in |
 | `axiom_dataset_clean_preview` | Preview bounded cleanup counts without returning row contents or writing files |
 | `axiom_dataset_clean` | Write a new cleaned JSONL copy inside the workspace |
+| `axiom_evaluation_preflight` | Preview bounded offline evaluation metrics and data quality without saving a report |
 | `axiom_evaluation_run` | Score precomputed outputs offline and save aggregate metrics |
 | `axiom_evaluation_history` | Read saved aggregate evaluation metrics |
 | `axiom_evaluation_compare` | Compare two complete saved evaluations using the history permission |

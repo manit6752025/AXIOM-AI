@@ -411,6 +411,22 @@ parent directory can race the path checks; the fallback is scoped against
 static traversal and refuses existing outputs, but does not pin directory
 handles against another process changing the workspace at the same time.
 
+The separately permissioned `axiom_evaluation_preflight` tool previews bounded
+offline metrics and data-quality counts for precomputed prediction JSONL under
+`data/`. Use the same fields, split, and limits planned for the later run. It
+returns no row values, paths, or hashes and saves no report. Partial scans and
+quality-skipped rows require review; rows filtered by the requested split do
+not. Metrics use `valid_samples`. The scan checks file identity metadata before
+and after reading but does not bind a later run to that content; the run
+rescans the current path. Rerun preflight immediately before seeking approval
+if the file may have changed. Show changed results and obtain approval again.
+Grant it separately with
+`axiom mcp allow axiom_evaluation_preflight`. Show the result and obtain
+explicit approval before persisting metrics. `clear_for_user_approval` means no
+known scan or data-quality blockers, not a model-quality judgment or approval.
+`baseline_eligible` reflects complete-scan fingerprint criteria only; review
+findings still apply.
+
 The separately permissioned `axiom_evaluation_run` tool scores precomputed
 prediction JSONL under the workspace's `data/` directory and saves a local
 aggregate report. It does not load a model, run inference, or access the
