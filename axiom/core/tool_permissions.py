@@ -18,6 +18,12 @@ TOOL_DESCRIPTIONS = {
     "axiom_workspace_assets": (
         "List workspace-relative model and JSONL paths without reading contents."
     ),
+    "axiom_workflow_save": (
+        "Validate and save a non-executable workflow design of up to 64 nodes and 128 connections after explicit user approval; writes to the workspace workflow store."
+    ),
+    "axiom_workflow_read": (
+        "Read bounded summaries or a validated non-executable workflow design from the workspace store without changing files; separate permission from workflow saving."
+    ),
     "axiom_training_preflight": (
         "Check local LoRA inputs and estimates without loading weights or starting a job."
     ),
@@ -55,7 +61,7 @@ TOOL_DESCRIPTIONS = {
         "Inspect the first up to three identity- and hash-verified raw exact mismatches; text is off by default and bounded excerpts require explicit per-call opt-in."
     ),
     "axiom_prediction_job_compare": (
-        "Compare two completed prediction jobs on hash-verified artifacts; returns transition counts, bounded row-number samples, and workspace-relative model settings without dataset or output paths."
+        "Compare two completed prediction jobs on hash-verified artifacts; returns exact-match transitions, offline-compatible lexical metric scores and deltas, bounded row-number samples, and workspace-relative model settings without dataset or output paths."
     ),
     "axiom_prediction_job_compare_examples": (
         "Inspect up to three hash-verified paired examples from one prediction-job transition; text is off by default and prompt excerpts require separate per-call opt-in."
@@ -69,7 +75,16 @@ TOOL_DESCRIPTIONS = {
     "axiom_dataset_clean_preview": "Preview bounded dataset cleaning counts without writing files.",
     "axiom_dataset_clean": "Write a new cleaned dataset copy inside the workspace.",
     "axiom_evaluation_run": "Score local precomputed outputs, including completed prediction-job artifacts, and persist aggregate metrics plus bounded run provenance without row values.",
-    "axiom_evaluation_history": "Read saved aggregate evaluation metrics and bounded run provenance without dataset values or local fingerprints.",
+    "axiom_evaluation_preflight": (
+        "Preview bounded aggregate metrics and data-quality counts for precomputed JSONL without saving a report or returning row values."
+    ),
+    "axiom_evaluation_examples": (
+        "Inspect raw exact mismatches from one intact saved offline evaluation; row numbers are default and bounded text requires explicit per-call opt-in."
+    ),
+    "axiom_evaluation_history": "Read saved aggregate evaluation metrics, compare complete reports, and inspect bounded run provenance without dataset values or local fingerprints.",
+    "axiom_evaluation_compare_examples": (
+        "Inspect up to three verified exact-match or per-row token-F1 examples between saved complete evaluations; row numbers and first-in-file-order exact-match examples are default, with optional deterministic hash-priority sampling and explicit per-call text opt-in."
+    ),
     "axiom_system_info": "Read local hardware information.",
     "axiom_training_plan": "Create a hardware-aware training estimate.",
     "axiom_supercompress_status": "Read optional SuperCompress configuration status.",

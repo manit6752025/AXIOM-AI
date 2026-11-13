@@ -45,12 +45,36 @@ class EvaluationStore:
             record["schema_version"] = self.SCHEMA_VERSION
         return records
 
-    def list_page(self, *, limit: int = 100, offset: int = 0) -> dict[str, Any]:
+    def list_page(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        after_run_id: str | None = None,
+        baselines_only: bool = False,
+    ) -> dict[str, Any]:
         if type(limit) is not int or not 1 <= limit <= 1000:
             raise ValueError("Evaluation page limit must be between 1 and 1000.")
         if type(offset) is not int or not 0 <= offset <= 1_000_000:
             raise ValueError("Evaluation page offset must be between 0 and 1000000.")
+        if type(baselines_only) is not bool:
+            raise ValueError("Evaluation baseline filter must be a boolean.")
+        if after_run_id is not None:
+            if not isinstance(after_run_id, str) or not after_run_id:
+                raise ValueError("Evaluation history cursor must be a non-empty run ID.")
+            if offset != 0:
+                raise ValueError("Evaluation history cursor cannot be combined with an offset.")
         records = self._read()
+        if baselines_only:
+            records = [record for record in records if record.get("baseline") is True]
+        if after_run_id is not None:
+            cursor_index = next(
+                (index for index, record in enumerate(records) if record.get("id") == after_run_id),
+                None,
+            )
+            if cursor_index is None:
+                raise KeyError("Evaluation history cursor was not found.")
+            offset = cursor_index + 1
         return {
             "runs": records[offset:offset + limit],
             "total": len(records),

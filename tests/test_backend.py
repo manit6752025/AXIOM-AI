@@ -50,7 +50,11 @@ def test_mcp_schema_and_all_handlers(tmp_path: Path, monkeypatch: pytest.MonkeyP
         "axiom_dataset_inspect",
         "axiom_engine_generate",
         "axiom_engine_preflight",
+        "axiom_evaluation_compare",
+        "axiom_evaluation_compare_examples",
+        "axiom_evaluation_examples",
         "axiom_evaluation_history",
+        "axiom_evaluation_preflight",
         "axiom_evaluation_run",
         "axiom_info",
         "axiom_model_info",
@@ -61,6 +65,7 @@ def test_mcp_schema_and_all_handlers(tmp_path: Path, monkeypatch: pytest.MonkeyP
         "axiom_prediction_job_evaluate",
         "axiom_prediction_job_examples",
         "axiom_prediction_job_preflight",
+        "axiom_prediction_job_validation_preflight",
         "axiom_prediction_job_start",
         "axiom_prediction_job_status",
         "axiom_prediction_job_wait",
@@ -79,6 +84,10 @@ def test_mcp_schema_and_all_handlers(tmp_path: Path, monkeypatch: pytest.MonkeyP
         "axiom_training_preflight",
         "axiom_workspace_assets",
         "axiom_workspace_context",
+        "axiom_workflow_compare",
+        "axiom_workflow_dry_run",
+        "axiom_workflow_read",
+        "axiom_workflow_save",
     }
 
     monkeypatch.chdir(tmp_path)
