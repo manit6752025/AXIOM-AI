@@ -29,6 +29,7 @@ from axiom.core.fine_tuning import (
     start_finetuning_job,
     training_loss_trace_summary,
     validate_local_model_tree,
+    wait_finetuning_job,
 )
 from axiom.core.mcp_paths import (
     open_mcp_workspace_file,
@@ -50,6 +51,7 @@ from axiom.core.tool_permissions import ToolPermissionStore
 from axiom.core.training_preflight import (
     resolve_workspace_input,
     resolve_workspace_output,
+    run_training_evaluation_overlap_preflight,
     run_training_preflight,
 )
 from axiom.daemon import local_summary
@@ -90,10 +92,12 @@ mcp = MCPServer(
         "Use axiom_dataset_inspect for bounded JSONL structure and schema checks. "
         "Sensitive field-name heuristics are included; content PII pattern scanning requires explicit opt-in. "
         "Use axiom_training_preflight for bounded, non-executing checks before local LoRA training. "
+        "When the user asks whether evaluation data may overlap training data, use the separate default-deny axiom_training_eval_overlap_preflight. It normalizes case and whitespace and returns only exact-overlap counts and row numbers. A clear result does not prove the evaluation data is held out or leakage-free; paraphrases are not detected. It does not load model weights or run inference. "
         "Use axiom_engine_preflight before local inference to check model/adapter structure, the selected device/precision, and advisory memory estimates; it does not load weights or run inference. Pass the same settings to axiom_engine_generate. "
         "Run preflight and show the exact configuration before calling axiom_training_job_start; "
         "call it only after the user explicitly requests that run. It uses compute and writes an adapter under outputs/. "
-        "Use the separate status/cancel tools to manage the job. Training status includes up to 64 evenly spaced loss samples; each point is one selected training record and may be noisy. Do not treat the trace as held-out validation or evidence of model quality/generalization; use held-out evaluation to assess quality. "
+        "Use axiom_training_job_status to inspect a job or list recent jobs, axiom_training_job_wait to check persisted state for up to 30 seconds without repeated MCP status calls, and axiom_training_job_cancel to request cancellation. Wait uses the existing status permission. Outcomes include completed, cancelled, failed, timed_out, not_found, and state_unavailable; inspect status if state_unavailable, and call wait again if timed_out. If status reports state_unavailable or runner_state_available=false, the worker may still be active: do not treat it as stopped or start a replacement job; check status again later. A job-state file that cannot be read is distinct from not_found. "
+        "Training status includes up to 64 evenly spaced loss samples; each point is one selected training record and may be noisy. Do not treat the trace as held-out validation or evidence of model quality/generalization; use held-out evaluation to assess quality. "
         "For local inference, use axiom_engine_generate only after the user requests a response; "
         "it runs one bounded prompt locally and AXIOM does not store the prompt or response. The MCP host may retain its tool transcript. "
         "For a dataset-to-evaluation workflow, when allowed, use axiom_engine_preflight before axiom_prediction_job_start. "
@@ -830,6 +834,29 @@ def axiom_training_preflight(
     return run_training_preflight(model_path, dataset_path, text_field)
 
 
+@mcp.tool()
+def axiom_training_eval_overlap_preflight(
+    training_dataset_path: str,
+    evaluation_dataset_path: str,
+    training_text_field: str = "text",
+    evaluation_prompt_field: str = "prompt",
+    include_reference: bool = False,
+    evaluation_reference_field: str = "completion",
+    sample_limit: int = 5,
+) -> dict:
+    """Check for bounded normalized exact overlap between training and evaluation text."""
+    ToolPermissionStore().require("axiom_training_eval_overlap_preflight")
+    return run_training_evaluation_overlap_preflight(
+        training_dataset_path,
+        evaluation_dataset_path,
+        training_text_field=training_text_field,
+        evaluation_prompt_field=evaluation_prompt_field,
+        include_reference=include_reference,
+        evaluation_reference_field=evaluation_reference_field,
+        sample_limit=sample_limit,
+    )
+
+
 def _mcp_workspace_root() -> Path:
     try:
         return Path.cwd().resolve(strict=True)
@@ -886,6 +913,7 @@ def _training_job_summary(job: dict, root: Path) -> dict:
         "started_at": job.get("started_at"),
         "finished_at": job.get("finished_at"),
         "cancel_requested": bool(job.get("cancel_requested", False)),
+        "runner_state_available": job.get("_runner_state") != "unknown",
         "config": {
             **relative_paths,
             "text_field": config.get("text_field"),
@@ -1636,16 +1664,100 @@ def axiom_training_job_status(job_id: str | None = None, limit: int = 10) -> dic
     if job_id is not None:
         try:
             job = get_job(job_id)
-        except (FineTuningError, ValueError):
+        except FineTuningError:
+            return {
+                "jobs": [],
+                "not_found": False,
+                "state_unavailable": True,
+                "scope": _training_job_scope(),
+            }
+        except ValueError:
             job = None
         if job is None or not _training_job_matches_workspace(job, root):
-            return {"jobs": [], "not_found": True, "scope": _training_job_scope()}
-        return {"jobs": [_training_job_summary(job, root)], "scope": _training_job_scope()}
+            return {"jobs": [], "not_found": True, "state_unavailable": False, "scope": _training_job_scope()}
+        return {
+            "jobs": [_training_job_summary(job, root)],
+            "not_found": False,
+            "state_unavailable": job.get("_runner_state") == "unknown",
+            "scope": _training_job_scope(),
+        }
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 25:
         raise ValueError("Job list limit must be between 1 and 25.")
     jobs = list_jobs(limit=limit, workspace_root=root)
     jobs = [job for job in jobs if _training_job_matches_workspace(job, root)]
-    return {"jobs": [_training_job_summary(job, root) for job in jobs], "scope": _training_job_scope()}
+    return {
+        "jobs": [_training_job_summary(job, root) for job in jobs],
+        "state_unavailable": any(job.get("_runner_state") == "unknown" for job in jobs),
+        "scope": _training_job_scope(),
+    }
+
+
+@mcp.tool()
+def axiom_training_job_wait(job_id: str, timeout_seconds: float = 30.0) -> dict:
+    """Wait up to 30 seconds for a local LoRA job without repeated status calls."""
+    ToolPermissionStore().require("axiom_training_job_status")
+    root = _mcp_workspace_root()
+    try:
+        existing = get_job(job_id)
+    except FineTuningError:
+        return {
+            "job": None,
+            "not_found": False,
+            "wait_outcome": "state_unavailable",
+            "timed_out": False,
+            "waited_seconds": 0.0,
+            "scope": _training_job_scope(),
+        }
+    except ValueError:
+        existing = None
+    if existing is None or not _training_job_matches_workspace(existing, root):
+        return {
+            "job": None,
+            "not_found": True,
+            "wait_outcome": "not_found",
+            "timed_out": False,
+            "waited_seconds": 0.0,
+            "scope": _training_job_scope(),
+        }
+
+    try:
+        result = wait_finetuning_job(job_id, timeout_seconds=timeout_seconds)
+    except FineTuningError:
+        return {
+            "job": None,
+            "not_found": False,
+            "wait_outcome": "state_unavailable",
+            "timed_out": False,
+            "waited_seconds": 0.0,
+            "scope": _training_job_scope(),
+        }
+    job = result.get("job")
+    if job is None and result["wait_outcome"] == "state_unavailable":
+        return {
+            "job": None,
+            "not_found": False,
+            "wait_outcome": "state_unavailable",
+            "timed_out": False,
+            "waited_seconds": result["waited_seconds"],
+            "scope": _training_job_scope(),
+        }
+    if job is None or not _training_job_matches_workspace(job, root):
+        return {
+            "job": None,
+            "not_found": True,
+            "wait_outcome": "not_found",
+            "timed_out": False,
+            "waited_seconds": result["waited_seconds"],
+            "scope": _training_job_scope(),
+        }
+    return {
+        "job": _training_job_summary(job, root),
+        "not_found": False,
+        "wait_outcome": result["wait_outcome"],
+        "timed_out": result["timed_out"],
+        "waited_seconds": result["waited_seconds"],
+        "scope": _training_job_scope(),
+    }
 
 
 @mcp.tool()
