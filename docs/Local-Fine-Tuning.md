@@ -78,6 +78,14 @@ detected overlap, and expected or inconclusive truncation, then wait for an
 explicit informed decision to proceed. Run the predictions sequentially because
 AXIOM allows one local compute job at a time.
 
+After both requested prediction jobs complete, use
+`axiom_training_job_prediction_compare` to verify that the baseline used the
+training job's saved base model and the candidate used its saved adapter with
+the same dataset and generation settings before comparing exact-match
+transitions. It uses the existing training-status and prediction-comparison
+permissions. This is a lexical diagnostic; it does not verify model/adapter
+contents or semantic quality, run inference, or write files.
+
 ## Limits and honest scope
 
 - Base model path must be a local Transformers model directory; no model is downloaded by AXIOM.

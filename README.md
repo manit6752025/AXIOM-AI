@@ -601,6 +601,37 @@ rather than a semantic quality judgment. Grant it separately:
 axiom mcp allow axiom_prediction_job_compare
 ```
 
+For a user-requested paired example from a completed comparison,
+`axiom_prediction_job_compare_examples` inspects up to three `fixed` or
+`regressed` rows, sampled first in file order. It rechecks both artifact
+identities and hashes and requires matching non-prediction rows. It returns
+row numbers only by default. The read-only comparison does not recover or
+rewrite stale job state; if it returns `not_ready`, inspect or wait on both
+jobs and retry. Grant the separate capability with:
+
+```bash
+axiom mcp allow axiom_prediction_job_compare_examples
+```
+
+Before setting `include_text=true`, get explicit approval and disclose that up
+to three baseline-prediction, candidate-prediction, and reference excerpts
+capped at 2,000 characters each will be returned and that the MCP host may
+retain them. Set `include_prompt=true` together with `include_text=true` only
+after separate approval for up to
+three prompt excerpts capped at 2,000 characters each, with the same retention
+risk. Examples are first-in-file-order lexical transitions, may not represent
+the corpus, and are not semantic quality judgments. The tool never returns
+full rows, artifact hashes, or artifact paths, runs inference, or writes files.
+
+For a user-requested base-versus-adapter comparison tied to a completed LoRA
+run, `axiom_training_job_prediction_compare` first verifies that the baseline
+job used the recorded base model, the candidate used that base plus the saved
+adapter, and both prediction jobs used the same dataset and generation
+settings. It then reports the same bounded exact-match transitions. It uses
+the existing training-status and prediction-comparison permissions; it does
+not add a grant, run inference, write files, fingerprint model contents, or
+measure semantic quality.
+
 `axiom_dataset_clean_preview` reports bounded keep/remove counts and a proposed output path before cleanup. It accepts workspace-relative `.jsonl` paths, returns no row values, and never writes files. When `truncated` is true, counts describe only the scanned portion; overlong rows are unclassified because the cleaner may still keep them. CR-only line endings and invalid UTF-8 produce warnings when preview decisions may differ from cleaner behavior. The preview is advisory because the source can change between calls, so re-preview immediately before writing. `axiom_dataset_clean` is a separate write permission: it repeats the preview, refuses partial or mismatched previews, and enforces the same byte, row, and line limits while writing. It only accepts workspace-relative paths, writes a new output file, and refuses to overwrite an existing destination. The output parent directory must already exist. Review the preview counts and destination with the user before calling the write tool. Grant preview and writing separately:
 
 ```bash
@@ -654,6 +685,7 @@ axiom mcp profile use readonly
 | `axiom_training_eval_overlap_preflight` | Check for normalized exact overlap between training and evaluation JSONL without returning text |
 | `axiom_training_job_eval_overlap_preflight` | Check overlap using the training dataset and text field recorded for a completed job; return safe base/adapter references |
 | `axiom_training_job_validation_preflight` | Plan base-versus-adapter evaluation with overlap, model compatibility, and prompt-truncation checks; no inference or file writes |
+| `axiom_training_job_prediction_compare` | Verify a completed training job's base/adapter prediction pair before exact-match comparison |
 | `axiom_training_job_start` | Start a user-requested bounded local LoRA job; writes adapter output under `outputs/` |
 | `axiom_training_job_status` | Read local LoRA progress and a bounded training-loss trace without logs or absolute paths |
 | `axiom_training_job_wait` | Wait up to 30 seconds for a local LoRA job outcome; uses the status permission |
@@ -668,6 +700,7 @@ axiom mcp profile use readonly
 | `axiom_prediction_job_evaluate` | Evaluate a completed job artifact using the `axiom_evaluation_run` permission |
 | `axiom_prediction_job_examples` | Inspect up to three verified mismatches; text is off unless approved per call |
 | `axiom_prediction_job_compare` | Compare exact-match transitions between two verified prediction jobs |
+| `axiom_prediction_job_compare_examples` | Inspect paired examples from one verified fixed/regressed transition; text is off unless approved per call |
 | `axiom_system_info` | Detected hardware |
 | `axiom_model_list` | Registered models |
 | `axiom_model_info` | Inspect a local model folder |
