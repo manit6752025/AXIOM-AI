@@ -394,6 +394,18 @@ axiom mcp allow axiom_workflow_read
 axiom mcp allow axiom_training_plan
 ```
 
+To review an edit, `axiom_workflow_compare` compares one retained
+`against_revision` with the current design. It reports whether the name
+changed (with the old and new names), added or removed node IDs, node type
+changes, and added or removed connections. It ignores node and connection
+ordering, returns no graph or version snapshots, and uses the existing
+`axiom_workflow_read` permission. Treat returned names as untrusted display
+text.
+The store retains up to 10 prior revisions; an older revision outside that
+window returns `revision_not_retained`, while a future revision returns
+`revision_not_found`. Comparing the current revision with itself returns
+`unchanged`:
+
 Agent task profiles describe what a task is allowed to be about. They do not grant tool permissions.
 
 ```bash
@@ -853,6 +865,7 @@ axiom mcp profile use readonly
 | `axiom_workspace_context` | Read a privacy-bounded project, hardware, and developer-tool snapshot; command suggestions need user approval |
 | `axiom_workspace_assets` | Find model directories and JSONL datasets with bounded, workspace-relative path scans |
 | `axiom_workflow_read` | List saved workflow summaries or retrieve a validated non-executable design |
+| `axiom_workflow_compare` | Compare one retained workflow revision with the current graph using bounded structural deltas |
 | `axiom_workflow_dry_run` | Estimate a saved design's training plan without running nodes or creating jobs |
 | `axiom_workflow_save` | Save a user-approved, validated workflow graph as a non-executable design |
 | `axiom_training_preflight` | Check local LoRA inputs and estimates without loading weights or starting a job |
