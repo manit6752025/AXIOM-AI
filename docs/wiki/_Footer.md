@@ -1,4 +1,4 @@
 ---
-[AXIOM AI source repository](https://github.com/NetCore-Technologies/AXIOM-AI) ·
-[Issues](https://github.com/NetCore-Technologies/AXIOM-AI/issues) ·
-[MIT license](https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/LICENSE)
+[AXIOM AI source repository](https://github.com/manit6752025/AXIOM-AI) ·
+[Issues](https://github.com/manit6752025/AXIOM-AI/issues) ·
+[MIT license](https://github.com/manit6752025/AXIOM-AI/blob/main/LICENSE)

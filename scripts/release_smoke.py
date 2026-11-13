@@ -25,14 +25,14 @@ VALID_STATUSES = {
 def roadmap_issues(markdown: str) -> list[str]:
     entries = ROADMAP_PATTERN.findall(markdown)
     ids = [item[0] for item in entries]
-    expected = {f"R{i:03d}" for i in range(1, 121)}
+    expected = {f"R{i:03d}" for i in range(1, 141)}
     issues: list[str] = []
     missing = sorted(expected - set(ids))
     duplicates = sorted({item for item in ids if ids.count(item) > 1})
     unexpected = sorted(set(ids) - expected)
     unknown_statuses = sorted({status for _, status in entries if status not in VALID_STATUSES})
-    if len(entries) != 120:
-        issues.append(f"Expected 120 roadmap entries; found {len(entries)}.")
+    if len(entries) != 140:
+        issues.append(f"Expected 140 roadmap entries; found {len(entries)}.")
     if missing:
         issues.append("Missing roadmap IDs: " + ", ".join(missing))
     if duplicates:
@@ -354,15 +354,55 @@ def api_playground_issues(component: str, client: str) -> list[str]:
         )
     return issues
 
+
+def resource_monitoring_issues(cli_source: str, panel_source: str, app_source: str, e2e_source: str) -> list[str]:
+    """Require explicit opt-in, bounded retention and safe export across CLI and Runtime UI."""
+    issues: list[str] = []
+    groups = (
+        ("CLI", cli_source, (
+            'watch: bool = typer.Option(False, "--watch"',
+            'samples: int = typer.Option(30, "--samples", min=1, max=300',
+            'output.open("x"',
+            "time.sleep(interval_seconds)",
+            "--output requires explicit opt-in",
+        )),
+        ("Runtime GUI", panel_source, (
+            "MAX_SAMPLES = 120",
+            "if (!recording) return undefined;",
+            "axiomApi.axiomEngineTelemetry()",
+            "window.setInterval",
+            'anchor.download = "axiom-resource-telemetry.json"',
+            "setSamples([])",
+        )),
+        ("Runtime page integration", app_source, (
+            'import EngineTelemetryMonitor from "./components/EngineTelemetryMonitor";',
+            "<EngineTelemetryMonitor />",
+        )),
+        ("Browser acceptance", e2e_source, (
+            "const baselineTelemetryCalls = telemetryCalls", "expect(telemetryCalls).toBe(baselineTelemetryCalls)",
+            'name: "Start monitoring"',
+            'name: "Stop monitoring"',
+            "axiom-resource-telemetry.json",
+            'name: "Clear history"',
+            "privacy.model_paths_included",
+        )),
+    )
+    for label, source, tokens in groups:
+        for token in tokens:
+            if token not in source:
+                issues.append(f"{label} resource monitoring is missing: {token}")
+    return issues
+
+
 def inspect(root: Path) -> dict[str, Any]:
     failures: list[str] = []
     warnings: list[str] = []
     required = [
         "pyproject.toml", "axiom/version.py", "ROADMAP.md", "src/App.tsx",
-        "src/api/client.ts", "src/components/ApiPlayground.tsx", "src/components/RuntimeConnectorPanel.tsx", "src/components/AgentProfiles.tsx", "src/components/LocalInferencePanel.tsx", "src/components/RuntimeTracePanel.tsx", "src/styles.css",
-        "axiom/api/server.py", "axiom/api/workspace.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/core/inference.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/runtime_traces.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/cli/agent_profiles.py", "scripts/release_smoke.py",
-        "tests/test_release_smoke.py", "tests/test_ollama_service.py", "tests/test_ollama_service_api.py", "tests/test_ollama_model_operations.py", "tests/test_cli_inference.py", "tests/test_axiom_engine.py", "tests/test_axiom_engine_api.py", "tests/test_native_engine.py", "e2e/axiom-engine.spec.ts", "e2e/helpers/auth.ts", "e2e/modules.spec.ts", "e2e/workflows.spec.ts", "e2e/evaluation.spec.ts",
-        "e2e/model-registry-filters.spec.ts", "e2e/ollama-service.spec.ts", "e2e/inference-benchmark.spec.ts", "e2e/runtime-traces.spec.ts", "e2e/axiom-engine.spec.ts", "tests/test_workspace_model_registry_filters.py",
+        "src/api/client.ts", "src/components/ApiPlayground.tsx", "src/components/RuntimeConnectorPanel.tsx", "src/components/AgentProfiles.tsx", "src/components/LocalInferencePanel.tsx", "src/components/RuntimeTracePanel.tsx", "src/components/EngineTelemetryMonitor.tsx", "src/styles.css",
+        "axiom/api/server.py", "axiom/api/workspace.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/core/inference.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/runtime_traces.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/engine.py", "scripts/release_smoke.py",
+        "tests/test_release_smoke.py", "tests/test_ollama_service.py", "tests/test_ollama_service_api.py", "tests/test_ollama_model_operations.py", "tests/test_cli_inference.py", "tests/test_axiom_engine.py", "tests/test_axiom_engine_api.py", "tests/test_axiom_engine_cli.py", "tests/test_native_engine.py", "e2e/axiom-engine.spec.ts", "e2e/helpers/auth.ts", "e2e/modules.spec.ts", "e2e/workflows.spec.ts", "e2e/evaluation.spec.ts",
+        "e2e/model-registry-filters.spec.ts", "e2e/ollama-service.spec.ts", "e2e/inference-benchmark.spec.ts", "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/axiom-engine.spec.ts", "tests/test_workspace_model_registry_filters.py",
         "tests/test_model_compatibility.py", "tests/test_inference_benchmark.py", "tests/test_inference_benchmark_api.py", "tests/test_runtime_traces.py", "tests/test_runtime_traces_api.py", "tests/test_runtime_discovery.py", "tests/test_runtime_discovery_api.py", "tests/test_agent_profiles.py", "tests/test_agent_profiles_api.py", "tests/test_agent_profiles_cli.py", "e2e/api-playground.spec.ts", "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts",
         "docs/Runtime-Discovery.md", "docs/Agent-Profiles.md", "docs/Api-Playground.md", "docs/Inference-Benchmarking.md", "docs/Local-Engine.md", ".github/workflows/quality-gates.yml", ".github/workflows/nightly-build.yml",
     ]
@@ -495,6 +535,9 @@ def inspect(root: Path) -> dict[str, Any]:
     for token in ('["discover", "--json"]', "test_engine_discover_json_lists_local_model_and_adapter_metadata", '"--stream"', "test_engine_run_stream_shows_live_output_and_final_metrics"):
         if token not in engine_cli_tests:
             failures.append("Native Engine CLI discovery regression coverage is missing: " + token)
+    telemetry_panel = (root / "src/components/EngineTelemetryMonitor.tsx").read_text(encoding="utf-8")
+    telemetry_e2e = (root / "e2e/telemetry-monitor.spec.ts").read_text(encoding="utf-8")
+    failures.extend(resource_monitoring_issues(engine_cli_source, telemetry_panel, app_source, telemetry_e2e))
     for path in (
         "/api/health", "/api/meta", "/api/workspace/runtime",
         "/api/workspace/models?offset=0&limit=5", "/api/workspace/datasets",
@@ -541,7 +584,7 @@ def inspect(root: Path) -> dict[str, Any]:
         "e2e/evaluation.spec.ts", "e2e/api-playground.spec.ts",
         "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts",
         "e2e/model-registry-filters.spec.ts", "e2e/inference-benchmark.spec.ts",
-        "e2e/runtime-traces.spec.ts", "e2e/ollama-service.spec.ts", "e2e/settings-retention.spec.ts",
+        "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/ollama-service.spec.ts", "e2e/settings-retention.spec.ts",
     ):
         target = root / relative
         if not target.is_file():

@@ -510,8 +510,12 @@ jobs:
     name: Publish AXIOM Release
     needs: [windows-packaging, linux, macos]
     runs-on: ubuntu-latest
-
     steps:
+      - name: Check out release notes source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+
       - name: Download Windows release
         uses: actions/download-artifact@v4
         with:
@@ -572,34 +576,39 @@ jobs:
           fi
           sha256sum "${release_binaries[@]#./}" > SHA256SUMS
 
+      - name: Assemble verified GitHub Release notes
+        shell: bash
+        env:
+          MAIN_SOURCE_SHA: ${{ inputs.main_sha || 'not supplied for this build' }}
+          DEVELOPMENT_SOURCE_SHA: ${{ inputs.development_sha || 'not supplied for this build' }}
+          INTEGRATION_SOURCE_SHA: ${{ inputs.integration_sha || github.sha }}
+          VERIFICATION_SUMMARY: ${{ inputs.verification_summary || 'Platform package, asset-validation, checksum, and installer-smoke workflow results are linked below.' }}
+        run: |
+          set -euo pipefail
+          notes="docs/releases/${TAG#v}.md"
+          if [[ ! -f "$notes" ]]; then
+            echo "Release notes file is missing: $notes" >&2
+            exit 1
+          fi
+          {
+            cat "$notes"
+            printf '\n\n---\n\n'
+            printf '## Build and verification record\n\n'
+            printf '%s\n' "**Package version / asset prefix:** `$TAG`"
+            printf '%s\n' "**Source ref:** `$SOURCE_REF`"
+            printf '%s\n' "**Main source SHA:** `$MAIN_SOURCE_SHA`"
+            printf '%s\n' "**Latest development SHA:** `$DEVELOPMENT_SOURCE_SHA`"
+            printf '%s\n' "**Verified integration SHA:** `$INTEGRATION_SOURCE_SHA`"
+            printf '\n%s\n' "$VERIFICATION_SUMMARY"
+            printf '\n[Workflow run](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)\n'
+          } > "$RUNNER_TEMP/axiom-release-body.md"
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: AXIOM ${{ env.RELEASE_TAG }} — Verified Cross-platform Release
-          body: |
-            # AXIOM ${{ env.RELEASE_TAG }}
-
-            **Package version / asset prefix:** `${{ env.TAG }}`
-            **Source ref:** `${{ env.SOURCE_REF }}`
-            **Main source SHA:** `${{ inputs.main_sha || 'not supplied for this build' }}`
-            **Latest development SHA:** `${{ inputs.development_sha || 'not supplied for this build' }}`
-            **Verified integration SHA:** `${{ inputs.integration_sha || github.sha }}`
-
-            ## Included packages
-            - **Windows x64:** portable `.exe`, `.msi`, PowerShell `.ps1`, and `.bat` launcher.
-            - **Linux x64:** `.elf`, `.deb`, `.AppImage`, `.sh` installer, and `.tar.gz` bundle.
-            - **macOS:** Apple Silicon (`arm64`) and Intel (`x64`) `.dmg` and `.tar.gz` packages.
-            - **Integrity:** `SHA256SUMS` and per-architecture macOS checksum files.
-
-            ## Verification
-            ${{ inputs.verification_summary || 'The release workflow requires successful platform packaging, artifact validation, checksum generation, and the published-installer smoke test. See the linked Actions run for per-platform results.' }}
-
-            The release is published only after the required build and asset-validation jobs succeed. Review the workflow run and checksums before installing.
-
-            **Build AI. Own AI.**
-
-            © 2026 NetCore Technologies
+          body_path: ${{ runner.temp }}/axiom-release-body.md
           files: release/*
           fail_on_unmatched_files: true
           overwrite_files: true
