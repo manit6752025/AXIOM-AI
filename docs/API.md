@@ -54,6 +54,9 @@ See [Unified LLM client and mobile bridge](Unified-LLM-Client.md) for examples a
 
 ## Collection pagination
 
+`GET /api/workflows` uses a bounded cursor page (`limit` 1–50, optional `q` search, and `after_workflow_id` from the previous page's `next_cursor`). The cursor is tied to the same search filter; restart the listing to include newer saved designs.
+
+
 Workspace collection endpoints use bounded `limit` and `offset` parameters and return `total`, `limit`, `offset`, and `has_more` where paging applies.
 
 - `GET /api/workspace/models`: bounded model registry pages; search, exact format/tag filters, favorites, and stable sorting are applied before pagination.
