@@ -191,8 +191,13 @@ export type RuntimeTraceReport = {
   schema_version: number;
   traces: RuntimeTrace[];
   total_retained: number;
+  total: number;
   limit: number;
+  offset: number;
+  has_more: boolean;
+  capacity_reached: boolean;
   max_retained: number;
+  filters: { search: string };
   privacy: { prompt_bodies_stored: false; response_bodies_stored: false; disk_persistence: false };
 };
 export type AxiomEngineBenchmarkRun = {
@@ -1818,7 +1823,14 @@ export const axiomApi = {
   startModelStudioJob: (config: { operation: "pull" | "pull_native" | "install_gguf" | "convert_gguf"; [key: string]: unknown }) => requestJson<ModelStudioJob>("/api/models/studio/jobs", { method: "POST", body: JSON.stringify(config) }),
 
   runtimeConnectors: () => requestJson<RuntimeConnectorReport>("/api/diagnostics/runtime-connectors"),
-  runtimeTraces: (limit = 50) => requestJson<RuntimeTraceReport>(`/api/diagnostics/runtime-traces?limit=${Math.min(200, Math.max(1, Math.floor(limit)))}`),
+  runtimeTraces: (limit = 50, offset = 0, search = "") => {
+    const query = new URLSearchParams({
+      limit: String(Math.min(200, Math.max(1, Math.floor(limit)))),
+      offset: String(Math.min(200, Math.max(0, Math.floor(offset)))),
+    });
+    if (search.trim()) query.set("search", search.trim());
+    return requestJson<RuntimeTraceReport>(`/api/diagnostics/runtime-traces?${query.toString()}`);
+  },
   clearRuntimeTraces: () => requestJson<{ cleared: number; remaining: 0; disk_persistence: false }>("/api/diagnostics/runtime-traces", { method: "DELETE" }),
   agentProfiles: () => requestJson<AgentProfileReport>("/api/agent-profiles"),
   createAgentProfile: (input: { name: string; task_capabilities: string[] }) =>
