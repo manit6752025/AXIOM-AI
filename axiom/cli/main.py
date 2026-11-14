@@ -126,8 +126,18 @@ def cli_callback(
         help="Skip the interactive startup banner.",
         is_eager=True,
     ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show diagnostic logging and detailed operational output.", is_eager=True),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress normal terminal output; errors remain visible.", is_eager=True),
+    json_errors: bool = typer.Option(False, "--json-errors", help="Emit stable JSON envelopes for AXIOM CLI errors.", is_eager=True),
 ) -> None:
-    """Prepare the interactive command-line experience."""
+    """Configure global output behavior before running a command."""
+    ctx.ensure_object(dict)
+    ctx.obj.update({"verbose": verbose, "quiet": quiet, "json_errors": json_errors})
+    console.quiet = quiet
+    logging.getLogger("axiom").setLevel(logging.DEBUG if verbose else logging.WARNING)
+
+    if verbose and quiet:
+        _cli_error("--verbose and --quiet cannot be used together.", code="invalid_global_options")
 
     if (
         ctx.resilient_parsing
@@ -137,17 +147,34 @@ def cli_callback(
         return
 
     if ctx.invoked_subcommand is None:
-        _run_default_session(show_banner=not no_banner)
+        _run_default_session(show_banner=not no_banner and not quiet)
         return
 
-    if no_banner:
+    if no_banner or quiet:
         return
 
     show_startup(include_next_steps=False)
 
 
-def _cli_error(message: str) -> None:
-    console.print(f"[red]Error:[/red] {message}")
+def _cli_runtime_options() -> dict[str, object]:
+    """Return root CLI options for the currently executing command."""
+    ctx = click.get_current_context(silent=True)
+    if ctx is None:
+        return {}
+    root = ctx.find_root()
+    return root.obj if isinstance(root.obj, dict) else {}
+
+
+def _cli_error(message: str, *, code: str = "AXIOM_CLI_ERROR") -> None:
+    """Emit a stable human or machine-readable error without leaking details."""
+    options = _cli_runtime_options()
+    if options.get("json_errors"):
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "error": {"code": code, "message": message, "exit_code": 1},
+        }, ensure_ascii=False, separators=(",", ":")), err=True)
+    else:
+        typer.echo(f"Error: {message}", err=True)
     raise typer.Exit(code=1)
 
 
