@@ -535,6 +535,21 @@ def inspect(root: Path) -> dict[str, Any]:
         for token in tokens:
             if token not in source:
                 failures.append("Workflow cursor pagination is missing contract token: " + token)
+    trace_core_source = (root / "axiom/core/runtime_traces.py").read_text(encoding="utf-8")
+    trace_api_source = (root / "axiom/api/diagnostics.py").read_text(encoding="utf-8")
+    trace_client_source = (root / "src/api/client.ts").read_text(encoding="utf-8")
+    trace_panel_source = (root / "src/components/RuntimeTracePanel.tsx").read_text(encoding="utf-8")
+    trace_tests_source = (root / "tests/test_runtime_traces.py").read_text(encoding="utf-8")
+    for source, tokens in (
+        (trace_core_source, ("def list_runtime_traces(", '"has_more":', '"capacity_reached":', '"filters": {"search": needle}')),
+        (trace_api_source, ("offset: int = Query", "search: str = Query", "list_runtime_traces(limit, offset, search)")),
+        (trace_client_source, ("runtimeTraces: (limit = 50, offset = 0, search = \"\" )", "offset: number;", "has_more: boolean;")),
+        (trace_panel_source, ("Load older traces", "Search runtime trace metadata", "loadMore")),
+        (trace_tests_source, ("test_trace_listing_paginates_newest_first_and_filters_metadata_only", "test_trace_listing_rejects_invalid_offsets")),
+    ):
+        for token in tokens:
+            if token not in source:
+                failures.append("Runtime trace pagination is missing contract token: " + token)
     for token in ('def model_list(', 'def model_add(', 'def model_update(', 'def model_export(', 'def model_import(', 'def model_remove(', 'def model_favorite(', 'def model_info(', 'def model_inspect(', 'def model_analyze(', 'def dataset_inspect(', 'def dataset_clean(', 'def integration_list(', 'def system_info('):
         if token not in cli_main_source:
             failures.append("CLI JSON output support is missing from a primary command: " + token)
