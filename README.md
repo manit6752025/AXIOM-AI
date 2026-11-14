@@ -1,6 +1,6 @@
 <div align="center">
 
-![AXIOM. Know what fits before you train.](docs/assets/banner.svg)
+![AXIOM. Know what fits before you train.](docs/assets/axiom-logo.svg)
 
 [![Status](https://img.shields.io/badge/status-beta-f59e0b?style=flat-square&labelColor=0f172a)](https://github.com/manit6752025/AXIOM-AI)
 [![Version](https://img.shields.io/badge/version-v0.3.0--beta.7-f59e0b?style=flat-square&labelColor=0f172a)](https://github.com/manit6752025/AXIOM-AI/releases)
