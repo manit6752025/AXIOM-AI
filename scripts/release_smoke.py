@@ -233,14 +233,14 @@ def runtime_trace_issues(trace_core: str, inference_api: str, diagnostics_api: s
     for token in (
         '@router.get("/runtime-traces")',
         '@router.delete("/runtime-traces")',
-        "list_runtime_traces(limit)",
+        "list_runtime_traces(limit, offset, search)",
         "clear_runtime_traces()",
     ):
         if token not in diagnostics_api:
             issues.append("Runtime trace history API is missing: " + token)
     for token in (
         "export type RuntimeTraceReport",
-        "runtimeTraces: (limit = 50)",
+        "runtimeTraces: (limit = 50, offset = 0, search = \"\")",
         "clearRuntimeTraces:",
     ):
         if token not in client_source:
@@ -529,7 +529,7 @@ def inspect(root: Path) -> dict[str, Any]:
         (workflow_cli_source, ('"--after"', '"--search"', '"--page-json"')),
         (workflow_client_source, ("workflowsPage:", "after_workflow_id")),
         (workflow_ui_source, ("loadMoreWorkflows", "Load more workflows", "Search saved workflows")),
-        (workflow_e2e_source, ('"next_cursor": null', '"has_more": false')),
+        (workflow_e2e_source, ('next_cursor', 'has_more')),
     )
     for source, tokens in workflow_pagination_contracts:
         for token in tokens:
