@@ -591,7 +591,7 @@ def workspace_add_experiment(request: WorkspaceExperimentInput) -> dict[str, Any
 @router.get("/datasets")
 def workspace_datasets(
     path: str | None = Query(default=None, max_length=512),
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=500, ge=1, le=500),
     offset: int = Query(default=0, ge=0, le=5000),
     search: str = Query(default="", max_length=160),
 ) -> dict[str, Any]:
