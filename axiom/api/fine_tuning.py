@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from axiom.core.fine_tuning import (
     ActiveFineTuningJobError,
     FineTuningError,
+    cancel_finetuning_job,
     get_job,
     list_jobs,
     runtime_status,
@@ -46,6 +47,17 @@ def fine_tuning_jobs(limit: int = 20) -> dict[str, Any]:
 def fine_tuning_job(job_id: str) -> dict[str, Any]:
     try:
         job = get_job(job_id)
+    except (ValueError, FineTuningError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    if job is None:
+        raise HTTPException(status_code=404, detail="Fine-tuning job was not found.")
+    return job
+
+
+@router.post("/jobs/{job_id}/cancel")
+def cancel_fine_tuning(job_id: str) -> dict[str, Any]:
+    try:
+        job = cancel_finetuning_job(job_id)
     except (ValueError, FineTuningError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     if job is None:

@@ -5,9 +5,6 @@ from __future__ import annotations
 import os
 import platform
 import stat
-import uuid
-from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -18,13 +15,17 @@ from axiom.evaluation.jsonl import (
     DEFAULT_MAX_BYTES,
     DEFAULT_MAX_LINE_BYTES,
     DEFAULT_MAX_ROWS,
-    compare_to_baseline,
-    create_output_manifest,
     evaluate_jsonl_stream,
+)
+from axiom.evaluation.service import (
+    EvaluationBaselineNotFoundError,
+    EvaluationBaselinePermissionError,
+    EvaluationHistoryReadError,
+    EvaluationPersistenceError,
+    persist_evaluation_run,
 )
 from axiom.evaluation.store import EvaluationStore
 from axiom.path_safety import open_regular_file
-from axiom.version import __version__
 
 router = APIRouter(prefix="/api/evaluation", tags=["evaluation"])
 
@@ -91,49 +92,23 @@ def create_evaluation_run(request: EvaluationRunInput) -> dict[str, Any]:
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    store = EvaluationStore()
-    comparison = None
-    if request.baseline_run_id:
-        try:
-            baseline = store.get(request.baseline_run_id)
-        except (OSError, ValueError) as exc:
-            raise HTTPException(status_code=500, detail="Evaluation history is invalid.") from exc
-        if baseline is None:
-            raise HTTPException(status_code=404, detail="Baseline evaluation run not found.")
-        if (
-            baseline.get("baseline") is not True
-        ):
-            raise HTTPException(status_code=422, detail="Only a run explicitly marked as a baseline can be compared.")
-        try:
-            comparison = compare_to_baseline(
-                report,
-                baseline,
-                baseline_run_id=request.baseline_run_id,
-                metric=request.regression_metric,
-                regression_tolerance=request.regression_tolerance,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    now = datetime.now(UTC).isoformat()
-    record = {
-        "schema_version": EvaluationStore.SCHEMA_VERSION,
-        "id": uuid.uuid4().hex,
-        "name": request.name or f"{Path(report['file_name']).stem} offline evaluation",
-        "created_at": now,
-        "model_label": request.model_label,
-        "baseline": request.baseline,
-        "comparison": comparison,
-        "status": "partial" if report["truncated"] else "complete",
-        "execution_status": "precomputed_outputs_only",
-        "software": {"axiom": __version__, "python": platform.python_version()},
-        "output_manifest": create_output_manifest(report),
-        "report": report,
-    }
     try:
-        store.add(record)
-    except (OSError, TimeoutError, ValueError) as exc:
-        raise HTTPException(status_code=500, detail="Evaluation report could not be saved.") from exc
+        record = persist_evaluation_run(
+            report,
+            name=request.name,
+            model_label=request.model_label,
+            baseline=request.baseline,
+            baseline_run_id=request.baseline_run_id,
+            regression_metric=request.regression_metric,
+            regression_tolerance=request.regression_tolerance,
+            python_version=platform.python_version(),
+        )
+    except EvaluationBaselineNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    except (EvaluationBaselinePermissionError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except (EvaluationHistoryReadError, EvaluationPersistenceError):
+        raise HTTPException(status_code=500, detail="Evaluation report could not be saved safely.") from None
 
     from axiom.api.workspace import record_workspace_event
 

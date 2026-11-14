@@ -10,6 +10,29 @@ Beta.4 improves workflow design discoverability, templates, versioned saves, dup
 
 Use `axiom workflow <command> --help` to check flags supported by the installed version.
 
+An MCP agent may also save a validated graph with `axiom_workflow_save`. The
+tool is separately default-deny and writes the approved design to the local
+`.axiom/workflows.json` store. It accepts only the existing design node types
+and reports `execution_status: not_executable`; it does not run nodes or create
+jobs. The workspace retains up to 200 designs and rejects new saves at the
+limit rather than silently removing older designs. The agent should show the
+exact graph and get explicit user approval before calling it:
+
+    axiom mcp allow axiom_workflow_save
+
+The tool response includes the saved `workflow.id` and graph. To inspect that
+design later, use `axiom workflow show <workflow.id>` or
+`axiom workflow validate <workflow.id>` from the same workspace.
+
+MCP agents can also use `axiom_workflow_read` with its own default-deny
+permission to list bounded summaries or fetch one validated graph by ID. Pass
+the returned `next_cursor` as `after_workflow_id` with the same `limit` to
+continue; start a fresh listing to include designs saved after paging began.
+Read access does not grant the separate write permission; every response
+labels a saved design `execution_status: not_executable`:
+
+    axiom mcp allow axiom_workflow_read
+
 ## Design is not execution
 
 A valid design or successful dry run does not prove a workload ran. These design tools do not themselves start training/fine-tuning, run inference, create checkpoints, provide production model serving, or prove an external framework is installed and connected.
@@ -22,7 +45,7 @@ Hardware-aware sizing uses detected hardware and assumptions. It is useful for c
 
 ## Evaluation is not inference
 
-`axiom evaluation run` scores predictions already present in the evaluation data. It does not call a model to generate predictions.
+`axiom evaluation run` scores predictions already present in the evaluation data and does not call a model. Separately, the permissioned MCP prediction-job tools can generate a bounded local artifact for that offline evaluator.
 
 ## Roadmap integrity
 

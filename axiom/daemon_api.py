@@ -7,6 +7,7 @@ paths must resolve inside the daemon's working directory.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 import dataclasses
 import math
 import os
@@ -30,6 +31,7 @@ SKIPPED_DIRECTORIES = frozenset(
     {".git", ".venv", "node_modules", "__pycache__", "dist", "build", ".axiom"}
 )
 MAX_LISTED_FILES = 200
+MAX_SCANNED_ENTRIES = 50_000
 MODEL_MARKERS = ("config.json",)
 MODEL_SUFFIXES = (".gguf", ".safetensors")
 
@@ -55,32 +57,56 @@ def _relative(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix() or "."
 
 
-def _walk(root: Path, max_depth: int):
-    root_depth = len(root.parts)
+def _walk(root: Path, max_depth: int) -> Iterator[tuple[Path | None, list[str]]]:
+    """Walk a shallow workspace tree with an entry budget and no symlink traversal."""
+    stack = [(root, 0)]
+    scanned_entries = 0
 
-    for current, directories, files in os.walk(root, followlinks=False):
-        # Do not traverse symlinked directories.
-        current_path = Path(current)
-        directories[:] = sorted(
-            name
-            for name in directories
-            if name not in SKIPPED_DIRECTORIES
-            and not (current_path / name).is_symlink()
+    while stack:
+        current, depth = stack.pop()
+        directories: list[Path] = []
+        files: list[str] = []
+        entry_limit_reached = False
+
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    scanned_entries += 1
+                    if scanned_entries > MAX_SCANNED_ENTRIES:
+                        entry_limit_reached = True
+                        break
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        if depth < max_depth and entry.name not in SKIPPED_DIRECTORIES:
+                            directories.append(Path(entry.path))
+                    elif entry.is_file(follow_symlinks=False):
+                        files.append(entry.name)
+        except OSError:
+            yield None, []
+            return
+
+        yield current, sorted(files)
+        if entry_limit_reached:
+            yield None, []
+            return
+        stack.extend(
+            (directory, depth + 1)
+            for directory in reversed(sorted(directories))
         )
-
-        if len(current_path.parts) - root_depth >= max_depth:
-            directories[:] = []
-
-        yield current_path, sorted(files)
 
 
 def list_workspace_files(kind: str) -> dict[str, Any]:
-    """List a bounded number of local model or JSONL dataset paths."""
+    """List local model or JSONL paths with depth, entry, and result limits."""
     root = Path.cwd().resolve()
     found: list[dict[str, str]] = []
+    scan_truncated = False
 
     if kind == "models":
         for current, files in _walk(root, 4):
+            if current is None:
+                scan_truncated = True
+                break
             is_model = any(
                 name in files for name in MODEL_MARKERS
             ) or any(
@@ -96,6 +122,9 @@ def list_workspace_files(kind: str) -> dict[str, Any]:
 
     elif kind == "datasets":
         for current, files in _walk(root, 5):
+            if current is None:
+                scan_truncated = True
+                break
             for name in files:
                 if not name.lower().endswith(".jsonl"):
                     continue
@@ -123,6 +152,9 @@ def list_workspace_files(kind: str) -> dict[str, Any]:
         "kind": kind,
         "root": str(root),
         "items": found[:MAX_LISTED_FILES],
+        "result_limit_reached": len(found) >= MAX_LISTED_FILES,
+        "scan_truncated": scan_truncated,
+        "scan_entry_limit": MAX_SCANNED_ENTRIES,
     }
 
 

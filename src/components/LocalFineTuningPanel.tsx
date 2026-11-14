@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Activity, Cpu, Play, RefreshCcw } from "lucide-react";
+import { Activity, Cpu, Play, RefreshCcw, Square } from "lucide-react";
 import { axiomApi, type FineTuningJob, type FineTuningRuntime } from "../api/client";
 
-const activeStates = new Set(["queued", "running"]);
+const activeStates = new Set(["queued", "running", "cancelling", "finalizing"]);
 
 export default function LocalFineTuningPanel() {
   const [runtime, setRuntime] = useState<FineTuningRuntime | null>(null);
@@ -17,6 +17,7 @@ export default function LocalFineTuningPanel() {
   const [loraRank, setLoraRank] = useState("8");
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState("");
 
   const refresh = async () => {
@@ -68,6 +69,19 @@ export default function LocalFineTuningPanel() {
     }
   };
 
+  const cancel = async () => {
+    if (!job) return;
+    setCancelling(true);
+    setError("");
+    try {
+      setJob(await axiomApi.cancelFineTuningJob(job.id));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Cancellation could not be requested.");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   const busy = Boolean(job && activeStates.has(job.status));
   const canStart = Boolean(runtime?.can_start && !busy && !starting && modelPath.trim() && datasetPath.trim() && outputDir.trim());
 
@@ -99,12 +113,16 @@ export default function LocalFineTuningPanel() {
       </div>
       <div className="integration-form-actions">
         <button type="submit" className="button primary-button" disabled={!canStart}><Play size={15} /> {starting ? "Starting…" : busy ? "Training is active" : "Start local fine-tuning"}</button>
+        {job && ["queued", "running"].includes(job.status) && <button type="button" className="button secondary-button" onClick={() => void cancel()} disabled={cancelling}><Square size={13} /> {cancelling ? "Requesting stop…" : "Cancel training"}</button>}
         {job && <span className="quiet-note"><Activity size={14} /> {job.completed_steps}/{job.config.max_steps} steps</span>}
       </div>
     </form>
     {error && <div className="inline-alert warning" role="alert">{error}</div>}
     {job && <section className="local-finetuning-job" role="region" aria-label="Fine-tuning job status">
       <div className="surface-head"><div><p className="surface-eyebrow">JOB {job.id.slice(0, 12)}</p><h3>Fine-tuning job</h3></div><span className={`status-pill ${job.status === "completed" ? "success" : job.status === "failed" ? "warning" : "neutral"}`}><i />{job.status.toUpperCase()}</span></div>
+      {job.status === "cancelling" && <p className="quiet-note">Stopping at the next safe training boundary.</p>}
+      {job.status === "finalizing" && <p className="quiet-note">Training steps are complete; AXIOM is writing adapter files. Cancellation is no longer available.</p>}
+      {job.status === "cancelled" && <p className="quiet-note">Training stopped before adapter finalization.</p>}
       <div className="plan-result-grid"><div><small>Steps</small><b>{job.completed_steps}/{job.config.max_steps}</b></div><div><small>Latest loss</small><b>{typeof job.loss === "number" ? job.loss.toFixed(5) : "—"}</b></div><div><small>Output</small><b>{job.config.output_dir.split("/").filter(Boolean).at(-1) || job.config.output_dir}</b></div></div>
       {job.error && <div className="inline-alert warning" role="alert">{job.error}</div>}
       {job.result && <p className="quiet-note"><Cpu size={14} /> Adapter weights written · {job.result.dataset_rows} records · target modules: {job.result.target_modules.join(", ")}</p>}
