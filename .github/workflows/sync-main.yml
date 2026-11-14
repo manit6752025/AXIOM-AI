@@ -1,0 +1,37 @@
+name: Sync main into branches
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge main into every other branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          failed=""
+          for ref in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin | grep -v -e '^origin$' -e '^origin/HEAD$' -e '^origin/main$'); do
+            b="${ref#origin/}"
+            git checkout -q -B "$b" "origin/$b"
+            if git merge --no-edit origin/main; then
+              git push origin "$b"
+            else
+              git merge --abort
+              failed="$failed $b"
+            fi
+          done
+          if [ -n "$failed" ]; then
+            echo "Merge conflicts, skipped:$failed"
+            exit 1
+          fi
