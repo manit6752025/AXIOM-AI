@@ -1169,3 +1169,13 @@ main .platform-button.is-active {
 @media(max-width:1120px){.community-site .pro-header-inner{gap:14px}.community-site .pro-menu{display:flex;align-items:center;gap:10px;margin-left:auto;padding:8px 0;border:0;background:transparent;color:var(--fg);font:12px Manrope;cursor:pointer}.community-site .pro-nav{display:none;position:absolute;top:77px;left:0;right:0;margin:0;padding:14px max(28px,calc((100% - 1124px)/2)) 22px;background:#141711;border-bottom:1px solid var(--line);flex-direction:column;align-items:stretch;gap:0}.community-site .pro-nav.is-open{display:flex}.community-site .pro-nav a{padding:10px 0;font-size:12px}.community-site .pro-header-cta{display:none}.community-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.community-site .community-main{width:calc(100% - 40px)}.community-hero{grid-template-columns:1fr;gap:38px;padding:65px 0 68px}.community-copy h1{font-size:clamp(49px,12vw,72px)}.community-aside{padding:23px}.community-section{padding:55px 0 70px}.community-section-heading{display:block}.community-section-heading>p{margin-top:13px}.community-grid{grid-template-columns:1fr}.community-card{min-height:220px}.community-bottom{align-items:flex-start;flex-direction:column;margin-bottom:65px;padding:26px 22px}.community-bottom h2{font-size:29px}.community-site .pro-footer-inner{padding:20px;flex-wrap:wrap;gap:16px}.community-site .pro-footer-inner>span{order:3;width:100%}.community-site .pro-footer nav{gap:12px}.community-site .pro-footer nav a{font-size:10px}}
 @media(prefers-reduced-motion:reduce){.community-site .community-card,.community-site .community-button{transition:none}}
+
+/* Shared desktop navigation: switch to the compact menu before links wrap. */
+@media(max-width:1120px){
+  .pro-header-inner{gap:14px}
+  .pro-menu{display:flex;align-items:center;gap:10px;margin-left:auto;padding:8px 0;border:0;background:transparent;color:var(--fg);font:12px Manrope;cursor:pointer}
+  .pro-nav{display:none;position:absolute;top:77px;left:0;right:0;margin:0;padding:14px max(28px,calc((100% - 1124px)/2)) 22px;background:#141711;border-bottom:1px solid var(--line);flex-direction:column;align-items:stretch;gap:0}
+  .pro-nav.is-open{display:flex}
+  .pro-nav a{padding:10px 0;font-size:12px}
+  .pro-header-cta{display:none}
+}
