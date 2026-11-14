@@ -543,7 +543,7 @@ def inspect(root: Path) -> dict[str, Any]:
     for source, tokens in (
         (trace_core_source, ("def list_runtime_traces(", '"has_more":', '"capacity_reached":', '"filters": {"search": needle}')),
         (trace_api_source, ("offset: int = Query", "search: str = Query", "list_runtime_traces(limit, offset, search)")),
-        (trace_client_source, ("runtimeTraces: (limit = 50, offset = 0, search = \"\" )", "offset: number;", "has_more: boolean;")),
+        (trace_client_source, ("runtimeTraces: (limit = 50, offset = 0, search = \"\")", "offset: number;", "has_more: boolean;")),
         (trace_panel_source, ("Load older traces", "Search runtime trace metadata", "loadMore")),
         (trace_tests_source, ("test_trace_listing_paginates_newest_first_and_filters_metadata_only", "test_trace_listing_rejects_invalid_offsets")),
     ):
