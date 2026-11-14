@@ -68,19 +68,44 @@ def record_runtime_trace(
         return dict(trace)
 
 
-def list_runtime_traces(limit: int = 50) -> dict[str, Any]:
-    """Return the most recent metadata-only traces, newest first."""
+def list_runtime_traces(
+    limit: int = 50,
+    offset: int = 0,
+    search: str = "",
+) -> dict[str, Any]:
+    """Return a bounded page of metadata-only traces, newest first."""
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_RUNTIME_TRACES:
         raise ValueError(f"Runtime trace limit must be between 1 and {MAX_RUNTIME_TRACES}.")
+    if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= MAX_RUNTIME_TRACES:
+        raise ValueError(f"Runtime trace offset must be between 0 and {MAX_RUNTIME_TRACES}.")
+    if not isinstance(search, str) or len(search) > 120:
+        raise ValueError("Runtime trace search must contain at most 120 characters.")
+    needle = search.strip().casefold()
     with _lock:
-        traces = [dict(item) for item in list(_traces)[:limit]]
-        total = len(_traces)
+        retained = [dict(item) for item in _traces]
+        total_retained = len(_traces)
+    filtered = retained
+    if needle:
+        filtered = [
+            trace for trace in retained
+            if any(
+                needle in str(trace.get(field) or "").casefold()
+                for field in ("request_id", "operation", "model", "status", "error_code")
+            )
+        ]
+    total = len(filtered)
+    page = filtered[offset:offset + limit]
     return {
         "schema_version": 1,
-        "traces": traces,
-        "total_retained": total,
+        "traces": page,
+        "total_retained": total_retained,
+        "total": total,
         "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(page) < total,
+        "capacity_reached": total_retained == MAX_RUNTIME_TRACES,
         "max_retained": MAX_RUNTIME_TRACES,
+        "filters": {"search": needle},
         "privacy": {
             "prompt_bodies_stored": False,
             "response_bodies_stored": False,

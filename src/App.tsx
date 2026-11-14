@@ -2216,6 +2216,13 @@ const datasetScanPresets = {
 
 function Datasets({ onNotify }: { onNotify: (message: string, tone?: Tone) => void }) {
   const [datasets, setDatasets] = useState<WorkspaceDataset[]>([]);
+  const [datasetTotal, setDatasetTotal] = useState(0);
+  const [datasetOffset, setDatasetOffset] = useState(0);
+  const [datasetHasMore, setDatasetHasMore] = useState(false);
+  const [datasetTruncated, setDatasetTruncated] = useState(false);
+  const [datasetSearchInput, setDatasetSearchInput] = useState("");
+  const [datasetSearch, setDatasetSearch] = useState("");
+  const [inventoryLoadingMore, setInventoryLoadingMore] = useState(false);
   const [profile, setProfile] = useState<DatasetProfile | null>(null);
   const [manifest, setManifest] = useState<DatasetManifest | null>(null);
   const [parentManifestSha256, setParentManifestSha256] = useState("");
@@ -2238,15 +2245,44 @@ function Datasets({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
   const [inventoryBusy, setInventoryBusy] = useState(true);
   const [error, setError] = useState("");
 
-  const refresh = async () => {
+  const refresh = async (search = datasetSearchInput.trim()) => {
     setInventoryBusy(true);
+    setInventoryLoadingMore(false);
     setError("");
     try {
-      setDatasets(await axiomApi.datasets());
+      const page = await axiomApi.datasetsPage({ limit: 500, offset: 0, search });
+      setDatasets(page.datasets);
+      setDatasetTotal(page.total);
+      setDatasetOffset(page.datasets.length);
+      setDatasetHasMore(page.has_more);
+      setDatasetTruncated(page.truncated);
+      setDatasetSearch(search);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Dataset inventory unavailable.");
     } finally {
       setInventoryBusy(false);
+    }
+  };
+
+  const loadMoreDatasets = async () => {
+    if (!datasetHasMore || inventoryBusy || inventoryLoadingMore) return;
+    setInventoryLoadingMore(true);
+    setError("");
+    try {
+      const page = await axiomApi.datasetsPage({
+        limit: 500,
+        offset: datasetOffset,
+        search: datasetSearch,
+      });
+      setDatasets((current) => [...current, ...page.datasets]);
+      setDatasetOffset((current) => current + page.datasets.length);
+      setDatasetTotal(page.total);
+      setDatasetHasMore(page.has_more);
+      setDatasetTruncated(page.truncated);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "More datasets could not be loaded.");
+    } finally {
+      setInventoryLoadingMore(false);
     }
   };
 
@@ -2421,11 +2457,20 @@ function Datasets({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
         <p className="quiet-note">{datasetScanPresets[scanPreset].description}. The API enforces fixed maximums; values are never returned.</p>
       </div>
       <label className="dataset-manifest-parent"><span>Optional parent manifest SHA-256 · link this dataset to an earlier source</span><input value={parentManifestSha256} onChange={(event) => setParentManifestSha256(event.target.value)} maxLength={64} placeholder="Paste a previous manifest digest (leave blank for source)" /></label>
+      <div className="dataset-scan-controls">
+        <label><span>Search dataset paths</span><input value={datasetSearchInput} onChange={(event) => setDatasetSearchInput(event.target.value)} maxLength={160} placeholder="e.g. train, eval, validation" aria-label="Search dataset paths" /></label>
+        <button type="button" className="button secondary-button" onClick={() => void refresh(datasetSearchInput.trim())} disabled={inventoryBusy}><Search size={15} /> Search inventory</button>
+      </div>
       {inventoryBusy ? <div className="loading-state" role="status">Scanning the local data directory…</div> : datasets.length ? <div className="module-list">{datasets.map((dataset) => <div className="module-row" key={dataset.path}>
         <span className="module-icon"><Database size={17} /></span>
         <span className="module-copy"><b>{dataset.path}</b><small>JSONL · {formatBytes(dataset.size_bytes)} · local workspace</small></span>
         <div className="module-row-actions"><button type="button" className="button secondary-button" disabled={profileBusy !== null} onClick={() => void runProfile(dataset.path)}>{profileBusy === dataset.path ? "Profiling…" : "Profile"}</button><button type="button" className="button secondary-button" disabled={manifestBusy !== null} onClick={() => void runManifest(dataset.path)}>{manifestBusy === dataset.path ? "Hashing…" : "Manifest"}</button><button type="button" className="button secondary-button" disabled={cleanPreviewBusy !== null} onClick={() => void runCleaningPreview(dataset.path)}>{cleanPreviewBusy === dataset.path ? "Previewing…" : "Preview clean"}</button></div>
       </div>)}</div> : <EmptyState icon={Database} title="No JSONL datasets found" description="Place a JSONL file under the workspace data/ directory, then refresh. You can inspect any path directly with the CLI." action={<CliReference command="axiom dataset profile ./data/train.jsonl" />} />}
+      {!inventoryBusy && datasets.length > 0 && <div className="pagination-actions">
+        <small>Showing {datasets.length.toLocaleString()} of {datasetTotal.toLocaleString()} matching datasets</small>
+        {datasetHasMore && <button type="button" className="button secondary-button" onClick={() => void loadMoreDatasets()} disabled={inventoryLoadingMore}>{inventoryLoadingMore ? "Loading…" : "Load more datasets"}</button>}
+      </div>}
+      {datasetTruncated && <InlineAlert tone="warning" role="status">The workspace scan reached its 5,000-entry safety limit. Narrow the search or inspect a subfolder to reduce the scan; entries beyond the cap are not included in this result.</InlineAlert>}
     </Surface>
     {datasets.length > 0 && <Surface title="Compare and validate" eyebrow="DATASET QUALITY">
       <p className="quiet-note">Select two or three JSONL files. The report compares field presence and observed types; checks never return row values.</p>
@@ -2866,6 +2911,12 @@ const workflowNodeLabels: Record<WorkflowNodeType, string> = {
 
 function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => void }) {
   const [workflows, setWorkflows] = useState<WorkspaceWorkflow[]>([]);
+  const [workflowTotal, setWorkflowTotal] = useState(0);
+  const [workflowCursor, setWorkflowCursor] = useState<string | null>(null);
+  const [workflowHasMore, setWorkflowHasMore] = useState(false);
+  const [workflowLoadingMore, setWorkflowLoadingMore] = useState(false);
+  const [workflowSearchInput, setWorkflowSearchInput] = useState("");
+  const [workflowSearch, setWorkflowSearch] = useState("");
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflowId, setWorkflowId] = useState<string | null>(null);
   const [templateId, setTemplateId] = useState("");
@@ -2890,20 +2941,46 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
     || JSON.stringify(edges) !== JSON.stringify(selectedWorkflow.edges)
   ));
 
-  const refresh = async () => {
+  const refresh = async (search = workflowSearchInput.trim()) => {
     setLoading(true);
+    setWorkflowLoadingMore(false);
     setError("");
     try {
-      const [savedWorkflows, availableTemplates] = await Promise.all([
-        axiomApi.workflows(),
+      const [page, availableTemplates] = await Promise.all([
+        axiomApi.workflowsPage({ limit: 20, q: search }),
         axiomApi.workflowTemplates(),
       ]);
-      setWorkflows(savedWorkflows);
+      setWorkflows(page.workflows);
+      setWorkflowTotal(page.total);
+      setWorkflowCursor(page.next_cursor);
+      setWorkflowHasMore(page.has_more);
+      setWorkflowSearch(search);
       setTemplates(availableTemplates);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Workflow list unavailable.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMoreWorkflows = async () => {
+    if (!workflowHasMore || !workflowCursor || loading || workflowLoadingMore) return;
+    setWorkflowLoadingMore(true);
+    setError("");
+    try {
+      const page = await axiomApi.workflowsPage({
+        limit: 20,
+        after_workflow_id: workflowCursor,
+        q: workflowSearch,
+      });
+      setWorkflows((current) => [...current, ...page.workflows]);
+      setWorkflowTotal(page.total);
+      setWorkflowCursor(page.next_cursor);
+      setWorkflowHasMore(page.has_more);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "More workflow designs could not be loaded.");
+    } finally {
+      setWorkflowLoadingMore(false);
     }
   };
 
@@ -3116,7 +3193,9 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
         </div>
       </Surface>
       <Surface title="Saved workflows" eyebrow="LOCAL WORKSPACE">
-        {loading ? <div className="loading-state" role="status">Loading workflows…</div> : error && !workflows.length ? <InlineAlert tone="warning" role="alert">{error}</InlineAlert> : workflows.length ? <div className="module-list">{workflows.map((workflow) => <button type="button" className={`module-row workflow-list-item ${workflow.id === workflowId ? "selected" : ""}`} key={workflow.id} onClick={() => selectWorkflow(workflow.id)}><span className="module-icon"><GitBranch size={17} /></span><span className="module-copy"><b>{workflow.name}</b><small>{workflow.nodes.length} steps · revision {workflow.revision} · updated {formatTimestamp(workflow.updated_at)}</small></span><StatusPill tone="neutral">DESIGN</StatusPill></button>)}</div> : <EmptyState icon={GitBranch} title="No saved workflows" description="Create and validate a workflow graph; saved graphs are local JSON metadata." />}
+        <div className="event-filter"><Search size={15} /><input aria-label="Search saved workflows" placeholder="Search by workflow name, ID, or node type" value={workflowSearchInput} onChange={(event) => setWorkflowSearchInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void refresh(workflowSearchInput.trim()); }} /><button type="button" className="button secondary-button" onClick={() => void refresh(workflowSearchInput.trim())} disabled={loading}>Search</button></div>
+        {loading ? <div className="loading-state" role="status">Loading workflows…</div> : error && !workflows.length ? <InlineAlert tone="warning" role="alert">{error}</InlineAlert> : workflows.length ? <div className="module-list">{workflows.map((workflow) => <button type="button" className={`module-row workflow-list-item ${workflow.id === workflowId ? "selected" : ""}`} key={workflow.id} onClick={() => selectWorkflow(workflow.id)}><span className="module-icon"><GitBranch size={17} /></span><span className="module-copy"><b>{workflow.name}</b><small>{workflow.nodes.length} steps · revision {workflow.revision} · updated {formatTimestamp(workflow.updated_at)}</small></span><StatusPill tone="neutral">DESIGN</StatusPill></button>)}</div> : <EmptyState icon={GitBranch} title="No saved workflows" description={workflowSearch ? "No saved workflow designs match this search." : "Create and validate a workflow graph; saved graphs are local JSON metadata."} />}
+        {!loading && <div className="pagination-actions"><small>Showing {workflows.length} of {workflowTotal} workflow designs</small>{workflowHasMore && <button type="button" className="button secondary-button" onClick={() => void loadMoreWorkflows()} disabled={workflowLoadingMore}>{workflowLoadingMore ? "Loading…" : "Load more workflows"}</button>}</div>}
         {selectedWorkflow && <details className="workflow-history"><summary>Revision history · {selectedWorkflow.versions.length} saved versions</summary><div className="workflow-version-list"><div><b>Current · r{selectedWorkflow.revision}</b><small>{selectedWorkflow.name} · {formatTimestamp(selectedWorkflow.updated_at)}</small></div>{[...selectedWorkflow.versions].reverse().map((version) => <div key={version.revision}><b>Revision {version.revision}</b><small>{version.name} · {formatTimestamp(version.updated_at)} · {version.nodes.length} steps</small></div>)}</div></details>}
       </Surface>
     </div>
@@ -3524,14 +3603,22 @@ function RoadmapPage() {
 function LogsPage() {
   const [events, setEvents] = useState<WorkspaceEvent[]>([]);
   const [filter, setFilter] = useState("");
+  const [appliedFilter, setAppliedFilter] = useState("");
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
 
-  const refresh = async () => {
+  const refresh = async (search = appliedFilter) => {
     setLoading(true);
     setError("");
     try {
-      setEvents(await axiomApi.events());
+      const page = await axiomApi.eventsPage({ limit: 50, offset: 0, search });
+      setEvents(page.events);
+      setTotal(page.total);
+      setHasMore(page.has_more);
+      setAppliedFilter(search);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load workspace events.");
     } finally {
@@ -3539,15 +3626,30 @@ function LogsPage() {
     }
   };
 
-  useEffect(() => { void refresh(); }, []);
-  const normalizedFilter = filter.trim().toLowerCase();
-  const visibleEvents = events.filter((event) => `${event.action} ${event.detail || ""}`.toLowerCase().includes(normalizedFilter));
+  const loadMore = async () => {
+    if (!hasMore || loading || loadingMore) return;
+    setLoadingMore(true);
+    setError("");
+    try {
+      const page = await axiomApi.eventsPage({ limit: 50, offset: events.length, search: appliedFilter });
+      setEvents((current) => [...current, ...page.events]);
+      setTotal(page.total);
+      setHasMore(page.has_more);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Older workspace events could not be loaded.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  useEffect(() => { void refresh(""); }, []);
 
   return <FeaturePage page="logs" actions={<button type="button" className="button secondary-button" onClick={() => void refresh()} disabled={loading}><RefreshCcw size={16} /> {loading ? "Refreshing" : "Refresh"}</button>}>
-    <Surface title="Workspace event stream" eyebrow="LOCAL / RECENT" action={<StatusPill tone={events.length ? "success" : "neutral"}>{events.length} EVENTS</StatusPill>}>
-      <label className="event-filter"><Search size={15} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Filter by action or detail" aria-label="Filter workspace events" /></label>
+    <Surface title="Workspace event stream" eyebrow="LOCAL / RECENT" action={<StatusPill tone={total ? "success" : "neutral"}>{total} EVENTS</StatusPill>}>
+      <div className="event-filter"><Search size={15} /><input value={filter} onChange={(event) => setFilter(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void refresh(filter.trim()); }} placeholder="Filter by action or detail" aria-label="Filter workspace events" /><button type="button" className="button secondary-button" onClick={() => void refresh(filter.trim())} disabled={loading}>Search</button></div>
       {error && <InlineAlert tone="warning" role="alert">{error}</InlineAlert>}
-      {loading ? <div className="loading-state" role="status">Loading local events…</div> : visibleEvents.length ? <div className="event-list">{visibleEvents.map((event, index) => <div className="event-row" key={`${event.timestamp}-${index}`}><span className="event-marker" /><div><b>{event.action.replaceAll(".", " / ")}</b><small>{event.detail || "Completed"} · {formatTimestamp(event.timestamp)}</small></div></div>)}</div> : <EmptyState icon={TerminalSquare} title={events.length ? "No events match" : "No workspace events yet"} description={events.length ? "Try a different filter." : "Successful model registration, dataset profiling, and training plans appear here."} />}
+      {loading ? <div className="loading-state" role="status">Loading local events…</div> : events.length ? <div className="event-list">{events.map((event, index) => <div className="event-row" key={event.timestamp + "-" + index}><span className="event-marker" /><div><b>{event.action.replaceAll(".", " / ")}</b><small>{event.detail || "Completed"} · {formatTimestamp(event.timestamp)}</small></div></div>)}</div> : <EmptyState icon={TerminalSquare} title={appliedFilter ? "No events match" : "No workspace events yet"} description={appliedFilter ? "Try a different filter." : "Successful model registration, dataset profiling, and training plans appear here."} />}
+      {hasMore && <div className="pagination-actions"><small>Showing {events.length} of {total} events</small><button type="button" className="button secondary-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load older events"}</button></div>}
     </Surface>
     <div className="log-contract"><span><FileCode2 size={15} /> Event retention</span><code>Recent local actions · in memory · bounded</code></div>
   </FeaturePage>;
