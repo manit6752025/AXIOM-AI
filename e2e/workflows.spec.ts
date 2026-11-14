@@ -34,7 +34,19 @@ test("workflow autosave and dry-run stay planning-only", async ({ page }) => {
   await page.route("**/api/workflows**", async (route) => {
     const request = route.request();
     if (request.method() === "GET") {
-      await route.fulfill({ json: { workflows: [currentWorkflow] } });
+      const params = new URL(request.url()).searchParams;
+      const pageSize = Number(params.get("limit") ?? 20);
+      const search = (params.get("q") ?? "").toLowerCase();
+      const all = [currentWorkflow].filter((item) => item.name.toLowerCase().includes(search));
+      await route.fulfill({ json: {
+        workflows: all.slice(0, pageSize),
+        total: all.length,
+        limit: pageSize,
+        offset: 0,
+        has_more: false,
+        next_cursor: null,
+        filters: { search },
+      } });
       return;
     }
     if (request.method() === "PUT") {

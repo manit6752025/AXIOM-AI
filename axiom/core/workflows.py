@@ -136,16 +136,36 @@ class WorkflowStore:
         *,
         limit: int = 20,
         after_workflow_id: str | None = None,
+        search: str | None = None,
     ) -> dict[str, Any]:
+        """Return a stable cursor page, applying search before calculating offsets."""
         if type(limit) is not int or not 1 <= limit <= 50:
             raise ValueError("Workflow page limit must be between 1 and 50.")
         if after_workflow_id is not None and (
             not isinstance(after_workflow_id, str) or not after_workflow_id
         ):
             raise ValueError("Workflow history cursor must be a non-empty workflow ID.")
+        if search is not None and (not isinstance(search, str) or len(search) > 120):
+            raise ValueError("Workflow search must contain at most 120 characters.")
         records = self._read()
         if len(records) > WORKFLOW_RECORD_LIMIT:
             raise ValueError("Workflow history exceeds the supported record limit.")
+        needle = (search or "").strip().casefold()
+        if needle:
+            def matches(record: dict[str, Any]) -> bool:
+                name = record.get("name")
+                workflow_id = record.get("id")
+                node_types = [
+                    node.get("type")
+                    for node in record.get("nodes", [])
+                    if isinstance(node, dict)
+                ]
+                return any(
+                    needle in value.casefold()
+                    for value in (name, workflow_id, *node_types)
+                    if isinstance(value, str)
+                )
+            records = [record for record in records if matches(record)]
         offset = 0
         if after_workflow_id is not None:
             cursor_index = next(
@@ -153,14 +173,18 @@ class WorkflowStore:
                 None,
             )
             if cursor_index is None:
-                raise KeyError("Workflow history cursor was not found.")
+                raise KeyError("Workflow history cursor was not found for the selected filter.")
             offset = cursor_index + 1
+        page = records[offset:offset + limit]
+        has_more = offset + len(page) < len(records)
         return {
-            "workflows": records[offset:offset + limit],
+            "workflows": page,
             "total": len(records),
             "limit": limit,
             "offset": offset,
-            "has_more": offset + limit < len(records),
+            "has_more": has_more,
+            "next_cursor": page[-1]["id"] if has_more and page else None,
+            "filters": {"search": needle},
         }
 
     def get(self, workflow_id: str) -> dict[str, Any] | None:

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Download, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
+import { Check, Download, RefreshCcw, Search, ShieldCheck, Trash2 } from "lucide-react";
 import { axiomApi, type RuntimeTraceReport } from "../api/client";
 
 function displayDate(value: string): string {
@@ -14,16 +14,37 @@ export default function RuntimeTracePanel() {
   const [showClearConfirmation, setShowClearConfirmation] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  const refresh = async () => {
+  const refresh = async (search = searchInput.trim()) => {
     setLoading(true);
     setError("");
     try {
-      setReport(await axiomApi.runtimeTraces(100));
+      setReport(await axiomApi.runtimeTraces(50, 0, search));
+      setAppliedSearch(search);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Runtime request traces are unavailable.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMore = async () => {
+    if (!report?.has_more || loading || loadingMore) return;
+    setLoadingMore(true);
+    setError("");
+    try {
+      const next = await axiomApi.runtimeTraces(50, report.traces.length, appliedSearch);
+      setReport((current) => current ? {
+        ...next,
+        traces: [...current.traces, ...next.traces],
+      } : next);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Older runtime traces could not be loaded.");
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -82,6 +103,7 @@ export default function RuntimeTracePanel() {
       <p className="quiet-note">Successful and failed local inference/benchmark requests are correlated by request ID. This buffer retains at most {report?.max_retained ?? 200} recent events in process memory. Prompt text, generated responses, credentials, and environment variables are never stored in these records.</p>
       {error && <div className="inline-alert warning" role="alert">{error}</div>}
       {notice && <div className="inline-alert success" role="status"><Check size={15} /> {notice}</div>}
+      <div className="event-filter"><Search size={15} /><input aria-label="Search runtime trace metadata" placeholder="Search request ID, operation, model, or status" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void refresh(searchInput.trim()); }} /><button type="button" className="button secondary-button" onClick={() => void refresh(searchInput.trim())} disabled={loading}>Search</button></div>
       {loading && !report ? <div className="loading-state" role="status">Loading runtime request traces…</div>
         : report?.traces.length ? <>
           <div className="info-grid">
@@ -101,6 +123,11 @@ export default function RuntimeTracePanel() {
                 <td>{displayDate(trace.completed_at)}</td>
               </tr>)}</tbody>
             </table>
+          </div>
+          <div className="pagination-actions">
+            <small>Showing {report.traces.length} of {report.total} matching traces · {report.total_retained}/{report.max_retained} retained</small>
+            {report.capacity_reached && <small>Oldest records may have rotated out of the bounded memory buffer.</small>}
+            {report.has_more && <button type="button" className="button secondary-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load older traces"}</button>}
           </div>
         </> : <div className="empty-state"><ShieldCheck size={22} /><h4>No runtime traces retained</h4><p>Run local generation or a benchmark from this Runtime page, then refresh to inspect its request ID and timing metadata.</p></div>}
       {showClearConfirmation && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setShowClearConfirmation(false); }}>

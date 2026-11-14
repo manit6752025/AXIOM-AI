@@ -17,22 +17,39 @@ console = Console()
 def register_workflow_cli(app: typer.Typer) -> None:
     @app.command("list")
     def workflow_list(
-        limit: int = typer.Option(100, min=1, max=1000, help="Maximum workflows to show."),
-        json_output: bool = typer.Option(False, "--json", help="Emit workflow records as JSON."),
+        limit: int = typer.Option(20, min=1, max=50, help="Maximum workflows in this page (1–50)."),
+        after: str | None = typer.Option(None, "--after", help="Continue after the workflow ID returned by the previous page."),
+        search: str = typer.Option("", "--search", "-s", help="Filter by workflow name, ID, or node type."),
+        json_output: bool = typer.Option(False, "--json", help="Emit workflow records as a JSON array."),
+        page_json: bool = typer.Option(False, "--page-json", help="Emit workflow records with cursor and pagination metadata."),
     ) -> None:
-        """List saved, non-executable workflow designs."""
+        """List saved, non-executable workflow designs with cursor pagination."""
+        if len(search) > 120:
+            _error("Workflow search must contain at most 120 characters.")
+        if after is not None and (not after or len(after) > 64):
+            _error("Workflow cursor must contain between 1 and 64 characters.")
         try:
+            page = WorkflowStore().list_page(
+                limit=limit,
+                after_workflow_id=after,
+                search=search,
+            )
             workflows = [
                 {**workflow, "execution_status": "not_executable"}
-                for workflow in WorkflowStore().list(limit)
+                for workflow in page["workflows"]
             ]
+        except KeyError as exc:
+            _error(str(exc))
         except (OSError, ValueError) as exc:
             _error(f"Workflow history is invalid: {exc}")
+        if page_json:
+            console.print_json(json.dumps({**page, "workflows": workflows}, ensure_ascii=False))
+            return
         if json_output:
             console.print_json(json.dumps(workflows, ensure_ascii=False))
             return
         if not workflows:
-            console.print("No saved workflows. Create one in the Control Center first.")
+            console.print("No saved workflows match this page. Create one in the Control Center or change the search.")
             return
 
         table = Table(title="Saved workflow designs")
@@ -50,6 +67,13 @@ def register_workflow_cli(app: typer.Typer) -> None:
                 "design only",
             )
         console.print(table)
+        console.print(f"Showing {page['offset'] + len(workflows)} of {page['total']} matching workflow designs.")
+        if page["next_cursor"]:
+            console.print(
+                "Next page: axiom workflow list "
+                f"--limit {limit} --after {page['next_cursor']} "
+                + (f"--search {json.dumps(search)}" if search else "")
+            )
 
     @app.command("show")
     def workflow_show(
