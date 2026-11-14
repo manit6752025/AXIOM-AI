@@ -116,6 +116,7 @@ register_fine_tuning_cli(train_app)
 
 
 console = Console()
+_RUNTIME_OPTIONS: dict[str, object] = {}
 
 
 @app.callback()
@@ -127,13 +128,16 @@ def cli_callback(
         help="Skip the interactive startup banner.",
         is_eager=True,
     ),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show diagnostic logging and detailed operational output.", is_eager=True),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress normal terminal output; errors remain visible.", is_eager=True),
-    json_errors: bool = typer.Option(False, "--json-errors", help="Emit stable JSON envelopes for AXIOM CLI errors.", is_eager=True),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show diagnostic logging and detailed operational output."),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress normal terminal output; errors remain visible."),
+    json_errors: bool = typer.Option(False, "--json-errors", help="Emit stable JSON envelopes for AXIOM CLI errors."),
 ) -> None:
     """Configure global output behavior before running a command."""
     ctx.ensure_object(dict)
-    ctx.obj.update({"verbose": verbose, "quiet": quiet, "json_errors": json_errors})
+    runtime = {"verbose": verbose, "quiet": quiet, "json_errors": json_errors}
+    ctx.obj.update(runtime)
+    _RUNTIME_OPTIONS.clear()
+    _RUNTIME_OPTIONS.update(runtime)
     console.quiet = quiet
     logging.getLogger("axiom").setLevel(logging.DEBUG if verbose else logging.WARNING)
 
@@ -160,10 +164,11 @@ def cli_callback(
 def _cli_runtime_options() -> dict[str, object]:
     """Return root CLI options for the currently executing command."""
     ctx = click.get_current_context(silent=True)
-    if ctx is None:
-        return {}
-    root = ctx.find_root()
-    return root.obj if isinstance(root.obj, dict) else {}
+    if ctx is not None:
+        root = ctx.find_root()
+        if isinstance(root.obj, dict) and root.obj:
+            return root.obj
+    return dict(_RUNTIME_OPTIONS)
 
 
 def _cli_error(message: str, *, code: str = "AXIOM_CLI_ERROR") -> None:

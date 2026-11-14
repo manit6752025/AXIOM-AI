@@ -72,7 +72,6 @@ def test_shell_completion_can_be_viewed_for_supported_shells_without_installing(
     assert "Unsupported shell" in unsupported.output
 
 
-
 def test_init_creates_a_project_that_project_commands_can_use(
     tmp_path: Path,
     monkeypatch,
@@ -107,7 +106,6 @@ def test_init_creates_a_project_that_project_commands_can_use(
     assert "README:" in info_result.stdout
     assert validate_result.exit_code == 0, validate_result.stdout
     assert "valid" in validate_result.stdout.lower()
-
 
 
 def test_gui_port_uses_environment_default_and_explicit_flag_precedence(monkeypatch):
@@ -201,7 +199,7 @@ def test_json_errors_emit_stable_machine_readable_envelope():
 def test_json_error_mode_uses_stable_code_for_invalid_global_options():
     import json
 
-    result = runner.invoke(app, ["--verbose", "--quiet", "version"])
+    result = runner.invoke(app, ["--json-errors", "--verbose", "--quiet", "version"])
     assert result.exit_code == 1
     payload = json.loads(result.output)
     assert payload["error"]["code"] == "invalid_global_options"
