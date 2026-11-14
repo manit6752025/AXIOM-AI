@@ -52,6 +52,20 @@ Run `axiom mobile-bridge` to start a separate app that mounts only the two `/v1`
 See [Unified LLM client and mobile bridge](Unified-LLM-Client.md) for examples and the supported-provider limits.
 
 
+## Collection pagination
+
+`GET /api/workflows` uses a bounded cursor page (`limit` 1–50, optional `q` search, and `after_workflow_id` from the previous page's `next_cursor`). The cursor is tied to the same search filter; restart the listing to include newer saved designs.
+
+
+Workspace collection endpoints use bounded `limit` and `offset` parameters and return `total`, `limit`, `offset`, and `has_more` where paging applies.
+
+- `GET /api/workspace/models`: bounded model registry pages; search, exact format/tag filters, favorites, and stable sorting are applied before pagination.
+- `GET /api/workspace/experiments`: bounded experiment pages; query and tag filters are applied before pagination.
+- `GET /api/workspace/datasets`: `limit` 1–500 (default 500), `offset` 0–5000, optional `path` and case-insensitive `search`. Discovery is capped at 5,000 JSONL entries; `truncated: true` explicitly indicates that the inventory exceeded the scan cap. Results are sorted by workspace-relative path before paging.
+- `GET /api/workspace/events`: `limit` 1–100 (default 100), `offset` 0–100, optional case-insensitive `search` across action and detail. Results remain newest-first and reflect the bounded in-memory event buffer.
+
+The frontend typed client keeps the existing array-returning `datasets()` and `events()` methods for compatibility and adds `datasetsPage()` and `eventsPage()` for callers that need pagination metadata.
+
 ## Environment configuration
 
 AXIOM reads configuration from the current process environment. The Control

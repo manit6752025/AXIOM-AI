@@ -16,7 +16,7 @@ feature exists or a delivery-date promise.
 - [R003 · In progress; validation pending] Make API configuration environment-backed and documented; GUI port now accepts AXIOM_GUI_PORT, CORS origins and trusted model roots are documented, and a cross-platform compatibility report is being added.
 - [R004 · Implemented; tests passing] Normalize validation and error response envelopes.
 - [R005 · Implemented; tests passing] Add request IDs and correlation across CLI, API, and GUI.
-- [R006 · In progress; validation pending] Add bounded pagination to every collection endpoint.
+- [R006 · In progress; validation pending] Add bounded pagination to every collection endpoint. Models, experiments, datasets, recent workspace events, saved workflow designs, and runtime traces now expose bounded paged responses. Dataset scans disclose their 5,000-entry cap; workflows use filter-bound cursors; Datasets, Workflows, Logs, and Runtime Trace History can load more results. Agent profiles, Model Studio jobs, and any remaining collection routes still need an API audit and appropriate GUI/CLI consumers.
 - [R007 · In progress; validation pending] Define stable resource IDs and schema migration behavior.
 - [R008 · In progress; validation pending] Add cancellation and timeout semantics to long operations; AXIOM-native streaming now supports cooperative cancellation, stop-string termination, and explicit finish reasons, while other long operations still need cancellation support.
 - [R009 · Planned] Separate read-only plans from side-effecting jobs in API scopes.
@@ -30,7 +30,7 @@ feature exists or a delivery-date promise.
 - [R014 · In progress; validation pending] Add consistent JSON output to every list and inspect command; model add/list/info/inspect/analyze/search/import/export/remove/favorite, integration list, system info, and dataset inspect/validate/stats/clean now have versioned outputs and focused CLI tests. Remaining command families still need coverage.
 - [R015 · In progress; validation pending] Expose and document Typer shell completion for Bash, Zsh, Fish, and PowerShell; add no-write completion smoke coverage.
 - [R016 · Planned] Add interactive prompts only where a non-interactive flag exists.
-- [R017 · Planned] Add global verbosity, quiet, and machine-readable error modes.
+- [R017 · In progress; validation pending] Add global verbosity, quiet, and machine-readable error modes; root `--verbose`/`-v`, `--quiet`/`-q`, and `--json-errors` are now wired into Typer, with stable error envelopes for AXIOM CLI errors. Full command-family output audit and CI validation remain.
 - [R018 · Planned] Add operation progress and cancellation for downloads and scans.
 - [R019 · Implemented; tests passing] Add workspace-aware `axiom status` summaries with JSON health, workspace path, version, and Git working-tree state.
 - [R020 · Planned] Add import/export commands for workspace metadata.
@@ -159,7 +159,6 @@ feature exists or a delivery-date promise.
 - [R119 · Planned] Add migration/rollback notes for every persisted-data schema change.
 - [R120 · Planned] Add end-to-end acceptance coverage for each shipped workflow.
 
-<<<<<<< HEAD
 ### 11 · Applied AI workflows and knowledge infrastructure
 
 - [R121 · Planned] Add reproducible hardware-specific benchmark profiles with environment and provenance records.
@@ -182,13 +181,7 @@ feature exists or a delivery-date promise.
 - [R138 · Planned] Add workspace backup and restore with manifests, checksums, and safe path validation.
 - [R139 · In progress; validation pending] Add opt-in resource sampling and history with clear, export, and retention controls. The CLI now supports an explicit bounded watch and create-only JSONL export; the Runtime page now supports opt-in, 120-sample browser-memory history with a CPU trend, JSON export, and clear. Persistent server-side history and broader retention settings remain outstanding pending acceptance checks.
 - [R140 · Planned] Publish stable Python and TypeScript SDKs verified against the supported API schema.
-=======
 
-### 11 · Intelligence, knowledge, and production workflows
-
-All deliverables are planned until genuinely implemented and verified.
-
->>>>>>> 0a01e53 (feat: update roadmap)
 
 ### Delivery gates
 

@@ -90,3 +90,37 @@ def test_clear_reports_removed_count_and_leaves_empty_buffer() -> None:
     result = clear_runtime_traces()
     assert result == {"cleared": 2, "remaining": 0, "disk_persistence": False}
     assert list_runtime_traces()["total_retained"] == 0
+
+
+def test_trace_listing_paginates_newest_first_and_filters_metadata_only() -> None:
+    clear_runtime_traces()
+    _record(1)
+    _record(2)
+    _record(3)
+
+    first = list_runtime_traces(2, 0)
+    second = list_runtime_traces(2, 2)
+    filtered = list_runtime_traces(1, 0, "REQUEST-002")
+
+    assert [item["request_id"] for item in first["traces"]] == ["request-003", "request-002"]
+    assert first["total"] == 3
+    assert first["has_more"] is True
+    assert first["offset"] == 0
+    assert [item["request_id"] for item in second["traces"]] == ["request-001"]
+    assert second["has_more"] is False
+    assert second["offset"] == 2
+    assert filtered["total"] == 1
+    assert [item["request_id"] for item in filtered["traces"]] == ["request-002"]
+    assert filtered["filters"]["search"] == "request-002"
+    clear_runtime_traces()
+
+
+@pytest.mark.parametrize("offset", [-1, MAX_RUNTIME_TRACES + 1, True])
+def test_trace_listing_rejects_invalid_offsets(offset: int) -> None:
+    with pytest.raises(ValueError, match="offset"):
+        list_runtime_traces(10, offset)
+
+
+def test_trace_listing_rejects_overlong_search() -> None:
+    with pytest.raises(ValueError, match="search"):
+        list_runtime_traces(10, 0, "x" * 121)
