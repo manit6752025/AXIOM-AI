@@ -188,26 +188,6 @@ feature exists or a delivery-date promise.
 
 All deliverables are planned until genuinely implemented and verified.
 
-- [R121 · Planned] Reproducible hardware-specific model benchmark profiles and provenance.
-- [R122 · Planned] Prompt Studio with versioned templates, variables, validation and history.
-- [R123 · Planned] JSON Schema constrained inference and explicit validation errors.
-- [R124 · Planned] Local embedding engine with model management, batching and dimension validation.
-- [R125 · Planned] Local reranking with documented scoring and bounded resources.
-- [R126 · Planned] Workspace-local knowledge bases and secure document ingestion.
-- [R127 · Planned] Hybrid retrieval, chunking, metadata filters, citations and configurable ranking.
-- [R128 · Planned] Local multimodal image understanding with capability checks.
-- [R129 · Planned] Optional local-first speech-to-text and text-to-speech integrations.
-- [R130 · Planned] Dataset snapshots, lineage, integrity hashes and reproducibility.
-- [R131 · Planned] Training and evaluation experiment comparison.
-- [R132 · Planned] Reusable local model-serving profiles.
-- [R133 · Planned] Bounded cancellable and resumable batch inference.
-- [R134 · Planned] Runtime request queues, concurrency limits and backpressure.
-- [R135 · Planned] Model provenance and security inspection.
-- [R136 · Planned] SBOM generation and dependency vulnerability reporting.
-- [R137 · Planned] Versioned default-deny plugin integrations.
-- [R138 · Planned] Workspace backup, restore and integrity verification.
-- [R139 · Planned] Opt-in historical CPU, RAM, VRAM and inference monitoring.
-- [R140 · Planned] Stable typed Python and TypeScript SDKs.
 >>>>>>> 0a01e53 (feat: update roadmap)
 
 ### Delivery gates
