@@ -2911,6 +2911,12 @@ const workflowNodeLabels: Record<WorkflowNodeType, string> = {
 
 function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => void }) {
   const [workflows, setWorkflows] = useState<WorkspaceWorkflow[]>([]);
+  const [workflowTotal, setWorkflowTotal] = useState(0);
+  const [workflowCursor, setWorkflowCursor] = useState<string | null>(null);
+  const [workflowHasMore, setWorkflowHasMore] = useState(false);
+  const [workflowLoadingMore, setWorkflowLoadingMore] = useState(false);
+  const [workflowSearchInput, setWorkflowSearchInput] = useState("");
+  const [workflowSearch, setWorkflowSearch] = useState("");
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflowId, setWorkflowId] = useState<string | null>(null);
   const [templateId, setTemplateId] = useState("");
@@ -2935,20 +2941,46 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
     || JSON.stringify(edges) !== JSON.stringify(selectedWorkflow.edges)
   ));
 
-  const refresh = async () => {
+  const refresh = async (search = workflowSearchInput.trim()) => {
     setLoading(true);
+    setWorkflowLoadingMore(false);
     setError("");
     try {
-      const [savedWorkflows, availableTemplates] = await Promise.all([
-        axiomApi.workflows(),
+      const [page, availableTemplates] = await Promise.all([
+        axiomApi.workflowsPage({ limit: 20, q: search }),
         axiomApi.workflowTemplates(),
       ]);
-      setWorkflows(savedWorkflows);
+      setWorkflows(page.workflows);
+      setWorkflowTotal(page.total);
+      setWorkflowCursor(page.next_cursor);
+      setWorkflowHasMore(page.has_more);
+      setWorkflowSearch(search);
       setTemplates(availableTemplates);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Workflow list unavailable.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMoreWorkflows = async () => {
+    if (!workflowHasMore || !workflowCursor || loading || workflowLoadingMore) return;
+    setWorkflowLoadingMore(true);
+    setError("");
+    try {
+      const page = await axiomApi.workflowsPage({
+        limit: 20,
+        after_workflow_id: workflowCursor,
+        q: workflowSearch,
+      });
+      setWorkflows((current) => [...current, ...page.workflows]);
+      setWorkflowTotal(page.total);
+      setWorkflowCursor(page.next_cursor);
+      setWorkflowHasMore(page.has_more);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "More workflow designs could not be loaded.");
+    } finally {
+      setWorkflowLoadingMore(false);
     }
   };
 
@@ -3161,7 +3193,9 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
         </div>
       </Surface>
       <Surface title="Saved workflows" eyebrow="LOCAL WORKSPACE">
-        {loading ? <div className="loading-state" role="status">Loading workflows…</div> : error && !workflows.length ? <InlineAlert tone="warning" role="alert">{error}</InlineAlert> : workflows.length ? <div className="module-list">{workflows.map((workflow) => <button type="button" className={`module-row workflow-list-item ${workflow.id === workflowId ? "selected" : ""}`} key={workflow.id} onClick={() => selectWorkflow(workflow.id)}><span className="module-icon"><GitBranch size={17} /></span><span className="module-copy"><b>{workflow.name}</b><small>{workflow.nodes.length} steps · revision {workflow.revision} · updated {formatTimestamp(workflow.updated_at)}</small></span><StatusPill tone="neutral">DESIGN</StatusPill></button>)}</div> : <EmptyState icon={GitBranch} title="No saved workflows" description="Create and validate a workflow graph; saved graphs are local JSON metadata." />}
+        <div className="event-filter"><Search size={15} /><input aria-label="Search saved workflows" placeholder="Search by workflow name, ID, or node type" value={workflowSearchInput} onChange={(event) => setWorkflowSearchInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void refresh(workflowSearchInput.trim()); }} /><button type="button" className="button secondary-button" onClick={() => void refresh(workflowSearchInput.trim())} disabled={loading}>Search</button></div>
+        {loading ? <div className="loading-state" role="status">Loading workflows…</div> : error && !workflows.length ? <InlineAlert tone="warning" role="alert">{error}</InlineAlert> : workflows.length ? <div className="module-list">{workflows.map((workflow) => <button type="button" className={`module-row workflow-list-item ${workflow.id === workflowId ? "selected" : ""}`} key={workflow.id} onClick={() => selectWorkflow(workflow.id)}><span className="module-icon"><GitBranch size={17} /></span><span className="module-copy"><b>{workflow.name}</b><small>{workflow.nodes.length} steps · revision {workflow.revision} · updated {formatTimestamp(workflow.updated_at)}</small></span><StatusPill tone="neutral">DESIGN</StatusPill></button>)}</div> : <EmptyState icon={GitBranch} title="No saved workflows" description={workflowSearch ? "No saved workflow designs match this search." : "Create and validate a workflow graph; saved graphs are local JSON metadata."} />}
+        {!loading && <div className="pagination-actions"><small>Showing {workflows.length} of {workflowTotal} workflow designs</small>{workflowHasMore && <button type="button" className="button secondary-button" onClick={() => void loadMoreWorkflows()} disabled={workflowLoadingMore}>{workflowLoadingMore ? "Loading…" : "Load more workflows"}</button>}</div>}
         {selectedWorkflow && <details className="workflow-history"><summary>Revision history · {selectedWorkflow.versions.length} saved versions</summary><div className="workflow-version-list"><div><b>Current · r{selectedWorkflow.revision}</b><small>{selectedWorkflow.name} · {formatTimestamp(selectedWorkflow.updated_at)}</small></div>{[...selectedWorkflow.versions].reverse().map((version) => <div key={version.revision}><b>Revision {version.revision}</b><small>{version.name} · {formatTimestamp(version.updated_at)} · {version.nodes.length} steps</small></div>)}</div></details>}
       </Surface>
     </div>
