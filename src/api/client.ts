@@ -1374,9 +1374,17 @@ export const axiomApi = {
       body: JSON.stringify(payload),
     }),
 
-  datasets: async () => {
-    const result = await requestJson<{ datasets: WorkspaceDataset[] }>("/api/workspace/datasets");
-    return result.datasets;
+  datasets: async (options: { limit?: number; offset?: number; search?: string } = {}) => {
+    const query = new URLSearchParams();
+    if (options.limit !== undefined) query.set("limit", String(options.limit));
+    if (options.offset !== undefined) query.set("offset", String(options.offset));
+    if (options.search?.trim()) query.set("search", options.search.trim());
+    const suffix = query.size ? `?${query.toString()}` : "";
+    return requestJson<{
+      datasets: WorkspaceDataset[]; total: number; limit: number; offset: number;
+      has_more: boolean; truncated: boolean; scan_limit: number;
+      filters: { path: string | null; search: string };
+    }>(`/api/workspace/datasets${suffix}`);
   },
 
   profileDataset: async (
@@ -1510,9 +1518,16 @@ export const axiomApi = {
 
   runtime: () => requestJson<RuntimeSnapshot>("/api/workspace/runtime"),
 
-  events: async () => {
-    const result = await requestJson<{ events: WorkspaceEvent[] }>("/api/workspace/events");
-    return result.events;
+  events: (options: { limit?: number; offset?: number; search?: string } = {}) => {
+    const query = new URLSearchParams();
+    if (options.limit !== undefined) query.set("limit", String(options.limit));
+    if (options.offset !== undefined) query.set("offset", String(options.offset));
+    if (options.search?.trim()) query.set("search", options.search.trim());
+    const suffix = query.size ? `?${query.toString()}` : "";
+    return requestJson<{
+      events: WorkspaceEvent[]; total: number; limit: number; offset: number;
+      has_more: boolean; filters: { search: string };
+    }>(`/api/workspace/events${suffix}`);
   },
 
   experiments: async (limit = 100) => {
