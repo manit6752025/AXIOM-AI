@@ -4,6 +4,23 @@ AXIOM's CLI supports human-readable terminal output and versioned JSON for the
 commands that document `--json`. Use `axiom --help` and each group's
 `--help` to inspect the command options installed on your machine.
 
+## Global output controls
+
+These root options are placed before the command name:
+
+```bash
+axiom --verbose doctor
+axiom --quiet status
+axiom --json-errors completion tcsh
+axiom --quiet --json-errors completion tcsh
+```
+
+- `--verbose` / `-v` enables AXIOM diagnostic logging.
+- `--quiet` / `-q` suppresses normal Rich terminal output; errors remain visible.
+- `--json-errors` emits a compact schema-versioned JSON error on standard error with a stable `code`, `message`, and `exit_code`.
+- `--verbose` and `--quiet` are mutually exclusive.
+- Existing command-level `--json` flags continue to control successful command output. `--json-errors` only changes error envelopes.
+
 ## Shell completion
 
 The root Typer command exposes shell completion. Install completion in the
