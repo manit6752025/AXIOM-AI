@@ -1613,8 +1613,23 @@ export const axiomApi = {
       method: "DELETE",
     }),
 
+  workflowsPage: (input: { limit?: number; after_workflow_id?: string; q?: string } = {}) => {
+    const query = new URLSearchParams({ limit: String(input.limit ?? 20) });
+    if (input.after_workflow_id) query.set("after_workflow_id", input.after_workflow_id);
+    if (input.q?.trim()) query.set("q", input.q.trim());
+    return requestJson<{
+      workflows: WorkspaceWorkflow[];
+      total: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+      next_cursor: string | null;
+      filters: { search: string };
+    }>(`/api/workflows?${query.toString()}`);
+  },
+
   workflows: async () => {
-    const result = await requestJson<{ workflows: WorkspaceWorkflow[] }>("/api/workflows");
+    const result = await requestJson<{ workflows: WorkspaceWorkflow[] }>("/api/workflows?limit=50");
     return result.workflows;
   },
 
