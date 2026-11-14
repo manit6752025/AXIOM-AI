@@ -44,7 +44,7 @@ if(meta)fetch("https://api.github.com/repos/manit6752025/AXIOM-AI").then(r=>r.ok
 
 const prog=d.createElement("div");prog.className="prog";d.body.prepend(prog);
 const hdr=$(".pro-header"),nav=$(".pro-nav"),wEl=$("#words");let last=0,words=[];
-if(wEl){wEl.innerHTML=wEl.textContent.trim().split(" ").map(x=>"<span>"+x+"</span>").join(" ");words=[...wEl.children]}
+if(wEl){const raw=wEl.textContent.trim().split(" ");wEl.textContent="";raw.forEach((x,i)=>{const s=d.createElement("span");s.textContent=x;wEl.appendChild(s);if(i<raw.length-1)wEl.appendChild(d.createTextNode(" "))});words=[...wEl.children]}
 function tick(){
  const y=scrollY,h=root.scrollHeight-innerHeight;
  prog.style.transform="scaleX("+(h>0?y/h:0)+")";root.style.setProperty("--sy",y);
