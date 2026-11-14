@@ -1,1 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="t d"><title id="t">AXIOM mark</title><desc id="d">Geometric A monogram surrounded by a lime orbital ring on a graphite tile.</desc><rect width="128" height="128" rx="27" fill="#171a15"/><rect x="2" y="2" width="124" height="124" rx="25" fill="none" stroke="#d7f36a" stroke-opacity=".35" stroke-width="2"/><path d="M29 100 48 27h23l19 73H76l-4.2-16.4H47.2L43 100H29Zm22.7-29h15.5L59.5 42.5 51.7 71Z" fill="#f0f2e9" fill-rule="evenodd"/><ellipse cx="64" cy="64" rx="55" ry="23" fill="none" stroke="#d7f36a" stroke-width="5" transform="rotate(-17 64 64)"/><path d="M12 76c18 24 48 34 76 27 13-3 23-10 28-19" fill="none" stroke="#171a15" stroke-width="11" stroke-linecap="round"/><path d="M12 76c18 24 48 34 76 27 13-3 23-10 28-19" fill="none" stroke="#d7f36a" stroke-width="5" stroke-linecap="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">AXIOM</title>
+  <desc id="desc">A precise geometric A framed by an orbital lime ring.</desc>
+  <defs>
+    <linearGradient id="tile" x1="12" y1="8" x2="116" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#20251b"/>
+      <stop offset="1" stop-color="#10130f"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="122" height="122" rx="28" fill="url(#tile)"/>
+  <rect x="3.75" y="3.75" width="120.5" height="120.5" rx="27.25" fill="none" stroke="#d9f36a" stroke-opacity=".22" stroke-width="1.5"/>
+  <path d="M36 91 57.2 36.4c2.7-6.9 10.9-6.9 13.6 0L92 91" fill="none" stroke="#f2f4eb" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M46.5 68.5h35" fill="none" stroke="#f2f4eb" stroke-width="8" stroke-linecap="round"/>
+  <ellipse cx="64" cy="64" rx="54" ry="24" transform="rotate(-22 64 64)" fill="none" stroke="#d9f36a" stroke-width="4.5"/>
+  <path d="M13.8 83.5c13.8 18.4 34.7 28.6 56.3 27.1" fill="none" stroke="#10130f" stroke-width="9" stroke-linecap="round"/>
+  <path d="M13.8 83.5c13.8 18.4 34.7 28.6 56.3 27.1" fill="none" stroke="#d9f36a" stroke-width="4.5" stroke-linecap="round"/>
+  <circle cx="109.4" cy="42.7" r="4.2" fill="#d9f36a"/>
+</svg>
