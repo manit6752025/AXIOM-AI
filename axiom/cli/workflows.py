@@ -19,11 +19,15 @@ def register_workflow_cli(app: typer.Typer) -> None:
     def workflow_list(
         limit: int = typer.Option(20, min=1, max=50, help="Maximum workflows in this page (1–50)."),
         after: str | None = typer.Option(None, "--after", help="Continue after the workflow ID returned by the previous page."),
-        search: str = typer.Option("", "--search", "-s", max_length=120, help="Filter by workflow name, ID, or node type."),
+        search: str = typer.Option("", "--search", "-s", help="Filter by workflow name, ID, or node type."),
         json_output: bool = typer.Option(False, "--json", help="Emit workflow records as a JSON array."),
         page_json: bool = typer.Option(False, "--page-json", help="Emit workflow records with cursor and pagination metadata."),
     ) -> None:
         """List saved, non-executable workflow designs with cursor pagination."""
+        if len(search) > 120:
+            _error("Workflow search must contain at most 120 characters.")
+        if after is not None and (not after or len(after) > 64):
+            _error("Workflow cursor must contain between 1 and 64 characters.")
         try:
             page = WorkflowStore().list_page(
                 limit=limit,
