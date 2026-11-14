@@ -159,7 +159,6 @@ feature exists or a delivery-date promise.
 - [R119 · Planned] Add migration/rollback notes for every persisted-data schema change.
 - [R120 · Planned] Add end-to-end acceptance coverage for each shipped workflow.
 
-<<<<<<< HEAD
 ### 11 · Applied AI workflows and knowledge infrastructure
 
 - [R121 · Planned] Add reproducible hardware-specific benchmark profiles with environment and provenance records.
@@ -182,13 +181,7 @@ feature exists or a delivery-date promise.
 - [R138 · Planned] Add workspace backup and restore with manifests, checksums, and safe path validation.
 - [R139 · In progress; validation pending] Add opt-in resource sampling and history with clear, export, and retention controls. The CLI now supports an explicit bounded watch and create-only JSONL export; the Runtime page now supports opt-in, 120-sample browser-memory history with a CPU trend, JSON export, and clear. Persistent server-side history and broader retention settings remain outstanding pending acceptance checks.
 - [R140 · Planned] Publish stable Python and TypeScript SDKs verified against the supported API schema.
-=======
 
-### 11 · Intelligence, knowledge, and production workflows
-
-All deliverables are planned until genuinely implemented and verified.
-
->>>>>>> 0a01e53 (feat: update roadmap)
 
 ### Delivery gates
 
