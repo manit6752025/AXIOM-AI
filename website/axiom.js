@@ -9,21 +9,38 @@ async function type(el,t,f=1,typo){el.textContent="";for(let i=0;i<t.length;i++)
 async function erase(el){while(el.textContent){el.textContent=el.textContent.slice(0,-1);await sleep(16)}}
 
 const h1=$("h1");
-if(h1&&!rm&&!h1.children.length){
- const t=h1.textContent.trim();h1.setAttribute("aria-label",t);
- h1.innerHTML='<span class="t-ghost" aria-hidden="true"></span><span class="t-live" aria-hidden="true"><span></span><i class="caret"></i></span>';
- h1.firstChild.textContent=t;
- (async()=>{await sleep(350);await type(h1.querySelector(".t-live span"),t,t.length>30?.55:.8,d.body.dataset.home?{at:5,bad:"o"}:null);await sleep(250);root.classList.add("ready")})();
+if(h1&&!rm){
+ const html=h1.innerHTML,t=h1.textContent.replace(/\s+/g," ").trim();
+ h1.setAttribute("aria-label",t);
+ h1.innerHTML='<span class="t-ghost" aria-hidden="true">'+html+'</span><span class="t-live" aria-hidden="true">'+html+'</span>';
+ const live=h1.lastChild,nodes=[],tw=d.createTreeWalker(live,NodeFilter.SHOW_TEXT);
+ while(tw.nextNode())nodes.push(tw.currentNode);
+ const full=nodes.map(n=>n.textContent.replace(/\s+/g," "));nodes.forEach(n=>n.textContent="");
+ const caret=d.createElement("i");caret.className="caret";live.appendChild(caret);
+ const f=t.length>30?.55:.8;
+ (async()=>{await sleep(350);let g=0;
+  for(let k=0;k<nodes.length;k++){nodes[k].after(caret);
+   for(const c of full[k]){
+    if(d.body.dataset.home&&g===5){nodes[k].textContent+="o";await sleep(280);nodes[k].textContent=nodes[k].textContent.slice(0,-1);await sleep(150)}
+    nodes[k].textContent+=c;g++;await sleep(gap(c,f))}}
+  await sleep(250);root.classList.add("ready")})();
  setTimeout(()=>root.classList.add("ready"),9000);
 }else root.classList.add("ready");
 
-const CARDS=".detail-grid article,.doc-card,.workflow-panel,.download-panel>div,.community-card,.engine-panel,.engine-status-panel,.explore a";
+const CARDS=".detail-grid article,.doc-card,.workflow-panel,.download-panel>div,.community-card,.engine-panel,.engine-status-panel,.explore a,.community-aside,.community-bottom";
 $$(CARDS).forEach(c=>c.addEventListener("pointermove",e=>{const r=c.getBoundingClientRect();c.style.setProperty("--mx",e.clientX-r.left+"px");c.style.setProperty("--my",e.clientY-r.top+"px")}));
 if(!rm){
  const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target)}}),{threshold:.12,rootMargin:"0px 0px -6% 0px"});
  $$(CARDS+",.doc-grid>*,.workflow-stack>*,.engine-feature-grid>*,.engine-path-grid>*,.pro-callout,.explore-title").forEach(el=>{
   el.dataset.r="";el.style.setProperty("--i",[...(el.parentNode.children)].indexOf(el)%4);io.observe(el)});
 }
+
+const meta=$(".community-meta");
+if(meta)fetch("https://api.github.com/repos/manit6752025/AXIOM-AI").then(r=>r.ok?r.json():null).then(j=>{if(!j)return;
+ const add=s=>{const e=d.createElement("span");e.textContent=s;meta.appendChild(e)};
+ if(j.stargazers_count>0)add(j.stargazers_count+" stars");
+ add(j.open_issues_count+" open issues");
+ add("Updated "+new Date(j.pushed_at).toLocaleDateString("en-AU",{day:"numeric",month:"short",year:"numeric"}))}).catch(()=>{});
 
 const prog=d.createElement("div");prog.className="prog";d.body.prepend(prog);
 const hdr=$(".pro-header"),nav=$(".pro-nav"),wEl=$("#words");let last=0,words=[];
