@@ -3569,14 +3569,22 @@ function RoadmapPage() {
 function LogsPage() {
   const [events, setEvents] = useState<WorkspaceEvent[]>([]);
   const [filter, setFilter] = useState("");
+  const [appliedFilter, setAppliedFilter] = useState("");
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
 
-  const refresh = async () => {
+  const refresh = async (search = appliedFilter) => {
     setLoading(true);
     setError("");
     try {
-      setEvents(await axiomApi.events());
+      const page = await axiomApi.eventsPage({ limit: 50, offset: 0, search });
+      setEvents(page.events);
+      setTotal(page.total);
+      setHasMore(page.has_more);
+      setAppliedFilter(search);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load workspace events.");
     } finally {
@@ -3584,15 +3592,30 @@ function LogsPage() {
     }
   };
 
-  useEffect(() => { void refresh(); }, []);
-  const normalizedFilter = filter.trim().toLowerCase();
-  const visibleEvents = events.filter((event) => `${event.action} ${event.detail || ""}`.toLowerCase().includes(normalizedFilter));
+  const loadMore = async () => {
+    if (!hasMore || loading || loadingMore) return;
+    setLoadingMore(true);
+    setError("");
+    try {
+      const page = await axiomApi.eventsPage({ limit: 50, offset: events.length, search: appliedFilter });
+      setEvents((current) => [...current, ...page.events]);
+      setTotal(page.total);
+      setHasMore(page.has_more);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Older workspace events could not be loaded.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  useEffect(() => { void refresh(""); }, []);
 
   return <FeaturePage page="logs" actions={<button type="button" className="button secondary-button" onClick={() => void refresh()} disabled={loading}><RefreshCcw size={16} /> {loading ? "Refreshing" : "Refresh"}</button>}>
-    <Surface title="Workspace event stream" eyebrow="LOCAL / RECENT" action={<StatusPill tone={events.length ? "success" : "neutral"}>{events.length} EVENTS</StatusPill>}>
-      <label className="event-filter"><Search size={15} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Filter by action or detail" aria-label="Filter workspace events" /></label>
+    <Surface title="Workspace event stream" eyebrow="LOCAL / RECENT" action={<StatusPill tone={total ? "success" : "neutral"}>{total} EVENTS</StatusPill>}>
+      <div className="event-filter"><Search size={15} /><input value={filter} onChange={(event) => setFilter(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void refresh(filter.trim()); }} placeholder="Filter by action or detail" aria-label="Filter workspace events" /><button type="button" className="button secondary-button" onClick={() => void refresh(filter.trim())} disabled={loading}>Search</button></div>
       {error && <InlineAlert tone="warning" role="alert">{error}</InlineAlert>}
-      {loading ? <div className="loading-state" role="status">Loading local events…</div> : visibleEvents.length ? <div className="event-list">{visibleEvents.map((event, index) => <div className="event-row" key={`${event.timestamp}-${index}`}><span className="event-marker" /><div><b>{event.action.replaceAll(".", " / ")}</b><small>{event.detail || "Completed"} · {formatTimestamp(event.timestamp)}</small></div></div>)}</div> : <EmptyState icon={TerminalSquare} title={events.length ? "No events match" : "No workspace events yet"} description={events.length ? "Try a different filter." : "Successful model registration, dataset profiling, and training plans appear here."} />}
+      {loading ? <div className="loading-state" role="status">Loading local events…</div> : events.length ? <div className="event-list">{events.map((event, index) => <div className="event-row" key={event.timestamp + "-" + index}><span className="event-marker" /><div><b>{event.action.replaceAll(".", " / ")}</b><small>{event.detail || "Completed"} · {formatTimestamp(event.timestamp)}</small></div></div>)}</div> : <EmptyState icon={TerminalSquare} title={appliedFilter ? "No events match" : "No workspace events yet"} description={appliedFilter ? "Try a different filter." : "Successful model registration, dataset profiling, and training plans appear here."} />}
+      {hasMore && <div className="pagination-actions"><small>Showing {events.length} of {total} events</small><button type="button" className="button secondary-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load older events"}</button></div>}
     </Surface>
     <div className="log-contract"><span><FileCode2 size={15} /> Event retention</span><code>Recent local actions · in memory · bounded</code></div>
   </FeaturePage>;
