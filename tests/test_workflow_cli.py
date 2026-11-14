@@ -56,3 +56,40 @@ def test_cli_validation_rejects_a_cyclic_saved_workflow(tmp_path, monkeypatch):
     result = CliRunner().invoke(app, ["workflow", "validate", "cycle"])
     assert result.exit_code == 1
     assert "acyclic" in result.stdout
+
+
+def test_cli_workflow_page_json_and_cursor_search_are_available(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    store = WorkflowStore()
+    for workflow_id, name in (
+        ("first", "First audit"),
+        ("second", "Second training"),
+        ("third", "Third audit"),
+    ):
+        store.save({
+            "id": workflow_id,
+            "name": name,
+            "created_at": "2026-11-14T00:00:00Z",
+            "updated_at": "2026-11-14T00:00:00Z",
+            "nodes": [{"id": "step", "type": "dataset.profile"}],
+            "edges": [],
+        })
+
+    runner = CliRunner()
+    first = runner.invoke(app, ["workflow", "list", "--limit", "2", "--page-json"])
+    assert first.exit_code == 0, first.output
+    first_page = json.loads(first.stdout)
+    assert [item["id"] for item in first_page["workflows"]] == ["third", "second"]
+    assert first_page["next_cursor"] == "second"
+    assert first_page["has_more"] is True
+
+    second = runner.invoke(app, [
+        "workflow", "list", "--limit", "2", "--after", first_page["next_cursor"], "--json",
+    ])
+    assert second.exit_code == 0, second.output
+    assert [item["id"] for item in json.loads(second.stdout)] == ["first"]
+
+    filtered = runner.invoke(app, ["workflow", "list", "--search", "audit", "--page-json"])
+    assert filtered.exit_code == 0, filtered.output
+    assert filtered.stdout
+    assert json.loads(filtered.stdout)["total"] == 2
