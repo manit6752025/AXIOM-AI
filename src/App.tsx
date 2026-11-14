@@ -2216,6 +2216,13 @@ const datasetScanPresets = {
 
 function Datasets({ onNotify }: { onNotify: (message: string, tone?: Tone) => void }) {
   const [datasets, setDatasets] = useState<WorkspaceDataset[]>([]);
+  const [datasetTotal, setDatasetTotal] = useState(0);
+  const [datasetOffset, setDatasetOffset] = useState(0);
+  const [datasetHasMore, setDatasetHasMore] = useState(false);
+  const [datasetTruncated, setDatasetTruncated] = useState(false);
+  const [datasetSearchInput, setDatasetSearchInput] = useState("");
+  const [datasetSearch, setDatasetSearch] = useState("");
+  const [inventoryLoadingMore, setInventoryLoadingMore] = useState(false);
   const [profile, setProfile] = useState<DatasetProfile | null>(null);
   const [manifest, setManifest] = useState<DatasetManifest | null>(null);
   const [parentManifestSha256, setParentManifestSha256] = useState("");
@@ -2238,15 +2245,44 @@ function Datasets({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
   const [inventoryBusy, setInventoryBusy] = useState(true);
   const [error, setError] = useState("");
 
-  const refresh = async () => {
+  const refresh = async (search = datasetSearchInput.trim()) => {
     setInventoryBusy(true);
+    setInventoryLoadingMore(false);
     setError("");
     try {
-      setDatasets(await axiomApi.datasets());
+      const page = await axiomApi.datasetsPage({ limit: 500, offset: 0, search });
+      setDatasets(page.datasets);
+      setDatasetTotal(page.total);
+      setDatasetOffset(page.datasets.length);
+      setDatasetHasMore(page.has_more);
+      setDatasetTruncated(page.truncated);
+      setDatasetSearch(search);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Dataset inventory unavailable.");
     } finally {
       setInventoryBusy(false);
+    }
+  };
+
+  const loadMoreDatasets = async () => {
+    if (!datasetHasMore || inventoryBusy || inventoryLoadingMore) return;
+    setInventoryLoadingMore(true);
+    setError("");
+    try {
+      const page = await axiomApi.datasetsPage({
+        limit: 500,
+        offset: datasetOffset,
+        search: datasetSearch,
+      });
+      setDatasets((current) => [...current, ...page.datasets]);
+      setDatasetOffset((current) => current + page.datasets.length);
+      setDatasetTotal(page.total);
+      setDatasetHasMore(page.has_more);
+      setDatasetTruncated(page.truncated);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "More datasets could not be loaded.");
+    } finally {
+      setInventoryLoadingMore(false);
     }
   };
 
@@ -2421,11 +2457,20 @@ function Datasets({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
         <p className="quiet-note">{datasetScanPresets[scanPreset].description}. The API enforces fixed maximums; values are never returned.</p>
       </div>
       <label className="dataset-manifest-parent"><span>Optional parent manifest SHA-256 · link this dataset to an earlier source</span><input value={parentManifestSha256} onChange={(event) => setParentManifestSha256(event.target.value)} maxLength={64} placeholder="Paste a previous manifest digest (leave blank for source)" /></label>
+      <div className="dataset-scan-controls">
+        <label><span>Search dataset paths</span><input value={datasetSearchInput} onChange={(event) => setDatasetSearchInput(event.target.value)} maxLength={160} placeholder="e.g. train, eval, validation" aria-label="Search dataset paths" /></label>
+        <button type="button" className="button secondary-button" onClick={() => void refresh(datasetSearchInput.trim())} disabled={inventoryBusy}><Search size={15} /> Search inventory</button>
+      </div>
       {inventoryBusy ? <div className="loading-state" role="status">Scanning the local data directory…</div> : datasets.length ? <div className="module-list">{datasets.map((dataset) => <div className="module-row" key={dataset.path}>
         <span className="module-icon"><Database size={17} /></span>
         <span className="module-copy"><b>{dataset.path}</b><small>JSONL · {formatBytes(dataset.size_bytes)} · local workspace</small></span>
         <div className="module-row-actions"><button type="button" className="button secondary-button" disabled={profileBusy !== null} onClick={() => void runProfile(dataset.path)}>{profileBusy === dataset.path ? "Profiling…" : "Profile"}</button><button type="button" className="button secondary-button" disabled={manifestBusy !== null} onClick={() => void runManifest(dataset.path)}>{manifestBusy === dataset.path ? "Hashing…" : "Manifest"}</button><button type="button" className="button secondary-button" disabled={cleanPreviewBusy !== null} onClick={() => void runCleaningPreview(dataset.path)}>{cleanPreviewBusy === dataset.path ? "Previewing…" : "Preview clean"}</button></div>
       </div>)}</div> : <EmptyState icon={Database} title="No JSONL datasets found" description="Place a JSONL file under the workspace data/ directory, then refresh. You can inspect any path directly with the CLI." action={<CliReference command="axiom dataset profile ./data/train.jsonl" />} />}
+      {!inventoryBusy && datasets.length > 0 && <div className="pagination-actions">
+        <small>Showing {datasets.length.toLocaleString()} of {datasetTotal.toLocaleString()} matching datasets</small>
+        {datasetHasMore && <button type="button" className="button secondary-button" onClick={() => void loadMoreDatasets()} disabled={inventoryLoadingMore}>{inventoryLoadingMore ? "Loading…" : "Load more datasets"}</button>}
+      </div>}
+      {datasetTruncated && <InlineAlert tone="warning" role="status">The workspace scan reached its 5,000-entry safety limit. Narrow the search or inspect a subfolder to reduce the scan; entries beyond the cap are not included in this result.</InlineAlert>}
     </Surface>
     {datasets.length > 0 && <Surface title="Compare and validate" eyebrow="DATASET QUALITY">
       <p className="quiet-note">Select two or three JSONL files. The report compares field presence and observed types; checks never return row values.</p>
