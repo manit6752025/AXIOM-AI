@@ -503,6 +503,20 @@ def inspect(root: Path) -> dict[str, Any]:
     cli_main_source = (root / "axiom/cli/main.py").read_text(encoding="utf-8")
     cli_extended_source = (root / "axiom/cli/extended.py").read_text(encoding="utf-8")
     cli_json_tests = (root / "tests/test_cli_json.py").read_text(encoding="utf-8")
+    cli_surface_tests = (root / "tests/test_cli_surface.py").read_text(encoding="utf-8")
+    cli_guide = (root / "docs/CLI-GUIDE.md").read_text(encoding="utf-8")
+    for token in ('"--verbose"', '"--quiet"', '"--json-errors"', 'def _cli_runtime_options(', 'def _cli_error('):
+        if token not in cli_main_source:
+            failures.append("Global CLI output controls are missing: " + token)
+    for token in (
+        "test_global_cli_output_options_are_exposed_before_subcommands",
+        "test_quiet_mode_suppresses_normal_command_output",
+        "test_json_errors_emit_stable_machine_readable_envelope",
+    ):
+        if token not in cli_surface_tests:
+            failures.append("Global CLI output regression coverage is missing: " + token)
+    if "## Global output controls" not in cli_guide:
+        failures.append("CLI guide is missing the global output controls reference.")
     for token in ('def model_list(', 'def model_add(', 'def model_update(', 'def model_export(', 'def model_import(', 'def model_remove(', 'def model_favorite(', 'def model_info(', 'def model_inspect(', 'def model_analyze(', 'def dataset_inspect(', 'def dataset_clean(', 'def integration_list(', 'def system_info('):
         if token not in cli_main_source:
             failures.append("CLI JSON output support is missing from a primary command: " + token)
