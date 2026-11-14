@@ -254,9 +254,30 @@ def record_action(request: WorkspaceAction) -> dict[str, Any]:
 
 
 @router.get("/events")
-def workspace_events() -> dict[str, list[dict[str, Any]]]:
+def workspace_events(
+    limit: int = Query(default=100, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=100),
+    search: str = Query(default="", max_length=160),
+) -> dict[str, Any]:
+    """Return a bounded, newest-first page of recent workspace events."""
     with _events_lock:
-        return {"events": list(_events)}
+        events = list(_events)
+    needle = search.strip().casefold()
+    if needle:
+        events = [
+            event for event in events
+            if needle in str(event.get("action", "")).casefold()
+            or needle in str(event.get("detail") or "").casefold()
+        ]
+    total = len(events)
+    return {
+        "events": events[offset:offset + limit],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + limit < total,
+        "filters": {"search": needle},
+    }
 
 
 def _model_parameter_sort_key(value: str | None) -> tuple[bool, float]:
@@ -568,8 +589,36 @@ def workspace_add_experiment(request: WorkspaceExperimentInput) -> dict[str, Any
 
 
 @router.get("/datasets")
-def workspace_datasets(path: str | None = Query(default=None, max_length=512)) -> dict[str, Any]:
-    """List JSONL datasets beneath the workspace data directory."""
+def workspace_datasets(
+    path: str | None = Query(default=None, max_length=512),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0, le=5000),
+    search: str = Query(default="", max_length=160),
+) -> dict[str, Any]:
+    """List a bounded, stable page of JSONL dataset metadata.
+
+    Discovery is capped at 5,000 entries. The response reports truncation
+    separately so clients never mistake a bounded inventory for a full scan.
+    """
+    def page_result(items: list[dict[str, Any]], *, truncated: bool = False) -> dict[str, Any]:
+        needle = search.strip().casefold()
+        filtered = [
+            item for item in items
+            if not needle or needle in str(item.get("path", "")).casefold()
+        ]
+        filtered.sort(key=lambda item: str(item.get("path", "")).casefold())
+        total = len(filtered)
+        return {
+            "datasets": filtered[offset:offset + limit],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + limit < total,
+            "truncated": truncated,
+            "scan_limit": 5000,
+            "filters": {"path": path, "search": needle},
+        }
+
     workspace_root = Path.cwd().resolve()
     data_entry = workspace_root / "data"
     if data_entry.is_symlink():
@@ -577,7 +626,7 @@ def workspace_datasets(path: str | None = Query(default=None, max_length=512)) -
     try:
         root = data_entry.resolve(strict=True)
     except FileNotFoundError:
-        return {"datasets": []}
+        return page_result([])
     if not root.is_dir() or not root.is_relative_to(workspace_root):
         raise HTTPException(status_code=400, detail="Invalid data directory.")
 
@@ -599,14 +648,21 @@ def workspace_datasets(path: str | None = Query(default=None, max_length=512)) -
             except SafePathError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             except FileNotFoundError:
-                return {"datasets": []}
+                return page_result([])
 
     datasets: list[dict[str, Any]] = []
+    truncated = False
     if candidate.is_file():
-        datasets.append({
-            "path": candidate.relative_to(root).as_posix(),
-            "size_bytes": candidate.stat().st_size,
-        })
+        try:
+            resolved = candidate.resolve(strict=True)
+            if not resolved.is_relative_to(root) or not resolved.is_file():
+                raise HTTPException(status_code=400, detail="Invalid dataset path.")
+            datasets.append({
+                "path": resolved.relative_to(root).as_posix(),
+                "size_bytes": resolved.stat().st_size,
+            })
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Dataset path could not be inspected safely.") from exc
     elif candidate.is_dir():
         for current, directories, filenames in os.walk(candidate, followlinks=False):
             current_path = Path(current)
@@ -630,12 +686,13 @@ def workspace_datasets(path: str | None = Query(default=None, max_length=512)) -
                 except (OSError, RuntimeError, ValueError):
                     continue
                 datasets.append({"path": relative_name, "size_bytes": size})
-                if len(datasets) >= 500:
+                if len(datasets) > 5000:
+                    truncated = True
                     break
-            if len(datasets) >= 500:
+            if truncated:
                 break
 
-    return {"datasets": datasets[:500]}
+    return page_result(datasets[:5000], truncated=truncated)
 @router.post("/training-plan")
 def workspace_training_plan(
     parameter_billions: float = Query(default=7.0, gt=0, le=1000),
