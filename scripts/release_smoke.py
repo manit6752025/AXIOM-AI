@@ -517,6 +517,24 @@ def inspect(root: Path) -> dict[str, Any]:
             failures.append("Global CLI output regression coverage is missing: " + token)
     if "## Global output controls" not in cli_guide:
         failures.append("CLI guide is missing the global output controls reference.")
+    workflow_core_source = (root / "axiom/core/workflows.py").read_text(encoding="utf-8")
+    workflow_api_source = (root / "axiom/api/workflows.py").read_text(encoding="utf-8")
+    workflow_cli_source = (root / "axiom/cli/workflows.py").read_text(encoding="utf-8")
+    workflow_client_source = (root / "src/api/client.ts").read_text(encoding="utf-8")
+    workflow_ui_source = (root / "src/App.tsx").read_text(encoding="utf-8")
+    workflow_e2e_source = (root / "e2e/workflows.spec.ts").read_text(encoding="utf-8")
+    workflow_pagination_contracts = (
+        (workflow_core_source, ('def list_page(', '"next_cursor":', '"filters": {"search": needle}')),
+        (workflow_api_source, ('after_workflow_id:', 'search=q', 'list_page(')),
+        (workflow_cli_source, ('"--after"', '"--search"', '"--page-json"')),
+        (workflow_client_source, ("workflowsPage:", "after_workflow_id")),
+        (workflow_ui_source, ("loadMoreWorkflows", "Load more workflows", "Search saved workflows")),
+        (workflow_e2e_source, ('"next_cursor": null', '"has_more": false')),
+    )
+    for source, tokens in workflow_pagination_contracts:
+        for token in tokens:
+            if token not in source:
+                failures.append("Workflow cursor pagination is missing contract token: " + token)
     for token in ('def model_list(', 'def model_add(', 'def model_update(', 'def model_export(', 'def model_import(', 'def model_remove(', 'def model_favorite(', 'def model_info(', 'def model_inspect(', 'def model_analyze(', 'def dataset_inspect(', 'def dataset_clean(', 'def integration_list(', 'def system_info('):
         if token not in cli_main_source:
             failures.append("CLI JSON output support is missing from a primary command: " + token)
