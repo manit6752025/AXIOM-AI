@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -74,9 +75,8 @@ def test_dataset_inventory_discloses_bounded_scan_truncation(tmp_path: Path, mon
     assert payload["scan_limit"] == 5000
 
 
-def test_workspace_events_are_paginated_newest_first_and_searchable() -> None:
-    with workspace._events_lock:
-        workspace._events.clear()
+def test_workspace_events_are_paginated_newest_first_and_searchable(monkeypatch) -> None:
+    monkeypatch.setattr(workspace, "_events", deque(maxlen=100))
     workspace.record_workspace_event("models.add", "Added Alpha")
     workspace.record_workspace_event("datasets.profile", "Profiled train.jsonl")
     workspace.record_workspace_event("models.remove", "Removed Beta")
