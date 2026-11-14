@@ -1,4 +1,4 @@
-name: Sync main into branches
+name: Rebase branches onto main
 
 on:
   schedule:
@@ -9,29 +9,32 @@ permissions:
   contents: write
 
 jobs:
-  sync:
+  rebase:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Merge main into every other branch
+      - name: Rebase every other branch onto main
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           failed=""
           for ref in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin | grep -v -e '^origin$' -e '^origin/HEAD$' -e '^origin/main$'); do
             b="${ref#origin/}"
+            if git merge-base --is-ancestor origin/main "origin/$b"; then
+              continue
+            fi
             git checkout -q -B "$b" "origin/$b"
-            if git merge --no-edit origin/main; then
-              git push origin "$b"
+            if git rebase origin/main; then
+              git push --force-with-lease="$b:origin/$b" origin "$b"
             else
-              git merge --abort
+              git rebase --abort
               failed="$failed $b"
             fi
           done
           if [ -n "$failed" ]; then
-            echo "Merge conflicts, skipped:$failed"
+            echo "Rebase conflicts, skipped:$failed"
             exit 1
           fi
