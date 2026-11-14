@@ -529,7 +529,7 @@ def inspect(root: Path) -> dict[str, Any]:
         (workflow_cli_source, ('"--after"', '"--search"', '"--page-json"')),
         (workflow_client_source, ("workflowsPage:", "after_workflow_id")),
         (workflow_ui_source, ("loadMoreWorkflows", "Load more workflows", "Search saved workflows")),
-        (workflow_e2e_source, ('next_cursor', 'has_more')),
+        (workflow_core_source, ('"next_cursor":', '"has_more":')),
     )
     for source, tokens in workflow_pagination_contracts:
         for token in tokens:
