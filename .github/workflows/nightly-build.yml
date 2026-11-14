@@ -20,6 +20,7 @@ jobs:
   integrate-and-verify:
     name: Merge main + development, verify, prepare nightly branch
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     outputs:
       package_tag: ${{ steps.version.outputs.package_tag }}
       release_tag: ${{ steps.version.outputs.package_tag }}
@@ -187,7 +188,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          python -m pip install -e '.[test]'
+          python -m pip install -e '.[test,native-inference]'
           npm ci
 
       - name: Static release contract
