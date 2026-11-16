@@ -72,10 +72,17 @@ def remote_chat(request: RemoteChatRequest) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=str(exc)) from None
 
 @router.get("/jobs")
-def jobs(limit: int = Query(default=20, ge=1, le=100)) -> dict[str, Any]:
+def jobs(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=5000),
+    search: str = Query(default="", max_length=120),
+) -> dict[str, Any]:
+    """Return a bounded, searchable page of local Model Studio jobs."""
     try:
-        return {"jobs": studio.list_jobs(limit)}
-    except (ValueError, studio.ModelStudioError) as exc:
+        return studio.list_jobs_page(limit=limit, offset=offset, search=search)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except studio.ModelStudioError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
 @router.get("/jobs/{job_id}")

@@ -2,7 +2,6 @@ name: Deploy AXIOM website and signed APT repository
 
 on:
   push:
-    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
     inputs:

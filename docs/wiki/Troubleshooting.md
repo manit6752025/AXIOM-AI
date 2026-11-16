@@ -36,4 +36,4 @@ Open and inspect the ZIP before attaching it. Metadata minimization does not gua
 
 Include AXIOM version, OS and Python version, installation method, exact command or GUI path, expected versus actual behavior, and a minimal safe reproducer. Never include credentials, API keys, passwords, private dataset rows, proprietary model weights, unredacted logs, or an unreviewed support ZIP.
 
-[Open GitHub Issues](https://github.com/NetCore-Technologies/AXIOM-AI/issues) · [Security page](https://github.com/NetCore-Technologies/AXIOM-AI/security)
+[Open GitHub Issues](https://github.com/manit6752025/AXIOM-AI/issues) · [Security page](https://github.com/manit6752025/AXIOM-AI/security)

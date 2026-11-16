@@ -16,19 +16,19 @@ Before asking for help:
 
 ### AXIOM Wiki
 
-https://github.com/NetCore-Technologies/AXIOM-AI/wiki
+https://github.com/manit6752025/AXIOM-AI/wiki
 
 ### Troubleshooting
 
-https://github.com/NetCore-Technologies/AXIOM-AI/wiki/Troubleshooting
+https://github.com/manit6752025/AXIOM-AI/wiki/Troubleshooting
 
 ### Releases
 
-https://github.com/NetCore-Technologies/AXIOM-AI/releases
+https://github.com/manit6752025/AXIOM-AI/releases
 
 ### Contributing
 
-https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/CONTRIBUTING.md
+https://github.com/manit6752025/AXIOM-AI/blob/main/CONTRIBUTING.md
 
 ## Where to ask
 
@@ -36,7 +36,7 @@ https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/CONTRIBUTING.md
 
 Use GitHub Issues:
 
-https://github.com/NetCore-Technologies/AXIOM-AI/issues
+https://github.com/manit6752025/AXIOM-AI/issues
 
 ### Feature requests
 
@@ -52,7 +52,7 @@ Do not post sensitive vulnerabilities publicly.
 
 Follow the project's security policy:
 
-https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/SECURITY.md
+https://github.com/manit6752025/AXIOM-AI/blob/main/SECURITY.md
 
 ## Include useful information
 

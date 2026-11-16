@@ -191,8 +191,13 @@ export type RuntimeTraceReport = {
   schema_version: number;
   traces: RuntimeTrace[];
   total_retained: number;
+  total: number;
   limit: number;
+  offset: number;
+  has_more: boolean;
+  capacity_reached: boolean;
   max_retained: number;
+  filters: { search: string };
   privacy: { prompt_bodies_stored: false; response_bodies_stored: false; disk_persistence: false };
 };
 export type AxiomEngineBenchmarkRun = {
@@ -1374,6 +1379,20 @@ export const axiomApi = {
       body: JSON.stringify(payload),
     }),
 
+  datasetsPage: (options: { limit?: number; offset?: number; search?: string } = {}) => {
+    const query = new URLSearchParams();
+    if (options.limit !== undefined) query.set("limit", String(options.limit));
+    if (options.offset !== undefined) query.set("offset", String(options.offset));
+    if (options.search?.trim()) query.set("search", options.search.trim());
+    const serialized = query.toString();
+    const suffix = serialized ? `?${serialized}` : "";
+    return requestJson<{
+      datasets: WorkspaceDataset[]; total: number; limit: number; offset: number;
+      has_more: boolean; truncated: boolean; scan_limit: number;
+      filters: { path: string | null; search: string };
+    }>(`/api/workspace/datasets${suffix}`);
+  },
+
   datasets: async () => {
     const result = await requestJson<{ datasets: WorkspaceDataset[] }>("/api/workspace/datasets");
     return result.datasets;
@@ -1510,6 +1529,19 @@ export const axiomApi = {
 
   runtime: () => requestJson<RuntimeSnapshot>("/api/workspace/runtime"),
 
+  eventsPage: (options: { limit?: number; offset?: number; search?: string } = {}) => {
+    const query = new URLSearchParams();
+    if (options.limit !== undefined) query.set("limit", String(options.limit));
+    if (options.offset !== undefined) query.set("offset", String(options.offset));
+    if (options.search?.trim()) query.set("search", options.search.trim());
+    const serialized = query.toString();
+    const suffix = serialized ? `?${serialized}` : "";
+    return requestJson<{
+      events: WorkspaceEvent[]; total: number; limit: number; offset: number;
+      has_more: boolean; filters: { search: string };
+    }>(`/api/workspace/events${suffix}`);
+  },
+
   events: async () => {
     const result = await requestJson<{ events: WorkspaceEvent[] }>("/api/workspace/events");
     return result.events;
@@ -1586,8 +1618,23 @@ export const axiomApi = {
       method: "DELETE",
     }),
 
+  workflowsPage: (input: { limit?: number; after_workflow_id?: string; q?: string } = {}) => {
+    const query = new URLSearchParams({ limit: String(input.limit ?? 20) });
+    if (input.after_workflow_id) query.set("after_workflow_id", input.after_workflow_id);
+    if (input.q?.trim()) query.set("q", input.q.trim());
+    return requestJson<{
+      workflows: WorkspaceWorkflow[];
+      total: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+      next_cursor: string | null;
+      filters: { search: string };
+    }>(`/api/workflows?${query.toString()}`);
+  },
+
   workflows: async () => {
-    const result = await requestJson<{ workflows: WorkspaceWorkflow[] }>("/api/workflows");
+    const result = await requestJson<{ workflows: WorkspaceWorkflow[] }>("/api/workflows?limit=50");
     return result.workflows;
   },
 
@@ -1776,7 +1823,14 @@ export const axiomApi = {
   startModelStudioJob: (config: { operation: "pull" | "pull_native" | "install_gguf" | "convert_gguf"; [key: string]: unknown }) => requestJson<ModelStudioJob>("/api/models/studio/jobs", { method: "POST", body: JSON.stringify(config) }),
 
   runtimeConnectors: () => requestJson<RuntimeConnectorReport>("/api/diagnostics/runtime-connectors"),
-  runtimeTraces: (limit = 50) => requestJson<RuntimeTraceReport>(`/api/diagnostics/runtime-traces?limit=${Math.min(200, Math.max(1, Math.floor(limit)))}`),
+  runtimeTraces: (limit = 50, offset = 0, search = "") => {
+    const query = new URLSearchParams({
+      limit: String(Math.min(200, Math.max(1, Math.floor(limit)))),
+      offset: String(Math.min(200, Math.max(0, Math.floor(offset)))),
+    });
+    if (search.trim()) query.set("search", search.trim());
+    return requestJson<RuntimeTraceReport>(`/api/diagnostics/runtime-traces?${query.toString()}`);
+  },
   clearRuntimeTraces: () => requestJson<{ cleared: number; remaining: 0; disk_persistence: false }>("/api/diagnostics/runtime-traces", { method: "DELETE" }),
   agentProfiles: () => requestJson<AgentProfileReport>("/api/agent-profiles"),
   createAgentProfile: (input: { name: string; task_capabilities: string[] }) =>

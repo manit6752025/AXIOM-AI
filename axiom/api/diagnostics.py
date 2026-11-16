@@ -55,9 +55,16 @@ def roadmap_audit() -> dict:
 
 
 @router.get("/runtime-traces")
-def runtime_trace_list(limit: int = Query(default=50, ge=1, le=200)) -> dict:
-    """Return a bounded metadata-only view of recent local inference requests."""
-    return list_runtime_traces(limit)
+def runtime_trace_list(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0, le=200),
+    search: str = Query(default="", max_length=120),
+) -> dict:
+    """Return a bounded, searchable metadata-only page of local inference requests."""
+    try:
+        return list_runtime_traces(limit, offset, search)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.delete("/runtime-traces")

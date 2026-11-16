@@ -8,7 +8,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-$Repo = "NetCore-Technologies/AXIOM-AI"
+$Repo = "manit6752025/AXIOM-AI"
 $TempDir = $null
 
 function Write-Step([string]$Message) {

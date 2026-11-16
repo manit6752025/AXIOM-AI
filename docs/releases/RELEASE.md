@@ -23,7 +23,7 @@ terminal.
 AXIOM keeps the CLI, local daemon, static landing page, and supporting
 engineering modules together in one repository:
 
-https://github.com/NetCore-Technologies/AXIOM-AI
+https://github.com/manit6752025/AXIOM-AI
 
 ## GitHub Pages
 

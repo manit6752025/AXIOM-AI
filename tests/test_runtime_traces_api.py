@@ -110,3 +110,32 @@ def test_runtime_trace_endpoints_list_and_clear_the_same_process_buffer() -> Non
     assert cleared.status_code == 200
     assert cleared.json()["cleared"] == 1
     assert client.get("/api/diagnostics/runtime-traces").json()["traces"] == []
+
+
+def test_runtime_trace_endpoint_supports_offset_search_and_bounded_limits() -> None:
+    from axiom.core.runtime_traces import record_runtime_trace
+
+    for index in range(3):
+        record_runtime_trace(
+            request_id=f"page-{index}",
+            operation="inference.generate",
+            model="small-qwen" if index == 1 else "test-model",
+            status="success",
+            started_at="2026-10-22T00:00:00+00:00",
+            duration_ms=10,
+            prompt_characters=12,
+            requested_output_tokens=20,
+            temperature=0.2,
+        )
+
+    client = _client()
+    first = client.get("/api/diagnostics/runtime-traces", params={"limit": 2})
+    second = client.get("/api/diagnostics/runtime-traces", params={"limit": 2, "offset": 2})
+    filtered = client.get("/api/diagnostics/runtime-traces", params={"search": "small-QWEN"})
+    assert first.status_code == second.status_code == filtered.status_code == 200
+    assert [item["request_id"] for item in first.json()["traces"]] == ["page-2", "page-1"]
+    assert first.json()["has_more"] is True
+    assert second.json()["has_more"] is False
+    assert [item["request_id"] for item in filtered.json()["traces"]] == ["page-1"]
+    assert filtered.json()["total"] == 1
+    assert client.get("/api/diagnostics/runtime-traces", params={"offset": 201}).status_code == 422

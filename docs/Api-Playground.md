@@ -19,8 +19,8 @@ The Control Center's API Playground is a browser UI for examining a curated list
 | `GET /api/meta` | Contract metadata and compatibility policy |
 | `GET /api/workspace/runtime` | Current hardware/runtime snapshot |
 | `GET /api/workspace/models?offset=0&limit=5` | First small page of registered model metadata |
-| `GET /api/workspace/datasets` | Dataset inventory |
-| `GET /api/workspace/events` | Recent workspace event records |
+| `GET /api/workspace/datasets?limit=100&offset=0` | Bounded JSONL dataset metadata page; optional `path` and `search` filters; a 5,000-entry scan cap is disclosed with `truncated` |
+| `GET /api/workspace/events?limit=100&offset=0` | Newest-first, paginated workspace event records; optional `search` matches action and detail |
 | `GET /api/diagnostics/workspace` | Redacted read-only workspace checks |
 | `GET /api/diagnostics/roadmap` | Roadmap status audit |
 

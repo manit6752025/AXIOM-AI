@@ -23,19 +23,19 @@ The APT package currently targets 64-bit Intel/AMD (`amd64`).
 
 ### macOS and Linux installer
 
-    curl -fsSL https://raw.githubusercontent.com/NetCore-Technologies/AXIOM-AI/main/installers/install.sh | bash
+    curl -fsSL https://raw.githubusercontent.com/manit6752025/AXIOM-AI/main/installers/install.sh | bash
     axiom version
 
 The user-scoped installer places `axiom` in `~/.local/bin`. Ensure that directory is on `PATH`.
 
 ### Windows PowerShell
 
-    irm https://raw.githubusercontent.com/NetCore-Technologies/AXIOM-AI/main/installers/install.ps1 | iex
+    irm https://raw.githubusercontent.com/manit6752025/AXIOM-AI/main/installers/install.ps1 | iex
     axiom version
 
 Follow the installer output and reopen PowerShell if the `PATH` update is not visible.
 
-> Check the [beta.6 release page](https://github.com/NetCore-Technologies/AXIOM-AI/releases/tag/v0.3.0-beta.6) and [Actions workflow](https://github.com/NetCore-Technologies/AXIOM-AI/actions/workflows/release-assets.yml) before relying on any specific platform binary.
+> Check the [beta.6 release page](https://github.com/manit6752025/AXIOM-AI/releases/tag/v0.3.0-beta.6) and [Actions workflow](https://github.com/manit6752025/AXIOM-AI/actions/workflows/release-assets.yml) before relying on any specific platform binary.
 
 ## 2. Learn the command path
 

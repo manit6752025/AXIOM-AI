@@ -4,7 +4,7 @@
 
 Welcome to the AXIOM documentation hub for **v0.3.0-beta.6**. AXIOM is a local-first toolkit for inspecting models and datasets, understanding the machine, validating a workspace, and building hardware-aware plans before committing compute.
 
-> **Beta notice:** Check the [beta.6 release page](https://github.com/NetCore-Technologies/AXIOM-AI/releases/tag/v0.3.0-beta.6) and [release Actions workflow](https://github.com/NetCore-Technologies/AXIOM-AI/actions/workflows/release-assets.yml) for the actual build and downloadable-asset status.
+> **Beta notice:** Check the [beta.6 release page](https://github.com/manit6752025/AXIOM-AI/releases/tag/v0.3.0-beta.6) and [release Actions workflow](https://github.com/manit6752025/AXIOM-AI/actions/workflows/release-assets.yml) for the actual build and downloadable-asset status.
 
 ## Start here
 
@@ -31,8 +31,8 @@ AXIOM helps inspect local model files and dataset structure, report detected har
 
 ## Project links
 
-- [Repository](https://github.com/NetCore-Technologies/AXIOM-AI)
-- [Issues](https://github.com/NetCore-Technologies/AXIOM-AI/issues)
-- [Releases](https://github.com/NetCore-Technologies/AXIOM-AI/releases)
-- [Changelog](https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/docs/CHANGELOG.md)
-- [Roadmap](https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/ROADMAP.md)
+- [Repository](https://github.com/manit6752025/AXIOM-AI)
+- [Issues](https://github.com/manit6752025/AXIOM-AI/issues)
+- [Releases](https://github.com/manit6752025/AXIOM-AI/releases)
+- [Changelog](https://github.com/manit6752025/AXIOM-AI/blob/main/docs/CHANGELOG.md)
+- [Roadmap](https://github.com/manit6752025/AXIOM-AI/blob/main/ROADMAP.md)

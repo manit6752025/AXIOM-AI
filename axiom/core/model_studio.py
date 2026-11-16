@@ -791,22 +791,81 @@ def get_job(job_id: str) -> dict[str, Any] | None:
     return _recover(value) if value else None
 
 
-def list_jobs(limit: int = 20) -> list[dict[str, Any]]:
+MAX_MODEL_STUDIO_JOB_SCAN = 5000
+
+
+def list_jobs_page(
+    limit: int = 20,
+    offset: int = 0,
+    search: str = "",
+) -> dict[str, Any]:
+    """Return a bounded, newest-first page of safe Model Studio job metadata."""
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
         raise ValueError("Job limit must be between 1 and 100.")
+    if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= MAX_MODEL_STUDIO_JOB_SCAN:
+        raise ValueError(f"Job offset must be between 0 and {MAX_MODEL_STUDIO_JOB_SCAN}.")
+    if not isinstance(search, str) or len(search) > 120:
+        raise ValueError("Job search must contain at most 120 characters.")
+    needle = search.strip().casefold()
     folder = jobs_directory()
+    if folder.is_symlink():
+        raise ModelStudioError("Model Studio job directory must not be a symlink.")
     if not folder.is_dir():
-        return []
-    records = []
-    for path in folder.glob("*.json"):
+        return {
+            "jobs": [], "total": 0, "limit": limit, "offset": offset,
+            "has_more": False, "truncated": False,
+            "scan_limit": MAX_MODEL_STUDIO_JOB_SCAN, "filters": {"search": needle},
+        }
+
+    paths = [path for path in folder.glob("*.json") if not path.is_symlink() and path.is_file()]
+    truncated = len(paths) > MAX_MODEL_STUDIO_JOB_SCAN
+    if truncated:
+        paths.sort(key=lambda path: path.stat().st_mtime_ns, reverse=True)
+        paths = paths[:MAX_MODEL_STUDIO_JOB_SCAN]
+
+    records: list[dict[str, Any]] = []
+    for path in paths:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(value, dict) and re.fullmatch(r"[0-9a-f]{32}", str(value.get("id", ""))):
                 records.append(_recover(value))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, ValueError):
             continue
-    records.sort(key=lambda item: str(item.get("created_at", "")), reverse=True)
-    return records[:limit]
+    records.sort(
+        key=lambda item: (str(item.get("created_at", "")), str(item.get("id", ""))),
+        reverse=True,
+    )
+    if needle:
+        records = [
+            record for record in records
+            if any(
+                needle in str(value or "").casefold()
+                for value in (
+                    record.get("id"),
+                    record.get("operation"),
+                    record.get("status"),
+                    record.get("repo_id"),
+                    record.get("model_name"),
+                )
+            )
+        ]
+    total = len(records)
+    page = records[offset:offset + limit]
+    return {
+        "jobs": page,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(page) < total,
+        "truncated": truncated,
+        "scan_limit": MAX_MODEL_STUDIO_JOB_SCAN,
+        "filters": {"search": needle},
+    }
+
+
+def list_jobs(limit: int = 20) -> list[dict[str, Any]]:
+    """Backward-compatible first-page view of Model Studio jobs."""
+    return list_jobs_page(limit=limit)["jobs"]
 
 
 def _update(job_id: str, **changes: Any) -> None:

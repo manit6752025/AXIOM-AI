@@ -1,6 +1,6 @@
 class Axiom < Formula
   desc "Local-first AI engineering CLI"
-  homepage "https://github.com/NetCore-Technologies/AXIOM-AI"
+  homepage "https://github.com/manit6752025/AXIOM-AI"
   url "REPLACE_WITH_VERIFIED_RELEASE_ARCHIVE_URL"
   sha256 "REPLACE_WITH_RELEASE_SHA256"
   license "MIT"

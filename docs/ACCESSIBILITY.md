@@ -30,7 +30,7 @@ Run the repository's available validation before submitting changes, including `
 
 ## Reporting accessibility issues
 
-Report an accessibility barrier through [AXIOM-AI GitHub Issues](https://github.com/NetCore-Technologies/AXIOM-AI/issues) with a title that starts with **Accessibility:**. Please describe:
+Report an accessibility barrier through [AXIOM-AI GitHub Issues](https://github.com/manit6752025/AXIOM-AI/issues) with a title that starts with **Accessibility:**. Please describe:
 
 - the page, URL, or feature affected;
 - the task you were trying to complete and what happened;
@@ -69,4 +69,4 @@ A comprehensive manual audit across keyboard-only use, screen readers, magnifica
 
 ## Feedback and improvements
 
-Suggestions for improving this statement or AXIOM's accessibility practices are welcome through [GitHub Issues](https://github.com/NetCore-Technologies/AXIOM-AI/issues) using the **Accessibility:** prefix. Please report an active barrier using the process above so it can be triaged with the affected task and context.
+Suggestions for improving this statement or AXIOM's accessibility practices are welcome through [GitHub Issues](https://github.com/manit6752025/AXIOM-AI/issues) using the **Accessibility:** prefix. Please report an active barrier using the process above so it can be triaged with the affected task and context.

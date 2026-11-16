@@ -89,7 +89,7 @@ Security reports should not be posted publicly when they contain exploitable vul
 
 Use the project's security reporting process:
 
-https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/SECURITY.md
+https://github.com/manit6752025/AXIOM-AI/blob/main/SECURITY.md
 
 Do not publish:
 
@@ -122,7 +122,7 @@ Contributors should be open to review and should not treat technical feedback as
 
 See the project contribution guide:
 
-https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/docs/CONTRIBUTING.md
+https://github.com/manit6752025/AXIOM-AI/blob/main/docs/CONTRIBUTING.md
 
 ---
 
@@ -149,11 +149,11 @@ If you experience or witness behaviour that violates this Code of Conduct, repor
 
 For security vulnerabilities, use:
 
-https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/SECURITY.md
+https://github.com/manit6752025/AXIOM-AI/blob/main/SECURITY.md
 
 For general project issues, use:
 
-https://github.com/NetCore-Technologies/AXIOM-AI/issues
+https://github.com/manit6752025/AXIOM-AI/issues
 
 Please provide enough context for the maintainers to understand what happened, while avoiding unnecessary disclosure of private information.
 
@@ -198,7 +198,7 @@ You do need to treat other people with respect.
 
 ## 11. Attribution
 
-This document is written for the AXIOM project by NetCore Technologies.
+This document is written for the AXIOM project by @manit6752025 and @taxcollecter23
 
 It is informed by common open-source community standards and adapted to the needs of an engineering-focused AI project.
 

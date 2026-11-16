@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import stat
 import tomllib
@@ -46,6 +47,17 @@ def test_project_metadata_runtime_and_release_workflow_share_one_version():
     assert project_version == runtime_version
     assert f'default: "v{runtime_version}"' in workflow
 
+    web_package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+    web_lock = json.loads((ROOT / "package-lock.json").read_text(encoding="utf-8"))
+    npm_package = json.loads(
+        (ROOT / "packaging/npm/package.json").read_text(encoding="utf-8")
+    )
+
+    assert web_package["version"] == runtime_version
+    assert web_lock["version"] == runtime_version
+    assert web_lock["packages"][""]["version"] == runtime_version
+    assert npm_package["version"] == runtime_version
+
 
 def test_linux_installer_verifies_the_published_bundle_before_user_path_update():
     installer_path = ROOT / "installers/install.sh"
@@ -53,7 +65,7 @@ def test_linux_installer_verifies_the_published_bundle_before_user_path_update()
 
     assert installer_path.stat().st_mode & stat.S_IXUSR
     assert 'set -euo pipefail' in installer
-    assert 'REPO="NetCore-Technologies/AXIOM-AI"' in installer
+    assert 'REPO="manit6752025/AXIOM-AI"' in installer
     assert 'asset="AXIOM-${tag}-linux-x64.tar.gz"' in installer
     assert 'download_file "$download_base/SHA256SUMS"' in installer
     assert 'verify_checksum "$DOWNLOAD_DIR/$asset" "$asset"' in installer

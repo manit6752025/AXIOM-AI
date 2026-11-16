@@ -33,6 +33,16 @@ It is read-only and does not change roadmap labels. A roadmap entry should only
 be marked implemented after its applicable backend, GUI, CLI, regression tests,
 and documentation gates have been verified in a real checkout.
 
+## Runtime trace history
+
+The Diagnostics API exposes `GET /api/diagnostics/runtime-traces?limit=50&offset=0`.
+Use optional `search` to match only the stored request ID, operation, model,
+status, or error code. Pages are newest-first and return filtered `total`,
+`has_more`, `offset`, and `limit` metadata. The buffer is still capped at
+200 entries in process memory; when the capacity is reached, older records may
+have rotated out. Prompt and response bodies are never retained, and clearing
+the buffer remains an explicit action.
+
 ## Support-bundle privacy contract
 
 The ZIP contains only `diagnostics.json`, `environment.json`, and a static

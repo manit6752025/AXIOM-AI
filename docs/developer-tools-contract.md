@@ -51,4 +51,4 @@ https://specifications.freedesktop.org/basedir/
 
 https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_environment_variables
 
-https://github.com/NetCore-Technologies/AXIOM-AI
+https://github.com/manit6752025/AXIOM-AI

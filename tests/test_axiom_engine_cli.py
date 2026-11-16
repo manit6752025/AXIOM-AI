@@ -78,6 +78,64 @@ def test_engine_telemetry_json_is_machine_readable_and_path_private(monkeypatch)
     assert payload["privacy_scope"]["model_paths_included"] is False
 
 
+
+def test_engine_telemetry_watch_is_opt_in_bounded_and_exports_jsonl_without_overwrite(
+    tmp_path: Path, monkeypatch
+) -> None:
+    snapshots = []
+    sleeps = []
+
+    def fake_telemetry():
+        sample = {
+            "schema_version": 1,
+            "sampled_at": f"2026-11-13T00:00:0{len(snapshots)}+00:00",
+            "cpu": {"system_percent": 12.5},
+            "process": {"rss_bytes": 4096},
+            "memory": {"available_bytes": 8192},
+            "devices": [],
+            "loaded_runtime": {"loaded": False},
+            "disks": [],
+            "privacy_scope": {"model_paths_included": False},
+        }
+        snapshots.append(sample)
+        return sample
+
+    monkeypatch.setattr(engine_cli, "runtime_telemetry", fake_telemetry)
+    monkeypatch.setattr(engine_cli.time, "sleep", lambda seconds: sleeps.append(seconds))
+    output = tmp_path / "resource-history.jsonl"
+
+    result = runner.invoke(engine_app, [
+        "telemetry", "--watch", "--samples", "3", "--interval-seconds", "0.5",
+        "--output", str(output),
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert len(snapshots) == 3
+    assert sleeps == [0.5, 0.5]
+    rows = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 3
+    assert rows[0]["cpu"]["system_percent"] == 12.5
+    assert all(row["privacy_scope"]["model_paths_included"] is False for row in rows)
+    assert "Captured 3 opt-in telemetry samples" in result.output
+
+    preserved = tmp_path / "existing.jsonl"
+    preserved.write_text("keep this report", encoding="utf-8")
+    overwrite = runner.invoke(engine_app, [
+        "telemetry", "--watch", "--samples", "1", "--output", str(preserved),
+    ])
+    assert overwrite.exit_code != 0
+    assert "already exists" in overwrite.output
+    assert preserved.read_text(encoding="utf-8") == "keep this report"
+
+
+def test_engine_telemetry_output_requires_explicit_watch_opt_in(tmp_path: Path) -> None:
+    output = tmp_path / "should-not-exist.jsonl"
+    result = runner.invoke(engine_app, ["telemetry", "--output", str(output)])
+    assert result.exit_code != 0
+    assert "requires explicit opt-in" in result.output
+    assert not output.exists()
+
+
 def test_engine_discover_json_returns_empty_inventory_cleanly(tmp_path: Path, monkeypatch) -> None:
     root = tmp_path / "trusted-models"
     root.mkdir()

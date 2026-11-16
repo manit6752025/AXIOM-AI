@@ -72,7 +72,6 @@ def test_shell_completion_can_be_viewed_for_supported_shells_without_installing(
     assert "Unsupported shell" in unsupported.output
 
 
-
 def test_init_creates_a_project_that_project_commands_can_use(
     tmp_path: Path,
     monkeypatch,
@@ -107,7 +106,6 @@ def test_init_creates_a_project_that_project_commands_can_use(
     assert "README:" in info_result.stdout
     assert validate_result.exit_code == 0, validate_result.stdout
     assert "valid" in validate_result.stdout.lower()
-
 
 
 def test_gui_port_uses_environment_default_and_explicit_flag_precedence(monkeypatch):
@@ -160,3 +158,58 @@ def test_engine_fabric_cli_advertises_native_backend_and_sampler_contract():
             assert option in flags
     benchmark_backend = next(parameter for parameter in benchmark.params if "--backend" in getattr(parameter, "opts", ()))
     assert "axiom-native" in (benchmark_backend.help or "")
+
+
+def test_global_cli_output_options_are_exposed_before_subcommands():
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0, result.output
+    assert "--verbose" in result.output
+    assert "--quiet" in result.output
+    assert "--json-errors" in result.output
+
+
+def test_quiet_mode_suppresses_normal_command_output():
+    result = runner.invoke(app, ["--quiet", "version"])
+    assert result.exit_code == 0, result.output
+    assert result.output == ""
+
+
+def test_verbose_mode_keeps_normal_command_output():
+    result = runner.invoke(app, ["--verbose", "version"])
+    assert result.exit_code == 0, result.output
+    assert "AXIOM" in result.output
+
+
+def test_json_errors_emit_stable_machine_readable_envelope():
+    import json
+
+    result = runner.invoke(app, ["--json-errors", "completion", "tcsh"])
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload == {
+        "schema_version": 1,
+        "error": {
+            "code": "AXIOM_CLI_ERROR",
+            "message": "Unsupported shell. Choose bash, zsh, fish, or powershell.",
+            "exit_code": 1,
+        },
+    }
+
+
+def test_json_error_mode_uses_stable_code_for_invalid_global_options():
+    import json
+
+    result = runner.invoke(app, ["--json-errors", "--verbose", "--quiet", "version"])
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error"]["code"] == "invalid_global_options"
+    assert payload["error"]["exit_code"] == 1
+
+
+def test_json_error_option_can_be_combined_with_quiet_mode():
+    import json
+
+    result = runner.invoke(app, ["--quiet", "--json-errors", "completion", "tcsh"])
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error"]["code"] == "AXIOM_CLI_ERROR"

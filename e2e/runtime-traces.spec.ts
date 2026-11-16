@@ -111,7 +111,7 @@ test("Runtime request traces show safe metadata, export JSON, and clear the in-m
   await expect(tracesPanel).not.toContainText("response_body");
 
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export JSON" }).click();
+  await tracesPanel.getByRole("button", { name: "Export JSON" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe("axiom-runtime-traces.json");
   const downloadPath = await download.path();
@@ -122,10 +122,10 @@ test("Runtime request traces show safe metadata, export JSON, and clear the in-m
   expect(exportedJson).not.toContain("prompt_text");
   expect(exportedJson).not.toContain("response_text");
 
-  await page.getByRole("button", { name: "Clear history" }).click();
+  await tracesPanel.getByRole("button", { name: "Clear history" }).click();
   await expect(page.getByRole("dialog", { name: "Clear runtime trace history?" })).toBeVisible();
   await page.getByRole("button", { name: "Clear in-memory history" }).click();
   await expect(page.getByRole("heading", { name: "No runtime traces retained" })).toBeVisible();
   expect(clearCount).toBe(1);
-  await expect(page.getByRole("button", { name: "Export JSON" })).toBeDisabled();
+  await expect(tracesPanel.getByRole("button", { name: "Export JSON" })).toBeDisabled();
 });

@@ -1,6 +1,6 @@
 # Roadmap
 
-See the canonical [repository roadmap](https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/ROADMAP.md).
+See the canonical [repository roadmap](https://github.com/manit6752025/AXIOM-AI/blob/main/ROADMAP.md).
 
 1. Visual training workflow builder.
 2. Agent profiles and tool permissions.

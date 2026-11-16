@@ -22,7 +22,7 @@ Before starting a change:
 
 Repository:
 
-https://github.com/NetCore-Technologies/AXIOM-AI
+https://github.com/manit6752025/AXIOM-AI
 
 ---
 
@@ -86,7 +86,7 @@ loopback daemon.
 Typical setup:
 
 ```bash
-git clone https://github.com/NetCore-Technologies/AXIOM-AI.git
+git clone https://github.com/manit6752025/AXIOM-AI.git
 cd AXIOM-AI
 
 python -m venv .venv
@@ -314,7 +314,7 @@ Avoid posting sensitive information.
 
 Issue tracker:
 
-https://github.com/NetCore-Technologies/AXIOM-AI/issues
+https://github.com/manit6752025/AXIOM-AI/issues
 
 ---
 
@@ -339,7 +339,7 @@ Do not publicly disclose exploitable vulnerabilities, credentials or other sensi
 
 For security vulnerabilities, follow:
 
-https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/SECURITY.md
+https://github.com/manit6752025/AXIOM-AI/blob/main/SECURITY.md
 
 Never commit:
 
@@ -430,7 +430,7 @@ All contributors are expected to follow the project's Code of Conduct.
 
 See:
 
-https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/CODE_OF_CONDUCT.md
+https://github.com/manit6752025/AXIOM-AI/blob/main/CODE_OF_CONDUCT.md
 
 Technical disagreement is welcome.
 

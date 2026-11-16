@@ -1,0 +1,736 @@
+:root {
+  color-scheme: light;
+  --paper: #f5f3ee;
+  --paper-raised: #fffefa;
+  --ink: #1c1916;
+  --body: #403a34;
+  --muted: #625b53;
+  --line: #d8d2c8;
+  --line-strong: #a9a095;
+  --coffee: #805238;
+  --coffee-soft: #c69b7d;
+  --terminal: #1c1916;
+  --terminal-ink: #f4eee7;
+  --terminal-muted: #c9bdb1;
+  --max-width: 1240px;
+  --gutter: clamp(24px, 5vw, 64px);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 24px;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--coffee-soft);
+  color: var(--ink);
+}
+
+a {
+  color: inherit;
+}
+
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--coffee);
+  outline-offset: 4px;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.site-header {
+  position: relative;
+  z-index: 10;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.header-inner,
+.section-inner,
+.footer-inner,
+.hero-inner {
+  width: min(var(--max-width), calc(100% - var(--gutter) * 2));
+  margin: 0 auto;
+}
+
+.header-inner {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  min-height: 72px;
+}
+
+.brand {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.brand-mark {
+  display: block;
+  width: 36px;
+  height: 36px;
+}
+
+.brand-name {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  margin-left: auto;
+}
+
+.site-nav a,
+.header-action,
+.site-footer > a,
+.footer-inner > a:last-child {
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.site-nav a,
+.footer-inner > a:last-child {
+  color: var(--body);
+}
+
+.site-nav a:hover,
+.footer-inner > a:last-child:hover,
+.text-link:hover {
+  color: var(--coffee);
+}
+
+.header-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid var(--ink);
+  border-radius: 2px;
+  background: var(--ink);
+  color: var(--paper);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.header-action:hover {
+  background: transparent;
+  color: var(--ink);
+}
+
+.menu-toggle {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.menu-icon {
+  display: grid;
+  gap: 5px;
+}
+
+.menu-icon i {
+  display: block;
+  width: 18px;
+  height: 1px;
+  background: currentColor;
+}
+
+.hero {
+  padding: clamp(76px, 10vw, 128px) 0 clamp(84px, 10vw, 128px);
+}
+
+.hero-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 0.94fr) minmax(380px, 1.06fr);
+  align-items: center;
+  gap: clamp(48px, 7vw, 100px);
+}
+
+.hero-copy {
+  max-width: 650px;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1,
+h2,
+h3 {
+  font-weight: 450;
+}
+
+h1 {
+  margin-bottom: 24px;
+  font-size: clamp(3.8rem, 6.1vw, 6rem);
+  letter-spacing: -0.065em;
+  line-height: 1;
+}
+
+.hero-lead {
+  max-width: 55ch;
+  margin-bottom: 32px;
+  color: var(--body);
+  font-size: clamp(1.05rem, 1.35vw, 1.16rem);
+  line-height: 1.58;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.button-primary {
+  border-color: var(--coffee);
+  background: var(--coffee);
+  color: #fffefa;
+}
+
+.button-primary:hover {
+  border-color: var(--ink);
+  background: var(--ink);
+}
+
+.button-secondary {
+  background: transparent;
+}
+
+.button-secondary:hover {
+  border-color: var(--ink);
+  background: var(--paper-raised);
+}
+
+.hero-cli {
+  width: 100%;
+  max-width: 680px;
+  margin: 0;
+  justify-self: end;
+}
+
+.cli-window {
+  border: 1px solid var(--terminal);
+  background: var(--terminal);
+  color: var(--terminal-ink);
+}
+
+.cli-window-body {
+  padding: clamp(22px, 3.2vw, 36px);
+}
+
+.cli-command,
+.cli-help code,
+.cli-commands code,
+.cli-section-title {
+  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.cli-command {
+  margin-bottom: 20px;
+  color: var(--terminal-ink);
+  font-size: 0.92rem;
+}
+
+.cli-command span {
+  color: var(--coffee-soft);
+}
+
+.cli-output {
+  max-width: 48ch;
+  margin-bottom: 24px;
+  color: var(--terminal-ink);
+  font-size: 0.98rem;
+  line-height: 1.5;
+}
+
+.cli-section-title {
+  margin-bottom: 10px;
+  color: var(--terminal-muted);
+  font-size: 0.8rem;
+}
+
+.cli-commands {
+  overflow-x: auto;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: var(--terminal-ink);
+}
+
+.cli-commands code {
+  display: block;
+  min-width: max-content;
+  color: inherit;
+  font-size: 0.82rem;
+  line-height: 1.9;
+}
+
+.cli-help {
+  margin: 20px 0 0;
+  color: var(--terminal-muted);
+  font-size: 0.86rem;
+}
+
+.cli-help code {
+  color: var(--terminal-ink);
+}
+
+.band {
+  padding: clamp(76px, 9vw, 120px) 0;
+  border-top: 1px solid var(--line);
+}
+
+.workflow-layout,
+.install-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.76fr) minmax(0, 1.24fr);
+  gap: clamp(56px, 9vw, 120px);
+}
+
+.workflow-intro,
+.install-copy {
+  align-self: start;
+}
+
+.workflow-intro h2,
+.install-copy h2 {
+  max-width: 640px;
+  margin-bottom: 24px;
+  font-size: clamp(2.8rem, 4.5vw, 4.7rem);
+  letter-spacing: -0.065em;
+  line-height: 1.03;
+}
+
+.workflow-intro > p,
+.install-copy > p {
+  max-width: 48ch;
+  margin-bottom: 0;
+  color: var(--body);
+  font-size: 1.03rem;
+  line-height: 1.58;
+}
+
+.workflow-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow-steps li {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 18px;
+  padding: 22px 0;
+  border-top: 1px solid var(--line);
+}
+
+.workflow-steps li:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+.step-number {
+  padding-top: 2px;
+  color: var(--coffee);
+  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9rem;
+}
+
+.workflow-steps h3 {
+  margin-bottom: 8px;
+  font-size: 1.45rem;
+  letter-spacing: -0.035em;
+}
+
+.workflow-steps li p {
+  max-width: 54ch;
+  margin-bottom: 0;
+  color: var(--body);
+  font-size: 0.98rem;
+  line-height: 1.55;
+}
+
+.install-copy h2 code,
+.install-copy > p code {
+  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78em;
+  letter-spacing: -0.04em;
+}
+
+.text-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 26px;
+  color: var(--ink);
+  font-size: 0.92rem;
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 4px;
+  transition: color 160ms ease;
+}
+
+.install-commands {
+  align-self: center;
+  min-width: 0;
+}
+
+.install-switcher {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.platform-button {
+  min-height: 44px;
+  padding: 0 0 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+
+.platform-button:hover,
+.platform-button.is-active {
+  border-bottom-color: var(--ink);
+  color: var(--ink);
+}
+
+.command-block {
+  padding: 20px 0;
+}
+
+.command-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 12px;
+  color: var(--body);
+  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.84rem;
+}
+
+.copy-button {
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.copy-button:hover {
+  border-color: var(--ink);
+  background: var(--paper-raised);
+}
+
+.command-block pre {
+  overflow: auto;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--paper-raised);
+}
+
+.command-block pre code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  padding: 18px;
+  color: var(--ink);
+  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  line-height: 1.65;
+  white-space: pre;
+}
+
+.apt-details {
+  border-top: 1px solid var(--line);
+}
+
+.apt-details summary {
+  padding: 18px 0;
+  color: var(--body);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.apt-details[open] summary {
+  color: var(--ink);
+}
+
+.apt-command-block {
+  padding-top: 0;
+}
+
+.copy-status {
+  min-height: 1.5em;
+  margin: 8px 0 0;
+  color: var(--body);
+  font-size: 0.86rem;
+}
+
+.site-footer {
+  border-top: 1px solid var(--line);
+}
+
+.footer-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 88px;
+}
+
+@media (max-width: 960px) {
+  .hero-inner {
+    grid-template-columns: 1fr;
+    gap: 44px;
+  }
+
+  .hero-copy {
+    max-width: 720px;
+  }
+
+  .hero-cli {
+    max-width: 760px;
+    justify-self: start;
+  }
+
+  .workflow-layout,
+  .install-layout {
+    grid-template-columns: 1fr;
+    gap: 42px;
+  }
+
+  .workflow-intro,
+  .install-copy {
+    max-width: 720px;
+  }
+}
+
+@media (max-width: 720px) {
+  :root {
+    --gutter: 22px;
+  }
+
+  html {
+    scroll-padding-top: 20px;
+  }
+
+  .header-inner {
+    min-height: 64px;
+  }
+
+  .brand-mark {
+    width: 32px;
+    height: 32px;
+  }
+
+  .menu-toggle {
+    display: inline-flex;
+  }
+
+  .site-nav {
+    position: absolute;
+    top: calc(100% + 1px);
+    right: var(--gutter);
+    left: var(--gutter);
+    display: none;
+    align-items: stretch;
+    gap: 0;
+    margin: 0;
+    padding: 6px 12px;
+    border: 1px solid var(--line-strong);
+    background: var(--paper);
+  }
+
+  .site-header.menu-open .site-nav {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .site-nav a {
+    padding: 13px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .site-nav a:last-child {
+    border-bottom: 0;
+  }
+
+  .header-action {
+    display: none;
+  }
+
+  .hero {
+    padding: 64px 0 72px;
+  }
+
+  .hero-inner {
+    gap: 38px;
+  }
+
+  h1 {
+    margin-bottom: 20px;
+    font-size: clamp(3.2rem, 12.5vw, 4.4rem);
+    line-height: 1.02;
+  }
+
+  .hero-lead {
+    margin-bottom: 24px;
+    font-size: 1.02rem;
+  }
+
+  .hero-actions {
+    gap: 10px;
+  }
+
+  .button {
+    min-height: 46px;
+    padding: 0 13px;
+    font-size: 0.86rem;
+  }
+
+  .cli-window-body {
+    padding: 20px 17px;
+  }
+
+  .cli-output {
+    font-size: 0.92rem;
+  }
+
+  .cli-commands code {
+    font-size: 0.76rem;
+  }
+
+  .band {
+    padding: 68px 0;
+  }
+
+  .workflow-layout,
+  .install-layout {
+    gap: 30px;
+  }
+
+  .workflow-intro h2,
+  .install-copy h2 {
+    margin-bottom: 18px;
+    font-size: clamp(2.7rem, 10.5vw, 3.8rem);
+  }
+
+  .workflow-intro > p,
+  .install-copy > p {
+    font-size: 1rem;
+  }
+
+  .workflow-steps li {
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 12px;
+    padding: 18px 0;
+  }
+
+  .workflow-steps h3 {
+    font-size: 1.25rem;
+  }
+
+  .workflow-steps li p {
+    font-size: 0.94rem;
+  }
+
+  .install-switcher {
+    gap: 20px;
+  }
+
+  .footer-inner {
+    min-height: 76px;
+  }
+}
+
+@media (max-width: 390px) {
+  .hero-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

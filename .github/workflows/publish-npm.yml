@@ -54,7 +54,7 @@ jobs:
           set -euo pipefail
 
           npm pkg set \
-            repository.url="git+https://github.com/NetCore-Technologies/AXIOM-AI.git"
+            repository.url="git+https://github.com/manit6752025/AXIOM-AI.git"
 
           node --check bin/axiom.mjs
 

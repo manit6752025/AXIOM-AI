@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "axiom-all"
-version = "0.3.0-beta.7"
+version = "0.3.0-beta.8"
 description = "Local-first CLI and daemon for inspecting models, datasets, and hardware-aware AI plans."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -58,11 +58,11 @@ test = [
 axiom = "axiom.cli.main:app"
 
 [project.urls]
-Homepage = "https://netcore-technologies.github.io/AXIOM-AI/"
-Repository = "https://github.com/NetCore-Technologies/AXIOM-AI"
-Documentation = "https://github.com/NetCore-Technologies/AXIOM-AI/wiki/Home"
-Issues = "https://github.com/NetCore-Technologies/AXIOM-AI/issues"
-Changelog = "https://github.com/NetCore-Technologies/AXIOM-AI/blob/main/docs/CHANGELOG.md"
+Homepage = "https://manit6752025.github.io/AXIOM-AI/"
+Repository = "https://github.com/manit6752025/AXIOM-AI"
+Documentation = "https://github.com/manit6752025/AXIOM-AI/wiki/Home"
+Issues = "https://github.com/manit6752025/AXIOM-AI/issues"
+Changelog = "https://github.com/manit6752025/AXIOM-AI/blob/latest/development/docs/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["axiom*"]

@@ -112,9 +112,20 @@ def list_workflow_templates() -> dict[str, Any]:
 
 
 @router.get("")
-def list_workflows(limit: int = Query(default=100, ge=1, le=1000)) -> dict[str, Any]:
+def list_workflows(
+    limit: int = Query(default=20, ge=1, le=50),
+    after_workflow_id: str | None = Query(default=None, min_length=1, max_length=64),
+    q: str = Query(default="", max_length=120),
+) -> dict[str, Any]:
+    """Return cursor-paginated workflow designs without executing them."""
     try:
-        return {"workflows": WorkflowStore().list(limit)}
+        return WorkflowStore().list_page(
+            limit=limit,
+            after_workflow_id=after_workflow_id,
+            search=q,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail="Workflow cursor is invalid for the selected search.") from exc
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=500, detail="Workflow history is invalid.") from exc
 

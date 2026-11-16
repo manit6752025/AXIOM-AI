@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import socket
 import sys
@@ -115,6 +116,7 @@ register_fine_tuning_cli(train_app)
 
 
 console = Console()
+_RUNTIME_OPTIONS: dict[str, object] = {}
 
 
 @app.callback()
@@ -126,8 +128,21 @@ def cli_callback(
         help="Skip the interactive startup banner.",
         is_eager=True,
     ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show diagnostic logging and detailed operational output."),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress normal terminal output; errors remain visible."),
+    json_errors: bool = typer.Option(False, "--json-errors", help="Emit stable JSON envelopes for AXIOM CLI errors."),
 ) -> None:
-    """Prepare the interactive command-line experience."""
+    """Configure global output behavior before running a command."""
+    ctx.ensure_object(dict)
+    runtime = {"verbose": verbose, "quiet": quiet, "json_errors": json_errors}
+    ctx.obj.update(runtime)
+    _RUNTIME_OPTIONS.clear()
+    _RUNTIME_OPTIONS.update(runtime)
+    console.quiet = quiet
+    logging.getLogger("axiom").setLevel(logging.DEBUG if verbose else logging.WARNING)
+
+    if verbose and quiet:
+        _cli_error("--verbose and --quiet cannot be used together.", code="invalid_global_options")
 
     if (
         ctx.resilient_parsing
@@ -137,17 +152,35 @@ def cli_callback(
         return
 
     if ctx.invoked_subcommand is None:
-        _run_default_session(show_banner=not no_banner)
+        _run_default_session(show_banner=not no_banner and not quiet)
         return
 
-    if no_banner:
+    if no_banner or quiet:
         return
 
     show_startup(include_next_steps=False)
 
 
-def _cli_error(message: str) -> None:
-    console.print(f"[red]Error:[/red] {message}")
+def _cli_runtime_options() -> dict[str, object]:
+    """Return root CLI options for the currently executing command."""
+    ctx = click.get_current_context(silent=True)
+    if ctx is not None:
+        root = ctx.find_root()
+        if isinstance(root.obj, dict) and root.obj:
+            return root.obj
+    return dict(_RUNTIME_OPTIONS)
+
+
+def _cli_error(message: str, *, code: str = "AXIOM_CLI_ERROR") -> None:
+    """Emit a stable human or machine-readable error without leaking details."""
+    options = _cli_runtime_options()
+    if options.get("json_errors"):
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "error": {"code": code, "message": message, "exit_code": 1},
+        }, ensure_ascii=False, separators=(",", ":")), err=True)
+    else:
+        typer.echo(f"Error: {message}", err=True)
     raise typer.Exit(code=1)
 
 

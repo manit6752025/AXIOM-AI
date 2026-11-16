@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="560" viewBox="0 0 1440 560" role="img" aria-labelledby="title desc">
+  <title id="title">AXIOM — Local-first AI engineering</title>
+  <desc id="desc">AXIOM geometric orbital mark and wordmark on a restrained graphite background.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1440" y2="560" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#171b14"/><stop offset=".55" stop-color="#10130f"/><stop offset="1" stop-color="#0b0d0b"/>
+    </linearGradient>
+    <radialGradient id="glow"><stop stop-color="#d9f36a" stop-opacity=".12"/><stop offset="1" stop-color="#d9f36a" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect width="1440" height="560" fill="url(#background)"/>
+  <circle cx="390" cy="280" r="300" fill="url(#glow)"/>
+  <path d="M72 72h1296" stroke="#d9f36a" stroke-opacity=".22"/>
+  <path d="M72 488h1296" stroke="#d9f36a" stroke-opacity=".16"/>
+  <g transform="translate(178 152) scale(2)">
+    <rect x="3" y="3" width="122" height="122" rx="28" fill="#171c14"/>
+    <rect x="3.75" y="3.75" width="120.5" height="120.5" rx="27.25" fill="none" stroke="#d9f36a" stroke-opacity=".22" stroke-width="1.5"/>
+    <path d="M36 91 57.2 36.4c2.7-6.9 10.9-6.9 13.6 0L92 91" fill="none" stroke="#f2f4eb" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M46.5 68.5h35" fill="none" stroke="#f2f4eb" stroke-width="8" stroke-linecap="round"/>
+    <ellipse cx="64" cy="64" rx="54" ry="24" transform="rotate(-22 64 64)" fill="none" stroke="#d9f36a" stroke-width="4.5"/>
+    <path d="M13.8 83.5c13.8 18.4 34.7 28.6 56.3 27.1" fill="none" stroke="#171c14" stroke-width="9" stroke-linecap="round"/>
+    <path d="M13.8 83.5c13.8 18.4 34.7 28.6 56.3 27.1" fill="none" stroke="#d9f36a" stroke-width="4.5" stroke-linecap="round"/>
+    <circle cx="109.4" cy="42.7" r="4.2" fill="#d9f36a"/>
+  </g>
+  <text x="520" y="292" fill="#f2f4eb" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="112" font-weight="750" letter-spacing="-5">AXIOM</text>
+  <circle cx="1004" cy="252" r="6" fill="#d9f36a"/>
+  <text x="526" y="356" fill="#aab39e" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="27" letter-spacing="2">LOCAL-FIRST AI ENGINEERING</text>
+  <text x="526" y="416" fill="#78816f" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="16" letter-spacing="3">BUILD AI. OWN AI.</text>
+  <text x="1368" y="526" text-anchor="end" fill="#59614f" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="13" letter-spacing="2">AXIOM-AI / OPEN SOURCE</text>
+</svg>

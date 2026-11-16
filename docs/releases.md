@@ -1,5 +1,10 @@
 # AXIOM release builds
 
+## v0.3.0-beta.7 — Beta prerelease
+
+See the [beta.7 release notes](releases/v0.3.0-beta.7.md) for the feature scope, roadmap status, known boundaries, and installation guidance. The [GitHub Releases page](https://github.com/manit6752025/AXIOM-AI/releases) and [Actions workflows](https://github.com/manit6752025/AXIOM-AI/actions) are authoritative for publication status, assets, and checksums.
+
+
 ## v0.3.0-beta.6 — Beta candidate
 
 The source metadata and installer examples target `v0.3.0-beta.6`. This is a candidate release note, not confirmation that assets have been built, tested, or published. Check the [GitHub Releases page](https://github.com/NetCore-Technologies/AXIOM-AI/releases) and [release workflow](https://github.com/NetCore-Technologies/AXIOM-AI/actions/workflows/release-assets.yml) for actual status.

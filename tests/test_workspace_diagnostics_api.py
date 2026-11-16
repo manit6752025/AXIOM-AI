@@ -45,7 +45,7 @@ def test_roadmap_audit_endpoint_returns_live_source_statuses(tmp_path: Path, mon
         "<!-- AXIOM-ROADMAP-UPDATE:START -->",
         "### 01 · Platform foundation",
     ]
-    for number in range(1, 121):
+    for number in range(1, 141):
         status = "Implemented; tests passing" if number <= 29 else "In progress; validation pending" if number <= 51 else "Planned"
         rows.append(f"- [R{number:03d} · {status}] Example deliverable {number}.")
     rows.append("<!-- AXIOM-ROADMAP-UPDATE:END -->")
@@ -58,10 +58,10 @@ def test_roadmap_audit_endpoint_returns_live_source_statuses(tmp_path: Path, mon
     assert response.status_code == 200
     payload = response.json()
     assert payload["integrity"]["ok"] is True
-    assert payload["total"] == 120
-    assert payload["counts"] == {"implemented": 29, "in_progress": 22, "planned": 69, "unknown": 0}
+    assert payload["total"] == 140
+    assert payload["counts"] == {"implemented": 29, "in_progress": 22, "planned": 89, "unknown": 0}
     assert payload["items"][0]["id"] == "R001"
-    assert payload["items"][-1]["id"] == "R120"
+    assert payload["items"][-1]["id"] == "R140"
 
 
 def test_roadmap_audit_endpoint_does_not_accept_arbitrary_file_paths(tmp_path: Path, monkeypatch):
