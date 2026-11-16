@@ -69,10 +69,11 @@ The bare command is the front door:
 axiom
 ```
 
-It shows the startup mark once per terminal session, explains AXIOM in one
-sentence, prints the small set of useful commands, starts the daemon on a free
-loopback port, and stays attached until Ctrl-C. `axiom --help` remains the
-complete reference; `axiom guide` remains the non-blocking explanation.
+It shows the startup mark once per terminal session, welcomes the user, and
+prints one short **Essential commands** group. It exits without starting a
+service; run `axiom daemon` explicitly to start the loopback daemon.
+`axiom --help` remains the complete reference; `axiom guide` remains the
+non-blocking explanation.
 
 ### Golden commands
 

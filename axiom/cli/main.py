@@ -41,7 +41,7 @@ from axiom.core.integrations import (
 )
 from axiom.core.project import create_project
 from axiom.core.tool_permissions import TOOL_DESCRIPTIONS, ToolPermissionStore
-from axiom.daemon import LOCAL_ACTIONS, run_daemon
+from axiom.daemon import run_daemon
 from axiom.datasets.cleaner import clean_jsonl
 from axiom.datasets.inspector import inspect_dataset
 from axiom.models.analysis import analyze_config, disk_info
@@ -152,38 +152,35 @@ def _cli_error(message: str) -> None:
 
 
 def _run_default_session(*, show_banner: bool = True) -> None:
-    """Make bare ``axiom`` the clear, useful entry point for a terminal."""
+    """Show a concise getting-started screen for bare ``axiom``."""
 
     if show_banner:
         show_startup(include_next_steps=False)
 
     console.print(
         Panel.fit(
-            "AXIOM inspects models, validates datasets, reads your hardware, "
-            "and suggests the next local step.\n"
-            "The daemon below exposes the same local context as JSON.",
-            title="AXIOM — start here",
+            "Welcome! Here are some commands to get you started.\n"
+            "AXIOM helps you plan local AI around your hardware",
+            title="AXIOM",
         )
     )
 
-    table = Table(title="Useful commands", show_header=False, pad_edge=False)
+    table = Table(title="Essential commands", show_header=False, pad_edge=False)
     table.add_column("Command", style="bold cyan", no_wrap=True)
     table.add_column("What it does")
-    for action in LOCAL_ACTIONS:
-        table.add_row(action["command"], action["description"])
-    table.add_row(
-        "axiom daemon",
-        "Run the loopback daemon on a free port and print health/summary URLs.",
-    )
+    for command, description in (
+        ("axiom guide", "Find the next useful step for this folder."),
+        ("axiom init my-ai", "Create a new AXIOM project."),
+        ("axiom summary", "See a snapshot of your project and machine."),
+        ("axiom system info", "Check the hardware available for local AI."),
+        ("axiom model inspect ./models/my-model", "Inspect a local model folder."),
+        ("axiom dataset validate ./data/train.jsonl", "Check a JSONL dataset."),
+        ("axiom train plan 7 --method qlora", "Make a hardware-aware training plan."),
+    ):
+        table.add_row(command, description)
     console.print(table)
-    console.print(
-        "\nLocal daemon: Ctrl-C stops it. Network access stays disabled by default.\n"
-    )
-
-    try:
-        run_daemon()
-    except (OSError, ValueError) as exc:
-        _cli_error(str(exc))
+    console.print("Full command list: axiom --help")
+    console.print("Start the local daemon explicitly with: axiom daemon")
 
 
 def _powershell_completion_script(command: click.Command) -> str:

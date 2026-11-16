@@ -971,7 +971,7 @@ JSON output is available for these groups:
 - **Planning and system:** `system info`, `train plan`, `doctor`, `status`, and `summary`
 - **Other:** `integration list`, `engine discover`, `tools list`, `headroom`, `agent-profile`, `evaluation run`, and `daemon`
 
-A local daemon is also available for supervisors and scripts: `axiom daemon --json` prints readiness records. Running bare `axiom` shows a command guide and starts the loopback daemon.
+A local daemon is also available for supervisors and scripts: `axiom daemon --json` prints readiness records. Running bare `axiom` shows a welcome screen with one Essential commands group and exits; start the loopback daemon explicitly with `axiom daemon`.
 
 ## Cheat sheet
 

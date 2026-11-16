@@ -119,8 +119,9 @@ def test_machine_and_usage_arguments_are_suppressed():
     assert suppress_for_arguments(["version"]) is False
 
 
-def test_bare_axiom_prints_commands_and_starts_the_daemon(monkeypatch):
+def test_bare_axiom_shows_essential_commands_without_starting_the_daemon(monkeypatch):
     calls: list[bool] = []
+    daemon_calls: list[dict[str, object]] = []
 
     def fake_show_startup(*, include_next_steps: bool = False, **kwargs):
         del kwargs
@@ -128,20 +129,25 @@ def test_bare_axiom_prints_commands_and_starts_the_daemon(monkeypatch):
         return True
 
     monkeypatch.setattr(cli_main, "show_startup", fake_show_startup)
-    monkeypatch.setattr(cli_main, "run_daemon", lambda: None)
+    monkeypatch.setattr(cli_main, "run_daemon", lambda **kwargs: daemon_calls.append(kwargs))
 
     result = CliRunner().invoke(cli_main.app, [])
 
     assert result.exit_code == 0
     assert "Missing command" not in result.stdout
     assert calls == [False]
-    assert "Useful commands" in result.stdout
+    assert daemon_calls == []
+    assert "Welcome! Here are some commands to get you started." in result.stdout
+    assert "Essential commands" in result.stdout
+    assert "AXIOM helps you plan local AI around your hardware" in result.stdout
     assert "axiom model inspect ./models/my-model" in result.stdout
-    assert "Local daemon" in result.stdout
+    assert "axiom --help" in result.stdout
+    assert "axiom daemon" in result.stdout
 
 
-def test_no_banner_bare_axiom_still_starts_the_daemon(monkeypatch):
+def test_no_banner_bare_axiom_still_shows_essential_commands(monkeypatch):
     startup_calls: list[bool] = []
+    daemon_calls: list[dict[str, object]] = []
 
     def fake_show_startup(*, include_next_steps: bool = False, **kwargs):
         del kwargs
@@ -149,13 +155,15 @@ def test_no_banner_bare_axiom_still_starts_the_daemon(monkeypatch):
         return True
 
     monkeypatch.setattr(cli_main, "show_startup", fake_show_startup)
-    monkeypatch.setattr(cli_main, "run_daemon", lambda: None)
+    monkeypatch.setattr(cli_main, "run_daemon", lambda **kwargs: daemon_calls.append(kwargs))
 
     result = CliRunner().invoke(cli_main.app, ["--no-banner"])
 
     assert result.exit_code == 0
     assert startup_calls == []
-    assert "Useful commands" in result.stdout
+    assert daemon_calls == []
+    assert "Welcome! Here are some commands to get you started." in result.stdout
+    assert "Essential commands" in result.stdout
 
 
 def test_daemon_json_option_passes_machine_readable_mode(monkeypatch):

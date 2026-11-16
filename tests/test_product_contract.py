@@ -7,7 +7,6 @@ real daemon process, call a vendor service, or install a developer tool.
 from __future__ import annotations
 
 import json
-import re
 from http.client import HTTPConnection
 from pathlib import Path
 
@@ -17,7 +16,6 @@ from typer.testing import CliRunner
 import axiom.cli.main as cli_main
 import axiom.daemon as daemon
 
-LOCAL_ACTIONS = daemon.LOCAL_ACTIONS
 serve_in_thread = daemon.serve_in_thread
 validate_bind_host = daemon.validate_bind_host
 
@@ -75,7 +73,7 @@ def test_daemon_requires_explicit_opt_in_for_non_loopback_binding():
     assert validate_bind_host("0.0.0.0", allow_network=True) == "0.0.0.0"
 
 
-def test_bare_command_lists_every_action_before_starting_the_daemon(
+def test_bare_command_shows_essential_commands_without_starting_the_daemon(
     monkeypatch: pytest.MonkeyPatch,
 ):
     startup_calls: list[bool] = []
@@ -94,19 +92,15 @@ def test_bare_command_lists_every_action_before_starting_the_daemon(
     result = CliRunner().invoke(cli_main.app, [])
 
     assert result.exit_code == 0, result.stdout
-    normalized_output = " ".join(result.stdout.split())
-    compact_output = re.sub(r"[^a-z0-9]+", "", normalized_output.lower())
     assert startup_calls == [False]
-    assert daemon_calls == [{}]
-    assert "AXIOM inspects models" in normalized_output
-    assert "Local daemon" in normalized_output
-
-    for action in LOCAL_ACTIONS:
-        assert action["command"] in normalized_output
-        compact_description = re.sub(
-            r"[^a-z0-9]+", "", action["description"].lower()
-        )
-        assert compact_description in compact_output
+    assert daemon_calls == []
+    assert "Welcome! Here are some commands to get you started." in result.stdout
+    assert "Essential commands" in result.stdout
+    assert "axiom guide" in result.stdout
+    assert "axiom init my-ai" in result.stdout
+    assert "axiom summary" in result.stdout
+    assert "axiom --help" in result.stdout
+    assert "axiom daemon" in result.stdout
 
 
 @pytest.mark.parametrize("installed", [False, True])
