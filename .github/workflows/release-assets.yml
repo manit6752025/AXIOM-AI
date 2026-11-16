@@ -10,7 +10,7 @@ on:
         description: "Package version/asset prefix to build"
         required: true
         type: string
-        default: "v0.3.0-beta.8"
+        default: "v0.3.0-beta.9"
       source_ref:
         description: "Optional source branch or ref; defaults to the package tag"
         required: false
