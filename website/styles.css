@@ -1,13 +1,19 @@
 :root {
-  --workflow-bg: #dec2aa;
-  --ink: #171310;
-  --muted: rgba(23, 19, 16, 0.68);
-  --line: rgba(23, 19, 16, 0.22);
-  --line-strong: rgba(23, 19, 16, 0.42);
-  --coffee: #99684e;
+  color-scheme: light;
+  --paper: #f5f3ee;
+  --paper-raised: #fffefa;
+  --ink: #1c1916;
+  --body: #403a34;
+  --muted: #625b53;
+  --line: #d8d2c8;
+  --line-strong: #a9a095;
+  --coffee: #805238;
   --coffee-soft: #c69b7d;
-  --max-width: 1320px;
-  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --terminal: #1c1916;
+  --terminal-ink: #f4eee7;
+  --terminal-muted: #c9bdb1;
+  --max-width: 1240px;
+  --gutter: clamp(24px, 5vw, 64px);
 }
 
 * {
@@ -16,14 +22,13 @@
 
 html {
   scroll-behavior: smooth;
-  scroll-padding-top: 32px;
+  scroll-padding-top: 24px;
 }
 
 body {
   min-width: 320px;
   margin: 0;
-  overflow-x: hidden;
-  background: var(--workflow-bg);
+  background: var(--paper);
   color: var(--ink);
   font-family: "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-weight: 400;
@@ -41,9 +46,10 @@ a {
 }
 
 a:focus-visible,
-button:focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: 5px;
+button:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--coffee);
+  outline-offset: 4px;
 }
 
 button,
@@ -51,163 +57,134 @@ a {
   -webkit-tap-highlight-color: transparent;
 }
 
-@view-transition {
-  navigation: auto;
-}
-
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 360ms;
-  animation-timing-function: var(--ease);
-}
-
-.transition-curtain {
-  position: fixed;
-  z-index: 100;
-  inset: 0;
-  pointer-events: none;
-  background: var(--coffee);
-  transform: scaleX(0);
-  transform-origin: right center;
-  transition: transform 420ms var(--ease);
-}
-
-.transition-curtain.is-active {
-  transform: scaleX(1);
-}
-
-.transition-curtain.is-clearing {
-  transform-origin: left center;
-  transform: scaleX(0);
-}
-
 .site-header {
-  position: absolute;
-  z-index: 20;
-  top: 0;
-  left: 0;
-  width: 100%;
+  position: relative;
+  z-index: 10;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.header-inner,
+.section-inner,
+.footer-inner,
+.hero-inner {
+  width: min(var(--max-width), calc(100% - var(--gutter) * 2));
+  margin: 0 auto;
 }
 
 .header-inner {
   display: flex;
   align-items: center;
-  gap: 28px;
-  width: min(var(--max-width), calc(100% - 48px));
-  min-height: 80px;
-  margin: 0 auto;
+  gap: 32px;
+  min-height: 72px;
 }
 
 .brand {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   color: var(--ink);
   text-decoration: none;
 }
 
 .brand-mark {
   display: block;
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
 }
 
 .brand-name {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
 }
 
 .site-nav {
   display: flex;
   align-items: center;
-  gap: 28px;
+  gap: 30px;
   margin-left: auto;
 }
 
 .site-nav a,
 .header-action,
-.site-footer a {
-  color: var(--ink);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+.site-footer > a,
+.footer-inner > a:last-child {
+  font-size: 0.9rem;
+  font-weight: 500;
   text-decoration: none;
-  transition: color 180ms ease, transform 180ms ease;
+}
+
+.site-nav a,
+.footer-inner > a:last-child {
+  color: var(--body);
 }
 
 .site-nav a:hover,
-.site-footer a:hover {
-  color: var(--ink);
-  transform: translateY(-1px);
+.footer-inner > a:last-child:hover,
+.text-link:hover {
+  color: var(--coffee);
 }
 
 .header-action {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  min-height: 38px;
-  padding: 0 15px;
-  border: 1px solid var(--line-strong);
-  transition: background-color 180ms ease, border-color 180ms ease, transform 180ms ease;
+  gap: 12px;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid var(--ink);
+  border-radius: 2px;
+  background: var(--ink);
+  color: var(--paper);
+  transition: background-color 160ms ease, color 160ms ease;
 }
 
 .header-action:hover {
-  border-color: var(--ink);
-  background: rgba(23, 19, 16, 0.08);
-  transform: translateY(-1px);
+  background: transparent;
+  color: var(--ink);
 }
 
 .menu-toggle {
   display: none;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  min-height: 44px;
   margin-left: auto;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--ink);
   font: inherit;
-  font-size: 0.72rem;
+  font-size: 0.9rem;
   cursor: pointer;
 }
 
 .menu-icon {
   display: grid;
-  gap: 4px;
+  gap: 5px;
 }
 
 .menu-icon i {
   display: block;
-  width: 17px;
+  width: 18px;
   height: 1px;
   background: currentColor;
 }
 
 .hero {
-  position: relative;
-  display: flex;
-  min-height: min(900px, 100svh);
-  align-items: center;
-  overflow: hidden;
-  background: var(--workflow-bg);
+  padding: clamp(76px, 10vw, 128px) 0 clamp(84px, 10vw, 128px);
 }
 
 .hero-inner {
   display: grid;
-  grid-template-columns: minmax(0, 0.86fr) minmax(420px, 1.14fr);
+  grid-template-columns: minmax(0, 0.94fr) minmax(380px, 1.06fr);
   align-items: center;
-  gap: clamp(48px, 7vw, 112px);
-  width: min(var(--max-width), calc(100% - 48px));
-  margin: 0 auto;
-  padding: 150px 0 108px;
+  gap: clamp(48px, 7vw, 100px);
 }
 
 .hero-copy {
-  position: relative;
-  z-index: 1;
-  max-width: 600px;
+  max-width: 650px;
 }
 
 h1,
@@ -220,31 +197,22 @@ p {
 h1,
 h2,
 h3 {
-  font-weight: 500;
+  font-weight: 450;
 }
 
 h1 {
-  max-width: 700px;
-  margin-bottom: 28px;
-  color: var(--ink);
-  font-size: clamp(3.35rem, 6vw, 6.9rem);
-  letter-spacing: -0.075em;
-  line-height: 0.95;
-}
-
-h1 em {
-  display: block;
-  color: var(--ink);
-  font-style: normal;
+  margin-bottom: 24px;
+  font-size: clamp(3.8rem, 6.1vw, 6rem);
+  letter-spacing: -0.065em;
+  line-height: 1;
 }
 
 .hero-lead {
-  max-width: 530px;
-  margin-bottom: 34px;
-  color: var(--muted);
-  font-size: clamp(1rem, 1.35vw, 1.18rem);
-  letter-spacing: -0.02em;
-  line-height: 1.55;
+  max-width: 55ch;
+  margin-bottom: 32px;
+  color: var(--body);
+  font-size: clamp(1.05rem, 1.35vw, 1.16rem);
+  line-height: 1.58;
 }
 
 .hero-actions {
@@ -256,108 +224,123 @@ h1 em {
 .button {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 16px;
+  justify-content: space-between;
+  gap: 20px;
   min-height: 48px;
-  padding: 0 18px;
-  border: 1px solid var(--ink);
+  padding: 0 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
   color: var(--ink);
-  font-size: 0.78rem;
+  font-size: 0.9rem;
   font-weight: 600;
   text-decoration: none;
-  transition: background-color 180ms ease, border-color 180ms ease, transform 180ms ease;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
 .button-primary {
-  background: var(--coffee-soft);
+  border-color: var(--coffee);
+  background: var(--coffee);
+  color: #fffefa;
+}
+
+.button-primary:hover {
+  border-color: var(--ink);
+  background: var(--ink);
 }
 
 .button-secondary {
   background: transparent;
 }
 
-.button:hover {
-  border-color: var(--coffee);
-  background: rgba(153, 104, 78, 0.15);
-  transform: translateY(-2px);
+.button-secondary:hover {
+  border-color: var(--ink);
+  background: var(--paper-raised);
 }
 
 .hero-cli {
   width: 100%;
-  max-width: 720px;
+  max-width: 680px;
   margin: 0;
   justify-self: end;
 }
 
 .cli-window {
-  overflow: hidden;
-  border: 1px solid rgba(222, 194, 170, 0.28);
-  background: #171310;
-  color: #f4e9df;
-  box-shadow: 14px 18px 0 rgba(23, 19, 16, 0.12);
+  border: 1px solid var(--terminal);
+  background: var(--terminal);
+  color: var(--terminal-ink);
 }
 
 .cli-window-body {
-  padding: clamp(22px, 3.2vw, 40px);
+  padding: clamp(22px, 3.2vw, 36px);
 }
 
-.cli-startup {
-  padding-bottom: 24px;
+.cli-command,
+.cli-help code,
+.cli-commands code,
+.cli-section-title {
+  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-.cli-art {
-  overflow: hidden;
+.cli-command {
+  margin-bottom: 20px;
+  color: var(--terminal-ink);
+  font-size: 0.92rem;
+}
+
+.cli-command span {
+  color: var(--coffee-soft);
+}
+
+.cli-output {
+  max-width: 48ch;
+  margin-bottom: 24px;
+  color: var(--terminal-ink);
+  font-size: 0.98rem;
+  line-height: 1.5;
+}
+
+.cli-section-title {
+  margin-bottom: 10px;
+  color: var(--terminal-muted);
+  font-size: 0.8rem;
+}
+
+.cli-commands {
+  overflow-x: auto;
   margin: 0;
-  color: #c9b6a8;
   border: 0;
   background: transparent;
-  font: 600 clamp(0.46rem, 0.95vw, 0.8rem)/1.3 "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  white-space: pre;
+  color: var(--terminal-ink);
 }
 
-.cli-command-list code b {
-  color: #c69b7d;
-  font-weight: 600;
+.cli-commands code {
+  display: block;
+  min-width: max-content;
+  color: inherit;
+  font-size: 0.82rem;
+  line-height: 1.9;
 }
 
-.cli-command-list {
-  display: grid;
-  gap: 0;
-  padding-top: 7px;
+.cli-help {
+  margin: 20px 0 0;
+  color: var(--terminal-muted);
+  font-size: 0.86rem;
 }
 
-.cli-command-list > div {
-  display: grid;
-  gap: 7px;
-  padding: 13px 0;
-}
-
-.cli-command-list > div:last-child {
-  padding-bottom: 0;
-}
-
-.cli-command-list code {
-  overflow-wrap: anywhere;
-  color: #f4e9df;
-  font: 0.72rem/1.5 "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+.cli-help code {
+  color: var(--terminal-ink);
 }
 
 .band {
-  padding: clamp(92px, 11vw, 170px) 0;
-  background: var(--workflow-bg);
-  color: var(--ink);
-}
-
-.section-inner {
-  width: min(var(--max-width), calc(100% - 48px));
-  margin: 0 auto;
+  padding: clamp(76px, 9vw, 120px) 0;
+  border-top: 1px solid var(--line);
 }
 
 .workflow-layout,
 .install-layout {
   display: grid;
-  grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
-  gap: clamp(64px, 10vw, 150px);
+  grid-template-columns: minmax(0, 0.76fr) minmax(0, 1.24fr);
+  gap: clamp(56px, 9vw, 120px);
 }
 
 .workflow-intro,
@@ -367,104 +350,113 @@ h1 em {
 
 .workflow-intro h2,
 .install-copy h2 {
-  max-width: 760px;
-  margin-bottom: 28px;
-  font-size: clamp(2.8rem, 5vw, 5.65rem);
-  letter-spacing: -0.07em;
-  line-height: 0.98;
+  max-width: 640px;
+  margin-bottom: 24px;
+  font-size: clamp(2.8rem, 4.5vw, 4.7rem);
+  letter-spacing: -0.065em;
+  line-height: 1.03;
 }
 
 .workflow-intro > p,
 .install-copy > p {
-  max-width: 430px;
+  max-width: 48ch;
   margin-bottom: 0;
-  color: var(--muted);
-  font-size: 1.02rem;
-  letter-spacing: -0.02em;
-  line-height: 1.55;
-}
-
-.text-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 13px;
-  margin-top: 32px;
-  padding-bottom: 7px;
-  color: var(--ink);
-  font-size: 0.78rem;
-  font-weight: 600;
-  text-decoration: none;
-  transition: gap 180ms ease, color 180ms ease;
-}
-
-.text-link:hover {
-  gap: 18px;
-  color: var(--ink);
+  color: var(--body);
+  font-size: 1.03rem;
+  line-height: 1.58;
 }
 
 .workflow-steps {
-  display: grid;
-  gap: 30px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .workflow-steps li {
-  display: block;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 18px;
+  padding: 22px 0;
+  border-top: 1px solid var(--line);
+}
+
+.workflow-steps li:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+.step-number {
+  padding-top: 2px;
+  color: var(--coffee);
+  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9rem;
 }
 
 .workflow-steps h3 {
-  margin-bottom: 11px;
-  font-size: clamp(1.75rem, 3vw, 2.45rem);
-  letter-spacing: -0.06em;
+  margin-bottom: 8px;
+  font-size: 1.45rem;
+  letter-spacing: -0.035em;
 }
 
 .workflow-steps li p {
-  max-width: 460px;
+  max-width: 54ch;
   margin-bottom: 0;
-  color: var(--muted);
-  font-size: 0.95rem;
-  line-height: 1.5;
+  color: var(--body);
+  font-size: 0.98rem;
+  line-height: 1.55;
 }
 
-.install-copy h2 code {
+.install-copy h2 code,
+.install-copy > p code {
   font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.76em;
-  letter-spacing: -0.08em;
+  font-size: 0.78em;
+  letter-spacing: -0.04em;
+}
+
+.text-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 26px;
+  color: var(--ink);
+  font-size: 0.92rem;
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 4px;
+  transition: color 160ms ease;
 }
 
 .install-commands {
   align-self: center;
+  min-width: 0;
 }
 
 .install-switcher {
-  display: inline-flex;
-  gap: 8px;
-  margin-bottom: 12px;
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid var(--line);
 }
 
 .platform-button {
-  min-height: 34px;
-  padding: 0 13px;
+  min-height: 44px;
+  padding: 0 0 2px;
   border: 0;
+  border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--muted);
-  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.62rem;
-  letter-spacing: 0.02em;
+  font: inherit;
+  font-size: 0.92rem;
   cursor: pointer;
-  transition: background-color 180ms ease, color 180ms ease;
 }
 
 .platform-button:hover,
 .platform-button.is-active {
-  background: var(--coffee-soft);
+  border-bottom-color: var(--ink);
   color: var(--ink);
 }
 
 .command-block {
-  padding: 18px 0 20px;
+  padding: 20px 0;
 }
 
 .command-heading {
@@ -472,60 +464,78 @@ h1 em {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  margin-bottom: 14px;
-  color: var(--ink);
+  margin-bottom: 12px;
+  color: var(--body);
   font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.65rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 0.84rem;
 }
 
 .copy-button {
-  padding: 5px 9px;
+  min-height: 34px;
+  padding: 0 11px;
   border: 1px solid var(--line-strong);
+  border-radius: 2px;
   background: transparent;
   color: var(--ink);
   font: inherit;
-  font-size: 0.6rem;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  font-size: 0.82rem;
   cursor: pointer;
-  transition: background-color 180ms ease, border-color 180ms ease, transform 180ms ease;
+  transition: background-color 160ms ease, border-color 160ms ease;
 }
 
 .copy-button:hover {
   border-color: var(--ink);
-  background: rgba(23, 19, 16, 0.08);
-  transform: translateY(-1px);
+  background: var(--paper-raised);
 }
 
-pre {
+.command-block pre {
+  overflow: auto;
   margin: 0;
-  overflow-x: auto;
-  border: 1px solid var(--line-strong);
-  background: var(--coffee-soft);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--paper-raised);
 }
 
-pre code {
+.command-block pre code {
   display: block;
-  min-width: max-content;
-  padding: 18px 20px;
+  width: max-content;
+  min-width: 100%;
+  padding: 18px;
   color: var(--ink);
   font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.76rem;
-  line-height: 1.6;
+  font-size: 0.82rem;
+  line-height: 1.65;
+  white-space: pre;
+}
+
+.apt-details {
+  border-top: 1px solid var(--line);
+}
+
+.apt-details summary {
+  padding: 18px 0;
+  color: var(--body);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.apt-details[open] summary {
+  color: var(--ink);
+}
+
+.apt-command-block {
+  padding-top: 0;
 }
 
 .copy-status {
-  min-height: 20px;
-  margin: 12px 0 0;
-  color: var(--ink);
-  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.62rem;
+  min-height: 1.5em;
+  margin: 8px 0 0;
+  color: var(--body);
+  font-size: 0.86rem;
 }
 
 .site-footer {
-  background: var(--workflow-bg);
+  border-top: 1px solid var(--line);
 }
 
 .footer-inner {
@@ -533,71 +543,52 @@ pre code {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  width: min(var(--max-width), calc(100% - 48px));
-  min-height: 104px;
-  margin: 0 auto;
+  min-height: 88px;
 }
 
-@keyframes reveal-up {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-[data-reveal] {
-  opacity: 1;
-  transform: none;
-}
-
-html.js [data-reveal] {
-  opacity: 0;
-  transform: translateY(20px);
-}
-
-html.js [data-reveal].is-visible {
-  animation: reveal-up 700ms var(--ease) both;
-  animation-delay: var(--reveal-delay, 0ms);
-}
-
-@media (max-width: 980px) {
+@media (max-width: 960px) {
   .hero-inner {
     grid-template-columns: 1fr;
-    gap: 70px;
+    gap: 44px;
   }
 
   .hero-copy {
-    max-width: 700px;
+    max-width: 720px;
   }
 
   .hero-cli {
-    width: min(100%, 760px);
+    max-width: 760px;
     justify-self: start;
   }
 
   .workflow-layout,
   .install-layout {
     grid-template-columns: 1fr;
-    gap: 50px;
+    gap: 42px;
+  }
+
+  .workflow-intro,
+  .install-copy {
+    max-width: 720px;
   }
 }
 
 @media (max-width: 720px) {
-  .header-inner,
-  .section-inner,
-  .footer-inner,
-  .hero-inner {
-    width: min(100% - 40px, var(--max-width));
+  :root {
+    --gutter: 22px;
+  }
+
+  html {
+    scroll-padding-top: 20px;
   }
 
   .header-inner {
-    position: relative;
-    min-height: 72px;
+    min-height: 64px;
+  }
+
+  .brand-mark {
+    width: 32px;
+    height: 32px;
   }
 
   .menu-toggle {
@@ -606,16 +597,16 @@ html.js [data-reveal].is-visible {
 
   .site-nav {
     position: absolute;
-    top: 64px;
-    right: 0;
-    left: 0;
+    top: calc(100% + 1px);
+    right: var(--gutter);
+    left: var(--gutter);
     display: none;
     align-items: stretch;
     gap: 0;
     margin: 0;
-    padding: 8px;
+    padding: 6px 12px;
     border: 1px solid var(--line-strong);
-    background: var(--workflow-bg);
+    background: var(--paper);
   }
 
   .site-header.menu-open .site-nav {
@@ -624,12 +615,12 @@ html.js [data-reveal].is-visible {
   }
 
   .site-nav a {
-    padding: 13px 12px;
+    padding: 13px 0;
+    border-bottom: 1px solid var(--line);
   }
 
-  .site-nav a:hover {
-    background: rgba(23, 19, 16, 0.08);
-    transform: none;
+  .site-nav a:last-child {
+    border-bottom: 0;
   }
 
   .header-action {
@@ -637,71 +628,98 @@ html.js [data-reveal].is-visible {
   }
 
   .hero {
-    min-height: 820px;
+    padding: 64px 0 72px;
   }
 
   .hero-inner {
-    gap: 58px;
-    padding-top: 128px;
-    padding-bottom: 96px;
+    gap: 38px;
   }
 
   h1 {
-    font-size: clamp(3rem, 13vw, 4.6rem);
+    margin-bottom: 20px;
+    font-size: clamp(3.2rem, 12.5vw, 4.4rem);
+    line-height: 1.02;
   }
 
   .hero-lead {
+    margin-bottom: 24px;
+    font-size: 1.02rem;
+  }
+
+  .hero-actions {
+    gap: 10px;
+  }
+
+  .button {
+    min-height: 46px;
+    padding: 0 13px;
+    font-size: 0.86rem;
+  }
+
+  .cli-window-body {
+    padding: 20px 17px;
+  }
+
+  .cli-output {
+    font-size: 0.92rem;
+  }
+
+  .cli-commands code {
+    font-size: 0.76rem;
+  }
+
+  .band {
+    padding: 68px 0;
+  }
+
+  .workflow-layout,
+  .install-layout {
+    gap: 30px;
+  }
+
+  .workflow-intro h2,
+  .install-copy h2 {
+    margin-bottom: 18px;
+    font-size: clamp(2.7rem, 10.5vw, 3.8rem);
+  }
+
+  .workflow-intro > p,
+  .install-copy > p {
     font-size: 1rem;
   }
 
+  .workflow-steps li {
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 12px;
+    padding: 18px 0;
+  }
+
+  .workflow-steps h3 {
+    font-size: 1.25rem;
+  }
+
+  .workflow-steps li p {
+    font-size: 0.94rem;
+  }
+
+  .install-switcher {
+    gap: 20px;
+  }
+
+  .footer-inner {
+    min-height: 76px;
+  }
+}
+
+@media (max-width: 390px) {
   .hero-actions {
     align-items: stretch;
     flex-direction: column;
   }
 
   .button {
-    justify-content: space-between;
+    width: 100%;
   }
-
-  .hero {
-    min-height: auto;
-  }
-
-  .hero-inner {
-    gap: 42px;
-  }
-
-  .cli-window {
-    box-shadow: 7px 9px 0 rgba(23, 19, 16, 0.12);
-  }
-
-  .cli-window-body {
-    padding: 22px 16px;
-  }
-
-  .cli-art {
-    font-size: clamp(0.36rem, 1.55vw, 0.62rem);
-  }
-
-  .cli-command-list code {
-    font-size: 0.65rem;
-  }
-
-  .band {
-    padding: 90px 0;
-  }
-
-  .workflow-intro h2,
-  .install-copy h2 {
-    font-size: clamp(2.8rem, 14vw, 4.6rem);
-  }
-
-  .footer-inner {
-    align-items: flex-start;
-    flex-wrap: wrap;
-    padding: 26px 0;
-  }
-
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -712,392 +730,7 @@ html.js [data-reveal].is-visible {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
-
-  .transition-curtain {
-    display: none;
-  }
-
-  html.js [data-reveal] {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* AXIOM SCREENSHOT THEME — START */
-:root {
-  color-scheme: dark;
-  --axiom-shot-bg: #101010;
-  --axiom-shot-sidebar: #0b0b0b;
-  --axiom-shot-surface: #141414;
-  --axiom-shot-surface-raised: #191919;
-  --axiom-shot-border: #292929;
-  --axiom-shot-text: #eeeeE8;
-  --axiom-shot-muted: #999990;
-  --axiom-shot-lime: #d7f64b;
-  --axiom-shot-lime-hover: #e4ff68;
-  --axiom-shot-lime-dim: #8d9e43;
-  --axiom-shot-amber: #e9ae58;
-  --axiom-shot-danger: #e36b6b;
-}
-
-html,
-body {
-  background: var(--axiom-shot-bg) !important;
-  color: var(--axiom-shot-text);
-}
-
-body {
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: var(--axiom-shot-text);
-}
-
-#root {
-  min-height: 100vh;
-  background-color: var(--axiom-shot-bg);
-  color: var(--axiom-shot-text);
-}
-
-/* Flat graphite surfaces, fine borders, no glass/gradient treatment. */
-:is(
-  .app-shell,
-  .app-layout,
-  .app-main,
-  .main-content,
-  .workspace,
-  .workspace-content,
-  .dashboard,
-  .dashboard-content,
-  .control-center,
-  .control-center-content,
-  .panel,
-  .card,
-  .surface,
-  .widget,
-  .metric-card,
-  .stat-card,
-  .section-card,
-  .table-container,
-  .modal,
-  .dialog,
-  .dropdown-menu,
-  [class*="-panel"],
-  [class*="-card"],
-  [class*="-surface"],
-  [class*="-widget"]
-) {
-  color: var(--axiom-shot-text);
-  border-color: var(--axiom-shot-border);
-  box-shadow: none;
-}
-
-:is(
-  .sidebar,
-  .app-sidebar,
-  .side-nav,
-  .sidebar-nav,
-  nav[aria-label*="side" i],
-  aside
-) {
-  background: var(--axiom-shot-sidebar) !important;
-  color: var(--axiom-shot-text);
-  border-color: #242424 !important;
-  box-shadow: none !important;
-}
-
-:is(
-  .topbar,
-  .top-bar,
-  .app-header,
-  .workspace-header,
-  .toolbar,
-  header[role="banner"]
-) {
-  background: #101010 !important;
-  color: var(--axiom-shot-text);
-  border-color: #262626 !important;
-  box-shadow: none !important;
-  backdrop-filter: none !important;
-}
-
-/* De-saturate old palettes while preserving status semantics. */
-:is(
-  .app-shell,
-  .app-layout,
-  .main-content,
-  .workspace,
-  .dashboard,
-  .control-center,
-  .page-content
-) :is(
-  .panel,
-  .card,
-  .surface,
-  .widget,
-  .metric-card,
-  .stat-card,
-  .section-card,
-  .table-container,
-  .modal,
-  .dialog,
-  [class*="-panel"],
-  [class*="-card"],
-  [class*="-surface"]
-) {
-  background-color: var(--axiom-shot-surface);
-  background-image: none;
-  border-color: var(--axiom-shot-border);
-}
-
-:is(h1, h2, h3, h4, h5, h6, strong, b, label, legend) {
-  color: var(--axiom-shot-text);
-}
-
-:is(p, small, .muted, .subtitle, .description, .helper-text, .secondary-text, .text-muted) {
-  color: var(--axiom-shot-muted);
-}
-
-:is(a, .link) {
-  color: var(--axiom-shot-lime);
-  text-decoration-color: color-mix(in srgb, var(--axiom-shot-lime) 45%, transparent);
-}
-
-:is(a, .link):hover {
-  color: var(--axiom-shot-lime-hover);
-}
-
-/* Sidebar rows and selected workspace navigation. */
-:is(.sidebar, .app-sidebar, .side-nav, aside) :is(a, button, [role="link"], [role="button"]) {
-  color: #a5a59c;
-  background-image: none;
-  box-shadow: none;
-}
-
-:is(.sidebar, .app-sidebar, .side-nav, aside) :is(a, button, [role="link"], [role="button"]):hover {
-  color: var(--axiom-shot-text);
-  background-color: #171717;
-}
-
-:is(.sidebar, .app-sidebar, .side-nav, aside) :is(.active, [aria-current="page"], [data-active="true"]) {
-  color: var(--axiom-shot-text) !important;
-  border-color: var(--axiom-shot-lime) !important;
-  box-shadow: inset 3px 0 0 var(--axiom-shot-lime);
-  background: #141414 !important;
-}
-
-/* Primary actions match the bright yellow-green screenshot accent. */
-:is(
-  button.primary,
-  button.primary-button,
-  .primary-button,
-  .button-primary,
-  .btn-primary,
-  a.primary-button,
-  [data-variant="primary"],
-  [data-kind="primary"]
-) {
-  background: var(--axiom-shot-lime) !important;
-  background-image: none !important;
-  color: #11120a !important;
-  border: 1px solid var(--axiom-shot-lime) !important;
-  box-shadow: none !important;
-  font-weight: 700;
-}
-
-:is(
-  button.primary,
-  button.primary-button,
-  .primary-button,
-  .button-primary,
-  .btn-primary,
-  a.primary-button,
-  [data-variant="primary"],
-  [data-kind="primary"]
-):hover:not(:disabled) {
-  background: var(--axiom-shot-lime-hover) !important;
-  border-color: var(--axiom-shot-lime-hover) !important;
-  color: #11120a !important;
-}
-
-button,
-[role="button"],
-.button,
-.btn {
-  border-radius: 3px;
-  box-shadow: none;
-  background-image: none;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-
-:is(button, [role="button"], .button, .btn):not(:is(
-  .primary,
-  .primary-button,
-  .button-primary,
-  .btn-primary,
-  [data-variant="primary"]
-)) {
-  background-color: #151515;
-  color: var(--axiom-shot-text);
-  border-color: #3a3a3a;
-}
-
-:is(button, [role="button"], .button, .btn):hover:not(:disabled):not(:is(
-  .primary,
-  .primary-button,
-  .button-primary,
-  .btn-primary,
-  [data-variant="primary"]
-)) {
-  background-color: #202020;
-  border-color: #656565;
-}
-
-:is(input, select, textarea) {
-  color: var(--axiom-shot-text);
-  background: #111111 !important;
-  border-color: #353535 !important;
-  border-radius: 3px;
-  box-shadow: none !important;
-}
-
-:is(input, select, textarea)::placeholder {
-  color: #77776f;
-  opacity: 1;
-}
-
-:is(input, select, textarea):focus-visible,
-:is(button, a, [role="button"]):focus-visible {
-  outline: 2px solid var(--axiom-shot-lime) !important;
-  outline-offset: 2px;
-}
-
-/* Status chips: lime for ready/success, amber for offline/warning. */
-:is(.status-ready, .status-success, .badge-success, .badge-ready, [data-status="ready"], [data-status="success"]) {
-  color: var(--axiom-shot-lime) !important;
-  border-color: #788b31 !important;
-  background: #171b0d !important;
-}
-
-:is(.status-warning, .status-offline, .badge-warning, .badge-offline, [data-status="offline"], [data-status="warning"]) {
-  color: var(--axiom-shot-amber) !important;
-  border-color: #6f5129 !important;
-  background: #1d170f !important;
-}
-
-:is(.status-error, .status-danger, .badge-danger, [data-status="error"], [data-status="failed"]) {
-  color: var(--axiom-shot-danger) !important;
-  border-color: #673535 !important;
-  background: #1e1111 !important;
-}
-
-/* Chart and activity bars use muted olive lime, not neon gradients. */
-:is(.chart-bar, .activity-bar, .bar-chart-bar, [data-chart-bar]) {
-  background: var(--axiom-shot-lime-dim);
-  border-color: var(--axiom-shot-lime-dim);
-}
-
-/* Existing optimizer/quantization UI: theme only; behavior/layout untouched. */
-:is(
-  .beta5-hero,
-  .beta5-panel,
-  .beta5-result-panel,
-  .beta5-empty,
-  .beta5-hardware,
-  .beta5-result,
-  .beta5-dataset,
-  .beta5-status,
-  .beta5-agent,
-  .optimizer-panel,
-  .optimizer-card,
-  .quantizer-panel,
-  .quantization-panel,
-  .agent-optimizer-panel
-) {
-  color: var(--axiom-shot-text);
-  background-color: var(--axiom-shot-surface) !important;
-  background-image: none !important;
-  border-color: var(--axiom-shot-border) !important;
-  box-shadow: none !important;
-}
-
-:is(.beta5-hero-badge, .beta5-panel-head span, .beta5-agent.active, .beta5-status span) {
-  color: var(--axiom-shot-lime);
-}
-
-:is(hr, .divider, .separator, [role="separator"]) {
-  border-color: #292929 !important;
-  background-color: #292929;
-}
-
-::selection {
-  color: #101010;
-  background: var(--axiom-shot-lime);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-/* AXIOM SCREENSHOT THEME — END */
-
-/* Keep the public landing page on its coffee/light system. The app theme above
-   belongs to the product shell and must not leak into this static surface. */
-:root {
-  color-scheme: light;
-}
-
-html,
-body,
-#root {
-  background: var(--workflow-bg) !important;
-  color: var(--ink) !important;
-}
-
-body {
-  font-family: "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
-}
-
-main :is(h1, h2, h3, p, code),
-.site-header :is(a, button),
-.site-footer :is(a, p) {
-  color: var(--ink);
-}
-
-main :is(.hero-lead, .workflow-intro > p, .install-copy > p, .workflow-steps li p) {
-  color: var(--muted);
-}
-
-main a.button-primary {
-  background: var(--coffee-soft) !important;
-  border-color: var(--ink) !important;
-  color: var(--ink) !important;
-}
-
-main :is(.button-secondary, .copy-button, .platform-button) {
-  background: transparent !important;
-  border-color: var(--line-strong) !important;
-  color: var(--ink) !important;
-}
-
-main a.text-link {
-  color: var(--ink) !important;
-  text-decoration-color: var(--ink);
-}
-
-main .platform-button.is-active {
-  background: var(--coffee-soft) !important;
-  border-color: var(--line-strong) !important;
-}
-
-::selection {
-  color: var(--ink) !important;
-  background: var(--coffee-soft) !important;
 }
