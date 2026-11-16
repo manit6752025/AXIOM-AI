@@ -1,6 +1,6 @@
 {
   "name": "@netcore-technologies/axiom-cli",
-  "version": "0.3.0-beta.8",
+  "version": "0.3.0-beta.9",
   "description": "Node.js launcher for the AXIOM AI engineering CLI",
   "license": "MIT",
   "repository": {
