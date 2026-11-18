@@ -66,6 +66,7 @@ export default function ModelStudioPanel() {
         search: jobHistorySearch,
       });
       setJobHistory((current) => append ? [...current, ...page.jobs] : page.jobs);
+      if (offset === 0 && !append && !job && page.jobs.length) setJob(page.jobs[0]);
       setJobHistoryTotal(page.total);
       setJobHistoryHasMore(page.has_more);
       setJobHistoryTruncated(page.truncated);
