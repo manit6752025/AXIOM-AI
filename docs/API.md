@@ -95,6 +95,10 @@ See [Unified LLM client and mobile bridge](Unified-LLM-Client.md) for examples a
 
 Workspace collection endpoints use bounded `limit` and `offset` parameters and return `total`, `limit`, `offset`, and `has_more` where paging applies.
 
+- `GET /api/agent-profiles`: bounded profile pages (`limit` 1–100, default 100; `offset` 0–100), retaining the capability catalog and authorization note on every page.
+- `GET /api/fine-tuning/jobs`: newest-first pages (`limit` 1–100, default 20; `offset` 0–5,000). Discovery scans at most 5,000 newest job records and returns `truncated` and `scan_limit` when the inventory exceeds that cap.
+- `GET /api/models/studio/jobs`: bounded, searchable newest-first pages (`limit` 1–100, `offset` 0–5,000, optional `search`), with explicit truncation metadata.
+
 - `GET /api/workspace/models`: bounded model registry pages; search, exact format/tag filters, favorites, and stable sorting are applied before pagination.
 - `GET /api/workspace/experiments`: bounded experiment pages; query and tag filters are applied before pagination.
 - `GET /api/workspace/datasets`: `limit` 1–500 (default 500), `offset` 0–5000, optional `path` and case-insensitive `search`. Discovery is capped at 5,000 JSONL entries; `truncated: true` explicitly indicates that the inventory exceeded the scan cap. Results are sorted by workspace-relative path before paging.
