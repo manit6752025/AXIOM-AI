@@ -71,6 +71,10 @@ def test_shell_completion_can_be_viewed_for_supported_shells_without_installing(
     assert unsupported.exit_code != 0
     assert "Unsupported shell" in unsupported.output
 
+    # Generating and previewing completion scripts must not modify shell
+    # startup files, create workspace metadata, or leave files in the cwd.
+    assert list(tmp_path.iterdir()) == []
+
 
 def test_init_creates_a_project_that_project_commands_can_use(
     tmp_path: Path,

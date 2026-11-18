@@ -26,6 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, BinaryIO, Callable
 
+from axiom.core.resource_ids import new_resource_id
 from axiom.core.storage import file_lock
 from axiom.path_safety import open_regular_file
 
@@ -668,24 +669,63 @@ def cancel_finetuning_job(job_id: str) -> dict[str, Any] | None:
         return _public_training_job(job)
 
 
-def list_jobs(limit: int = 20, *, workspace_root: Path | None = None) -> list[dict[str, Any]]:
+MAX_FINE_TUNING_JOB_SCAN = 5_000
+
+
+def list_jobs_page(
+    limit: int = 20,
+    offset: int = 0,
+    *,
+    workspace_root: Path | None = None,
+) -> dict[str, Any]:
+    """Return a bounded page of newest-first, workspace-safe fine-tuning jobs."""
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
         raise ValueError("Job list limit must be between 1 and 100.")
+    if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= MAX_FINE_TUNING_JOB_SCAN:
+        raise ValueError(f"Job list offset must be between 0 and {MAX_FINE_TUNING_JOB_SCAN}.")
     root = Path(workspace_root).resolve(strict=True) if workspace_root is not None else None
     folder = jobs_directory()
+    if folder.is_symlink():
+        raise FineTuningError("Fine-tuning job directory must not be a symbolic link.")
     if not folder.is_dir():
-        return []
+        return {"jobs": [], "total": 0, "limit": limit, "offset": offset,
+                "has_more": False, "truncated": False, "scan_limit": MAX_FINE_TUNING_JOB_SCAN}
+
+    paths = [path for path in folder.glob("*.json") if not path.is_symlink() and path.is_file()]
+    truncated = len(paths) > MAX_FINE_TUNING_JOB_SCAN
+    if truncated:
+        def modified_ns(path: Path) -> int:
+            try:
+                return path.stat().st_mtime_ns
+            except OSError:
+                return 0
+        paths.sort(key=modified_ns, reverse=True)
+        paths = paths[:MAX_FINE_TUNING_JOB_SCAN]
+
     records: list[dict[str, Any]] = []
-    for path in folder.glob("*.json"):
+    for path in paths:
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
+            with open_regular_file(path) as stream:
+                value = json.load(stream)
             if isinstance(value, dict) and re.fullmatch(r"[0-9a-f]{32}", str(value.get("id", ""))):
                 if root is None or _job_belongs_to_workspace(value, root):
                     records.append(_public_training_job(_recover_if_stale(value)))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, ValueError):
             continue
+
     records.sort(key=lambda item: str(item.get("created_at", "")), reverse=True)
-    return records[:limit]
+    total = len(records)
+    page = records[offset:offset + limit]
+    return {
+        "jobs": page, "total": total, "limit": limit, "offset": offset,
+        "has_more": offset + len(page) < total, "truncated": truncated,
+        "scan_limit": MAX_FINE_TUNING_JOB_SCAN,
+    }
+
+
+def list_jobs(limit: int = 20, *, workspace_root: Path | None = None) -> list[dict[str, Any]]:
+    """Backward-compatible first-page view of recent local fine-tuning jobs."""
+    return list_jobs_page(limit=limit, workspace_root=workspace_root)["jobs"]
 
 
 def _job_belongs_to_workspace(job: dict[str, Any], root: Path) -> bool:
@@ -905,7 +945,7 @@ def _new_job(
 ) -> dict[str, Any]:
     validated = validate_config(config, workspace_guard=workspace_guard)
     require_runtime()
-    job_id = uuid.uuid4().hex
+    job_id = new_resource_id()
     _acquire_lock(job_id)
     now = _now()
     job: dict[str, Any] = {

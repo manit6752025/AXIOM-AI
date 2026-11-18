@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowDownToLine, BookOpen, Cpu, ExternalLink, FileCog, Globe, HardDrive, Search, Sparkles } from "lucide-react";
 import { axiomApi, type ModelStudioFile, type ModelStudioJob, type ModelStudioModel, type ModelStudioStatus } from "../api/client";
 
-const activeStates = new Set(["queued", "running"]);
+const activeStates = new Set(["queued", "running", "cancelling"]);
 const tasks = [
   { value: "general", label: "General assistant", query: "instruct GGUF" },
   { value: "coding", label: "Coding", query: "coder GGUF" },
@@ -38,6 +38,12 @@ export default function ModelStudioPanel() {
   const [outputPath, setOutputPath] = useState("");
   const [quantization, setQuantization] = useState("Q4_K_M");
   const [job, setJob] = useState<ModelStudioJob | null>(null);
+  const [jobHistory, setJobHistory] = useState<ModelStudioJob[]>([]);
+  const [jobHistoryTotal, setJobHistoryTotal] = useState(0);
+  const [jobHistoryHasMore, setJobHistoryHasMore] = useState(false);
+  const [jobHistoryTruncated, setJobHistoryTruncated] = useState(false);
+  const [jobHistorySearch, setJobHistorySearch] = useState("");
+  const [jobHistoryLoading, setJobHistoryLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
@@ -51,14 +57,31 @@ export default function ModelStudioPanel() {
   const [remoteBusy, setRemoteBusy] = useState(false);
   const [remoteError, setRemoteError] = useState("");
 
+  const loadJobHistory = async (offset = 0, append = false) => {
+    setJobHistoryLoading(true);
+    try {
+      const page = await axiomApi.modelStudioJobsPage({
+        limit: 10,
+        offset,
+        search: jobHistorySearch,
+      });
+      setJobHistory((current) => append ? [...current, ...page.jobs] : page.jobs);
+      if (offset === 0 && !append && !job && page.jobs.length) setJob(page.jobs[0]);
+      setJobHistoryTotal(page.total);
+      setJobHistoryHasMore(page.has_more);
+      setJobHistoryTruncated(page.truncated);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Model Studio job history is unavailable.");
+    } finally {
+      setJobHistoryLoading(false);
+    }
+  };
+
   const refreshStatus = async () => {
     try {
       const result = await axiomApi.modelStudioStatus();
       setStatus(result);
-      if (!job) {
-        const recent = await axiomApi.modelStudioJobs(10);
-        if (recent.jobs.length) setJob(recent.jobs[0]);
-      }
+      void loadJobHistory();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Model Studio status is unavailable.");
     }
@@ -67,7 +90,10 @@ export default function ModelStudioPanel() {
   useEffect(() => {
     if (!job || !activeStates.has(job.status)) return;
     const timer = window.setInterval(() => {
-      axiomApi.modelStudioJob(job.id).then(setJob).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not refresh model job status."));
+      axiomApi.modelStudioJob(job.id).then((updated) => {
+        setJob(updated);
+        setJobHistory((current) => current.map((item) => item.id === updated.id ? updated : item));
+      }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not refresh model job status."));
     }, 1500);
     return () => window.clearInterval(timer);
   }, [job?.id, job?.status]);
@@ -103,9 +129,29 @@ export default function ModelStudioPanel() {
   };
   const startJob = async (config: Record<string, unknown>) => {
     setBusy(true); setError("");
-    try { const started = await axiomApi.startModelStudioJob(config as never); setJob(started); }
+    try {
+      const started = await axiomApi.startModelStudioJob(config as never);
+      setJob(started);
+      setJobHistory((current) => [started, ...current.filter((item) => item.id !== started.id)]);
+      setJobHistoryTotal((current) => current + 1);
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Model Studio job could not start."); }
     finally { setBusy(false); }
+  };
+
+  const cancelJob = async () => {
+    if (!job || !activeStates.has(job.status) || job.status === "cancelling") return;
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await axiomApi.cancelModelStudioJob(job.id);
+      setJob(updated);
+      setJobHistory((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Model Studio cancellation could not be requested.");
+    } finally {
+      setBusy(false);
+    }
   };
   const testRemoteConnection = async () => {
     setRemoteBusy(true); setRemoteError(""); setRemoteResponse("");
@@ -170,8 +216,26 @@ export default function ModelStudioPanel() {
       <button type="button" className="button secondary-button" disabled={busy || activeJob || !sourceDir.trim() || !llamaCppDir.trim() || !outputPath.trim()} onClick={() => void startJob({operation:"convert_gguf",source_dir:sourceDir.trim(),llama_cpp_dir:llamaCppDir.trim(),output_path:outputPath.trim(),outtype:"f16",quantization})}><FileCog size={15} /> Convert and quantize GGUF</button>
     </div>
     {error && <div className="inline-alert warning" role="alert">{error}</div>}
+    <section className="model-studio-history" aria-label="Model Studio job history">
+      <div className="surface-head"><div><p className="surface-eyebrow">LOCAL JOB INVENTORY</p><h3>Recent model jobs</h3></div><span className="quiet-note">{jobHistory.length} of {jobHistoryTotal}</span></div>
+      <div className="integration-form-actions">
+        <label className="field"><span className="field-label-row"><span>Search jobs</span></span><input value={jobHistorySearch} onChange={(event) => setJobHistorySearch(event.target.value)} maxLength={120} placeholder="ID, operation, status, repository, model" /></label>
+        <button type="button" className="button secondary-button" onClick={() => void loadJobHistory()} disabled={jobHistoryLoading}><Search size={14} /> Search history</button>
+      </div>
+      {jobHistory.map((item) => (
+        <article className="model-studio-result" key={item.id}>
+          <div className="model-studio-result-copy"><b>{item.operation.replaceAll("_", " ")}</b><small>{item.id.slice(0, 12)} · {new Date(item.created_at).toLocaleString()}</small></div>
+          <div className="model-studio-result-actions"><span className={`status-pill ${item.status === "completed" ? "success" : item.status === "failed" ? "warning" : "neutral"}`}><i />{item.status.toUpperCase()}</span><button type="button" className="button secondary-button small-button" aria-pressed={job?.id === item.id} onClick={() => setJob(item)}>{job?.id === item.id ? "Selected" : "Inspect"}</button></div>
+        </article>
+      ))}
+      {jobHistory.length === 0 && !jobHistoryLoading && <p className="quiet-note">No Model Studio jobs match this search.</p>}
+      {jobHistoryTruncated && <p className="quiet-note">History discovery is capped at 5,000 newest job records.</p>}
+      {jobHistoryHasMore && <button type="button" className="button secondary-button" onClick={() => void loadJobHistory(jobHistory.length, true)} disabled={jobHistoryLoading}>{jobHistoryLoading ? "Loading…" : "Load more jobs"}</button>}
+    </section>
     {job && <section className="model-studio-job" aria-label="Model Studio job status" role="region"><div className="surface-head"><div><p className="surface-eyebrow">JOB {job.id.slice(0, 12)}</p><h3>{job.operation.replaceAll("_", " ")}</h3></div><span className={`status-pill ${job.status === "completed" ? "success" : job.status === "failed" ? "warning" : "neutral"}`}><i />{job.status.toUpperCase()}</span></div>
       {job.total_bytes && job.total_bytes > 0 && <div className="model-studio-progress"><span style={{ width: `${Math.min(100, (job.progress_bytes / job.total_bytes) * 100)}%` }} /></div>}
+      {activeJob && <div className="integration-form-actions"><span className="quiet-note">{job.status === "cancelling" ? "Cancellation requested. The worker is stopping at a safe boundary…" : "This operation has a four-hour hard deadline and can be cancelled safely."}</span><button type="button" className="button secondary-button" onClick={() => void cancelJob()} disabled={busy || job.status === "cancelling"}>Cancel operation</button></div>}
+      {job.status === "timed_out" && <div className="inline-alert warning" role="alert">The operation exceeded its time limit. Temporary download/conversion files were cleaned up where safe.</div>}
       {job.error && <div className="inline-alert warning" role="alert">{job.error}</div>}{savedPath && <p className="quiet-note"><HardDrive size={14} /> Saved locally: <code>{savedPath}</code></p>}{savedModelName && isRegisteredWithOllama && <p className="quiet-note">Use it for local inference: <code>axiom infer run {savedModelName} --prompt "Hello"</code></p>}
       <pre className="model-studio-log" data-testid="model-studio-log">{job.logs.join("\n")}</pre>
     </section>}

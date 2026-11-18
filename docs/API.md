@@ -21,6 +21,44 @@ visible request errors, and the CLI daemon readiness probe sends one as well.
   optional field is present unless the OpenAPI schema marks it required.
 - API version does not replace per-resource `schema_version` fields used for
   persisted workspace data.
+- Persisted resource ID and workspace schema migration rules are defined in
+  [Storage schemas and migrations](Storage-Schemas-and-Migrations.md).
+
+## API permission scopes
+
+API scope enforcement is opt-in so existing loopback-only Control Center and CLI
+workflows remain compatible. To enable it for API clients, configure **both**
+environment variables with distinct, high-entropy values:
+
+- `AXIOM_API_READ_TOKEN`: permits `GET`/`HEAD` requests and the explicitly
+  allowlisted validation/planning `POST` endpoints.
+- `AXIOM_API_WRITE_TOKEN`: permits read access and all write, job, execution,
+  cancellation, model-load, and other side-effecting operations.
+
+Generate each value independently, for example with
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`. Tokens must be
+32–256 ASCII characters, and the read and write values must differ. AXIOM rejects
+a partial, weak, or duplicate configuration at startup rather than silently
+running with incomplete scope enforcement.
+
+Read-only `POST` operations are deliberately allowlisted: workflow validation
+and dry-run, model optimization/policy inspection, optimizer planning, workspace
+training-plan and dataset previews, model inspection, and engine compatibility
+or quantization estimates. Every other `POST`, plus `PUT`, `PATCH`, and
+`DELETE`, requires the write token. New mutation routes therefore fail closed
+until explicitly classified. A read token cannot create or update a saved
+workflow, start/cancel a job, pull or unload a model, generate inference, or
+invoke a remote provider.
+
+Send credentials as `Authorization: Bearer <token>`. Missing/invalid credentials
+return HTTP 401; a valid read token used for a write operation returns HTTP 403.
+Both use the standard AXIOM error envelope and preserve `X-Request-ID`. Health,
+metadata, and OpenAPI documentation endpoints remain public. The OpenAI-compatible
+`/v1/models` endpoint requires read scope, and `/v1/chat/completions` requires
+write scope. The bundled same-origin Control Center remains usable; cross-origin
+API clients must provide a token. When both variables are unset, token enforcement is disabled for
+backwards compatibility. Keep the daemon on loopback for ordinary local use;
+tokens do not replace TLS, network isolation, or host security.
 
 ## AXIOM Engine and training
 
@@ -59,6 +97,10 @@ See [Unified LLM client and mobile bridge](Unified-LLM-Client.md) for examples a
 
 Workspace collection endpoints use bounded `limit` and `offset` parameters and return `total`, `limit`, `offset`, and `has_more` where paging applies.
 
+- `GET /api/agent-profiles`: bounded profile pages (`limit` 1–100, default 100; `offset` 0–100), retaining the capability catalog and authorization note on every page.
+- `GET /api/fine-tuning/jobs`: newest-first pages (`limit` 1–100, default 20; `offset` 0–5,000). Discovery scans at most 5,000 newest job records and returns `truncated` and `scan_limit` when the inventory exceeds that cap.
+- `GET /api/models/studio/jobs`: bounded, searchable newest-first pages (`limit` 1–100, `offset` 0–5,000, optional `search`), with explicit truncation metadata.
+
 - `GET /api/workspace/models`: bounded model registry pages; search, exact format/tag filters, favorites, and stable sorting are applied before pagination.
 - `GET /api/workspace/experiments`: bounded experiment pages; query and tag filters are applied before pagination.
 - `GET /api/workspace/datasets`: `limit` 1–500 (default 500), `offset` 0–5000, optional `path` and case-insensitive `search`. Discovery is capped at 5,000 JSONL entries; `truncated: true` explicitly indicates that the inventory exceeded the scan cap. Results are sorted by workspace-relative path before paging.
@@ -85,3 +127,25 @@ Do not add a public origin to `AXIOM_CORS_ORIGINS` unless you understand the
 browser trust implications. CORS is not authentication. Keep the service on
 loopback for ordinary local use; network exposure requires a separately
 reviewed deployment and access-control design.
+
+
+## Model Studio job cancellation and timeout
+
+`POST /api/models/studio/jobs/{job_id}/cancel` requests cooperative cancellation of
+an active Model Studio job. The response returns the updated job with status
+`cancelling`; the worker reports terminal status `cancelled` after it reaches a
+safe boundary. Completed, failed, cancelled, and timed-out jobs are returned
+unchanged. Missing IDs return HTTP 404 and malformed IDs return HTTP 422.
+
+Downloads check cancellation between 1 MiB chunks and remove partial temporary
+files before returning. Ollama/llama.cpp subprocesses are terminated and then
+killed if they do not exit within the cleanup grace period. Model Studio jobs
+have a four-hour hard deadline, individual remote reads have bounded network
+timeouts, and subprocesses have operation-specific timeouts. Deadline expiry
+returns the distinct terminal status `timed_out`. Cancellation cannot undo an
+external side effect that has already committed (for example, a completed model
+registration); such work is reported as completed rather than falsely marked
+cancelled. If cancellation is requested during Ollama registration after the GGUF
+file is downloaded, that complete file remains in its selected local destination;
+AXIOM does not delete a successful download while cancelling a later registration
+step.

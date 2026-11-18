@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 
 import typer
+
+from axiom.cli.errors import emit_error, json_errors_enabled
 import yaml
 from rich.console import Console
 from rich.panel import Panel
@@ -145,9 +147,12 @@ def register(app, model_app, dataset_app) -> None:
         try:
             report = diagnose_workspace(workspace)
         except (OSError, ValueError):
-            message = {"schema_version": 1, "status": "error", "message": "Workspace could not be resolved safely."}
-            typer.echo(json.dumps(message, sort_keys=True) if json_output else "Error: workspace could not be resolved safely.", err=not json_output)
-            raise typer.Exit(code=2)
+            if json_errors_enabled():
+                emit_error("Workspace could not be resolved safely.", code="workspace_resolution_failed", exit_code=2)
+            if json_output:
+                typer.echo(json.dumps({"schema_version": 1, "status": "error", "message": "Workspace could not be resolved safely.", "exit_code": 2}, sort_keys=True))
+                raise typer.Exit(code=2)
+            emit_error("Workspace could not be resolved safely.", code="workspace_resolution_failed", exit_code=2)
         tool_checks = [
             {"name": name, "available": bool(shutil.which(command)), "path": shutil.which(command)}
             for name, command in (("Python", "python3"), ("Python fallback", "python"), ("Git", "git"), ("Node.js", "node"), ("npm", "npm"))
@@ -206,9 +211,12 @@ def register(app, model_app, dataset_app) -> None:
         try:
             report = diagnose_workspace(workspace)
         except (OSError, ValueError):
-            message = {"schema_version": 1, "status": "error", "message": "Workspace could not be resolved safely."}
-            typer.echo(json.dumps(message, sort_keys=True) if json_output else "Error: workspace could not be resolved safely.", err=not json_output)
-            raise typer.Exit(code=2)
+            if json_errors_enabled():
+                emit_error("Workspace could not be resolved safely.", code="workspace_resolution_failed", exit_code=2)
+            if json_output:
+                typer.echo(json.dumps({"schema_version": 1, "status": "error", "message": "Workspace could not be resolved safely.", "exit_code": 2}, sort_keys=True))
+                raise typer.Exit(code=2)
+            emit_error("Workspace could not be resolved safely.", code="workspace_resolution_failed", exit_code=2)
         dirty = bool(git_output("status", "--porcelain"))
         payload = {
             "schema_version": 1,
@@ -393,14 +401,15 @@ def register(app, model_app, dataset_app) -> None:
         try:
             result = inspect_dataset(path)
         except (FileNotFoundError, ValueError, OSError) as exc:
+            if json_errors_enabled():
+                emit_error(str(exc), code="dataset_validation_failed")
             if json_output:
                 typer.echo(json.dumps({
                     "schema_version": 1,
-                    "error": {"code": "dataset_validation_failed", "message": str(exc)},
+                    "error": {"code": "dataset_validation_failed", "message": str(exc), "exit_code": 1},
                 }, ensure_ascii=False, sort_keys=True))
-            else:
-                console.print(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(code=1) from exc
+                raise typer.Exit(code=1) from exc
+            emit_error(str(exc), code="dataset_validation_failed")
 
         if json_output:
             typer.echo(json.dumps(dataset_inspection_payload(result), ensure_ascii=False, sort_keys=True))
@@ -431,14 +440,15 @@ def register(app, model_app, dataset_app) -> None:
         try:
             result = inspect_dataset(path)
         except (FileNotFoundError, ValueError, OSError) as exc:
+            if json_errors_enabled():
+                emit_error(str(exc), code="dataset_statistics_failed")
             if json_output:
                 typer.echo(json.dumps({
                     "schema_version": 1,
-                    "error": {"code": "dataset_statistics_failed", "message": str(exc)},
+                    "error": {"code": "dataset_statistics_failed", "message": str(exc), "exit_code": 1},
                 }, ensure_ascii=False, sort_keys=True))
-            else:
-                console.print(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(code=1) from exc
+                raise typer.Exit(code=1) from exc
+            emit_error(str(exc), code="dataset_statistics_failed")
 
         if json_output:
             typer.echo(json.dumps(dataset_inspection_payload(result), ensure_ascii=False, sort_keys=True))
@@ -519,8 +529,7 @@ def register(app, model_app, dataset_app) -> None:
         config = Path(path)
 
         if not config.is_file():
-            console.print(f"[red]Error:[/red] config not found: {config}")
-            raise typer.Exit(code=1)
+            emit_error(f"Config not found: {config}", code="config_not_found")
 
         typer.echo(config.read_text(encoding="utf-8"))
 
@@ -622,6 +631,8 @@ def register(app, model_app, dataset_app) -> None:
         elif valid:
             console.print(f"[green]✓ {message}[/green]")
         else:
+            if json_errors_enabled():
+                emit_error(message, code=error_code)
             console.print(f"[red]Error:[/red] {message}")
             if suggestions:
                 console.print("[bold]Suggested next steps:[/bold]")

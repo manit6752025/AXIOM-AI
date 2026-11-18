@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from axiom.core.fine_tuning import (
@@ -11,7 +11,7 @@ from axiom.core.fine_tuning import (
     FineTuningError,
     cancel_finetuning_job,
     get_job,
-    list_jobs,
+    list_jobs_page,
     runtime_status,
     start_finetuning_job,
 )
@@ -36,11 +36,17 @@ def fine_tuning_runtime() -> dict[str, Any]:
 
 
 @router.get("/jobs")
-def fine_tuning_jobs(limit: int = 20) -> dict[str, Any]:
+def fine_tuning_jobs(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=5000),
+) -> dict[str, Any]:
+    """Return a bounded, newest-first page of local fine-tuning job metadata."""
     try:
-        return {"jobs": list_jobs(limit)}
+        return list_jobs_page(limit=limit, offset=offset)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+    except FineTuningError as exc:
+        raise HTTPException(status_code=400, detail="Fine-tuning job history is unavailable.") from exc
 
 
 @router.get("/jobs/{job_id}")

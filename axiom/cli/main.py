@@ -22,6 +22,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from axiom.cli.interactive import confirm as safe_confirm
+from axiom.cli.errors import emit_error, json_errors_enabled
+from axiom.cli.progress import cancellable_scan_progress, report_cancelled
 from axiom.cli.ai_features import ai_app
 from axiom.cli.optimizer import optimizer_app
 from axiom.cli.startup import show_startup, suppress_for_arguments
@@ -44,6 +47,7 @@ from axiom.core.project import create_project
 from axiom.core.tool_permissions import TOOL_DESCRIPTIONS, ToolPermissionStore
 from axiom.daemon import LOCAL_ACTIONS, run_daemon
 from axiom.datasets.cleaner import clean_jsonl
+from axiom.datasets.progress import DatasetScanCancelled
 from axiom.datasets.inspector import inspect_dataset
 from axiom.models.analysis import analyze_config, disk_info
 from axiom.models.inspector import inspect_model
@@ -131,10 +135,11 @@ def cli_callback(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show diagnostic logging and detailed operational output."),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress normal terminal output; errors remain visible."),
     json_errors: bool = typer.Option(False, "--json-errors", help="Emit stable JSON envelopes for AXIOM CLI errors."),
+    non_interactive: bool = typer.Option(False, "--non-interactive", "--no-input", help="Disable prompts; provide values via flags or environment variables."),
 ) -> None:
     """Configure global output behavior before running a command."""
     ctx.ensure_object(dict)
-    runtime = {"verbose": verbose, "quiet": quiet, "json_errors": json_errors}
+    runtime = {"verbose": verbose, "quiet": quiet, "json_errors": json_errors, "non_interactive": non_interactive}
     ctx.obj.update(runtime)
     _RUNTIME_OPTIONS.clear()
     _RUNTIME_OPTIONS.update(runtime)
@@ -152,6 +157,8 @@ def cli_callback(
         return
 
     if ctx.invoked_subcommand is None:
+        if non_interactive:
+            _cli_error("--non-interactive requires an explicit command; use `axiom --help` to list commands.", code="command_required")
         _run_default_session(show_banner=not no_banner and not quiet)
         return
 
@@ -173,16 +180,25 @@ def _cli_runtime_options() -> dict[str, object]:
 
 def _cli_error(message: str, *, code: str = "AXIOM_CLI_ERROR") -> None:
     """Emit a stable human or machine-readable error without leaking details."""
-    options = _cli_runtime_options()
-    if options.get("json_errors"):
-        typer.echo(json.dumps({
-            "schema_version": 1,
-            "error": {"code": code, "message": message, "exit_code": 1},
-        }, ensure_ascii=False, separators=(",", ":")), err=True)
-    else:
-        typer.echo(f"Error: {message}", err=True)
-    raise typer.Exit(code=1)
+    emit_error(message, code=code, options=_cli_runtime_options(), stderr=True)
 
+
+
+def _cli_command_error(
+    message: str,
+    *,
+    code: str,
+    json_output: bool = False,
+    legacy_payload: dict[str, object] | None = None,
+    exit_code: int = 1,
+) -> None:
+    """Prefer the global envelope while retaining legacy command --json output."""
+    if json_errors_enabled():
+        _cli_error(message, code=code)
+    if json_output and legacy_payload is not None:
+        typer.echo(json.dumps(legacy_payload, ensure_ascii=False, sort_keys=True))
+        raise typer.Exit(code=exit_code)
+    _cli_error(message, code=code)
 
 def _run_default_session(*, show_banner: bool = True) -> None:
     """Make bare ``axiom`` the clear, useful entry point for a terminal."""
@@ -477,7 +493,7 @@ def experiment_delete(
     yes: bool = typer.Option(False, "--yes", help="Delete without an interactive confirmation."),
 ) -> None:
     """Delete one saved plan record; no run artifacts are removed."""
-    if not yes and not typer.confirm(f"Delete saved plan {experiment_id}?", default=False):
+    if not yes and not safe_confirm(f"Delete saved plan {experiment_id}?", default=False):
         console.print("Cancelled.")
         return
     try:
@@ -640,8 +656,7 @@ def init(name: str):
     try:
         root = create_project(name, Path.cwd())
     except (FileExistsError, ValueError) as exc:
-        console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1)
+        _cli_error(str(exc), code="project_initialization_failed")
 
     console.print(
         Panel.fit(
@@ -671,8 +686,7 @@ def hf_login():
     try:
         login()
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[red]Error:[/red] Hugging Face login failed: {exc}")
-        raise typer.Exit(code=1)
+        _cli_error(f"Hugging Face login failed: {exc}", code="huggingface_login_failed")
 
     console.print("[green]✓[/green] Hugging Face authentication configured.")
 
@@ -725,8 +739,7 @@ def hf_logout():
     try:
         logout()
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[red]Error:[/red] Hugging Face logout failed: {exc}")
-        raise typer.Exit(code=1)
+        _cli_error(f"Hugging Face logout failed: {exc}", code="huggingface_logout_failed")
 
     console.print("[green]✓[/green] Hugging Face authentication removed.")
 
@@ -777,8 +790,7 @@ def supercompress_compress(
     path = Path(context_file)
 
     if not path.is_file():
-        console.print(f"[red]Error:[/red] Context file not found: {path}")
-        raise typer.Exit(code=1)
+        _cli_error(f"Context file not found: {path}", code="context_file_not_found")
 
     try:
         context = path.read_text(encoding="utf-8")
@@ -872,8 +884,7 @@ def integration_add(
     try:
         integration_type = IntegrationType(type.lower())
     except ValueError:
-        console.print("[red]Error:[/red] Type must be one of: mcp, cli, http, a2a.")
-        raise typer.Exit(code=1)
+        _cli_error("Type must be one of: mcp, cli, http, a2a.", code="invalid_integration_type")
 
     if (
         integration_type
@@ -928,8 +939,7 @@ def integration_remove(name: str):
     registry = IntegrationRegistry()
 
     if not registry.remove(name):
-        console.print(f"[yellow]Integration not found:[/yellow] {name}")
-        raise typer.Exit(code=1)
+        _cli_error(f"Integration not found: {name}", code="integration_not_found")
 
     console.print(f"[green]✓[/green] Removed integration: [cyan]{name}[/cyan]")
 
@@ -1188,11 +1198,10 @@ def model_export(
         target.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(target, json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
     except (OSError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_export_failed", "message": str(exc)}}, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
+        _cli_command_error(
+            str(exc), code="model_export_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_export_failed", "message": str(exc)}},
+        )
     if json_output:
         typer.echo(json.dumps({"schema_version": 1, "exported": True, "path": str(target.resolve()), "total": len(models)}, sort_keys=True))
         return
@@ -1222,11 +1231,10 @@ def model_import(
         imported = registry.import_models(values)
         after_count = len(registry.list())
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_import_failed", "message": str(exc)}}, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] Model import failed: {exc}")
-        raise typer.Exit(code=1) from exc
+        _cli_command_error(
+            f"Model import failed: {exc}", code="model_import_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_import_failed", "message": str(exc)}},
+        )
     payload = {
         "schema_version": 1,
         "imported": len(imported),
@@ -1249,17 +1257,15 @@ def model_remove(
     try:
         removed = registry.remove(model_id)
     except (OSError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_remove_failed", "message": str(exc)}}, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] Could not remove model record: {exc}")
-        raise typer.Exit(code=1) from exc
+        _cli_command_error(
+            f"Could not remove model record: {exc}", code="model_remove_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_remove_failed", "message": str(exc)}},
+        )
     if removed is None:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_not_found", "message": "No registered model has that ID."}}, sort_keys=True))
-        else:
-            console.print("[yellow]No registered model has that ID.[/yellow]")
-        raise typer.Exit(code=1)
+        _cli_command_error(
+            "No registered model has that ID.", code="model_not_found", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_not_found", "message": "No registered model has that ID."}},
+        )
     payload = {"schema_version": 1, "removed": True, "model": removed.to_dict()}
     if json_output:
         typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True))
@@ -1278,17 +1284,15 @@ def model_favorite(
     try:
         updated = registry.update(model_id, {"favorite": favorite})
     except (OSError, TypeError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_favorite_failed", "message": str(exc)}}, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] Could not update model favorite state: {exc}")
-        raise typer.Exit(code=1) from exc
+        _cli_command_error(
+            f"Could not update model favorite state: {exc}", code="model_favorite_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_favorite_failed", "message": str(exc)}},
+        )
     if updated is None:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_not_found", "message": "No registered model has that ID."}}, sort_keys=True))
-        else:
-            console.print("[yellow]No registered model has that ID.[/yellow]")
-        raise typer.Exit(code=1)
+        _cli_command_error(
+            "No registered model has that ID.", code="model_not_found", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_not_found", "message": "No registered model has that ID."}},
+        )
     payload = {"schema_version": 1, "updated": True, "model": updated.to_dict()}
     if json_output:
         typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True))
@@ -1464,11 +1468,10 @@ def model_add(
         )
         registry.add(model)
     except (TypeError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_add_failed", "message": str(exc)}}, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
+        _cli_command_error(
+            str(exc), code="model_add_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_add_failed", "message": str(exc)}},
+        )
     if json_output:
         typer.echo(json.dumps({"schema_version": 1, "created": True, "model": model.to_dict()}, ensure_ascii=False, sort_keys=True))
         return
@@ -1510,38 +1513,34 @@ def model_update(
     if clear_tags:
         if tag is not None:
             message = "--clear-tags cannot be combined with --tag."
-            if json_output:
-                typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_update_invalid", "message": message}}, sort_keys=True))
-            else:
-                console.print(f"[red]Error:[/red] {message}")
-            raise typer.Exit(code=1)
+            _cli_command_error(
+                message, code="model_update_invalid", json_output=json_output,
+                legacy_payload={"schema_version": 1, "error": {"code": "model_update_invalid", "message": message}},
+            )
         changes["tags"] = []
     if favorite is not None:
         changes["favorite"] = favorite
     if not changes:
         message = "Specify at least one metadata option to update."
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_update_empty", "message": message}}, sort_keys=True))
-        else:
-            console.print(f"[yellow]No model changes requested.[/yellow] {message}")
-        raise typer.Exit(code=1)
+        _cli_command_error(
+            message, code="model_update_empty", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_update_empty", "message": message}},
+        )
 
     registry = ModelRegistry()
     try:
         updated = registry.update(model_id, changes)
     except (OSError, TypeError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_update_failed", "message": str(exc)}}, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] Could not update model metadata: {exc}")
-        raise typer.Exit(code=1) from exc
+        _cli_command_error(
+            f"Could not update model metadata: {exc}", code="model_update_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_update_failed", "message": str(exc)}},
+        )
     if updated is None:
         message = "No registered model has that ID."
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_not_found", "message": message}}, sort_keys=True))
-        else:
-            console.print(f"[yellow]{message}[/yellow]")
-        raise typer.Exit(code=1)
+        _cli_command_error(
+            message, code="model_not_found", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_not_found", "message": message}},
+        )
     payload = {"schema_version": 1, "updated": True, "model": updated.to_dict()}
     if json_output:
         typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True))
@@ -1701,8 +1700,7 @@ def model_pull(
     )
 
     if remaining_gb < 0:
-        console.print("[red]✗ Download blocked:[/red] insufficient disk space.")
-        raise typer.Exit(code=1)
+        _cli_error("Download blocked: insufficient disk space.", code="model_pull_insufficient_disk_space")
 
     projected_used_percent = (
         ((total_bytes - free_bytes + total_size) / total_bytes) * 100
@@ -1711,11 +1709,7 @@ def model_pull(
     )
 
     if projected_used_percent > max_disk_usage_gb:
-        console.print(
-            "[red]✗ Download blocked:[/red] "
-            f"projected disk usage would reach {projected_used_percent:.1f}%."
-        )
-        raise typer.Exit(code=1)
+        _cli_error(f"Download blocked: projected disk usage would reach {projected_used_percent:.1f}%.", code="model_pull_disk_usage_limit")
 
     console.print("[green]✓ Disk safety check passed.[/green]")
 
@@ -1725,8 +1719,7 @@ def model_pull(
             local_dir=Path("models") / repo_id.replace("/", "__"),
         )
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[red]Error:[/red] Model download failed: {exc}")
-        raise typer.Exit(code=1)
+        _cli_error(f"Model download failed: {exc}", code="model_pull_failed")
 
     console.print(f"[green]✓ Model downloaded:[/green] {destination}")
 
@@ -1740,14 +1733,10 @@ def model_inspect(
     try:
         result = inspect_model(path)
     except (FileNotFoundError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({
-                "schema_version": 1,
-                "error": {"code": "model_inspection_failed", "message": str(exc)},
-            }, ensure_ascii=False, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1)
+        _cli_command_error(
+            str(exc), code="model_inspection_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_inspection_failed", "message": str(exc)}},
+        )
 
     if json_output:
         typer.echo(json.dumps({
@@ -1804,14 +1793,10 @@ def dataset_inspect(
     try:
         result = inspect_dataset(path)
     except (FileNotFoundError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({
-                "schema_version": 1,
-                "error": {"code": "dataset_inspection_failed", "message": str(exc)},
-            }, ensure_ascii=False, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1)
+        _cli_command_error(
+            str(exc), code="dataset_inspection_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "dataset_inspection_failed", "message": str(exc)}},
+        )
 
     if json_output:
         typer.echo(json.dumps(dataset_inspection_payload(result), ensure_ascii=False, sort_keys=True))
@@ -1864,7 +1849,18 @@ def dataset_clean(
 
     destination = Path(output) if output else source.with_name(f"{source.stem}.cleaned.jsonl")
     try:
-        result = clean_jsonl(source, destination)
+        with cancellable_scan_progress("Cleaning JSONL dataset", source.stat().st_size) as (cancel_event, progress):
+            result = clean_jsonl(
+                source,
+                destination,
+                on_progress=(
+                    (lambda rows, current, total: progress(rows, current, total))
+                    if progress is not None else None
+                ),
+                cancel_event=cancel_event,
+            )
+    except (DatasetScanCancelled, KeyboardInterrupt):
+        report_cancelled("Dataset cleaning cancelled; the original file is unchanged and temporary output was removed.")
     except OSError as exc:
         report_error("dataset_cleaning_failed", str(exc))
         raise typer.Exit(code=1) from exc

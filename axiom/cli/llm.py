@@ -5,10 +5,13 @@ import json
 import os
 
 import typer
+
+from axiom.cli.errors import emit_error
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from axiom.cli.interactive import prompt as safe_prompt
 from axiom.core import llm_client
 
 console = Console()
@@ -16,8 +19,7 @@ llm_app = typer.Typer(help="Use the AXIOM local engine or a supported cloud LLM 
 
 
 def _fail(message: str) -> None:
-    console.print(f"[red]Error:[/red] {message}")
-    raise typer.Exit(code=1)
+    emit_error(message, code="llm_error")
 
 
 def _credential(provider: str, env_name: str) -> str | None:
@@ -28,7 +30,7 @@ def _credential(provider: str, env_name: str) -> str | None:
     value = os.environ.get(env_name, "")
     if value.strip():
         return value
-    return typer.prompt(f"{provider} API key (used once, never saved by AXIOM)", hide_input=True)
+    return safe_prompt(f"{provider} API key (used once, never saved by AXIOM)", hide_input=True, non_interactive_hint=f"Set {env_name} or pass --api-key-env <ENVIRONMENT_VARIABLE>.")
 
 
 @llm_app.command("providers")

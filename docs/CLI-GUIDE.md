@@ -32,6 +32,59 @@ axiom --quiet --json-errors completion tcsh
 - `--verbose` and `--quiet` are mutually exclusive.
 - Existing command-level `--json` flags continue to control successful command output. `--json-errors` only changes error envelopes.
 
+## Progress and cancellation
+
+Local Model Studio downloads and GGUF conversions show byte progress on an
+interactive terminal; dataset profiling, manifest hashing, cleaning previews,
+and JSONL cleaning show row/byte progress on stderr. Redirected/JSON output
+remains clean, and progress is suppressed by `--quiet`.
+
+Press **Ctrl+C once** to request cooperative cancellation at the next file
+chunk, row, or subprocess boundary. The CLI exits with status `130`. Partial
+staged model downloads and temporary dataset-cleaning output are removed; a
+cleaning operation never changes its original source. Model Studio jobs also
+retain their API/GUI cancellation endpoint and persistent status history.
+
+## Non-interactive execution
+
+Use the root `--non-interactive` (alias `--no-input`) option before the
+command to disable all prompts. AXIOM also refuses to prompt when standard
+input is not a terminal, even when the flag is omitted. Supply required values
+through command arguments/options or environment variables instead.
+
+```bash
+axiom --non-interactive optimize run --profile 2 --model ./models/qwen --target-tps 12
+AXIOM_LLM_API_KEY="$MY_PROVIDER_KEY" axiom --non-interactive llm chat qwen "Hello" --provider openai --send-to-provider
+axiom --non-interactive model studio remote-models https://provider.example/v1 --api-key-env AXIOM_LLM_API_KEY
+```
+
+The Model Studio `wizard` command is explicitly interactive; use the
+`search`, `files`, `pull`, `pull-native`, `install-gguf`, or `convert-gguf`
+commands for scripted operations. Remote prompt submission requires
+`--send-to-provider` in non-interactive mode. API keys should be provided
+through environment variables, not command-line arguments.
+
+Destructive confirmations default to **no** when input is unavailable.
+Existing `--yes` flags remain the explicit opt-in for deletion/removal.
+
+## Machine-readable CLI errors
+
+Place `--json-errors` before the command to emit a schema-versioned error
+envelope on standard error while preserving the command's non-zero exit code.
+The envelope shape is:
+
+```json
+{"schema_version":1,"error":{"code":"model_studio_error","message":"...","exit_code":1}}
+```
+
+The same emitter is used by root commands and the inference, engine, training,
+Model Studio, LLM, workflow, evaluation, tools, agent-profile, support-bundle,
+dataset, and workspace command groups. Command-level `--json` remains the
+success/report format; global `--json-errors` takes precedence only when a
+command fails. Exit codes are unchanged, including exit code 2 for unsafe
+support-bundle output paths. Shell/Click argument parsing errors that occur
+before the root command callback are still rendered by Click itself.
+
 ## Shell completion
 
 The root Typer command exposes shell completion. Install completion in the

@@ -23,3 +23,23 @@ def test_train_run_exposes_required_input_options():
         for option in getattr(parameter, "opts", ())
     }
     assert {"--model-path", "--dataset", "--output-dir"} <= options
+
+
+def test_train_jobs_supports_offset_and_page_json(monkeypatch):
+    import json
+    from axiom.cli import fine_tuning as cli_fine_tuning
+
+    expected = {
+        "jobs": [{"id": "a" * 32, "status": "completed"}],
+        "total": 8, "limit": 2, "offset": 4, "has_more": True,
+        "truncated": False, "scan_limit": 5000,
+    }
+    observed = {}
+    def fake_page(*, limit, offset):
+        observed.update(limit=limit, offset=offset)
+        return expected
+    monkeypatch.setattr(cli_fine_tuning, "list_jobs_page", fake_page)
+    result = CliRunner().invoke(app, ["--no-banner", "train", "jobs", "--limit", "2", "--offset", "4", "--json"])
+    assert result.exit_code == 0, result.output
+    assert observed == {"limit": 2, "offset": 4}
+    assert json.loads(result.stdout) == expected

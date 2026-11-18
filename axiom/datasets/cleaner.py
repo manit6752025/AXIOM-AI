@@ -7,7 +7,10 @@ import os
 import secrets
 import tempfile
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Callable
+from threading import Event
+
+from axiom.datasets.progress import check_scan_cancelled
 
 _LOG = logging.getLogger(__name__)
 
@@ -105,6 +108,8 @@ def clean_jsonl(
     max_bytes: int | None = None,
     max_rows: int | None = None,
     max_line_bytes: int | None = None,
+    on_progress: Callable[[int, int, int | None], None] | None = None,
+    cancel_event: Event | None = None,
 ) -> DatasetCleaningResult:
     source = Path(source)
     output = Path(output)
@@ -161,6 +166,27 @@ def clean_jsonl(
     seen: set[str] = set()
 
     total_lines = 0
+    progress_bytes = 0
+    last_progress_rows = 0
+    last_progress_bytes = 0
+    try:
+        progress_total_bytes: int | None = (
+            source.stat().st_size if source_stream is None
+            else os.fstat(source_stream.fileno()).st_size
+        )
+    except (AttributeError, OSError):
+        progress_total_bytes = None
+
+    def notify_progress(*, force: bool = False) -> None:
+        nonlocal last_progress_rows, last_progress_bytes
+        if on_progress is None:
+            return
+        if force or total_lines - last_progress_rows >= 256 or progress_bytes - last_progress_bytes >= 1024 * 1024:
+            on_progress(total_lines, progress_bytes, progress_total_bytes)
+            check_scan_cancelled(cancel_event)
+            last_progress_rows = total_lines
+            last_progress_bytes = progress_bytes
+
     kept = 0
     removed_invalid = 0
     removed_empty = 0
@@ -222,7 +248,10 @@ def clean_jsonl(
 
             with outfile:
                 for raw_line in input_lines:
+                    check_scan_cancelled(cancel_event)
                     total_lines += 1
+                    progress_bytes += len(raw_line.encode("utf-8"))
+                    notify_progress()
                     line = raw_line.strip()
 
                     if not line:
@@ -265,9 +294,12 @@ def clean_jsonl(
 
                     kept += 1
 
+                notify_progress(force=True)
+                check_scan_cancelled(cancel_event)
                 outfile.flush()
                 os.fsync(outfile.fileno())
 
+        check_scan_cancelled(cancel_event)
         if output_parent_fd is not None:
             assert output_name is not None
             if overwrite:

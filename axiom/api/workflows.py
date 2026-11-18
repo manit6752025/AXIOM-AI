@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import uuid
+from axiom.core.resource_ids import new_resource_id
 import hashlib
 import importlib.metadata
 import json
@@ -135,7 +135,7 @@ def create_workflow(request: WorkflowInput) -> dict[str, Any]:
     nodes, edges = _validated_payload(request)
     now = datetime.now(UTC).isoformat()
     record = {
-        "id": uuid.uuid4().hex,
+        "id": new_resource_id(),
         "name": request.name,
         "created_at": now,
         "updated_at": now,
@@ -211,7 +211,7 @@ def duplicate_workflow(workflow_id: str) -> dict[str, Any]:
             raise HTTPException(status_code=404, detail="Workflow not found.")
         record = store.duplicate(
             workflow_id,
-            new_id=uuid.uuid4().hex,
+            new_id=new_resource_id(),
             name=f"{source['name']} (copy)"[:120],
         )
     except WorkflowStoreFullError as exc:

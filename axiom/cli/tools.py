@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 
 import typer
+
+from axiom.cli.errors import emit_error
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -286,8 +288,7 @@ def register(app: typer.Typer, tools_app: typer.Typer) -> None:
         try:
             tool = _find_tool(tool_id)
         except ValueError as exc:
-            console.print(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(code=1) from exc
+            emit_error(str(exc), code="tool_not_found")
 
         console.print(Panel.fit(tool.purpose, title=f"{tool.name} · {tool.id}"))
         console.print(f"Auth: {tool.auth_notes}")
@@ -330,11 +331,9 @@ def register(app: typer.Typer, tools_app: typer.Typer) -> None:
         """Preview tool setup; use --yes for explicit package installation."""
 
         if all_tools and tool_id:
-            console.print("[red]Error:[/red] choose a tool ID or --all, not both.")
-            raise typer.Exit(code=1)
+            emit_error("Choose a tool ID or --all, not both.", code="invalid_tool_selection")
         if not all_tools and not tool_id:
-            console.print("[red]Error:[/red] provide a tool ID or use --all.")
-            raise typer.Exit(code=1)
+            emit_error("Provide a tool ID or use --all.", code="missing_tool_selection")
 
         selected = list(TOOLS) if all_tools else [_find_tool(tool_id or "")]
         failures = 0

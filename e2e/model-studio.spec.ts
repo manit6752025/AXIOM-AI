@@ -111,3 +111,37 @@ test("Model Studio installs GGUF directly into AXIOM Native Engine trusted stora
   });
   await expect(page.getByRole("region", { name: "Model Studio job status" })).toContainText("QUEUED");
 });
+
+
+test("Model Studio exposes cancellation for active installs", async ({ page }) => {
+  await ensureAuthenticated(page);
+  await page.route("**/api/models/studio/status", route => route.fulfill({ json: {
+    schema_version: 1, ollama_installed: true, ollama_endpoint: "http://127.0.0.1:11434",
+    download_limit_bytes: 21474836480, gguf_directory: "/local/models/gguf",
+    catalogue: "Hugging Face public model API", network_search_is_explicit: true,
+  }}));
+  const running = {
+    schema_version: 1, id: "d".repeat(32), status: "running", operation: "pull_native",
+    created_at: "2026-11-18T00:00:00Z", updated_at: "2026-11-18T00:00:00Z",
+    config: { operation: "pull_native", repo_id: "Qwen/test" },
+    progress_bytes: 1024, total_bytes: 4096, logs: ["Downloading model weights"],
+    error: null, result: null,
+  };
+  let cancelRequested = false;
+  await page.route("**/api/models/studio/jobs**", async route => {
+    const url = route.request().url();
+    if (route.request().method() === "POST" && url.endsWith("/cancel")) {
+      cancelRequested = true;
+      return route.fulfill({ json: { ...running, status: "cancelling", cancel_requested: true, logs: [...running.logs, "Cancellation requested"] } });
+    }
+    if (route.request().method() === "POST") return route.fulfill({ status: 202, json: running });
+    if (url.endsWith("/" + "d".repeat(32))) return route.fulfill({ json: running });
+    return route.fulfill({ json: { jobs: [running], total: 1, limit: 10, offset: 0, has_more: false, truncated: false, scan_limit: 5000, filters: { search: "" } } });
+  });
+  await page.goto("/?page=models");
+  await expect(page.getByRole("region", { name: "Model Studio job status" })).toContainText("RUNNING");
+  await page.getByRole("button", { name: "Cancel operation" }).click();
+  await expect(page.getByRole("button", { name: "Cancel operation" })).toBeDisabled();
+  expect(cancelRequested).toBe(true);
+  await expect(page.getByTestId("model-studio-log")).toContainText("Cancellation requested");
+});

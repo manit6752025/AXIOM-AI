@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import os
 import re
-import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+from axiom.core.resource_ids import legacy_resource_id, new_resource_id
 
 from axiom.core.storage import atomic_write_text, file_lock
 
@@ -17,7 +18,7 @@ class Model:
     format: str = "unknown"
     parameters: str | None = None
     quantization: str | None = None
-    id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    id: str = field(default_factory=new_resource_id)
     architecture: str | None = None
     license: str | None = None
     tags: list[str] = field(default_factory=list)
@@ -105,10 +106,10 @@ class ModelRegistry:
             try:
                 migrated = dict(item)
                 if "id" not in migrated:
-                    migrated["id"] = uuid.uuid5(
-                        uuid.NAMESPACE_URL,
-                        f"axiom:model:{migrated.get('name', '')}:{migrated.get('source', '')}",
-                    ).hex
+                    migrated["id"] = legacy_resource_id(
+                        "model",
+                        f"{migrated.get('name', '')}:{migrated.get('source', '')}",
+                    )
                 models.append(Model(**migrated))
             except (TypeError, ValueError) as exc:
                 raise ValueError(

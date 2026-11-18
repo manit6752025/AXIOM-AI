@@ -38,3 +38,27 @@ def test_agent_profile_api_rejects_unknown_capability(monkeypatch, tmp_path) -> 
     app.include_router(agent_profiles.router)
     response = TestClient(app).post("/api/agent-profiles", json={"name": "Unsafe", "task_capabilities": ["shell.execute"]})
     assert response.status_code == 422
+
+
+def test_agent_profile_api_returns_page_metadata(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(agent_profiles, "AgentProfileStore", lambda: AgentProfileStore(tmp_path))
+    app = FastAPI()
+    app.include_router(agent_profiles.router)
+    client = TestClient(app)
+    for index in range(3):
+        created = client.post("/api/agent-profiles", json={"name": f"Research {index}"})
+        assert created.status_code == 201
+
+    first = client.get("/api/agent-profiles?limit=2&offset=0")
+    assert first.status_code == 200
+    assert len(first.json()["profiles"]) == 2
+    assert first.json()["total"] == 4
+    assert first.json()["has_more"] is True
+
+    second = client.get("/api/agent-profiles?limit=2&offset=2")
+    assert second.status_code == 200
+    assert len(second.json()["profiles"]) == 2
+    assert second.json()["has_more"] is False
+
+    invalid = client.get("/api/agent-profiles?limit=101")
+    assert invalid.status_code == 422

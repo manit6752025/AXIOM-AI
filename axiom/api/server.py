@@ -4,6 +4,7 @@ import os
 import logging
 import re
 import uuid
+import hmac
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,75 @@ _REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 _logger = logging.getLogger(__name__)
 API_CONTRACT_VERSION = 1
 
+_API_SCOPE_TOKEN = re.compile(r"^[A-Za-z0-9._~-]{32,256}$")
+_API_SCOPE_PUBLIC_PATHS = frozenset({
+    "/api/health",
+    "/api/meta",
+    "/api/openapi.json",
+    "/api/docs",
+    "/api/redoc",
+    "/api/docs/oauth2-redirect",
+})
+_READ_ONLY_POST_PATHS = frozenset({
+    # These handlers validate or calculate plans only. Unlisted POST routes
+    # intentionally require write scope (fail closed).
+    "/api/workflows/validate",
+    "/api/models/optimize",
+    "/api/models/policy-audit",
+    "/api/optimizer/plan",
+    "/api/workspace/training-plan",
+    "/api/workspace/dataset-cleaning-preview",
+    "/api/workspace/dataset-quality",
+    "/api/workspace/models/inspect",
+    "/api/engine/adapters/compatibility",
+    "/api/engine/quantization/estimate",
+})
+
+
+def _configured_api_scope_tokens() -> tuple[str | None, str | None]:
+    """Read optional read/write API tokens, rejecting partial or weak configuration."""
+    read_token = os.environ.get("AXIOM_API_READ_TOKEN")
+    write_token = os.environ.get("AXIOM_API_WRITE_TOKEN")
+    if read_token is None and write_token is None:
+        return None, None
+    if not read_token or not write_token:
+        raise RuntimeError(
+            "AXIOM_API_READ_TOKEN and AXIOM_API_WRITE_TOKEN must be configured together."
+        )
+    if not _API_SCOPE_TOKEN.fullmatch(read_token) or not _API_SCOPE_TOKEN.fullmatch(write_token):
+        raise RuntimeError(
+            "AXIOM API scope tokens must be 32–256 ASCII characters using letters, digits, '.', '_', '~', or '-'."
+        )
+    if hmac.compare_digest(read_token, write_token):
+        raise RuntimeError("AXIOM API read and write tokens must be different.")
+    return read_token, write_token
+
+
+def _required_api_scope(method: str, path: str) -> str:
+    """Return the minimum scope for a request; unknown mutations require write."""
+    normalized_method = method.upper()
+    if normalized_method in {"GET", "HEAD"}:
+        return "read"
+    if normalized_method == "POST" and (
+        path in _READ_ONLY_POST_PATHS
+        or re.fullmatch(r"/api/workflows/[A-Za-z0-9_-]{1,64}/dry-run", path)
+    ):
+        return "read"
+    return "write"
+
+
+def _is_same_origin_control_center_request(request: Any) -> bool:
+    """Keep the bundled same-origin Control Center usable with API tokens enabled."""
+    origin = request.headers.get("origin")
+    host = request.headers.get("host")
+    fetch_site = request.headers.get("sec-fetch-site", "")
+    return bool(
+        origin
+        and host
+        and origin == f"{request.url.scheme}://{host}"
+        and fetch_site in {"", "same-origin"}
+    )
+
 
 class OptimizeRequest(BaseModel):
     model: str
@@ -53,6 +123,8 @@ def create_app() -> Any:
 
     from axiom.api.optimization import plan_optimization
     from axiom.api.policy_audit import audit_model
+
+    api_read_token, api_write_token = _configured_api_scope_tokens()
 
     app = FastAPI(
         title="AXIOM API",
@@ -82,6 +154,43 @@ def create_app() -> Any:
         supplied = request.headers.get("X-Request-ID", "")
         request_id = supplied if _REQUEST_ID.fullmatch(supplied) else uuid.uuid4().hex
         request.state.request_id = request_id
+
+        path = request.url.path
+        if (
+            api_read_token is not None
+            and path.startswith(("/api/", "/v1/"))
+            and path not in _API_SCOPE_PUBLIC_PATHS
+            and request.method.upper() != "OPTIONS"
+            and not _is_same_origin_control_center_request(request)
+        ):
+            required_scope = _required_api_scope(request.method, path)
+            authorization = request.headers.get("authorization", "")
+            scheme, separator, supplied_token = authorization.partition(" ")
+            supplied_token = supplied_token.strip() if separator and scheme.lower() == "bearer" else ""
+            has_write_scope = bool(
+                supplied_token and hmac.compare_digest(supplied_token, api_write_token or "")
+            )
+            has_read_scope = bool(
+                supplied_token and hmac.compare_digest(supplied_token, api_read_token or "")
+            )
+            if not (has_write_scope or has_read_scope):
+                return error_response(
+                    request,
+                    "authentication_required",
+                    "A valid AXIOM API token is required.",
+                    {"required_scope": required_scope},
+                    401,
+                    {"WWW-Authenticate": "Bearer"},
+                )
+            if required_scope == "write" and not has_write_scope:
+                return error_response(
+                    request,
+                    "insufficient_scope",
+                    "This operation requires the write scope.",
+                    {"required_scope": "write"},
+                    403,
+                )
+
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         return response
