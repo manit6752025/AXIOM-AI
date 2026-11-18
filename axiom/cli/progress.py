@@ -8,7 +8,7 @@ import threading
 from typing import Any
 
 from rich.console import Console
-from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TimeRemainingColumn
+from rich.progress import BarColumn, DownloadColumn, Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
 
 from axiom.cli.errors import runtime_options
 
@@ -34,6 +34,7 @@ def scan_progress(
         return
 
     with Progress(
+        SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         DownloadColumn(),
