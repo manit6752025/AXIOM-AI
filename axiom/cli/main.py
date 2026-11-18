@@ -1196,11 +1196,10 @@ def model_export(
         target.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(target, json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
     except (OSError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_export_failed", "message": str(exc)}}, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
+        _cli_command_error(
+            str(exc), code="model_export_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_export_failed", "message": str(exc)}},
+        )
     if json_output:
         typer.echo(json.dumps({"schema_version": 1, "exported": True, "path": str(target.resolve()), "total": len(models)}, sort_keys=True))
         return
@@ -1230,11 +1229,10 @@ def model_import(
         imported = registry.import_models(values)
         after_count = len(registry.list())
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_import_failed", "message": str(exc)}}, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] Model import failed: {exc}")
-        raise typer.Exit(code=1) from exc
+        _cli_command_error(
+            f"Model import failed: {exc}", code="model_import_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_import_failed", "message": str(exc)}},
+        )
     payload = {
         "schema_version": 1,
         "imported": len(imported),
@@ -1257,17 +1255,15 @@ def model_remove(
     try:
         removed = registry.remove(model_id)
     except (OSError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_remove_failed", "message": str(exc)}}, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] Could not remove model record: {exc}")
-        raise typer.Exit(code=1) from exc
+        _cli_command_error(
+            f"Could not remove model record: {exc}", code="model_remove_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_remove_failed", "message": str(exc)}},
+        )
     if removed is None:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_not_found", "message": "No registered model has that ID."}}, sort_keys=True))
-        else:
-            console.print("[yellow]No registered model has that ID.[/yellow]")
-        raise typer.Exit(code=1)
+        _cli_command_error(
+            "No registered model has that ID.", code="model_not_found", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_not_found", "message": "No registered model has that ID."}},
+        )
     payload = {"schema_version": 1, "removed": True, "model": removed.to_dict()}
     if json_output:
         typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True))
@@ -1286,17 +1282,15 @@ def model_favorite(
     try:
         updated = registry.update(model_id, {"favorite": favorite})
     except (OSError, TypeError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_favorite_failed", "message": str(exc)}}, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] Could not update model favorite state: {exc}")
-        raise typer.Exit(code=1) from exc
+        _cli_command_error(
+            f"Could not update model favorite state: {exc}", code="model_favorite_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_favorite_failed", "message": str(exc)}},
+        )
     if updated is None:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_not_found", "message": "No registered model has that ID."}}, sort_keys=True))
-        else:
-            console.print("[yellow]No registered model has that ID.[/yellow]")
-        raise typer.Exit(code=1)
+        _cli_command_error(
+            "No registered model has that ID.", code="model_not_found", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_not_found", "message": "No registered model has that ID."}},
+        )
     payload = {"schema_version": 1, "updated": True, "model": updated.to_dict()}
     if json_output:
         typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True))
@@ -1472,11 +1466,10 @@ def model_add(
         )
         registry.add(model)
     except (TypeError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_add_failed", "message": str(exc)}}, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
+        _cli_command_error(
+            str(exc), code="model_add_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_add_failed", "message": str(exc)}},
+        )
     if json_output:
         typer.echo(json.dumps({"schema_version": 1, "created": True, "model": model.to_dict()}, ensure_ascii=False, sort_keys=True))
         return
@@ -1518,38 +1511,34 @@ def model_update(
     if clear_tags:
         if tag is not None:
             message = "--clear-tags cannot be combined with --tag."
-            if json_output:
-                typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_update_invalid", "message": message}}, sort_keys=True))
-            else:
-                console.print(f"[red]Error:[/red] {message}")
-            raise typer.Exit(code=1)
+            _cli_command_error(
+                message, code="model_update_invalid", json_output=json_output,
+                legacy_payload={"schema_version": 1, "error": {"code": "model_update_invalid", "message": message}},
+            )
         changes["tags"] = []
     if favorite is not None:
         changes["favorite"] = favorite
     if not changes:
         message = "Specify at least one metadata option to update."
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_update_empty", "message": message}}, sort_keys=True))
-        else:
-            console.print(f"[yellow]No model changes requested.[/yellow] {message}")
-        raise typer.Exit(code=1)
+        _cli_command_error(
+            message, code="model_update_empty", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_update_empty", "message": message}},
+        )
 
     registry = ModelRegistry()
     try:
         updated = registry.update(model_id, changes)
     except (OSError, TypeError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_update_failed", "message": str(exc)}}, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] Could not update model metadata: {exc}")
-        raise typer.Exit(code=1) from exc
+        _cli_command_error(
+            f"Could not update model metadata: {exc}", code="model_update_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_update_failed", "message": str(exc)}},
+        )
     if updated is None:
         message = "No registered model has that ID."
-        if json_output:
-            typer.echo(json.dumps({"schema_version": 1, "error": {"code": "model_not_found", "message": message}}, sort_keys=True))
-        else:
-            console.print(f"[yellow]{message}[/yellow]")
-        raise typer.Exit(code=1)
+        _cli_command_error(
+            message, code="model_not_found", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_not_found", "message": message}},
+        )
     payload = {"schema_version": 1, "updated": True, "model": updated.to_dict()}
     if json_output:
         typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True))
@@ -1742,14 +1731,10 @@ def model_inspect(
     try:
         result = inspect_model(path)
     except (FileNotFoundError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({
-                "schema_version": 1,
-                "error": {"code": "model_inspection_failed", "message": str(exc)},
-            }, ensure_ascii=False, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1)
+        _cli_command_error(
+            str(exc), code="model_inspection_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "model_inspection_failed", "message": str(exc)}},
+        )
 
     if json_output:
         typer.echo(json.dumps({
@@ -1806,14 +1791,10 @@ def dataset_inspect(
     try:
         result = inspect_dataset(path)
     except (FileNotFoundError, ValueError) as exc:
-        if json_output:
-            typer.echo(json.dumps({
-                "schema_version": 1,
-                "error": {"code": "dataset_inspection_failed", "message": str(exc)},
-            }, ensure_ascii=False, sort_keys=True))
-        else:
-            console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1)
+        _cli_command_error(
+            str(exc), code="dataset_inspection_failed", json_output=json_output,
+            legacy_payload={"schema_version": 1, "error": {"code": "dataset_inspection_failed", "message": str(exc)}},
+        )
 
     if json_output:
         typer.echo(json.dumps(dataset_inspection_payload(result), ensure_ascii=False, sort_keys=True))
