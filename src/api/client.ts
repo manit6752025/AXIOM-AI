@@ -461,6 +461,10 @@ export type ModelStudioModel = { id: string; author: string; downloads: number; 
 export type ModelStudioFile = { filename: string; size_bytes: number | null; quantization: string };
 export type ModelStudioStatus = { schema_version: number; ollama_installed: boolean; ollama_endpoint: string; download_limit_bytes: number; gguf_directory: string; native_model_root?: string; native_model_download_limit_bytes?: number; native_model_file_limit_bytes?: number; native_pull_available?: boolean; catalogue: string; network_search_is_explicit: boolean };
 export type ModelStudioJob = { schema_version: 1; id: string; status: "queued" | "running" | "completed" | "failed"; operation: string; created_at: string; updated_at: string; started_at?: string | null; finished_at?: string | null; config: Record<string, unknown>; progress_bytes: number; total_bytes: number | null; logs: string[]; error: string | null; result: Record<string, unknown> | null };
+export type ModelStudioJobPage = {
+  jobs: ModelStudioJob[]; total: number; limit: number; offset: number;
+  has_more: boolean; truncated: boolean; scan_limit: number; filters: { search: string };
+};
 export type LLMProvider = "axiom-local" | "ollama-local" | "openai" | "anthropic" | "gemini" | "deepseek" | "moonshot" | "openrouter" | "openai-compatible";
 export type LLMProviderInfo = {
   id: LLMProvider; label: string; kind: "local" | "cloud"; requires_api_key: boolean;
@@ -506,6 +510,7 @@ export type AgentProfile = {
 };
 export type AgentProfileReport = {
   schema_version: 1; profiles: AgentProfile[]; capability_catalog: string[]; authorization_note: string;
+  total: number; limit: number; offset: number; has_more: boolean;
 };
 
 export type WorkspaceModel = {
@@ -778,6 +783,10 @@ export type FineTuningJob = {
   created_at: string; updated_at: string; started_at: string | null; finished_at: string | null;
   config: FineTuningConfig; cancel_requested?: boolean; completed_steps: number; loss: number | null; error: string | null;
   logs: string[]; result?: { output_dir: string; adapter_files: string[]; target_modules: string[]; dataset_rows: number; max_steps: number; device?: string; engine?: string; trainable_parameters?: number };
+};
+export type FineTuningJobPage = {
+  jobs: FineTuningJob[]; total: number; limit: number; offset: number;
+  has_more: boolean; truncated: boolean; scan_limit: number;
 };
 
 export type WorkspaceEvent = {
@@ -1476,6 +1485,13 @@ export const axiomApi = {
 
   fineTuningRuntime: () => requestJson<FineTuningRuntime>("/api/fine-tuning/runtime"),
   fineTuningJobs: (limit = 20) => requestJson<{ jobs: FineTuningJob[] }>(`/api/fine-tuning/jobs?limit=${limit}`),
+  fineTuningJobsPage: (options: { limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams({
+      limit: String(options.limit ?? 20),
+      offset: String(options.offset ?? 0),
+    });
+    return requestJson<FineTuningJobPage>(`/api/fine-tuning/jobs?${query.toString()}`);
+  },
   fineTuningJob: (id: string) => requestJson<FineTuningJob>(`/api/fine-tuning/jobs/${encodeURIComponent(id)}`),
   cancelFineTuningJob: (id: string) => requestJson<FineTuningJob>(`/api/fine-tuning/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST", body: JSON.stringify({}) }),
   startFineTuningJob: (config: FineTuningConfig) => requestJson<FineTuningJob>("/api/fine-tuning/jobs", {
@@ -1819,6 +1835,14 @@ export const axiomApi = {
   testRemoteModelConnection: (input: { base_url: string; api_key: string }) => requestJson<RemoteModelCatalog>("/api/models/studio/remote/models", { method: "POST", body: JSON.stringify(input) }),
   remoteModelChat: (input: { base_url: string; api_key: string; model: string; prompt: string; max_tokens: number; temperature: number }) => requestJson<RemoteModelResponse>("/api/models/studio/remote/chat", { method: "POST", body: JSON.stringify(input) }),
   modelStudioJobs: (limit = 20) => requestJson<{ jobs: ModelStudioJob[] }>(`/api/models/studio/jobs?limit=${limit}`),
+  modelStudioJobsPage: (options: { limit?: number; offset?: number; search?: string } = {}) => {
+    const query = new URLSearchParams({
+      limit: String(options.limit ?? 20),
+      offset: String(options.offset ?? 0),
+    });
+    if (options.search?.trim()) query.set("search", options.search.trim());
+    return requestJson<ModelStudioJobPage>(`/api/models/studio/jobs?${query.toString()}`);
+  },
   modelStudioJob: (id: string) => requestJson<ModelStudioJob>(`/api/models/studio/jobs/${encodeURIComponent(id)}`),
   startModelStudioJob: (config: { operation: "pull" | "pull_native" | "install_gguf" | "convert_gguf"; [key: string]: unknown }) => requestJson<ModelStudioJob>("/api/models/studio/jobs", { method: "POST", body: JSON.stringify(config) }),
 
@@ -1832,7 +1856,13 @@ export const axiomApi = {
     return requestJson<RuntimeTraceReport>(`/api/diagnostics/runtime-traces?${query.toString()}`);
   },
   clearRuntimeTraces: () => requestJson<{ cleared: number; remaining: 0; disk_persistence: false }>("/api/diagnostics/runtime-traces", { method: "DELETE" }),
-  agentProfiles: () => requestJson<AgentProfileReport>("/api/agent-profiles"),
+  agentProfiles: (options: { limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams({
+      limit: String(options.limit ?? 100),
+      offset: String(options.offset ?? 0),
+    });
+    return requestJson<AgentProfileReport>(`/api/agent-profiles?${query.toString()}`);
+  },
   createAgentProfile: (input: { name: string; task_capabilities: string[] }) =>
     requestJson<{ profile: AgentProfile }>("/api/agent-profiles", { method: "POST", body: JSON.stringify(input) }),
   updateAgentProfile: (id: string, taskCapabilities: string[]) =>
