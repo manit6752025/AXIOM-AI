@@ -295,7 +295,7 @@ def test_model_studio_job_history_rejects_invalid_page_bounds(tmp_path, monkeypa
 
 
 
-def test_model_studio_cancel_job_sets_worker_event_and_resolves_success_race(tmp_path, monkeypatch):
+def test_model_studio_cancel_job_sets_worker_event_and_preserves_committed_result(tmp_path, monkeypatch):
     import threading
 
     monkeypatch.setattr(studio, "jobs_directory", lambda: tmp_path / "jobs")
@@ -319,8 +319,8 @@ def test_model_studio_cancel_job_sets_worker_event_and_resolves_success_race(tmp
     studio._update(job_id, status="completed", result={"path": "/partial"})
     current = studio.get_job(job_id)
     assert current is not None
-    assert current["status"] == "cancelled"
-    assert current["result"] is None
+    assert current["status"] == "completed"
+    assert current["result"] == {"path": "/partial"}
 
 
 def test_model_studio_cancel_validates_ids_and_returns_terminal_jobs(tmp_path, monkeypatch):
