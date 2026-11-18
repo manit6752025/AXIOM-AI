@@ -202,7 +202,7 @@ export default function ModelStudioPanel() {
     </div>
     {error && <div className="inline-alert warning" role="alert">{error}</div>}
     <section className="model-studio-history" aria-label="Model Studio job history">
-      <div className="surface-head"><div><p className="surface-eyebrow">LOCAL JOB INVENTORY</p><h3>Model Studio history</h3></div><span className="quiet-note">{jobHistory.length} of {jobHistoryTotal}</span></div>
+      <div className="surface-head"><div><p className="surface-eyebrow">LOCAL JOB INVENTORY</p><h3>Recent model jobs</h3></div><span className="quiet-note">{jobHistory.length} of {jobHistoryTotal}</span></div>
       <div className="integration-form-actions">
         <label className="field"><span className="field-label-row"><span>Search jobs</span></span><input value={jobHistorySearch} onChange={(event) => setJobHistorySearch(event.target.value)} maxLength={120} placeholder="ID, operation, status, repository, model" /></label>
         <button type="button" className="button secondary-button" onClick={() => void loadJobHistory()} disabled={jobHistoryLoading}><Search size={14} /> Search history</button>
