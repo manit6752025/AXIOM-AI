@@ -22,6 +22,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from axiom.cli.interactive import confirm as safe_confirm
 from axiom.cli.ai_features import ai_app
 from axiom.cli.optimizer import optimizer_app
 from axiom.cli.startup import show_startup, suppress_for_arguments
@@ -131,10 +132,11 @@ def cli_callback(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show diagnostic logging and detailed operational output."),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress normal terminal output; errors remain visible."),
     json_errors: bool = typer.Option(False, "--json-errors", help="Emit stable JSON envelopes for AXIOM CLI errors."),
+    non_interactive: bool = typer.Option(False, "--non-interactive", "--no-input", help="Disable prompts; provide values via flags or environment variables."),
 ) -> None:
     """Configure global output behavior before running a command."""
     ctx.ensure_object(dict)
-    runtime = {"verbose": verbose, "quiet": quiet, "json_errors": json_errors}
+    runtime = {"verbose": verbose, "quiet": quiet, "json_errors": json_errors, "non_interactive": non_interactive}
     ctx.obj.update(runtime)
     _RUNTIME_OPTIONS.clear()
     _RUNTIME_OPTIONS.update(runtime)
@@ -152,6 +154,8 @@ def cli_callback(
         return
 
     if ctx.invoked_subcommand is None:
+        if non_interactive:
+            _cli_error("--non-interactive requires an explicit command; use `axiom --help` to list commands.", code="command_required")
         _run_default_session(show_banner=not no_banner and not quiet)
         return
 
@@ -477,7 +481,7 @@ def experiment_delete(
     yes: bool = typer.Option(False, "--yes", help="Delete without an interactive confirmation."),
 ) -> None:
     """Delete one saved plan record; no run artifacts are removed."""
-    if not yes and not typer.confirm(f"Delete saved plan {experiment_id}?", default=False):
+    if not yes and not safe_confirm(f"Delete saved plan {experiment_id}?", default=False):
         console.print("Cancelled.")
         return
     try:
