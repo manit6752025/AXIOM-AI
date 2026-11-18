@@ -5,6 +5,8 @@ import json
 import os
 
 import typer
+
+from axiom.cli.errors import emit_error
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -17,8 +19,7 @@ llm_app = typer.Typer(help="Use the AXIOM local engine or a supported cloud LLM 
 
 
 def _fail(message: str) -> None:
-    console.print(f"[red]Error:[/red] {message}")
-    raise typer.Exit(code=1)
+    emit_error(message, code="llm_error")
 
 
 def _credential(provider: str, env_name: str) -> str | None:

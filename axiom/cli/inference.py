@@ -7,6 +7,8 @@ import time
 
 import typer
 
+from axiom.cli.errors import emit_error
+
 from axiom.cli.interactive import confirm as safe_confirm
 from rich.console import Console
 from rich.panel import Panel
@@ -31,8 +33,7 @@ console = Console()
 
 
 def _fail(message: str) -> None:
-    console.print(f"[red]Error:[/red] {message}")
-    raise typer.Exit(code=1)
+    emit_error(message, code="inference_error")
 
 
 @infer_app.command("status")

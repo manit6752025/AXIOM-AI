@@ -5,6 +5,8 @@ import json
 from typing import Any
 
 import typer
+
+from axiom.cli.errors import emit_error
 from rich.console import Console
 from rich.table import Table
 
@@ -21,8 +23,7 @@ console = Console()
 
 
 def _fail(message: str) -> None:
-    console.print(f"[red]Error:[/red] {message}")
-    raise typer.Exit(code=1)
+    emit_error(message, code="fine_tuning_error")
 
 
 def register(train_app: typer.Typer) -> None:

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import typer
+
+from axiom.cli.errors import emit_error
 from rich.console import Console
 from rich.table import Table
 from axiom.cli.interactive import confirm as safe_confirm, is_interactive, prompt as safe_prompt
@@ -12,8 +14,7 @@ console = Console()
 studio_app = typer.Typer(help="Search, download, convert, and quantize local AI models.", no_args_is_help=True)
 
 def _fail(message: str) -> None:
-    console.print(f"[red]Error:[/red] {message}")
-    raise typer.Exit(code=1)
+    emit_error(message, code="model_studio_error")
 
 
 def _remote_api_key(env_name: str) -> str:
