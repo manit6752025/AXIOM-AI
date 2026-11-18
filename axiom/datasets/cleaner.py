@@ -299,6 +299,7 @@ def clean_jsonl(
                 outfile.flush()
                 os.fsync(outfile.fileno())
 
+        check_scan_cancelled(cancel_event)
         if output_parent_fd is not None:
             assert output_name is not None
             if overwrite:
