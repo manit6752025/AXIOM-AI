@@ -5,7 +5,7 @@ MCP tool policy remains enforced independently by the existing security router.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from axiom.core.agent_profiles import AgentProfileError, AgentProfileStore, TASK_CAPABILITIES
@@ -52,9 +52,24 @@ def _safe_call(callable_):
 
 
 @router.get("")
-def list_agent_profiles() -> dict:
+def list_agent_profiles(
+    limit: int = Query(default=100, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=100),
+) -> dict:
+    """Return a bounded page of versioned workspace-local agent profile metadata."""
     document = _safe_call(AgentProfileStore().load)
-    return {**document, "capability_catalog": list(TASK_CAPABILITIES), "authorization_note": "Task capabilities are descriptive metadata and do not grant MCP/tool permissions."}
+    profiles = document["profiles"]
+    page = profiles[offset:offset + limit]
+    return {
+        **document,
+        "profiles": page,
+        "total": len(profiles),
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(page) < len(profiles),
+        "capability_catalog": list(TASK_CAPABILITIES),
+        "authorization_note": "Task capabilities are descriptive metadata and do not grant MCP/tool permissions.",
+    }
 
 
 @router.post("", status_code=201)
