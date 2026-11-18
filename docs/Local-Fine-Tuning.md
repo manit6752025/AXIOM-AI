@@ -30,11 +30,13 @@ axiom --no-banner train run \
   --dataset "$HOME/data/train.jsonl" \
   --output-dir "$HOME/runs/my-lora-adapter" \
   --max-steps 20 --sequence-length 512 --lora-rank 8
-axiom --no-banner train jobs
+axiom --no-banner train jobs --limit 20 --offset 0
 axiom --no-banner train status JOB_ID
 ```
 
 `train run` is an actual training operation and runs until completion or failure. Progress, loss when available, and the final adapter directory are recorded. The history is stored under `${AXIOM_FINETUNE_HOME:-~/.local/share/axiom/fine-tuning}/jobs`.
+
+The `train jobs` command accepts `--limit` (1–100) and `--offset` (0–5,000), and its JSON output includes total, next-page, and bounded-scan metadata. The Control Center Training panel exposes the same history in pages of ten and lets you select a previous job to inspect its logs and output.
 
 ## Control Center and API
 
