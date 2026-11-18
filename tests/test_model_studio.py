@@ -169,7 +169,7 @@ def test_install_gguf_directly_into_native_model_root(tmp_path, monkeypatch):
     native_root = tmp_path / "trusted-native-models"
     monkeypatch.setattr(studio, "native_model_root", lambda: native_root)
 
-    def fake_download(repo_id, filename, destination, on_progress=None):
+    def fake_download(repo_id, filename, destination, on_progress=None, **kwargs):
         assert repo_id == "example/tiny-gguf"
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(b"gguf-fixture")

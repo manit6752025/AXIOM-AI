@@ -1004,12 +1004,8 @@ def _update(job_id: str, **changes: Any) -> None:
         logs = changes.pop("append_log", None)
         if logs:
             job["logs"] = [*job.get("logs", []), str(logs)[:600]][-80:]
-        if job.get("cancel_requested") and changes.get("status") in {"running", "completed"}:
-            if changes["status"] == "completed":
-                changes.update(status="cancelled", result=None, error=None, finished_at=_now())
-                job["logs"] = [*job.get("logs", []), "Operation cancelled at a safe boundary."][-80:]
-            else:
-                changes.pop("status", None)
+        if job.get("cancel_requested") and changes.get("status") == "running":
+            changes.pop("status", None)
         job.update(changes, updated_at=_now())
         _write_job(job)
 
@@ -1058,8 +1054,18 @@ def _worker(job_id: str) -> None:
             result = convert_local_model_to_gguf(config["source_dir"], config["llama_cpp_dir"], config["output_path"], config["outtype"], config["quantization"], on_log=log, cancel_event=cancel_event, deadline=deadline)
         else:
             raise ValueError("Unsupported Model Studio operation.")
-        _check_cancel(cancel_event, deadline)
-        _update(job_id, status="completed", result=result, error=None, finished_at=_now(), append_log="Operation completed.")
+        _update(
+            job_id,
+            status="completed",
+            result=result,
+            error=None,
+            finished_at=_now(),
+            append_log=(
+                "Operation completed; cancellation arrived after the operation committed."
+                if cancel_event.is_set()
+                else "Operation completed."
+            ),
+        )
     except ModelStudioCancelled as exc:
         _update(job_id, status="cancelled", cancel_requested=True, error=None, result=None, finished_at=_now(), append_log=str(exc))
     except ModelStudioTimeout as exc:
