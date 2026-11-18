@@ -1,9 +1,11 @@
 """CLI commands and interactive questionnaire for Model Studio."""
 from __future__ import annotations
 import json
+import os
 import typer
 from rich.console import Console
 from rich.table import Table
+from axiom.cli.interactive import confirm as safe_confirm, is_interactive, prompt as safe_prompt
 from axiom.core import model_studio as studio
 
 console = Console()
@@ -12,6 +14,19 @@ studio_app = typer.Typer(help="Search, download, convert, and quantize local AI 
 def _fail(message: str) -> None:
     console.print(f"[red]Error:[/red] {message}")
     raise typer.Exit(code=1)
+
+
+def _remote_api_key(env_name: str) -> str:
+    if not isinstance(env_name, str) or not env_name.strip() or len(env_name) > 128:
+        _fail("API-key environment variable name must be between 1 and 128 characters.")
+    value = os.environ.get(env_name, "")
+    if value.strip():
+        return value
+    return safe_prompt(
+        "Provider API key (used once, never saved by AXIOM)",
+        hide_input=True,
+        non_interactive_hint=f"Set {env_name} or pass --api-key-env <ENVIRONMENT_VARIABLE>.",
+    )
 
 @studio_app.command("search")
 def search(query: str = typer.Argument(..., help="Search public Hugging Face GGUF repositories."),
@@ -162,15 +177,17 @@ def convert_gguf(source_dir: str = typer.Argument(..., help="Existing local Tran
 
 @studio_app.command("wizard")
 def wizard() -> None:
-    """Interactive model install questionnaire: task, source, catalogue, and local setup."""
+    """Interactive model install questionnaire; use explicit subcommands for scripts."""
+    if not is_interactive():
+        _fail("The Model Studio wizard is interactive-only. Use search/files plus pull, pull-native, install-gguf, or convert-gguf with explicit arguments in scripts.")
     console.print("[bold]AXIOM Model Studio · install questionnaire[/bold]")
-    task = typer.prompt("What do you need? (general chat / coding / reasoning / multilingual / low memory)", default="general chat")
-    size = typer.prompt("Approximate RAM available (e.g. 8 GB, 16 GB, 32 GB)", default="16 GB")
-    source = typer.prompt("Source: ollama or huggingface GGUF", default="huggingface", show_default=True).strip().lower()
+    task = safe_prompt("What do you need? (general chat / coding / reasoning / multilingual / low memory)", default="general chat")
+    size = safe_prompt("Approximate RAM available (e.g. 8 GB, 16 GB, 32 GB)", default="16 GB")
+    source = safe_prompt("Source: ollama or huggingface GGUF", default="huggingface", show_default=True).strip().lower()
     if source in {"ollama", "o"}:
         typer.echo("Browse model tags at https://ollama.com/search, then install a selected local tag.")
-        model = typer.prompt("Ollama model tag (for example qwen3.5:0.8b)")
-        if not typer.confirm(f"Pull {model} into your local Ollama store?", default=False):
+        model = safe_prompt("Ollama model tag (for example qwen3.5:0.8b)")
+        if not safe_confirm(f"Pull {model} into your local Ollama store?", default=False):
             raise typer.Exit(code=0)
         try: result = studio.pull_ollama_model(model, on_log=lambda message: console.print(message))
         except (ValueError, studio.ModelStudioError) as exc: _fail(str(exc))
@@ -182,13 +199,13 @@ def wizard() -> None:
     low_ram = size_lower.startswith(("4", "8")) or "low" in size_lower or "small" in size_lower
     suffix = "GGUF Q4_K_M" if low_ram else "GGUF"
     query_default = {"coding": "coding", "reasoning": "reasoning", "multilingual": "multilingual", "low memory": "1B"}.get(task.lower().replace("-", " "), "instruct")
-    query = typer.prompt("Search Hugging Face GGUF models", default=f"{query_default} {suffix}")
+    query = safe_prompt("Search Hugging Face GGUF models", default=f"{query_default} {suffix}")
     try: catalog = studio.search_gguf_catalog(query, 12)
     except (ValueError, studio.ModelStudioError) as exc: _fail(str(exc))
     if not catalog["results"]: _fail("No GGUF repositories found. Try a broader query, such as 'Qwen GGUF' or 'Llama GGUF'.")
     for index, item in enumerate(catalog["results"], 1):
         console.print(f"{index:>2}. {item['id']} · {item['downloads']:,} downloads · {item['likes']:,} likes")
-    selected = typer.prompt("Select repository number", type=int)
+    selected = safe_prompt("Select repository number", type=int)
     if selected < 1 or selected > len(catalog["results"]): _fail("Selection is outside the result list.")
     repo = catalog["results"][selected - 1]["id"]
     try: inventory = studio.list_gguf_files(repo)
@@ -197,14 +214,14 @@ def wizard() -> None:
     for index, item in enumerate(inventory["files"][:80], 1):
         size_value = f"{item['size_bytes'] / (1024**3):.2f} GiB" if item["size_bytes"] else "size unknown"
         console.print(f"{index:>2}. {item['filename']} · {item['quantization']} · {size_value}")
-    file_index = typer.prompt("Select GGUF file number", type=int)
+    file_index = safe_prompt("Select GGUF file number", type=int)
     if file_index < 1 or file_index > min(len(inventory["files"]), 80): _fail("Selection is outside the displayed file list.")
     selected_file = inventory["files"][file_index - 1]["filename"]
     default_name = "axiom-" + repo.split("/")[-1].lower().replace("_", "-")[:48]
-    model_name = typer.prompt("Local model name", default=default_name)
-    register = typer.confirm("Register this GGUF with local Ollama after downloading?", default=True)
+    model_name = safe_prompt("Local model name", default=default_name)
+    register = safe_confirm("Register this GGUF with local Ollama after downloading?", default=True)
     console.print(f"Task: {task} · available RAM: {size} · repository: {repo} · file: {selected_file}")
-    if not typer.confirm("Start download and installation?", default=False): raise typer.Exit(code=0)
+    if not safe_confirm("Start download and installation?", default=False): raise typer.Exit(code=0)
     try:
         result = studio.install_hf_gguf(repo, selected_file, model_name, register,
             on_log=lambda message: console.print(message),
@@ -214,26 +231,37 @@ def wizard() -> None:
     if result["registered_with_ollama"]: console.print(f"[green]Ready for inference:[/green] axiom infer run {result['model_name']} --prompt \"Hello\"")
 
 @studio_app.command("remote-models")
-def remote_models(base_url: str = typer.Argument(..., help="Public OpenAI-compatible HTTPS base URL ending in /v1")) -> None:
-    """Test a public HTTPS endpoint and list its models without saving the API key."""
-    api_key = typer.prompt("Provider API key (not saved by AXIOM)", hide_input=True)
+def remote_models(
+    base_url: str = typer.Argument(..., help="Public OpenAI-compatible HTTPS base URL ending in /v1"),
+    api_key_env: str = typer.Option("AXIOM_LLM_API_KEY", "--api-key-env", help="Environment variable holding the provider API key."),
+) -> None:
+    """Test a public HTTPS endpoint and list models without saving the API key."""
+    api_key = _remote_api_key(api_key_env)
     try: result = studio.list_remote_models(base_url, api_key)
     except (ValueError, studio.ModelStudioError) as exc: _fail(str(exc))
     console.print_json(json.dumps(result, ensure_ascii=False))
 
+
 @studio_app.command("remote-run")
-def remote_run(base_url: str = typer.Argument(..., help="Public OpenAI-compatible HTTPS base URL ending in /v1"),
-               model: str = typer.Argument(..., help="Model ID from remote-models"),
-               prompt: str = typer.Argument(..., help="Prompt; the provider will receive this text"),
-               max_tokens: int = typer.Option(256, min=1, max=2048)) -> None:
-    """Send one prompt to an explicitly configured online model provider."""
-    if not typer.confirm("This sends the prompt to the remote provider. Continue?", default=False):
-        raise typer.Exit(code=0)
-    api_key = typer.prompt("Provider API key (not saved by AXIOM)", hide_input=True)
+def remote_run(
+    base_url: str = typer.Argument(..., help="Public OpenAI-compatible HTTPS base URL ending in /v1"),
+    model: str = typer.Argument(..., help="Model ID from remote-models"),
+    prompt: str = typer.Argument(..., help="Prompt; the provider will receive this text"),
+    max_tokens: int = typer.Option(256, min=1, max=2048),
+    api_key_env: str = typer.Option("AXIOM_LLM_API_KEY", "--api-key-env", help="Environment variable holding the provider API key."),
+    send_to_provider: bool = typer.Option(False, "--send-to-provider", help="Explicit non-interactive consent to send this prompt to the remote provider."),
+) -> None:
+    """Send one prompt to an explicitly selected online provider."""
+    if not send_to_provider:
+        if not is_interactive():
+            _fail("Remote prompt submission in non-interactive mode requires --send-to-provider.")
+        if not safe_confirm("This sends the prompt to the remote provider. Continue?", default=False):
+            raise typer.Exit(code=0)
+    api_key = _remote_api_key(api_key_env)
     try: result = studio.run_remote_chat(base_url, api_key, model, prompt, max_tokens=max_tokens)
     except (ValueError, studio.ModelStudioError) as exc: _fail(str(exc))
     console.print(result["response"])
-    console.print(f"\n[dim]Provider: {result['base_url']} · model: {result['model']} · tokens: {result['completion_tokens']}[/dim]")
+    console.print(f"\\n[dim]Provider: {result['base_url']} · model: {result['model']} · tokens: {result['completion_tokens']}[/dim]")
 
 def register_model_studio(model_app: typer.Typer) -> None:
     """Attach `axiom model studio ...` commands to the existing model family."""
