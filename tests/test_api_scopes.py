@@ -18,6 +18,7 @@ def test_scope_classifier_defaults_mutations_to_write() -> None:
     assert _required_api_scope("POST", "/api/workflows") == "write"
     assert _required_api_scope("POST", "/api/fine-tuning/jobs") == "write"
     assert _required_api_scope("POST", "/api/engine/generate") == "write"
+    assert _required_api_scope("POST", "/v1/chat/completions") == "write"
     assert _required_api_scope("PUT", "/api/workflows/workflow_123") == "write"
     assert _required_api_scope("DELETE", "/api/workspace/models/model_123") == "write"
 
@@ -102,6 +103,13 @@ def test_read_token_can_inspect_validate_and_dry_run_but_not_mutate(tmp_path, mo
             headers=read_headers,
         )
         assert denied_job.status_code == 403
+
+        denied_openai_completion = client.post(
+            "/v1/chat/completions",
+            json={},
+            headers=read_headers,
+        )
+        assert denied_openai_completion.status_code == 403
 
 
 def test_same_origin_control_center_remains_available_with_scopes_enabled(tmp_path, monkeypatch) -> None:

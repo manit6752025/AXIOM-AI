@@ -158,7 +158,7 @@ def create_app() -> Any:
         path = request.url.path
         if (
             api_read_token is not None
-            and path.startswith("/api/")
+            and path.startswith(("/api/", "/v1/"))
             and path not in _API_SCOPE_PUBLIC_PATHS
             and request.method.upper() != "OPTIONS"
             and not _is_same_origin_control_center_request(request)

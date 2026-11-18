@@ -51,9 +51,10 @@ invoke a remote provider.
 Send credentials as `Authorization: Bearer <token>`. Missing/invalid credentials
 return HTTP 401; a valid read token used for a write operation returns HTTP 403.
 Both use the standard AXIOM error envelope and preserve `X-Request-ID`. Health,
-metadata, and OpenAPI documentation endpoints remain public. The bundled
-same-origin Control Center remains usable; cross-origin API clients must provide
-a token. When both variables are unset, token enforcement is disabled for
+metadata, and OpenAPI documentation endpoints remain public. The OpenAI-compatible
+`/v1/models` endpoint requires read scope, and `/v1/chat/completions` requires
+write scope. The bundled same-origin Control Center remains usable; cross-origin
+API clients must provide a token. When both variables are unset, token enforcement is disabled for
 backwards compatibility. Keep the daemon on loopback for ordinary local use;
 tokens do not replace TLS, network isolation, or host security.
 
