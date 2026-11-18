@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
 from typing import Any
-from uuid import uuid4
+from axiom.core.resource_ids import new_resource_id
 
 SCHEMA_VERSION = 1
 MAX_STORE_BYTES = 2 * 1024 * 1024
@@ -188,7 +188,7 @@ class AgentProfileStore:
                 raise AgentProfileError("A profile with that name already exists.")
             now = _now()
             profile = {
-                "id": uuid4().hex,
+                "id": new_resource_id(),
                 "name": normalized_name,
                 "version": 1,
                 "task_capabilities": caps,

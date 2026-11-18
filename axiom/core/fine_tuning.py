@@ -26,6 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, BinaryIO, Callable
 
+from axiom.core.resource_ids import new_resource_id
 from axiom.core.storage import file_lock
 from axiom.path_safety import open_regular_file
 
@@ -944,7 +945,7 @@ def _new_job(
 ) -> dict[str, Any]:
     validated = validate_config(config, workspace_guard=workspace_guard)
     require_runtime()
-    job_id = uuid.uuid4().hex
+    job_id = new_resource_id()
     _acquire_lock(job_id)
     now = _now()
     job: dict[str, Any] = {

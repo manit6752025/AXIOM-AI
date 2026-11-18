@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-import uuid
+from axiom.core.resource_ids import new_resource_id
 from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
@@ -567,7 +567,7 @@ def workspace_add_experiment(request: WorkspaceExperimentInput) -> dict[str, Any
 
     record = {
         "schema_version": 1,
-        "id": uuid.uuid4().hex,
+        "id": new_resource_id(),
         "name": request.name,
         "created_at": datetime.now(UTC).isoformat(),
         "model": request.model,

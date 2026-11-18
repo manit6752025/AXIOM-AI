@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import platform
 import re
-import uuid
+from axiom.core.resource_ids import new_resource_id
 from datetime import UTC, datetime
 from typing import Any
 
@@ -276,7 +276,7 @@ def persist_evaluation_run(
         software["python"] = python_version or platform.python_version()
     record = {
         "schema_version": EvaluationStore.SCHEMA_VERSION,
-        "id": uuid.uuid4().hex,
+        "id": new_resource_id(),
         "name": name or f"{report.get('file_name', 'dataset')} offline evaluation",
         "created_at": now,
         "model_label": model_label,
