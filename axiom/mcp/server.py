@@ -6,7 +6,7 @@ import platform
 import re
 import stat
 import unicodedata
-import uuid
+from axiom.core.resource_ids import new_resource_id
 from contextlib import ExitStack
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1966,7 +1966,7 @@ def axiom_workflow_save(
 
     now = datetime.now(UTC).isoformat()
     record = {
-        "id": uuid.uuid4().hex,
+        "id": new_resource_id(),
         "name": safe_name,
         "created_at": now,
         "updated_at": now,

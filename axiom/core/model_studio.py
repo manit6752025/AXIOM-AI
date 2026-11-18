@@ -18,6 +18,8 @@ import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+
+from axiom.core.resource_ids import new_resource_id
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
@@ -974,7 +976,7 @@ def start_job(config: dict[str, Any]) -> dict[str, Any]:
         active = [job for job in list_jobs(100) if job.get("status") in {"queued", "running"}]
         if active:
             raise ModelStudioError("Another Model Studio operation is active. Wait for it to finish before starting another.")
-        job_id = uuid.uuid4().hex
+        job_id = new_resource_id()
         job = {"schema_version": 1, "id": job_id, "status": "queued", "operation": operation,
                "created_at": _now(), "updated_at": _now(), "started_at": None, "finished_at": None,
                "runner_pid": os.getpid(), "config": clean, "progress_bytes": 0, "total_bytes": None,

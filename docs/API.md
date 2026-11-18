@@ -21,6 +21,8 @@ visible request errors, and the CLI daemon readiness probe sends one as well.
   optional field is present unless the OpenAPI schema marks it required.
 - API version does not replace per-resource `schema_version` fields used for
   persisted workspace data.
+- Persisted resource ID and workspace schema migration rules are defined in
+  [Storage schemas and migrations](Storage-Schemas-and-Migrations.md).
 
 ## API permission scopes
 
