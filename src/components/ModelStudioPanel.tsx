@@ -214,7 +214,7 @@ export default function ModelStudioPanel() {
         </article>
       ))}
       {jobHistory.length === 0 && !jobHistoryLoading && <p className="quiet-note">No Model Studio jobs match this search.</p>}
-      {jobHistoryTruncated && <p className="quiet-note">History discovery is capped at {5_000.toLocaleString()} newest job records.</p>}
+      {jobHistoryTruncated && <p className="quiet-note">History discovery is capped at {(5_000).toLocaleString()} newest job records.</p>}
       {jobHistoryHasMore && <button type="button" className="button secondary-button" onClick={() => void loadJobHistory(jobHistory.length, true)} disabled={jobHistoryLoading}>{jobHistoryLoading ? "Loading…" : "Load more jobs"}</button>}
     </section>
     {job && <section className="model-studio-job" aria-label="Model Studio job status" role="region"><div className="surface-head"><div><p className="surface-eyebrow">JOB {job.id.slice(0, 12)}</p><h3>{job.operation.replaceAll("_", " ")}</h3></div><span className={`status-pill ${job.status === "completed" ? "success" : job.status === "failed" ? "warning" : "neutral"}`}><i />{job.status.toUpperCase()}</span></div>
