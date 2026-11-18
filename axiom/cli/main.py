@@ -23,6 +23,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from axiom.cli.interactive import confirm as safe_confirm
+from axiom.cli.errors import emit_error
 from axiom.cli.ai_features import ai_app
 from axiom.cli.optimizer import optimizer_app
 from axiom.cli.startup import show_startup, suppress_for_arguments
@@ -177,15 +178,7 @@ def _cli_runtime_options() -> dict[str, object]:
 
 def _cli_error(message: str, *, code: str = "AXIOM_CLI_ERROR") -> None:
     """Emit a stable human or machine-readable error without leaking details."""
-    options = _cli_runtime_options()
-    if options.get("json_errors"):
-        typer.echo(json.dumps({
-            "schema_version": 1,
-            "error": {"code": code, "message": message, "exit_code": 1},
-        }, ensure_ascii=False, separators=(",", ":")), err=True)
-    else:
-        typer.echo(f"Error: {message}", err=True)
-    raise typer.Exit(code=1)
+    emit_error(message, code=code, options=_cli_runtime_options())
 
 
 def _run_default_session(*, show_banner: bool = True) -> None:

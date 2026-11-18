@@ -1,10 +1,10 @@
 """Shared safety rules for interactive and scripted CLI execution."""
 from __future__ import annotations
 
-import json
-
 import click
 import typer
+
+from axiom.cli.errors import emit_error
 
 
 def _root_options() -> dict[str, object]:
@@ -28,26 +28,7 @@ def is_interactive() -> bool:
 
 def _prompt_error(message: str, hint: str) -> None:
     detail = f"{message} Interactive input is unavailable. {hint}"
-    options = _root_options()
-    if bool(options.get("json_errors")):
-        typer.echo(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "error": {
-                        "code": "interactive_input_required",
-                        "message": detail,
-                        "exit_code": 1,
-                    },
-                },
-                ensure_ascii=False,
-                separators=(",", ":"),
-            ),
-            err=True,
-        )
-    else:
-        typer.echo(f"Error: {detail}", err=True)
-    raise typer.Exit(code=1)
+    emit_error(detail, code="interactive_input_required")
 
 
 def prompt(
