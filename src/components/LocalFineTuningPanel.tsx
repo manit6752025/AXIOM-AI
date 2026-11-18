@@ -7,6 +7,10 @@ const activeStates = new Set(["queued", "running", "cancelling", "finalizing"]);
 export default function LocalFineTuningPanel() {
   const [runtime, setRuntime] = useState<FineTuningRuntime | null>(null);
   const [job, setJob] = useState<FineTuningJob | null>(null);
+  const [jobHistory, setJobHistory] = useState<FineTuningJob[]>([]);
+  const [jobHistoryTotal, setJobHistoryTotal] = useState(0);
+  const [jobHistoryHasMore, setJobHistoryHasMore] = useState(false);
+  const [jobHistoryLoading, setJobHistoryLoading] = useState(false);
   const [modelPath, setModelPath] = useState("");
   const [datasetPath, setDatasetPath] = useState("");
   const [outputDir, setOutputDir] = useState("");
@@ -20,12 +24,32 @@ export default function LocalFineTuningPanel() {
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState("");
 
+  const loadJobHistory = async (offset = 0, append = false) => {
+    setJobHistoryLoading(true);
+    try {
+      const page = await axiomApi.fineTuningJobsPage({ limit: 10, offset });
+      setJobHistory((current) => append ? [...current, ...page.jobs] : page.jobs);
+      setJobHistoryTotal(page.total);
+      setJobHistoryHasMore(page.has_more);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Fine-tuning job history is unavailable.");
+    } finally {
+      setJobHistoryLoading(false);
+    }
+  };
+
   const refresh = async () => {
     setLoading(true);
     setError("");
     try {
-      const [available, saved] = await Promise.all([axiomApi.fineTuningRuntime(), axiomApi.fineTuningJobs(10)]);
+      const [available, saved] = await Promise.all([
+        axiomApi.fineTuningRuntime(),
+        axiomApi.fineTuningJobsPage({ limit: 10 }),
+      ]);
       setRuntime(available);
+      setJobHistory(saved.jobs);
+      setJobHistoryTotal(saved.total);
+      setJobHistoryHasMore(saved.has_more);
       if (!job && saved.jobs.length) setJob(saved.jobs[0]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Fine-tuning status is unavailable.");
@@ -39,7 +63,10 @@ export default function LocalFineTuningPanel() {
   useEffect(() => {
     if (!job || !activeStates.has(job.status)) return;
     const timer = window.setInterval(() => {
-      axiomApi.fineTuningJob(job.id).then(setJob).catch((cause: unknown) => {
+      axiomApi.fineTuningJob(job.id).then((updated) => {
+        setJob(updated);
+        setJobHistory((current) => current.map((item) => item.id === updated.id ? updated : item));
+      }).catch((cause: unknown) => {
         setError(cause instanceof Error ? cause.message : "Could not refresh the active fine-tuning job.");
       });
     }, 1800);
@@ -62,6 +89,8 @@ export default function LocalFineTuningPanel() {
         lora_rank: Number(loraRank),
       });
       setJob(created);
+      setJobHistory((current) => [created, ...current.filter((item) => item.id !== created.id)]);
+      setJobHistoryTotal((current) => current + 1);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Fine-tuning job could not be started.");
     } finally {
@@ -74,7 +103,9 @@ export default function LocalFineTuningPanel() {
     setCancelling(true);
     setError("");
     try {
-      setJob(await axiomApi.cancelFineTuningJob(job.id));
+      const updated = await axiomApi.cancelFineTuningJob(job.id);
+      setJob(updated);
+      setJobHistory((current) => current.map((item) => item.id === updated.id ? updated : item));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Cancellation could not be requested.");
     } finally {
@@ -117,6 +148,17 @@ export default function LocalFineTuningPanel() {
         {job && <span className="quiet-note"><Activity size={14} /> {job.completed_steps}/{job.config.max_steps} steps</span>}
       </div>
     </form>
+    <section className="model-studio-history" aria-label="Fine-tuning job history">
+      <div className="surface-head"><div><p className="surface-eyebrow">WORKSPACE JOBS</p><h3>Training history</h3></div><span className="quiet-note">{jobHistory.length} of {jobHistoryTotal}</span></div>
+      {jobHistory.map((item) => (
+        <article className="model-studio-result" key={item.id}>
+          <div className="model-studio-result-copy"><b>{item.id.slice(0, 12)} · {item.config.model_path.split("/").filter(Boolean).at(-1) || item.config.model_path}</b><small>{item.completed_steps}/{item.config.max_steps} steps · {new Date(item.created_at).toLocaleString()}</small></div>
+          <div className="model-studio-result-actions"><span className={`status-pill ${item.status === "completed" ? "success" : item.status === "failed" ? "warning" : "neutral"}`}><i />{item.status.toUpperCase()}</span><button type="button" className="button secondary-button small-button" aria-pressed={job?.id === item.id} onClick={() => setJob(item)}>{job?.id === item.id ? "Selected" : "Inspect"}</button></div>
+        </article>
+      ))}
+      {jobHistory.length === 0 && !jobHistoryLoading && <p className="quiet-note">No saved fine-tuning jobs yet.</p>}
+      {jobHistoryHasMore && <button type="button" className="button secondary-button" onClick={() => void loadJobHistory(jobHistory.length, true)} disabled={jobHistoryLoading}>{jobHistoryLoading ? "Loading…" : "Load more jobs"}</button>}
+    </section>
     {error && <div className="inline-alert warning" role="alert">{error}</div>}
     {job && <section className="local-finetuning-job" role="region" aria-label="Fine-tuning job status">
       <div className="surface-head"><div><p className="surface-eyebrow">JOB {job.id.slice(0, 12)}</p><h3>Fine-tuning job</h3></div><span className={`status-pill ${job.status === "completed" ? "success" : job.status === "failed" ? "warning" : "neutral"}`}><i />{job.status.toUpperCase()}</span></div>
