@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowDownToLine, BookOpen, Cpu, ExternalLink, FileCog, Globe, HardDrive, Search, Sparkles } from "lucide-react";
 import { axiomApi, type ModelStudioFile, type ModelStudioJob, type ModelStudioModel, type ModelStudioStatus } from "../api/client";
 
-const activeStates = new Set(["queued", "running"]);
+const activeStates = new Set(["queued", "running", "cancelling"]);
 const tasks = [
   { value: "general", label: "General assistant", query: "instruct GGUF" },
   { value: "coding", label: "Coding", query: "coder GGUF" },
@@ -138,6 +138,21 @@ export default function ModelStudioPanel() {
     catch (cause) { setError(cause instanceof Error ? cause.message : "Model Studio job could not start."); }
     finally { setBusy(false); }
   };
+
+  const cancelJob = async () => {
+    if (!job || !activeStates.has(job.status) || job.status === "cancelling") return;
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await axiomApi.cancelModelStudioJob(job.id);
+      setJob(updated);
+      setJobHistory((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Model Studio cancellation could not be requested.");
+    } finally {
+      setBusy(false);
+    }
+  };
   const testRemoteConnection = async () => {
     setRemoteBusy(true); setRemoteError(""); setRemoteResponse("");
     try {
@@ -219,6 +234,8 @@ export default function ModelStudioPanel() {
     </section>
     {job && <section className="model-studio-job" aria-label="Model Studio job status" role="region"><div className="surface-head"><div><p className="surface-eyebrow">JOB {job.id.slice(0, 12)}</p><h3>{job.operation.replaceAll("_", " ")}</h3></div><span className={`status-pill ${job.status === "completed" ? "success" : job.status === "failed" ? "warning" : "neutral"}`}><i />{job.status.toUpperCase()}</span></div>
       {job.total_bytes && job.total_bytes > 0 && <div className="model-studio-progress"><span style={{ width: `${Math.min(100, (job.progress_bytes / job.total_bytes) * 100)}%` }} /></div>}
+      {activeJob && <div className="integration-form-actions"><span className="quiet-note">{job.status === "cancelling" ? "Cancellation requested. The worker is stopping at a safe boundary…" : "This operation has a four-hour hard deadline and can be cancelled safely."}</span><button type="button" className="button secondary-button" onClick={() => void cancelJob()} disabled={busy || job.status === "cancelling"}>Cancel operation</button></div>}
+      {job.status === "timed_out" && <div className="inline-alert warning" role="alert">The operation exceeded its time limit. Temporary download/conversion files were cleaned up where safe.</div>}
       {job.error && <div className="inline-alert warning" role="alert">{job.error}</div>}{savedPath && <p className="quiet-note"><HardDrive size={14} /> Saved locally: <code>{savedPath}</code></p>}{savedModelName && isRegisteredWithOllama && <p className="quiet-note">Use it for local inference: <code>axiom infer run {savedModelName} --prompt "Hello"</code></p>}
       <pre className="model-studio-log" data-testid="model-studio-log">{job.logs.join("\n")}</pre>
     </section>}

@@ -14,6 +14,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 import threading
 import uuid
 from datetime import UTC, datetime
@@ -37,9 +38,27 @@ _REPO_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}/[A-Za-z0-9][A-Za-z0-9_.
 _FILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.+() -]{0,240}\.gguf$", re.IGNORECASE)
 _SLUG = re.compile(r"[^a-z0-9._-]+")
 _ACTIVE_LOCK = threading.RLock()
+_ACTIVE_CANCEL_EVENTS: dict[str, threading.Event] = {}
+_MODEL_STUDIO_JOB_TIMEOUT_SECONDS = 4 * 60 * 60
+
+
+def _check_cancel(cancel_event: threading.Event | None, deadline: float | None = None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise ModelStudioCancelled("Model Studio operation was cancelled.")
+    if deadline is not None and time.monotonic() >= deadline:
+        raise ModelStudioTimeout("Model Studio operation exceeded its four-hour time limit.")
+
 
 class ModelStudioError(RuntimeError):
     """Model acquisition/conversion could not be completed."""
+
+
+class ModelStudioCancelled(ModelStudioError):
+    """A Model Studio job received a cooperative cancellation request."""
+
+
+class ModelStudioTimeout(ModelStudioError):
+    """A Model Studio job exceeded its bounded execution deadline."""
 
 
 def _now() -> str:
@@ -321,21 +340,85 @@ def ollama_status() -> dict[str, Any]:
             "conversion_available": False}
 
 
-def _run_checked(command: list[str], *, label: str, timeout: int = 14_400) -> str:
+def _run_checked(
+    command: list[str],
+    *,
+    label: str,
+    timeout: int = 14_400,
+    cancel_event: threading.Event | None = None,
+    deadline: float | None = None,
+) -> str:
+    """Run a local tool with a hard timeout and cooperative cancellation."""
     try:
-        proc = subprocess.run(command, capture_output=True, text=True, errors="replace", timeout=timeout, check=False)
+        proc = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
     except FileNotFoundError:
         raise ModelStudioError(f"Required local tool for {label} was not found. Check the selected llama.cpp/Ollama installation.") from None
-    except subprocess.TimeoutExpired:
-        raise ModelStudioError(f"{label} exceeded the {timeout // 60}-minute timeout.") from None
-    output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
-    if proc.returncode != 0:
-        detail = " ".join(output.split())[-1200:]
-        raise ModelStudioError(f"{label} failed (exit {proc.returncode}). {detail}".strip())
-    return " ".join(output.split())[-1200:]
+
+    output: list[str] = []
+    output_size = [0]
+
+    def collect_output() -> None:
+        if proc.stdout is None:
+            return
+        for line in proc.stdout:
+            output.append(line)
+            output_size[0] += len(line)
+            while output and output_size[0] > 65_536:
+                removed = output.pop(0)
+                output_size[0] -= len(removed)
+
+    reader = threading.Thread(target=collect_output, name="axiom-model-studio-command-output", daemon=True)
+    reader.start()
+    started = time.monotonic()
+    timed_out = False
+    cancelled = False
+    while proc.poll() is None:
+        try:
+            _check_cancel(cancel_event, deadline)
+        except ModelStudioCancelled:
+            cancelled = True
+            break
+        except ModelStudioTimeout:
+            timed_out = True
+            break
+        if time.monotonic() - started >= timeout:
+            timed_out = True
+            break
+        time.sleep(0.1)
+
+    if cancelled or timed_out:
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=3)
+    return_code = proc.wait()
+    reader.join(timeout=2)
+    rendered = "".join(output)
+    if cancelled:
+        raise ModelStudioCancelled(f"{label} was cancelled.")
+    if timed_out:
+        raise ModelStudioTimeout(f"{label} exceeded its {timeout // 60}-minute timeout.")
+    if return_code != 0:
+        detail = " ".join(rendered.split())[-1200:]
+        raise ModelStudioError(f"{label} failed (exit {return_code}). {detail}".strip())
+    return " ".join(rendered.split())[-1200:]
 
 
-def pull_ollama_model(model_name: str, on_log: Callable[[str], None] | None = None) -> dict[str, Any]:
+def pull_ollama_model(model_name: str, on_log: Callable[[str], None] | None = None, *, cancel_event: threading.Event | None = None, deadline: float | None = None) -> dict[str, Any]:
     model = validate_ollama_name(model_name)
     _require_loopback_ollama()
     executable = shutil.which("ollama")
@@ -343,14 +426,15 @@ def pull_ollama_model(model_name: str, on_log: Callable[[str], None] | None = No
         raise ModelStudioError("Ollama is not installed. Install Ollama first or download a GGUF file without registering it.")
     if on_log:
         on_log(f"Starting local Ollama pull: {model}")
-    summary = _run_checked([executable, "pull", model], label="Ollama model pull", timeout=7200)
+    summary = _run_checked([executable, "pull", model], label="Ollama model pull", timeout=7200, cancel_event=cancel_event, deadline=deadline)
     if on_log:
         on_log("Ollama pull finished.")
     return {"operation": "pull", "model_name": model, "runtime": "ollama", "summary": summary}
 
 
 def _download_gguf(repo_id: str, filename: str, destination: Path,
-                    on_progress: Callable[[int, int | None], None] | None = None) -> dict[str, Any]:
+                    on_progress: Callable[[int, int | None], None] | None = None, *,
+                    cancel_event: threading.Event | None = None, deadline: float | None = None) -> dict[str, Any]:
     repo = validate_repo_id(repo_id)
     file_name = validate_gguf_filename(filename)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -374,6 +458,7 @@ def _download_gguf(repo_id: str, filename: str, destination: Path,
                 raise ModelStudioError("There is not enough free disk space for this GGUF file.")
             with temp.open("xb") as handle:
                 while True:
+                    _check_cancel(cancel_event, deadline)
                     chunk = response.read(1024 * 1024)
                     if not chunk:
                         break
@@ -385,6 +470,7 @@ def _download_gguf(repo_id: str, filename: str, destination: Path,
                     handle.write(chunk)
                     if on_progress:
                         on_progress(written, total)
+                    _check_cancel(cancel_event, deadline)
         if written <= 0:
             raise ModelStudioError("The catalogue returned an empty GGUF file.")
         os.replace(temp, destination)
@@ -405,7 +491,8 @@ def _download_gguf(repo_id: str, filename: str, destination: Path,
 def install_hf_gguf(repo_id: str, filename: str, model_name: str, register_ollama: bool = True,
                     on_log: Callable[[str], None] | None = None,
                     on_progress: Callable[[int, int | None], None] | None = None,
-                    install_native: bool = False) -> dict[str, Any]:
+                    install_native: bool = False, *,
+                    cancel_event: threading.Event | None = None, deadline: float | None = None) -> dict[str, Any]:
     """Download a public GGUF either to Model Studio storage or AXIOM's trusted native root."""
     repo = validate_repo_id(repo_id)
     file_name = validate_gguf_filename(filename)
@@ -431,7 +518,7 @@ def install_hf_gguf(repo_id: str, filename: str, model_name: str, register_ollam
         base = studio_home() / "gguf" / _slug(model)
         base.mkdir(parents=True, exist_ok=True)
     target = base / file_name
-    downloaded = _download_gguf(repo, file_name, target, on_progress)
+    downloaded = _download_gguf(repo, file_name, target, on_progress, cancel_event=cancel_event, deadline=deadline)
     result: dict[str, Any] = {
         "operation": "install_gguf",
         **downloaded,
@@ -456,7 +543,7 @@ def install_hf_gguf(repo_id: str, filename: str, model_name: str, register_ollam
         modelfile.write_text(text, encoding="utf-8")
         if on_log:
             on_log(f"Downloaded GGUF ({downloaded['size_bytes']:,} bytes); registering {model} with local Ollama.")
-        summary = _run_checked([executable, "create", model, "-f", str(modelfile)], label="Ollama GGUF registration", timeout=7200)
+        summary = _run_checked([executable, "create", model, "-f", str(modelfile)], label="Ollama GGUF registration", timeout=7200, cancel_event=cancel_event, deadline=deadline)
         result.update(registered_with_ollama=True, modelfile=str(modelfile), registration_summary=summary)
         if on_log:
             on_log("GGUF registered with Ollama. Inference is now available through the local runtime.")
@@ -488,6 +575,8 @@ def _download_native_file(
     progress_offset: int = 0,
     progress_total: int | None = None,
     free_bytes: int | None = None,
+    cancel_event: threading.Event | None = None,
+    deadline: float | None = None,
 ) -> int:
     """Download one whitelisted public Hub file into staging."""
     if not _is_native_asset_name(filename):
@@ -507,6 +596,7 @@ def _download_native_file(
                 raise ModelStudioError("There is not enough free disk space for this native model.")
             with temp.open("xb") as handle:
                 while True:
+                    _check_cancel(cancel_event, deadline)
                     chunk = response.read(1024 * 1024)
                     if not chunk:
                         break
@@ -520,6 +610,7 @@ def _download_native_file(
                     handle.write(chunk)
                     if on_progress:
                         on_progress(progress_offset + written, progress_total)
+                    _check_cancel(cancel_event, deadline)
         if written <= 0:
             raise ModelStudioError(f"The Hub returned an empty native-model file: {filename}.")
         os.replace(temp, destination)
@@ -543,6 +634,7 @@ def pull_native_model(
     repo_id: str,
     on_log: Callable[[str], None] | None = None,
     on_progress: Callable[[int, int | None], None] | None = None,
+    *, cancel_event: threading.Event | None = None, deadline: float | None = None,
 ) -> dict[str, Any]:
     """Acquire public Llama/Mistral/Qwen2 safetensors assets for AXIOM's native runtime.
 
@@ -550,6 +642,7 @@ def pull_native_model(
     Existing installs are left untouched.
     """
     repo = validate_repo_id(repo_id)
+    _check_cancel(cancel_event, deadline)
     repo_url = quote(repo, safe="/")
     metadata = _read_public_json(f"https://huggingface.co/api/models/{repo_url}?blobs=true")
     siblings = metadata.get("siblings", []) if isinstance(metadata, dict) else []
@@ -572,6 +665,7 @@ def pull_native_model(
         raise ModelStudioError("Native pull requires top-level config.json and tokenizer.json files.")
     if on_log:
         on_log(f"Inspecting public Hub metadata for {repo} before downloading weights.")
+    _check_cancel(cancel_event, deadline)
     config = _read_public_json(f"https://huggingface.co/{repo_url}/resolve/main/config.json")
     if not isinstance(config, dict):
         raise ModelStudioError("The repository config.json is not a JSON object.")
@@ -645,12 +739,15 @@ def pull_native_model(
             summary = f"{expected_total:,} bytes estimated" if expected_total is not None else "total size unknown"
             on_log(f"Downloading {len(selected)} allowlisted model/tokenizer files ({summary}).")
         for filename in selected:
+            _check_cancel(cancel_event, deadline)
             written = _download_native_file(
                 repo, filename, staging / filename,
                 on_progress=on_progress,
                 progress_offset=downloaded,
                 progress_total=expected_total,
                 free_bytes=free_bytes,
+                cancel_event=cancel_event,
+                deadline=deadline,
             )
             downloaded += written
             if downloaded > _MAX_NATIVE_MODEL_BYTES:
@@ -691,7 +788,9 @@ def pull_native_model(
 
 def convert_local_model_to_gguf(source_dir: str, llama_cpp_dir: str, output_path: str,
                                  outtype: str = "f16", quantization: str = "Q4_K_M",
-                                 on_log: Callable[[str], None] | None = None) -> dict[str, Any]:
+                                 on_log: Callable[[str], None] | None = None, *,
+                                 cancel_event: threading.Event | None = None,
+                                 deadline: float | None = None) -> dict[str, Any]:
     try:
         source = Path(source_dir).expanduser().resolve(strict=True)
         llama_dir = Path(llama_cpp_dir).expanduser().resolve(strict=True)
@@ -719,7 +818,7 @@ def convert_local_model_to_gguf(source_dir: str, llama_cpp_dir: str, output_path
     if on_log:
         on_log("Converting local Transformers weights to GGUF. This can use substantial RAM and disk space.")
     if quantization == "none":
-        summary = _run_checked([sys.executable, str(converter), str(source), "--outfile", str(output), "--outtype", outtype], label="HF-to-GGUF conversion")
+        summary = _run_checked([sys.executable, str(converter), str(source), "--outfile", str(output), "--outtype", outtype], label="HF-to-GGUF conversion", cancel_event=cancel_event, deadline=deadline)
         return {"operation": "convert_gguf", "source_dir": str(source), "output_path": str(output), "outtype": outtype, "quantization": "none", "summary": summary}
     quant_candidates = [llama_dir / "build" / "bin" / "llama-quantize", llama_dir / "build" / "bin" / "llama-quantize.exe", llama_dir / "llama-quantize", llama_dir / "llama-quantize.exe"]
     quantizer = next((path for path in quant_candidates if path.is_file()), None)
@@ -727,10 +826,10 @@ def convert_local_model_to_gguf(source_dir: str, llama_cpp_dir: str, output_path
         raise ValueError("Quantization requested, but llama-quantize was not found. Build llama.cpp first, or choose quantization 'none'.")
     interim = output.with_name(f".{output.stem}.unquantized.{uuid.uuid4().hex}.gguf")
     try:
-        _run_checked([sys.executable, str(converter), str(source), "--outfile", str(interim), "--outtype", "f16"], label="HF-to-GGUF conversion")
+        _run_checked([sys.executable, str(converter), str(source), "--outfile", str(interim), "--outtype", "f16"], label="HF-to-GGUF conversion", cancel_event=cancel_event, deadline=deadline)
         if on_log:
             on_log(f"Converted weights; quantizing to {quantization}.")
-        summary = _run_checked([str(quantizer), str(interim), str(output), quantization], label="GGUF quantization")
+        summary = _run_checked([str(quantizer), str(interim), str(output), quantization], label="GGUF quantization", cancel_event=cancel_event, deadline=deadline)
     except Exception:
         interim.unlink(missing_ok=True)
         output.unlink(missing_ok=True)
@@ -780,10 +879,15 @@ def _pid_alive(pid: Any) -> bool:
 
 
 def _recover(job: dict[str, Any]) -> dict[str, Any]:
-    if job.get("status") in {"queued", "running"} and job.get("runner_pid") != os.getpid() and not _pid_alive(job.get("runner_pid")):
+    if job.get("status") in {"queued", "running", "cancelling"} and job.get("runner_pid") != os.getpid() and not _pid_alive(job.get("runner_pid")):
         job = dict(job)
-        job.update(status="failed", error="The Model Studio process exited before the operation completed.", updated_at=_now(), finished_at=_now())
-        job["logs"] = [*job.get("logs", []), "Recovered stale job after process exit."][-80:]
+        if job.get("cancel_requested"):
+            job.update(status="cancelled", error=None, updated_at=_now(), finished_at=_now())
+            recovery_log = "Recovered cancellation after the Model Studio process exited."
+        else:
+            job.update(status="failed", error="The Model Studio process exited before the operation completed.", updated_at=_now(), finished_at=_now())
+            recovery_log = "Recovered stale job after process exit."
+        job["logs"] = [*job.get("logs", []), recovery_log][-80:]
         _write_job(job)
     return job
 
@@ -791,6 +895,28 @@ def _recover(job: dict[str, Any]) -> dict[str, Any]:
 def get_job(job_id: str) -> dict[str, Any] | None:
     value = _read_job(job_id)
     return _recover(value) if value else None
+
+
+def cancel_job(job_id: str) -> dict[str, Any] | None:
+    """Request cooperative cancellation of an active Model Studio job."""
+    _job_path(job_id)
+    with _ACTIVE_LOCK:
+        job = _read_job(job_id)
+        if job is None:
+            return None
+        job = _recover(job)
+        if job.get("status") in {"completed", "cancelled", "failed", "timed_out"}:
+            return job
+        cancel_event = _ACTIVE_CANCEL_EVENTS.get(job_id)
+        if cancel_event is None:
+            raise ModelStudioError("The Model Studio worker is not available to accept cancellation.")
+        cancel_event.set()
+        job["cancel_requested"] = True
+        job["status"] = "cancelling"
+        job["updated_at"] = _now()
+        job["logs"] = [*job.get("logs", []), "Cancellation requested; stopping at the next safe operation boundary."][-80:]
+        _write_job(job)
+        return job
 
 
 MAX_MODEL_STUDIO_JOB_SCAN = 5000
@@ -878,6 +1004,12 @@ def _update(job_id: str, **changes: Any) -> None:
         logs = changes.pop("append_log", None)
         if logs:
             job["logs"] = [*job.get("logs", []), str(logs)[:600]][-80:]
+        if job.get("cancel_requested") and changes.get("status") in {"running", "completed"}:
+            if changes["status"] == "completed":
+                changes.update(status="cancelled", result=None, error=None, finished_at=_now())
+                job["logs"] = [*job.get("logs", []), "Operation cancelled at a safe boundary."][-80:]
+            else:
+                changes.pop("status", None)
         job.update(changes, updated_at=_now())
         _write_job(job)
 
@@ -886,14 +1018,25 @@ def _worker(job_id: str) -> None:
     job = _read_job(job_id)
     if not job:
         return
-    _update(job_id, status="running", started_at=_now(), append_log="Job started.")
-    config = job["config"]
+    with _ACTIVE_LOCK:
+        cancel_event = _ACTIVE_CANCEL_EVENTS.get(job_id)
+    if cancel_event is None:
+        cancel_event = threading.Event()
+    deadline = time.monotonic() + _MODEL_STUDIO_JOB_TIMEOUT_SECONDS
     try:
+        _check_cancel(cancel_event, deadline)
+        _update(job_id, status="running", started_at=_now(), append_log="Job started.")
+        config = job["config"]
+
         def log(message: str) -> None:
+            _check_cancel(cancel_event, deadline)
             _update(job_id, append_log=message)
+
         last_percent = [-1]
         last_unknown_bytes = [0]
+
         def progress(current: int, total: int | None) -> None:
+            _check_cancel(cancel_event, deadline)
             if total:
                 percent = min(100, int(current * 100 / total))
                 if percent // 5 == last_percent[0] // 5 and percent < 100:
@@ -902,26 +1045,32 @@ def _worker(job_id: str) -> None:
             elif current - last_unknown_bytes[0] < 32 * 1024 * 1024 and current > 1024 * 1024:
                 return
             last_unknown_bytes[0] = current
-            _update(job_id, progress_bytes=current, total_bytes=total, append_log=(f"Downloaded {current:,} bytes" + (f" / {total:,} bytes" if total else "")))
+            _update(job_id, progress_bytes=current, total_bytes=total, append_log=f"Downloaded {current:,} bytes" + (f" / {total:,} bytes" if total else ""))
+
         operation = config["operation"]
         if operation == "pull":
-            result = pull_ollama_model(config["model_name"], on_log=log)
+            result = pull_ollama_model(config["model_name"], on_log=log, cancel_event=cancel_event, deadline=deadline)
         elif operation == "pull_native":
-            result = pull_native_model(config["repo_id"], on_log=log, on_progress=progress)
+            result = pull_native_model(config["repo_id"], on_log=log, on_progress=progress, cancel_event=cancel_event, deadline=deadline)
         elif operation == "install_gguf":
-            result = install_hf_gguf(
-                config["repo_id"], config["filename"], config["model_name"],
-                config["register_ollama"], on_log=log, on_progress=progress,
-                install_native=config.get("install_native", False),
-            )
+            result = install_hf_gguf(config["repo_id"], config["filename"], config["model_name"], config["register_ollama"], on_log=log, on_progress=progress, install_native=config.get("install_native", False), cancel_event=cancel_event, deadline=deadline)
         elif operation == "convert_gguf":
-            result = convert_local_model_to_gguf(config["source_dir"], config["llama_cpp_dir"], config["output_path"], config["outtype"], config["quantization"], on_log=log)
+            result = convert_local_model_to_gguf(config["source_dir"], config["llama_cpp_dir"], config["output_path"], config["outtype"], config["quantization"], on_log=log, cancel_event=cancel_event, deadline=deadline)
         else:
             raise ValueError("Unsupported Model Studio operation.")
+        _check_cancel(cancel_event, deadline)
         _update(job_id, status="completed", result=result, error=None, finished_at=_now(), append_log="Operation completed.")
+    except ModelStudioCancelled as exc:
+        _update(job_id, status="cancelled", cancel_requested=True, error=None, result=None, finished_at=_now(), append_log=str(exc))
+    except ModelStudioTimeout as exc:
+        _update(job_id, status="timed_out", error=str(exc)[:1200], finished_at=_now(), append_log=f"Timed out: {str(exc)[:450]}")
     except Exception as exc:
         message = str(exc).strip() or "Operation failed."
         _update(job_id, status="failed", error=message[:1200], finished_at=_now(), append_log=f"Failed: {message[:450]}")
+    finally:
+        with _ACTIVE_LOCK:
+            if _ACTIVE_CANCEL_EVENTS.get(job_id) is cancel_event:
+                _ACTIVE_CANCEL_EVENTS.pop(job_id, None)
 
 
 def start_job(config: dict[str, Any]) -> dict[str, Any]:
@@ -973,15 +1122,18 @@ def start_job(config: dict[str, Any]) -> dict[str, Any]:
     else:
         raise ValueError("Choose pull, pull_native, install_gguf, or convert_gguf.")
     with _ACTIVE_LOCK:
-        active = [job for job in list_jobs(100) if job.get("status") in {"queued", "running"}]
+        active = [job for job in list_jobs(100) if job.get("status") in {"queued", "running", "cancelling"}]
         if active:
             raise ModelStudioError("Another Model Studio operation is active. Wait for it to finish before starting another.")
         job_id = new_resource_id()
         job = {"schema_version": 1, "id": job_id, "status": "queued", "operation": operation,
                "created_at": _now(), "updated_at": _now(), "started_at": None, "finished_at": None,
                "runner_pid": os.getpid(), "config": clean, "progress_bytes": 0, "total_bytes": None,
+               "cancel_requested": False, "timeout_seconds": _MODEL_STUDIO_JOB_TIMEOUT_SECONDS,
                "logs": ["Job queued."], "error": None, "result": None}
+        cancel_event = threading.Event()
         _write_job(job)
+        _ACTIVE_CANCEL_EVENTS[job_id] = cancel_event
         thread = threading.Thread(target=_worker, args=(job_id,), name=f"axiom-model-studio-{job_id[:8]}", daemon=True)
         thread.start()
         return job

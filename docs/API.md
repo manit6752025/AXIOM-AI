@@ -127,3 +127,22 @@ Do not add a public origin to `AXIOM_CORS_ORIGINS` unless you understand the
 browser trust implications. CORS is not authentication. Keep the service on
 loopback for ordinary local use; network exposure requires a separately
 reviewed deployment and access-control design.
+
+
+## Model Studio job cancellation and timeout
+
+`POST /api/models/studio/jobs/{job_id}/cancel` requests cooperative cancellation of
+an active Model Studio job. The response returns the updated job with status
+`cancelling`; the worker reports terminal status `cancelled` after it reaches a
+safe boundary. Completed, failed, cancelled, and timed-out jobs are returned
+unchanged. Missing IDs return HTTP 404 and malformed IDs return HTTP 422.
+
+Downloads check cancellation between 1 MiB chunks and remove partial temporary
+files before returning. Ollama/llama.cpp subprocesses are terminated and then
+killed if they do not exit within the cleanup grace period. Model Studio jobs
+have a four-hour hard deadline, individual remote reads have bounded network
+timeouts, and subprocesses have operation-specific timeouts. Deadline expiry
+returns the distinct terminal status `timed_out`. Cancellation cannot undo an
+external side effect that has already committed (for example, a completed model
+registration); such work is reported as completed rather than falsely marked
+cancelled.

@@ -292,3 +292,81 @@ def test_model_studio_job_history_rejects_invalid_page_bounds(tmp_path, monkeypa
     for kwargs in ({"limit": 0}, {"limit": 101}, {"offset": -1}, {"offset": 5001}):
         with pytest.raises(ValueError):
             studio.list_jobs_page(**kwargs)
+
+
+
+def test_model_studio_cancel_job_sets_worker_event_and_resolves_success_race(tmp_path, monkeypatch):
+    import threading
+
+    monkeypatch.setattr(studio, "jobs_directory", lambda: tmp_path / "jobs")
+    job_id = "a" * 32
+    event = threading.Event()
+    monkeypatch.setitem(studio._ACTIVE_CANCEL_EVENTS, job_id, event)
+    studio._write_job({
+        "schema_version": 1, "id": job_id, "status": "running",
+        "operation": "pull_native", "runner_pid": studio.os.getpid(),
+        "created_at": "2026-11-18T00:00:00+00:00",
+        "updated_at": "2026-11-18T00:00:00+00:00",
+        "cancel_requested": False, "logs": [],
+    })
+
+    result = studio.cancel_job(job_id)
+    assert result is not None
+    assert result["status"] == "cancelling"
+    assert result["cancel_requested"] is True
+    assert event.is_set()
+
+    studio._update(job_id, status="completed", result={"path": "/partial"})
+    current = studio.get_job(job_id)
+    assert current is not None
+    assert current["status"] == "cancelled"
+    assert current["result"] is None
+
+
+def test_model_studio_cancel_validates_ids_and_returns_terminal_jobs(tmp_path, monkeypatch):
+    monkeypatch.setattr(studio, "jobs_directory", lambda: tmp_path / "jobs")
+    with pytest.raises(ValueError, match="Invalid Model Studio job ID"):
+        studio.cancel_job("../bad")
+
+    job_id = "b" * 32
+    studio._write_job({
+        "schema_version": 1, "id": job_id, "status": "completed",
+        "operation": "pull_native", "runner_pid": studio.os.getpid(),
+        "cancel_requested": False, "logs": [],
+    })
+    assert studio.cancel_job(job_id)["status"] == "completed"
+
+    missing_event_job_id = "c" * 32
+    studio._write_job({
+        "schema_version": 1, "id": missing_event_job_id, "status": "running",
+        "operation": "pull_native", "runner_pid": studio.os.getpid(),
+        "cancel_requested": False, "logs": [],
+    })
+    with pytest.raises(studio.ModelStudioError, match="not available"):
+        studio.cancel_job(missing_event_job_id)
+
+
+def test_model_studio_checked_process_can_be_cancelled_and_terminated():
+    import threading
+    import sys
+
+    cancel_event = threading.Event()
+    cancel_event.set()
+    with pytest.raises(studio.ModelStudioCancelled):
+        studio._run_checked(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            label="test command",
+            timeout=10,
+            cancel_event=cancel_event,
+        )
+
+
+def test_model_studio_checked_process_has_a_hard_timeout():
+    import sys
+
+    with pytest.raises(studio.ModelStudioTimeout):
+        studio._run_checked(
+            [sys.executable, "-c", "import time; time.sleep(2)"],
+            label="test command",
+            timeout=0.2,
+        )

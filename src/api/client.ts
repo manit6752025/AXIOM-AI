@@ -460,7 +460,7 @@ export type AxiomEngineStreamEvent =
 export type ModelStudioModel = { id: string; author: string; downloads: number; likes: number; pipeline_tag: string; last_modified: string; tags: string[]; url: string };
 export type ModelStudioFile = { filename: string; size_bytes: number | null; quantization: string };
 export type ModelStudioStatus = { schema_version: number; ollama_installed: boolean; ollama_endpoint: string; download_limit_bytes: number; gguf_directory: string; native_model_root?: string; native_model_download_limit_bytes?: number; native_model_file_limit_bytes?: number; native_pull_available?: boolean; catalogue: string; network_search_is_explicit: boolean };
-export type ModelStudioJob = { schema_version: 1; id: string; status: "queued" | "running" | "completed" | "failed"; operation: string; created_at: string; updated_at: string; started_at?: string | null; finished_at?: string | null; config: Record<string, unknown>; progress_bytes: number; total_bytes: number | null; logs: string[]; error: string | null; result: Record<string, unknown> | null };
+export type ModelStudioJob = { schema_version: 1; id: string; status: "queued" | "running" | "cancelling" | "completed" | "cancelled" | "failed" | "timed_out"; operation: string; created_at: string; updated_at: string; started_at?: string | null; finished_at?: string | null; config: Record<string, unknown>; progress_bytes: number; total_bytes: number | null; logs: string[]; error: string | null; result: Record<string, unknown> | null };
 export type ModelStudioJobPage = {
   jobs: ModelStudioJob[]; total: number; limit: number; offset: number;
   has_more: boolean; truncated: boolean; scan_limit: number; filters: { search: string };
@@ -1845,6 +1845,7 @@ export const axiomApi = {
   },
   modelStudioJob: (id: string) => requestJson<ModelStudioJob>(`/api/models/studio/jobs/${encodeURIComponent(id)}`),
   startModelStudioJob: (config: { operation: "pull" | "pull_native" | "install_gguf" | "convert_gguf"; [key: string]: unknown }) => requestJson<ModelStudioJob>("/api/models/studio/jobs", { method: "POST", body: JSON.stringify(config) }),
+  cancelModelStudioJob: (id: string) => requestJson<ModelStudioJob>(`/api/models/studio/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST", body: JSON.stringify({}) }),
 
   runtimeConnectors: () => requestJson<RuntimeConnectorReport>("/api/diagnostics/runtime-connectors"),
   runtimeTraces: (limit = 50, offset = 0, search = "") => {

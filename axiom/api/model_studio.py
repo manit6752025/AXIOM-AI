@@ -103,3 +103,17 @@ def start_job(request: ModelJobRequest) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     except studio.ModelStudioError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+@router.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict[str, Any]:
+    """Request cooperative cancellation; terminal jobs are returned unchanged."""
+    try:
+        result = studio.cancel_job(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except studio.ModelStudioError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    if result is None:
+        raise HTTPException(status_code=404, detail="Model Studio job was not found.")
+    return result
