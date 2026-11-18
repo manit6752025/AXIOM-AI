@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 import typer
+
+from axiom.cli.interactive import confirm as safe_confirm
 from rich.console import Console
 from rich.table import Table
 
@@ -179,7 +181,7 @@ def register_evaluation_cli(app: typer.Typer) -> None:
         yes: bool = typer.Option(False, "--yes", help="Delete without an interactive confirmation."),
     ) -> None:
         """Delete one saved evaluation report."""
-        if not yes and not typer.confirm(f"Delete evaluation report {run_id}?", default=False):
+        if not yes and not safe_confirm(f"Delete evaluation report {run_id}?", default=False):
             console.print("Cancelled.")
             return
         try:
