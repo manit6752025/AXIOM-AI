@@ -143,5 +143,5 @@ test("Model Studio exposes cancellation for active installs", async ({ page }) =
   await page.getByRole("button", { name: "Cancel operation" }).click();
   await expect(page.getByRole("button", { name: "Cancel operation" })).toBeDisabled();
   expect(cancelRequested).toBe(true);
-  await expect(page.getByText(/Cancellation requested/)).toBeVisible();
+  await expect(page.getByTestId("model-studio-log")).toContainText("Cancellation requested");
 });

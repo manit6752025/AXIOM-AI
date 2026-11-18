@@ -473,6 +473,7 @@ def _download_gguf(repo_id: str, filename: str, destination: Path,
                     _check_cancel(cancel_event, deadline)
         if written <= 0:
             raise ModelStudioError("The catalogue returned an empty GGUF file.")
+        _check_cancel(cancel_event, deadline)
         os.replace(temp, destination)
     except ModelStudioError:
         temp.unlink(missing_ok=True)
@@ -613,6 +614,7 @@ def _download_native_file(
                     _check_cancel(cancel_event, deadline)
         if written <= 0:
             raise ModelStudioError(f"The Hub returned an empty native-model file: {filename}.")
+        _check_cancel(cancel_event, deadline)
         os.replace(temp, destination)
         return written
     except ModelStudioError:
@@ -761,6 +763,7 @@ def pull_native_model(
             raise ModelStudioError("The completed download is missing tokenizer.json.")
         if not (staging / "model.safetensors").is_file() and not (staging / "model.safetensors.index.json").is_file():
             raise ModelStudioError("The completed download is missing its native safetensors weights.")
+        _check_cancel(cancel_event, deadline)
         os.replace(staging, target)
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
@@ -818,7 +821,11 @@ def convert_local_model_to_gguf(source_dir: str, llama_cpp_dir: str, output_path
     if on_log:
         on_log("Converting local Transformers weights to GGUF. This can use substantial RAM and disk space.")
     if quantization == "none":
-        summary = _run_checked([sys.executable, str(converter), str(source), "--outfile", str(output), "--outtype", outtype], label="HF-to-GGUF conversion", cancel_event=cancel_event, deadline=deadline)
+        try:
+            summary = _run_checked([sys.executable, str(converter), str(source), "--outfile", str(output), "--outtype", outtype], label="HF-to-GGUF conversion", cancel_event=cancel_event, deadline=deadline)
+        except Exception:
+            output.unlink(missing_ok=True)
+            raise
         return {"operation": "convert_gguf", "source_dir": str(source), "output_path": str(output), "outtype": outtype, "quantization": "none", "summary": summary}
     quant_candidates = [llama_dir / "build" / "bin" / "llama-quantize", llama_dir / "build" / "bin" / "llama-quantize.exe", llama_dir / "llama-quantize", llama_dir / "llama-quantize.exe"]
     quantizer = next((path for path in quant_candidates if path.is_file()), None)

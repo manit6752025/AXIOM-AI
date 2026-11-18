@@ -370,3 +370,27 @@ def test_model_studio_checked_process_has_a_hard_timeout():
             label="test command",
             timeout=0.2,
         )
+
+
+def test_model_studio_unquantized_conversion_removes_partial_output_on_cancellation(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    llama_dir = tmp_path / "llama.cpp"
+    source.mkdir()
+    llama_dir.mkdir()
+    (source / "config.json").write_text("{}", encoding="utf-8")
+    (llama_dir / "convert_hf_to_gguf.py").write_text("# test converter", encoding="utf-8")
+    output = tmp_path / "model.gguf"
+
+    def cancelled(*_args, **_kwargs):
+        output.write_bytes(b"partial")
+        raise studio.ModelStudioCancelled("test cancellation")
+
+    monkeypatch.setattr(studio, "_run_checked", cancelled)
+    with pytest.raises(studio.ModelStudioCancelled):
+        studio.convert_local_model_to_gguf(
+            str(source),
+            str(llama_dir),
+            str(output),
+            quantization="none",
+        )
+    assert not output.exists()

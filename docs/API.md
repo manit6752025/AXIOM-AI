@@ -145,4 +145,7 @@ timeouts, and subprocesses have operation-specific timeouts. Deadline expiry
 returns the distinct terminal status `timed_out`. Cancellation cannot undo an
 external side effect that has already committed (for example, a completed model
 registration); such work is reported as completed rather than falsely marked
-cancelled.
+cancelled. If cancellation is requested during Ollama registration after the GGUF
+file is downloaded, that complete file remains in its selected local destination;
+AXIOM does not delete a successful download while cancelling a later registration
+step.
