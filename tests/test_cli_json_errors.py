@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from typer.testing import CliRunner
 
 from axiom.cli.main import app
@@ -69,6 +70,5 @@ def test_human_error_mode_remains_readable_without_json_errors():
     ])
     assert result.exit_code == 1
     assert "Error: Workflow search" in result.output
-    with __import__("contextlib").suppress(Exception):
+    with pytest.raises(json.JSONDecodeError):
         json.loads(result.output)
-        raise AssertionError("Human mode unexpectedly returned JSON.")
