@@ -39,6 +39,42 @@ def files(repo_id: str, json_output: bool = typer.Option(False, "--json")) -> No
     for index, item in enumerate(result["files"], 1): table.add_row(str(index), item["filename"], item["quantization"], f'{item["size_bytes"]:,}' if item["size_bytes"] is not None else "unknown")
     console.print(table)
 
+@studio_app.command("jobs")
+def jobs(
+    limit: int = typer.Option(20, min=1, max=100, help="Maximum jobs to return."),
+    offset: int = typer.Option(0, min=0, max=5000, help="Number of matching jobs to skip."),
+    search: str = typer.Option("", "--search", max_length=120, help="Filter by job ID, operation, status, repository, or model name."),
+    json_output: bool = typer.Option(False, "--json", help="Emit page metadata and job records as JSON."),
+) -> None:
+    """List a bounded, searchable page of local Model Studio jobs."""
+    try:
+        page = studio.list_jobs_page(limit=limit, offset=offset, search=search)
+    except (ValueError, studio.ModelStudioError) as exc:
+        _fail(str(exc))
+    if json_output:
+        console.print_json(json.dumps(page, ensure_ascii=False))
+        return
+    if not page["jobs"]:
+        console.print("No Model Studio jobs match this page.")
+        return
+    table = Table(title=f"Model Studio jobs · {offset + 1}–{offset + len(page['jobs'])} of {page['total']}")
+    for column in ("ID", "Operation", "Status", "Updated"):
+        table.add_column(column)
+    for job in page["jobs"]:
+        table.add_row(
+            str(job.get("id", ""))[:12],
+            str(job.get("operation", "")),
+            str(job.get("status", "unknown")).upper(),
+            str(job.get("updated_at", "")),
+        )
+    console.print(table)
+    if page["truncated"]:
+        console.print(f"History scan capped at {page['scan_limit']:,} newest job records.")
+    if page["has_more"]:
+        next_offset = offset + len(page["jobs"])
+        console.print(f"Next page: axiom model studio jobs --limit {limit} --offset {next_offset} --search {search!r}")
+
+
 @studio_app.command("status")
 def status(json_output: bool = typer.Option(False, "--json")) -> None:
     """Show local model-tool availability and recent Studio jobs."""
