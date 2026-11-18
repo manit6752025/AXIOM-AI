@@ -23,7 +23,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from axiom.cli.interactive import confirm as safe_confirm
-from axiom.cli.errors import emit_error
+from axiom.cli.errors import emit_error, json_errors_enabled
 from axiom.cli.ai_features import ai_app
 from axiom.cli.optimizer import optimizer_app
 from axiom.cli.startup import show_startup, suppress_for_arguments
@@ -180,6 +180,23 @@ def _cli_error(message: str, *, code: str = "AXIOM_CLI_ERROR") -> None:
     """Emit a stable human or machine-readable error without leaking details."""
     emit_error(message, code=code, options=_cli_runtime_options(), stderr=True)
 
+
+
+def _cli_command_error(
+    message: str,
+    *,
+    code: str,
+    json_output: bool = False,
+    legacy_payload: dict[str, object] | None = None,
+    exit_code: int = 1,
+) -> None:
+    """Prefer the global envelope while retaining legacy command --json output."""
+    if json_errors_enabled():
+        _cli_error(message, code=code)
+    if json_output and legacy_payload is not None:
+        typer.echo(json.dumps(legacy_payload, ensure_ascii=False, sort_keys=True))
+        raise typer.Exit(code=exit_code)
+    _cli_error(message, code=code)
 
 def _run_default_session(*, show_banner: bool = True) -> None:
     """Make bare ``axiom`` the clear, useful entry point for a terminal."""
@@ -637,8 +654,7 @@ def init(name: str):
     try:
         root = create_project(name, Path.cwd())
     except (FileExistsError, ValueError) as exc:
-        console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1)
+        _cli_error(str(exc), code="project_initialization_failed")
 
     console.print(
         Panel.fit(
@@ -668,8 +684,7 @@ def hf_login():
     try:
         login()
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[red]Error:[/red] Hugging Face login failed: {exc}")
-        raise typer.Exit(code=1)
+        _cli_error(f"Hugging Face login failed: {exc}", code="huggingface_login_failed")
 
     console.print("[green]✓[/green] Hugging Face authentication configured.")
 
@@ -722,8 +737,7 @@ def hf_logout():
     try:
         logout()
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[red]Error:[/red] Hugging Face logout failed: {exc}")
-        raise typer.Exit(code=1)
+        _cli_error(f"Hugging Face logout failed: {exc}", code="huggingface_logout_failed")
 
     console.print("[green]✓[/green] Hugging Face authentication removed.")
 
@@ -774,8 +788,7 @@ def supercompress_compress(
     path = Path(context_file)
 
     if not path.is_file():
-        console.print(f"[red]Error:[/red] Context file not found: {path}")
-        raise typer.Exit(code=1)
+        _cli_error(f"Context file not found: {path}", code="context_file_not_found")
 
     try:
         context = path.read_text(encoding="utf-8")
@@ -869,8 +882,7 @@ def integration_add(
     try:
         integration_type = IntegrationType(type.lower())
     except ValueError:
-        console.print("[red]Error:[/red] Type must be one of: mcp, cli, http, a2a.")
-        raise typer.Exit(code=1)
+        _cli_error("Type must be one of: mcp, cli, http, a2a.", code="invalid_integration_type")
 
     if (
         integration_type
@@ -925,8 +937,7 @@ def integration_remove(name: str):
     registry = IntegrationRegistry()
 
     if not registry.remove(name):
-        console.print(f"[yellow]Integration not found:[/yellow] {name}")
-        raise typer.Exit(code=1)
+        _cli_error(f"Integration not found: {name}", code="integration_not_found")
 
     console.print(f"[green]✓[/green] Removed integration: [cyan]{name}[/cyan]")
 
@@ -1698,8 +1709,7 @@ def model_pull(
     )
 
     if remaining_gb < 0:
-        console.print("[red]✗ Download blocked:[/red] insufficient disk space.")
-        raise typer.Exit(code=1)
+        _cli_error("Download blocked: insufficient disk space.", code="model_pull_insufficient_disk_space")
 
     projected_used_percent = (
         ((total_bytes - free_bytes + total_size) / total_bytes) * 100
@@ -1708,11 +1718,7 @@ def model_pull(
     )
 
     if projected_used_percent > max_disk_usage_gb:
-        console.print(
-            "[red]✗ Download blocked:[/red] "
-            f"projected disk usage would reach {projected_used_percent:.1f}%."
-        )
-        raise typer.Exit(code=1)
+        _cli_error(f"Download blocked: projected disk usage would reach {projected_used_percent:.1f}%.", code="model_pull_disk_usage_limit")
 
     console.print("[green]✓ Disk safety check passed.[/green]")
 
@@ -1722,8 +1728,7 @@ def model_pull(
             local_dir=Path("models") / repo_id.replace("/", "__"),
         )
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[red]Error:[/red] Model download failed: {exc}")
-        raise typer.Exit(code=1)
+        _cli_error(f"Model download failed: {exc}", code="model_pull_failed")
 
     console.print(f"[green]✓ Model downloaded:[/green] {destination}")
 
