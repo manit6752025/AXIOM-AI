@@ -13,6 +13,7 @@ from axiom.core.fine_tuning import (
     FineTuningError,
     get_job,
     list_jobs,
+    list_jobs_page,
     run_finetuning_inline,
 )
 
@@ -72,20 +73,22 @@ def register(train_app: typer.Typer) -> None:
     @train_app.command("jobs")
     def train_jobs(
         limit: int = typer.Option(20, min=1, max=100, help="Maximum saved jobs to list."),
-        json_output: bool = typer.Option(False, "--json", help="Print jobs as JSON."),
+        offset: int = typer.Option(0, min=0, max=5000, help="Number of matching jobs to skip."),
+        json_output: bool = typer.Option(False, "--json", help="Print page metadata and jobs as JSON."),
     ) -> None:
-        """List recent local fine-tuning jobs."""
+        """List a bounded page of recent local fine-tuning jobs."""
         try:
-            jobs = list_jobs(limit)
+            page = list_jobs_page(limit=limit, offset=offset)
+            jobs = page["jobs"]
         except (ValueError, FineTuningError) as exc:
             _fail(str(exc))
         if json_output:
-            console.print_json(json.dumps({"jobs": jobs}, ensure_ascii=False))
+            console.print_json(json.dumps(page, ensure_ascii=False))
             return
         if not jobs:
-            console.print("No local fine-tuning jobs yet. Use `axiom train run --help` to start one.")
+            console.print("No local fine-tuning jobs on this page. Use `axiom train run --help` to start one.")
             return
-        table = Table(title="Local fine-tuning jobs")
+        table = Table(title=f"Local fine-tuning jobs · {offset + 1}–{offset + len(jobs)} of {page['total']}")
         for column in ("ID", "Status", "Steps", "Model", "Updated"):
             table.add_column(column)
         for job in jobs:
@@ -96,6 +99,11 @@ def register(train_app: typer.Typer) -> None:
                 str(config.get("model_path", ""))[-32:], str(job.get("updated_at", "")),
             )
         console.print(table)
+        if page["truncated"]:
+            console.print(f"History scan capped at {page['scan_limit']:,} newest job records.")
+        if page["has_more"]:
+            next_offset = offset + len(jobs)
+            console.print(f"Next page: axiom train jobs --limit {limit} --offset {next_offset}")
 
     @train_app.command("status")
     def train_status(
