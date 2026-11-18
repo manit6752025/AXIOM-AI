@@ -32,6 +32,28 @@ axiom --quiet --json-errors completion tcsh
 - `--verbose` and `--quiet` are mutually exclusive.
 - Existing command-level `--json` flags continue to control successful command output. `--json-errors` only changes error envelopes.
 
+## Non-interactive execution
+
+Use the root `--non-interactive` (alias `--no-input`) option before the
+command to disable all prompts. AXIOM also refuses to prompt when standard
+input is not a terminal, even when the flag is omitted. Supply required values
+through command arguments/options or environment variables instead.
+
+```bash
+axiom --non-interactive optimize run --profile 2 --model ./models/qwen --target-tps 12
+AXIOM_LLM_API_KEY="$MY_PROVIDER_KEY" axiom --non-interactive llm chat qwen "Hello" --provider openai --send-to-provider
+axiom --non-interactive model studio remote-models https://provider.example/v1 --api-key-env AXIOM_LLM_API_KEY
+```
+
+The Model Studio `wizard` command is explicitly interactive; use the
+`search`, `files`, `pull`, `pull-native`, `install-gguf`, or `convert-gguf`
+commands for scripted operations. Remote prompt submission requires
+`--send-to-provider` in non-interactive mode. API keys should be provided
+through environment variables, not command-line arguments.
+
+Destructive confirmations default to **no** when input is unavailable.
+Existing `--yes` flags remain the explicit opt-in for deletion/removal.
+
 ## Shell completion
 
 The root Typer command exposes shell completion. Install completion in the
