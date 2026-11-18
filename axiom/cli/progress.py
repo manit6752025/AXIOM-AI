@@ -45,11 +45,15 @@ def scan_progress(
     ) as progress:
         task_id = progress.add_task(description, total=max(1, total_bytes), rows=0)
 
-        def update(rows: int, completed_bytes: int, total: int) -> None:
+        def update(rows: int, completed_bytes: int, total: int | None) -> None:
+            effective_total = max(1, total) if total is not None else None
+            completed = max(0, completed_bytes)
+            if effective_total is not None:
+                completed = min(completed, effective_total)
             progress.update(
                 task_id,
-                total=max(1, total),
-                completed=min(max(0, completed_bytes), max(1, total)),
+                total=effective_total,
+                completed=completed,
                 rows=rows,
             )
 
@@ -89,7 +93,7 @@ def cancellable_byte_progress(
     total_bytes: int,
     *,
     enabled: bool = True,
-) -> Iterator[tuple[threading.Event, Callable[[int, int], None] | None]]:
+) -> Iterator[tuple[threading.Event, Callable[[int, int | None], None] | None]]:
     """Byte-transfer progress with a cancel event set by the first Ctrl-C."""
     cancel_event = threading.Event()
     previous_handler = None
@@ -116,7 +120,7 @@ def byte_progress(
     total_bytes: int,
     *,
     enabled: bool = True,
-) -> Iterator[Callable[[int, int], None] | None]:
+) -> Iterator[Callable[[int, int | None], None] | None]:
     """Two-argument progress callback for chunked hash/download operations."""
     with scan_progress(description, total_bytes, enabled=enabled) as update:
         if update is None:
