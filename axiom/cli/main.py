@@ -24,6 +24,7 @@ from rich.table import Table
 
 from axiom.cli.interactive import confirm as safe_confirm
 from axiom.cli.errors import emit_error, json_errors_enabled
+from axiom.cli.progress import cancellable_scan_progress, report_cancelled
 from axiom.cli.ai_features import ai_app
 from axiom.cli.optimizer import optimizer_app
 from axiom.cli.startup import show_startup, suppress_for_arguments
@@ -46,6 +47,7 @@ from axiom.core.project import create_project
 from axiom.core.tool_permissions import TOOL_DESCRIPTIONS, ToolPermissionStore
 from axiom.daemon import LOCAL_ACTIONS, run_daemon
 from axiom.datasets.cleaner import clean_jsonl
+from axiom.datasets.progress import DatasetScanCancelled
 from axiom.datasets.inspector import inspect_dataset
 from axiom.models.analysis import analyze_config, disk_info
 from axiom.models.inspector import inspect_model
@@ -1847,7 +1849,18 @@ def dataset_clean(
 
     destination = Path(output) if output else source.with_name(f"{source.stem}.cleaned.jsonl")
     try:
-        result = clean_jsonl(source, destination)
+        with cancellable_scan_progress("Cleaning JSONL dataset", source.stat().st_size) as (cancel_event, progress):
+            result = clean_jsonl(
+                source,
+                destination,
+                on_progress=(
+                    (lambda rows, current, total: progress(rows, current, total))
+                    if progress is not None else None
+                ),
+                cancel_event=cancel_event,
+            )
+    except (DatasetScanCancelled, KeyboardInterrupt):
+        report_cancelled("Dataset cleaning cancelled; the original file is unchanged and temporary output was removed.")
     except OSError as exc:
         report_error("dataset_cleaning_failed", str(exc))
         raise typer.Exit(code=1) from exc
