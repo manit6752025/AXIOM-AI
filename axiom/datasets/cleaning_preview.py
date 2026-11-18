@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 from typing import Any, BinaryIO, Callable
+from threading import Event
 
+from axiom.datasets.progress import check_scan_cancelled
 from axiom.datasets.profiler import (
     DEFAULT_MAX_BYTES,
     DEFAULT_MAX_LINE_BYTES,
@@ -25,6 +27,7 @@ def preview_jsonl_cleaning(
     max_rows: int = DEFAULT_MAX_ROWS,
     max_line_bytes: int = DEFAULT_MAX_LINE_BYTES,
     on_progress: Callable[[int, int, int], None] | None = None,
+    cancel_event: Event | None = None,
 ) -> dict[str, Any]:
     """Summarize cleaning decisions while never writing an output file."""
     _validate_limits(max_bytes, max_rows, max_line_bytes)
@@ -48,10 +51,12 @@ def preview_jsonl_cleaning(
             return
         if force or lines - last_progress_rows >= 256 or read_bytes - last_progress_bytes >= 1024 * 1024:
             on_progress(lines, read_bytes, file_size_bytes)
+            check_scan_cancelled(cancel_event)
             last_progress_bytes = read_bytes
             last_progress_rows = lines
 
     while lines < max_rows:
+        check_scan_cancelled(cancel_event)
         remaining = max_bytes - read_bytes
         if remaining <= 0:
             if stream.read(1):
@@ -172,6 +177,7 @@ def preview_jsonl_cleaning(
         )
 
     notify_progress(force=True)
+    check_scan_cancelled(cancel_event)
     return {
         "file_name": file_name,
         "preview_only": True,

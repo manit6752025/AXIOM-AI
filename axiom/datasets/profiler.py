@@ -4,9 +4,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from threading import Event
 from collections import Counter
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Sequence
+from axiom.datasets.progress import check_scan_cancelled
 from axiom.datasets.pii import MAX_PII_TEXT_BYTES, MAX_PII_VALUES_PER_ROW, scan_row_for_pii
 
 DEFAULT_MAX_BYTES = 64 * 1024 * 1024
@@ -105,6 +107,7 @@ def profile_jsonl(
     ignored_sensitive_fields: Sequence[str] = (),
     scan_pii: bool = False,
     on_progress: Callable[[int, int, int], None] | None = None,
+    cancel_event: Event | None = None,
 ) -> dict[str, Any]:
     """Profile a local file path. Intended for trusted local CLI callers."""
     _validate_limits(max_bytes, max_rows, max_line_bytes)
@@ -128,6 +131,7 @@ def profile_jsonl(
             ignored_sensitive_fields=ignored_sensitive_fields,
             scan_pii=scan_pii,
             on_progress=on_progress,
+            cancel_event=cancel_event,
         )
 
 
@@ -146,6 +150,7 @@ def profile_jsonl_stream(
     ignored_sensitive_fields: Sequence[str] = (),
     scan_pii: bool = False,
     on_progress: Callable[[int, int, int], None] | None = None,
+    cancel_event: Event | None = None,
 ) -> dict[str, Any]:
     """Profile an already-open file without resolving or reopening a client path."""
     duplicate_key_fields = tuple(name.strip() for name in duplicate_key_fields)
@@ -192,6 +197,7 @@ def profile_jsonl_stream(
             return
         if force or lines - last_progress_rows >= 256 or read_bytes - last_progress_bytes >= 1024 * 1024:
             on_progress(lines, read_bytes, size)
+            check_scan_cancelled(cancel_event)
             last_progress_bytes = read_bytes
             last_progress_rows = lines
 
@@ -202,6 +208,7 @@ def profile_jsonl_stream(
         newline_counts["CR"] += raw_line.count(b"\r") - crlf
 
     while lines < max_rows:
+        check_scan_cancelled(cancel_event)
         remaining = max_bytes - read_bytes
         if remaining <= 0:
             truncated = True
@@ -379,6 +386,7 @@ def profile_jsonl_stream(
     observed_endings = [ending for ending, count in ending_counts.items() if count]
     newline_style = "mixed" if len(observed_endings) > 1 else observed_endings[0] if observed_endings else "none"
     notify_progress(force=True)
+    check_scan_cancelled(cancel_event)
 
     return {
         "format": "jsonl",

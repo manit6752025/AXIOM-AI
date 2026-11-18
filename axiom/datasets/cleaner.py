@@ -8,6 +8,9 @@ import secrets
 import tempfile
 from pathlib import Path
 from typing import Any, BinaryIO, Callable
+from threading import Event
+
+from axiom.datasets.progress import check_scan_cancelled
 
 _LOG = logging.getLogger(__name__)
 
@@ -106,6 +109,7 @@ def clean_jsonl(
     max_rows: int | None = None,
     max_line_bytes: int | None = None,
     on_progress: Callable[[int, int, int | None], None] | None = None,
+    cancel_event: Event | None = None,
 ) -> DatasetCleaningResult:
     source = Path(source)
     output = Path(output)
@@ -179,6 +183,7 @@ def clean_jsonl(
             return
         if force or total_lines - last_progress_rows >= 256 or progress_bytes - last_progress_bytes >= 1024 * 1024:
             on_progress(total_lines, progress_bytes, progress_total_bytes)
+            check_scan_cancelled(cancel_event)
             last_progress_rows = total_lines
             last_progress_bytes = progress_bytes
 
@@ -243,6 +248,7 @@ def clean_jsonl(
 
             with outfile:
                 for raw_line in input_lines:
+                    check_scan_cancelled(cancel_event)
                     total_lines += 1
                     progress_bytes += len(raw_line.encode("utf-8"))
                     notify_progress()
@@ -289,6 +295,7 @@ def clean_jsonl(
                     kept += 1
 
                 notify_progress(force=True)
+                check_scan_cancelled(cancel_event)
                 outfile.flush()
                 os.fsync(outfile.fileno())
 

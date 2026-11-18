@@ -6,6 +6,9 @@ import os
 import re
 from datetime import UTC, datetime
 from typing import Any, BinaryIO, Callable
+from threading import Event
+
+from axiom.datasets.progress import check_scan_cancelled
 
 DEFAULT_MANIFEST_MAX_BYTES = 256 * 1024 * 1024
 MAX_MANIFEST_MAX_BYTES = 1024 * 1024 * 1024
@@ -21,6 +24,7 @@ def create_dataset_manifest(
     max_bytes: int = DEFAULT_MANIFEST_MAX_BYTES,
     parent_manifest_sha256: str | None = None,
     on_progress: Callable[[int, int], None] | None = None,
+    cancel_event: Event | None = None,
 ) -> dict[str, Any]:
     """Hash a bounded prefix, claiming a full digest only for a stable full read."""
     if type(file_size_bytes) is not int or file_size_bytes < 0:
@@ -39,6 +43,7 @@ def create_dataset_manifest(
     digest = hashlib.sha256()
     bytes_hashed = 0
     while bytes_hashed < expected_bytes:
+        check_scan_cancelled(cancel_event)
         chunk = stream.read(min(HASH_CHUNK_BYTES, expected_bytes - bytes_hashed))
         if not chunk:
             break
@@ -46,9 +51,12 @@ def create_dataset_manifest(
         bytes_hashed += len(chunk)
         if on_progress is not None:
             on_progress(bytes_hashed, expected_bytes)
+            check_scan_cancelled(cancel_event)
 
     if on_progress is not None and bytes_hashed == 0:
         on_progress(0, expected_bytes)
+        check_scan_cancelled(cancel_event)
+    check_scan_cancelled(cancel_event)
 
     try:
         final_stat = os.fstat(stream.fileno())
