@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+
+from axiom.cli.interactive import confirm as safe_confirm, prompt as safe_prompt
 from rich.console import Console
 from rich.table import Table
 
@@ -56,7 +58,7 @@ def run(
     if profile == 0:
         console.print("\n[bold cyan]AXIOM AGENT OPTIMIZER[/bold cyan]\n")
         console.print(menu())
-        profile = typer.prompt(
+        profile = safe_prompt(
             "\nChoose agent profile (1-8)",
             type=int,
         )
@@ -64,20 +66,20 @@ def run(
     selected = get_profile(profile)
 
     if not model:
-        model = typer.prompt("\nHugging Face model ID or local model path")
+        model = safe_prompt("\nHugging Face model ID or local model path")
 
     if not output:
         safe_name = model.replace("/", "__").replace("\\", "__")
         output = str(Path(".axiom") / "optimized" / safe_name / selected.key)
 
     if (
-        typer.confirm(
+        safe_confirm(
             f"\nTarget {target_tps:g} tok/s. Keep this target?",
             default=True,
         )
         is False
     ):
-        target_tps = typer.prompt(
+        target_tps = safe_prompt(
             "Target tokens/sec",
             type=float,
             default=10.0,
