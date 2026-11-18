@@ -10,6 +10,8 @@ from typing import Any
 
 import typer
 
+from axiom.cli.errors import emit_error
+
 from axiom.cli.interactive import confirm as safe_confirm
 from rich.console import Console
 from rich.table import Table
@@ -194,5 +196,4 @@ def register_evaluation_cli(app: typer.Typer) -> None:
 
 
 def _error(message: str) -> Any:
-    console.print(f"[red]Error:[/red] {message}")
-    raise typer.Exit(code=1)
+    emit_error(message, code="evaluation_error")

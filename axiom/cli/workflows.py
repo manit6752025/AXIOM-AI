@@ -6,6 +6,8 @@ import json
 from typing import Any
 
 import typer
+
+from axiom.cli.errors import emit_error
 from rich.console import Console
 from rich.table import Table
 
@@ -123,5 +125,4 @@ def register_workflow_cli(app: typer.Typer) -> None:
 
 
 def _error(message: str) -> Any:
-    console.print(f"[red]Error:[/red] {message}")
-    raise typer.Exit(code=1)
+    emit_error(message, code="workflow_error")
