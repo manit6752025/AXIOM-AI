@@ -43,7 +43,7 @@ def files(repo_id: str, json_output: bool = typer.Option(False, "--json")) -> No
 def jobs(
     limit: int = typer.Option(20, min=1, max=100, help="Maximum jobs to return."),
     offset: int = typer.Option(0, min=0, max=5000, help="Number of matching jobs to skip."),
-    search: str = typer.Option("", "--search", max_length=120, help="Filter by job ID, operation, status, repository, or model name."),
+    search: str = typer.Option("", "--search", help="Filter by job ID, operation, status, repository, or model name (max 120 characters)."),
     json_output: bool = typer.Option(False, "--json", help="Emit page metadata and job records as JSON."),
 ) -> None:
     """List a bounded, searchable page of local Model Studio jobs."""
