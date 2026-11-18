@@ -55,3 +55,22 @@ def test_fine_tuning_start_rejects_when_a_job_is_already_active(monkeypatch):
     }
     response = TestClient(create_app()).post("/api/fine-tuning/jobs", json=payload)
     assert response.status_code == 409
+
+
+def test_fine_tuning_jobs_endpoint_returns_bounded_page(monkeypatch):
+    from axiom.api import fine_tuning
+
+    expected = {
+        "jobs": [{"id": "a" * 32, "status": "completed"}],
+        "total": 11, "limit": 5, "offset": 5, "has_more": True,
+        "truncated": False, "scan_limit": 5000,
+    }
+    monkeypatch.setattr(fine_tuning, "list_jobs_page", lambda **kwargs: expected)
+    response = TestClient(create_app()).get("/api/fine-tuning/jobs?limit=5&offset=5")
+    assert response.status_code == 200
+    assert response.json() == expected
+
+
+def test_fine_tuning_jobs_endpoint_rejects_unbounded_paging():
+    response = TestClient(create_app()).get("/api/fine-tuning/jobs?limit=101")
+    assert response.status_code == 422
