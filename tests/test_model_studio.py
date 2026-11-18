@@ -255,3 +255,38 @@ def test_cli_can_install_gguf_directly_for_native_engine(monkeypatch):
     }
     assert "Installed for AXIOM Native Engine" in result.output
     assert "axiom engine run --model-path" in result.output
+
+
+def test_model_studio_job_history_pages_and_searches_bounded_inventory(tmp_path, monkeypatch):
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    for index, model in enumerate(("qwen-small", "llama-base", "qwen-large", "mistral-chat")):
+        job_id = f"{index + 10:032x}"
+        (jobs_dir / f"{job_id}.json").write_text(json.dumps({
+            "id": job_id,
+            "created_at": f"2026-11-{18-index:02d}T10:00:00+00:00",
+            "operation": "pull_native",
+            "status": "completed",
+            "repo_id": f"org/{model}",
+            "model_name": model,
+        }), encoding="utf-8")
+
+    monkeypatch.setattr(studio, "jobs_directory", lambda: jobs_dir)
+    monkeypatch.setattr(studio, "_recover", lambda record: record)
+
+    first = studio.list_jobs_page(limit=2, offset=0)
+    assert first["total"] == 4
+    assert first["has_more"] is True
+    assert len(first["jobs"]) == 2
+
+    matching = studio.list_jobs_page(limit=2, offset=0, search="qwen")
+    assert matching["total"] == 2
+    assert matching["filters"] == {"search": "qwen"}
+    assert all("qwen" in job["model_name"] for job in matching["jobs"])
+
+
+def test_model_studio_job_history_rejects_invalid_page_bounds(tmp_path, monkeypatch):
+    monkeypatch.setattr(studio, "jobs_directory", lambda: tmp_path / "missing")
+    for kwargs in ({"limit": 0}, {"limit": 101}, {"offset": -1}, {"offset": 5001}):
+        with pytest.raises(ValueError):
+            studio.list_jobs_page(**kwargs)
