@@ -4,6 +4,8 @@ from pathlib import Path
 
 import typer
 
+from axiom.cli.errors import emit_error
+
 from axiom.cli.interactive import confirm as safe_confirm, prompt as safe_prompt
 from rich.console import Console
 from rich.table import Table
@@ -113,8 +115,7 @@ def run(
 
             console.print(f"[green]✓ Model available at {model}[/green]")
         except Exception as exc:  # noqa: BLE001
-            console.print(f"[red]Error:[/red] Could not download Hugging Face model: {exc}")
-            raise typer.Exit(code=1) from exc
+            emit_error(f"Could not download Hugging Face model: {exc}", code="optimizer_model_download_failed")
 
     info = inspect_model(model)
 

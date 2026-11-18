@@ -7,6 +7,8 @@ from pathlib import Path
 
 import typer
 
+from axiom.cli.errors import emit_error
+
 from axiom.core.diagnostics import create_support_bundle
 
 
@@ -30,18 +32,14 @@ def register(app: typer.Typer) -> None:
         """Export privacy-safe diagnostics for support; never include data files."""
         destination = output.expanduser()
         if destination.is_symlink():
-            typer.echo("Error: output path must not be a symbolic link.", err=True)
-            raise typer.Exit(code=2)
+            emit_error("Output path must not be a symbolic link.", code="support_bundle_symlink", exit_code=2)
         if destination.exists() and not destination.is_file():
-            typer.echo("Error: output path must be a regular file.", err=True)
-            raise typer.Exit(code=2)
+            emit_error("Output path must be a regular file.", code="support_bundle_not_file", exit_code=2)
         if destination.exists() and not force:
-            typer.echo("Error: output file already exists; pass --force to replace it.", err=True)
-            raise typer.Exit(code=2)
+            emit_error("Output file already exists; pass --force to replace it.", code="support_bundle_exists", exit_code=2)
         parent = destination.parent
         if parent.is_symlink() or not parent.is_dir():
-            typer.echo("Error: output parent must be an existing, non-symlink directory.", err=True)
-            raise typer.Exit(code=2)
+            emit_error("Output parent must be an existing, non-symlink directory.", code="support_bundle_invalid_parent", exit_code=2)
         try:
             archive = create_support_bundle(workspace)
             flags = os.O_WRONLY | os.O_CREAT
@@ -60,11 +58,9 @@ def register(app: typer.Typer) -> None:
                     pass
                 raise
         except FileExistsError:
-            typer.echo("Error: output file already exists; pass --force to replace it.", err=True)
-            raise typer.Exit(code=2) from None
+            emit_error("Output file already exists; pass --force to replace it.", code="support_bundle_exists", exit_code=2)
         except (OSError, ValueError) as exc:
-            typer.echo(f"Error: could not write support bundle ({type(exc).__name__}).", err=True)
-            raise typer.Exit(code=1) from None
+            emit_error(f"Could not write support bundle ({type(exc).__name__}).", code="support_bundle_write_failed")
 
         payload = {
             "schema_version": 1,

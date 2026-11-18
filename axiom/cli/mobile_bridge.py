@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import secrets
 import typer
+
+from axiom.cli.errors import emit_error
 from rich.console import Console
 
 console = Console()
@@ -21,8 +23,7 @@ def register_mobile_bridge(app: typer.Typer) -> None:
             import uvicorn
             from fastapi import FastAPI
         except ImportError:
-            console.print("[red]Error:[/red] Install the API extra with: python -m pip install 'axiom-all'")
-            raise typer.Exit(code=1) from None
+            emit_error("Install the API extra with: python -m pip install 'axiom-all'.", code="api_extra_missing")
 
         from axiom.api.openai_compat import router as openai_compat_router
 
