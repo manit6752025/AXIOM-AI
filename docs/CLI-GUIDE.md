@@ -32,6 +32,19 @@ axiom --quiet --json-errors completion tcsh
 - `--verbose` and `--quiet` are mutually exclusive.
 - Existing command-level `--json` flags continue to control successful command output. `--json-errors` only changes error envelopes.
 
+## Progress and cancellation
+
+Local Model Studio downloads and GGUF conversions show byte progress on an
+interactive terminal; dataset profiling, manifest hashing, cleaning previews,
+and JSONL cleaning show row/byte progress on stderr. Redirected/JSON output
+remains clean, and progress is suppressed by `--quiet`.
+
+Press **Ctrl+C once** to request cooperative cancellation at the next file
+chunk, row, or subprocess boundary. The CLI exits with status `130`. Partial
+staged model downloads and temporary dataset-cleaning output are removed; a
+cleaning operation never changes its original source. Model Studio jobs also
+retain their API/GUI cancellation endpoint and persistent status history.
+
 ## Non-interactive execution
 
 Use the root `--non-interactive` (alias `--no-input`) option before the
