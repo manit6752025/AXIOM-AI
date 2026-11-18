@@ -5,6 +5,7 @@ import os
 import typer
 
 from axiom.cli.errors import emit_error
+from axiom.cli.progress import cancellable_byte_progress, cancellable_scan_progress, report_cancelled
 from rich.console import Console
 from rich.table import Table
 from axiom.cli.interactive import confirm as safe_confirm, is_interactive, prompt as safe_prompt
@@ -101,7 +102,13 @@ def status(json_output: bool = typer.Option(False, "--json")) -> None:
 @studio_app.command("pull")
 def pull(model_name: str = typer.Argument(..., help="Ollama library model tag, e.g. qwen3.5:0.8b")) -> None:
     """Download a model from the Ollama library to the local Ollama store."""
-    try: result = studio.pull_ollama_model(model_name, on_log=lambda msg: console.print(msg))
+    try:
+        with cancellable_scan_progress(f"Pulling {model_name} from Ollama", 1) as (cancel_event, _):
+            result = studio.pull_ollama_model(
+                model_name, on_log=lambda msg: console.print(msg), cancel_event=cancel_event,
+            )
+    except (studio.ModelStudioCancelled, KeyboardInterrupt):
+        report_cancelled("Ollama model pull cancelled; incomplete download data was discarded.")
     except (ValueError, studio.ModelStudioError) as exc: _fail(str(exc))
     console.print(f"[green]Installed locally:[/green] {result['model_name']}")
 
@@ -109,14 +116,15 @@ def pull(model_name: str = typer.Argument(..., help="Ollama library model tag, e
 def pull_native(repo_id: str = typer.Argument(..., help="Public Hugging Face repository ID for AXIOM-native safetensors."), json_output: bool = typer.Option(False, "--json")) -> None:
     """Pull compatible Llama/Mistral/Qwen2 safetensors into AXIOM's native model store."""
     try:
-        result = studio.pull_native_model(
-            repo_id,
-            on_log=(lambda message: console.print(message)) if not json_output else None,
-            on_progress=(lambda current, total: console.print(
-                "\rDownloaded " + f"{current:,}" + (f" / {total:,} bytes" if total else " bytes"),
-                end="",
-            )) if not json_output else None,
-        )
+        with cancellable_byte_progress("Downloading AXIOM-native model", 0) as (cancel_event, progress):
+            result = studio.pull_native_model(
+                repo_id,
+                on_log=(lambda message: console.print(message)) if not json_output else None,
+                on_progress=progress,
+                cancel_event=cancel_event,
+            )
+    except (studio.ModelStudioCancelled, KeyboardInterrupt):
+        report_cancelled("Native model download cancelled; partial staging files were removed.")
     except (ValueError, studio.ModelStudioError) as exc:
         _fail(str(exc))
     if json_output:
@@ -140,18 +148,19 @@ def install_gguf(
         _fail("Choose either --native or --download-only, not both.")
     register_ollama = not (no_ollama or native)
     try:
-        result = studio.install_hf_gguf(
-            repo_id,
-            filename,
-            model_name,
-            register_ollama,
-            on_log=(lambda msg: console.print(msg)) if not json_output else None,
-            on_progress=(lambda current, total: console.print(
-                f"\rDownloaded {current:,}" + (f" / {total:,} bytes" if total else " bytes"),
-                end="",
-            )) if not json_output else None,
-            install_native=native,
-        )
+        with cancellable_byte_progress("Downloading GGUF model", 0) as (cancel_event, progress):
+            result = studio.install_hf_gguf(
+                repo_id,
+                filename,
+                model_name,
+                register_ollama,
+                on_log=(lambda msg: console.print(msg)) if not json_output else None,
+                on_progress=progress,
+                install_native=native,
+                cancel_event=cancel_event,
+            )
+    except (studio.ModelStudioCancelled, KeyboardInterrupt):
+        report_cancelled("GGUF installation cancelled; partial temporary files were removed.")
     except (ValueError, studio.ModelStudioError) as exc:
         _fail(str(exc))
     if json_output:
@@ -172,7 +181,14 @@ def convert_gguf(source_dir: str = typer.Argument(..., help="Existing local Tran
                  outtype: str = typer.Option("f16", help="auto, f16, f32, or bf16."),
                  quantization: str = typer.Option("Q4_K_M", help="none, Q2_K, Q3_K_M, Q4_0, Q4_K_M, Q5_K_M, Q6_K, or Q8_0.")) -> None:
     """Convert local Transformers weights to GGUF, optionally quantizing them."""
-    try: result = studio.convert_local_model_to_gguf(source_dir, llama_cpp_dir, output_path, outtype, quantization, on_log=lambda msg: console.print(msg))
+    try:
+        with cancellable_scan_progress("Converting and quantizing GGUF", 1) as (cancel_event, _):
+            result = studio.convert_local_model_to_gguf(
+                source_dir, llama_cpp_dir, output_path, outtype, quantization,
+                on_log=lambda msg: console.print(msg), cancel_event=cancel_event,
+            )
+    except (studio.ModelStudioCancelled, KeyboardInterrupt):
+        report_cancelled("GGUF conversion cancelled; incomplete output files were removed.")
     except (ValueError, studio.ModelStudioError) as exc: _fail(str(exc))
     console.print_json(json.dumps(result, ensure_ascii=False))
 
@@ -190,7 +206,13 @@ def wizard() -> None:
         model = safe_prompt("Ollama model tag (for example qwen3.5:0.8b)")
         if not safe_confirm(f"Pull {model} into your local Ollama store?", default=False):
             raise typer.Exit(code=0)
-        try: result = studio.pull_ollama_model(model, on_log=lambda message: console.print(message))
+        try:
+            with cancellable_scan_progress(f"Pulling {model} from Ollama", 1) as (cancel_event, _):
+                result = studio.pull_ollama_model(
+                    model, on_log=lambda message: console.print(message), cancel_event=cancel_event,
+                )
+        except (studio.ModelStudioCancelled, KeyboardInterrupt):
+            report_cancelled("Ollama model pull cancelled; incomplete download data was discarded.")
         except (ValueError, studio.ModelStudioError) as exc: _fail(str(exc))
         console.print(f"[green]Installed:[/green] {result['model_name']}")
         return
@@ -224,10 +246,17 @@ def wizard() -> None:
     console.print(f"Task: {task} · available RAM: {size} · repository: {repo} · file: {selected_file}")
     if not safe_confirm("Start download and installation?", default=False): raise typer.Exit(code=0)
     try:
-        result = studio.install_hf_gguf(repo, selected_file, model_name, register,
-            on_log=lambda message: console.print(message),
-            on_progress=lambda current, total: console.print(f"\rDownloaded {current:,}" + (f" / {total:,} bytes" if total else " bytes"), end=""))
-    except (ValueError, studio.ModelStudioError) as exc: _fail(str(exc))
+        with cancellable_byte_progress("Downloading selected GGUF", 0) as (cancel_event, progress):
+            result = studio.install_hf_gguf(
+                repo, selected_file, model_name, register,
+                on_log=lambda message: console.print(message),
+                on_progress=progress,
+                cancel_event=cancel_event,
+            )
+    except (studio.ModelStudioCancelled, KeyboardInterrupt):
+        report_cancelled("GGUF installation cancelled; partial temporary files were removed.")
+    except (ValueError, studio.ModelStudioError) as exc:
+        _fail(str(exc))
     console.print("\n[green]Saved:[/green] " + result["path"])
     if result["registered_with_ollama"]: console.print(f"[green]Ready for inference:[/green] axiom infer run {result['model_name']} --prompt \"Hello\"")
 
