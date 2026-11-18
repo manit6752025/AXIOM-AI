@@ -22,6 +22,41 @@ visible request errors, and the CLI daemon readiness probe sends one as well.
 - API version does not replace per-resource `schema_version` fields used for
   persisted workspace data.
 
+## API permission scopes
+
+API scope enforcement is opt-in so existing loopback-only Control Center and CLI
+workflows remain compatible. To enable it for API clients, configure **both**
+environment variables with distinct, high-entropy values:
+
+- `AXIOM_API_READ_TOKEN`: permits `GET`/`HEAD` requests and the explicitly
+  allowlisted validation/planning `POST` endpoints.
+- `AXIOM_API_WRITE_TOKEN`: permits read access and all write, job, execution,
+  cancellation, model-load, and other side-effecting operations.
+
+Generate each value independently, for example with
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`. Tokens must be
+32–256 ASCII characters, and the read and write values must differ. AXIOM rejects
+a partial, weak, or duplicate configuration at startup rather than silently
+running with incomplete scope enforcement.
+
+Read-only `POST` operations are deliberately allowlisted: workflow validation
+and dry-run, model optimization/policy inspection, optimizer planning, workspace
+training-plan and dataset previews, model inspection, and engine compatibility
+or quantization estimates. Every other `POST`, plus `PUT`, `PATCH`, and
+`DELETE`, requires the write token. New mutation routes therefore fail closed
+until explicitly classified. A read token cannot create or update a saved
+workflow, start/cancel a job, pull or unload a model, generate inference, or
+invoke a remote provider.
+
+Send credentials as `Authorization: Bearer <token>`. Missing/invalid credentials
+return HTTP 401; a valid read token used for a write operation returns HTTP 403.
+Both use the standard AXIOM error envelope and preserve `X-Request-ID`. Health,
+metadata, and OpenAPI documentation endpoints remain public. The bundled
+same-origin Control Center remains usable; cross-origin API clients must provide
+a token. When both variables are unset, token enforcement is disabled for
+backwards compatibility. Keep the daemon on loopback for ordinary local use;
+tokens do not replace TLS, network isolation, or host security.
+
 ## AXIOM Engine and training
 
 - `GET /api/engine/status` reports direct local inference readiness.
