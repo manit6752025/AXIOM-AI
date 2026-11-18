@@ -27,3 +27,43 @@ def test_model_studio_jobs_cli_supports_offset_search_and_json(monkeypatch):
     assert result.exit_code == 0, result.output
     assert observed == {"limit": 3, "offset": 6, "search": "qwen"}
     assert json.loads(result.stdout) == expected
+
+
+def test_model_studio_native_download_receives_progress_and_cancel_callbacks(monkeypatch):
+    import threading
+
+    from axiom.cli import model_studio
+
+    observed = {}
+
+    def fake_pull(repo_id, *, on_log=None, on_progress=None, cancel_event=None):
+        observed.update(
+            repo_id=repo_id,
+            on_progress=on_progress,
+            cancel_event=cancel_event,
+        )
+        assert isinstance(cancel_event, threading.Event)
+        assert not cancel_event.is_set()
+        return {"operation": "pull_native", "path": "/models/qwen"}
+
+    monkeypatch.setattr(model_studio.studio, "pull_native_model", fake_pull)
+    result = CliRunner().invoke(studio_app, ["pull-native", "Qwen/test", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert observed["repo_id"] == "Qwen/test"
+    assert isinstance(observed["cancel_event"], threading.Event)
+    assert json.loads(result.stdout)["path"] == "/models/qwen"
+
+
+def test_model_studio_native_download_reports_cooperative_cancel(monkeypatch):
+    from axiom.cli import model_studio
+
+    def cancelled(repo_id, *, on_log=None, on_progress=None, cancel_event=None):
+        cancel_event.set()
+        raise model_studio.studio.ModelStudioCancelled("simulated cancellation")
+
+    monkeypatch.setattr(model_studio.studio, "pull_native_model", cancelled)
+    result = CliRunner().invoke(studio_app, ["pull-native", "Qwen/test"])
+
+    assert result.exit_code == 130
+    assert "cancelled" in result.output.lower()
