@@ -28,7 +28,7 @@ def is_interactive() -> bool:
 
 def _prompt_error(message: str, hint: str) -> None:
     detail = f"{message} Interactive input is unavailable. {hint}"
-    emit_error(detail, code="interactive_input_required")
+    emit_error(detail, code="interactive_input_required", stderr=True)
 
 
 def prompt(

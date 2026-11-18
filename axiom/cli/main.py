@@ -178,7 +178,7 @@ def _cli_runtime_options() -> dict[str, object]:
 
 def _cli_error(message: str, *, code: str = "AXIOM_CLI_ERROR") -> None:
     """Emit a stable human or machine-readable error without leaking details."""
-    emit_error(message, code=code, options=_cli_runtime_options())
+    emit_error(message, code=code, options=_cli_runtime_options(), stderr=True)
 
 
 def _run_default_session(*, show_banner: bool = True) -> None:

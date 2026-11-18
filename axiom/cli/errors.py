@@ -30,6 +30,7 @@ def emit_error(
     code: str = "AXIOM_CLI_ERROR",
     exit_code: int = 1,
     options: Mapping[str, object] | None = None,
+    stderr: bool = False,
 ) -> NoReturn:
     """Emit one stable error envelope or a concise human-readable error."""
     if json_errors_enabled(options):
@@ -49,5 +50,5 @@ def emit_error(
             err=True,
         )
     else:
-        typer.echo(f"Error: {message}", err=True)
+        typer.echo(f"Error: {message}", err=stderr)
     raise typer.Exit(code=exit_code)
