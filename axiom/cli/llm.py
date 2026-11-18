@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from axiom.cli.interactive import prompt as safe_prompt
 from axiom.core import llm_client
 
 console = Console()
@@ -28,7 +29,7 @@ def _credential(provider: str, env_name: str) -> str | None:
     value = os.environ.get(env_name, "")
     if value.strip():
         return value
-    return typer.prompt(f"{provider} API key (used once, never saved by AXIOM)", hide_input=True)
+    return safe_prompt(f"{provider} API key (used once, never saved by AXIOM)", hide_input=True, non_interactive_hint=f"Set {env_name} or pass --api-key-env <ENVIRONMENT_VARIABLE>.")
 
 
 @llm_app.command("providers")
