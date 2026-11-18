@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Callable
 
 from axiom.datasets.profiler import (
     DEFAULT_MAX_BYTES,
@@ -24,6 +24,7 @@ def preview_jsonl_cleaning(
     max_bytes: int = DEFAULT_MAX_BYTES,
     max_rows: int = DEFAULT_MAX_ROWS,
     max_line_bytes: int = DEFAULT_MAX_LINE_BYTES,
+    on_progress: Callable[[int, int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Summarize cleaning decisions while never writing an output file."""
     _validate_limits(max_bytes, max_rows, max_line_bytes)
@@ -38,6 +39,17 @@ def preview_jsonl_cleaning(
     encoding_semantics_mismatch = False
     truncation_reasons: set[str] = set()
     seen: set[str] = set()
+    last_progress_bytes = 0
+    last_progress_rows = 0
+
+    def notify_progress(*, force: bool = False) -> None:
+        nonlocal last_progress_bytes, last_progress_rows
+        if on_progress is None:
+            return
+        if force or lines - last_progress_rows >= 256 or read_bytes - last_progress_bytes >= 1024 * 1024:
+            on_progress(lines, read_bytes, file_size_bytes)
+            last_progress_bytes = read_bytes
+            last_progress_rows = lines
 
     while lines < max_rows:
         remaining = max_bytes - read_bytes
@@ -57,6 +69,7 @@ def preview_jsonl_cleaning(
 
         read_bytes += len(raw)
         lines += 1
+        notify_progress()
         newline_free_body = (
             raw.removesuffix(b"\r\n")
             .removesuffix(b"\n")
@@ -158,6 +171,7 @@ def preview_jsonl_cleaning(
             "preview counts may differ."
         )
 
+    notify_progress(force=True)
     return {
         "file_name": file_name,
         "preview_only": True,

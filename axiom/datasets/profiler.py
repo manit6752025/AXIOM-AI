@@ -6,7 +6,7 @@ import json
 import os
 from collections import Counter
 from pathlib import Path
-from typing import Any, BinaryIO, Sequence
+from typing import Any, BinaryIO, Callable, Sequence
 from axiom.datasets.pii import MAX_PII_TEXT_BYTES, MAX_PII_VALUES_PER_ROW, scan_row_for_pii
 
 DEFAULT_MAX_BYTES = 64 * 1024 * 1024
@@ -104,6 +104,7 @@ def profile_jsonl(
     sensitive_field_rules: Sequence[str] = (),
     ignored_sensitive_fields: Sequence[str] = (),
     scan_pii: bool = False,
+    on_progress: Callable[[int, int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Profile a local file path. Intended for trusted local CLI callers."""
     _validate_limits(max_bytes, max_rows, max_line_bytes)
@@ -126,6 +127,7 @@ def profile_jsonl(
             sensitive_field_rules=sensitive_field_rules,
             ignored_sensitive_fields=ignored_sensitive_fields,
             scan_pii=scan_pii,
+            on_progress=on_progress,
         )
 
 
@@ -143,6 +145,7 @@ def profile_jsonl_stream(
     sensitive_field_rules: Sequence[str] = (),
     ignored_sensitive_fields: Sequence[str] = (),
     scan_pii: bool = False,
+    on_progress: Callable[[int, int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Profile an already-open file without resolving or reopening a client path."""
     duplicate_key_fields = tuple(name.strip() for name in duplicate_key_fields)
@@ -180,6 +183,17 @@ def profile_jsonl_stream(
     pii_matches: Counter[str] = Counter()
     pii_fields: dict[str, set[str]] = {}
     pii_values_scanned = pii_long_values_skipped = pii_rows_truncated = 0
+    last_progress_bytes = 0
+    last_progress_rows = 0
+
+    def notify_progress(*, force: bool = False) -> None:
+        nonlocal last_progress_bytes, last_progress_rows
+        if on_progress is None:
+            return
+        if force or lines - last_progress_rows >= 256 or read_bytes - last_progress_bytes >= 1024 * 1024:
+            on_progress(lines, read_bytes, size)
+            last_progress_bytes = read_bytes
+            last_progress_rows = lines
 
     def count_newlines(raw_line: bytes) -> None:
         crlf = raw_line.count(b"\r\n")
@@ -206,6 +220,7 @@ def profile_jsonl_stream(
         read_bytes += len(raw)
         lines += 1
         count_newlines(raw)
+        notify_progress()
 
         if len(raw) > max_line_bytes:
             invalid += 1
@@ -228,6 +243,7 @@ def profile_jsonl_stream(
                     break
                 read_bytes += len(raw)
                 count_newlines(raw)
+                notify_progress()
             if scan_budget_exhausted:
                 break
             continue
@@ -362,6 +378,7 @@ def profile_jsonl_stream(
     ending_counts = {ending: newline_counts[ending] for ending in ("LF", "CRLF", "CR")}
     observed_endings = [ending for ending, count in ending_counts.items() if count]
     newline_style = "mixed" if len(observed_endings) > 1 else observed_endings[0] if observed_endings else "none"
+    notify_progress(force=True)
 
     return {
         "format": "jsonl",

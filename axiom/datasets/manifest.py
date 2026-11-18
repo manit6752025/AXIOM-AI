@@ -5,7 +5,7 @@ import hashlib
 import os
 import re
 from datetime import UTC, datetime
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Callable
 
 DEFAULT_MANIFEST_MAX_BYTES = 256 * 1024 * 1024
 MAX_MANIFEST_MAX_BYTES = 1024 * 1024 * 1024
@@ -20,6 +20,7 @@ def create_dataset_manifest(
     file_size_bytes: int,
     max_bytes: int = DEFAULT_MANIFEST_MAX_BYTES,
     parent_manifest_sha256: str | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Hash a bounded prefix, claiming a full digest only for a stable full read."""
     if type(file_size_bytes) is not int or file_size_bytes < 0:
@@ -43,6 +44,11 @@ def create_dataset_manifest(
             break
         digest.update(chunk)
         bytes_hashed += len(chunk)
+        if on_progress is not None:
+            on_progress(bytes_hashed, expected_bytes)
+
+    if on_progress is not None and bytes_hashed == 0:
+        on_progress(0, expected_bytes)
 
     try:
         final_stat = os.fstat(stream.fileno())
