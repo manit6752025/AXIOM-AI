@@ -5,7 +5,6 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 import signal
 import threading
-from typing import Any
 
 from rich.console import Console
 from rich.progress import BarColumn, DownloadColumn, Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
