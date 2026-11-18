@@ -54,6 +54,24 @@ through environment variables, not command-line arguments.
 Destructive confirmations default to **no** when input is unavailable.
 Existing `--yes` flags remain the explicit opt-in for deletion/removal.
 
+## Machine-readable CLI errors
+
+Place `--json-errors` before the command to emit a schema-versioned error
+envelope on standard error while preserving the command's non-zero exit code.
+The envelope shape is:
+
+```json
+{"schema_version":1,"error":{"code":"model_studio_error","message":"...","exit_code":1}}
+```
+
+The same emitter is used by root commands and the inference, engine, training,
+Model Studio, LLM, workflow, evaluation, tools, agent-profile, support-bundle,
+dataset, and workspace command groups. Command-level `--json` remains the
+success/report format; global `--json-errors` takes precedence only when a
+command fails. Exit codes are unchanged, including exit code 2 for unsafe
+support-bundle output paths. Shell/Click argument parsing errors that occur
+before the root command callback are still rendered by Click itself.
+
 ## Shell completion
 
 The root Typer command exposes shell completion. Install completion in the
