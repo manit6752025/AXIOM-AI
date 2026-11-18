@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+import signal
+import threading
 from typing import Any
 
 from rich.console import Console
@@ -51,6 +53,60 @@ def scan_progress(
             )
 
         yield update
+
+
+@contextmanager
+def cancellable_scan_progress(
+    description: str,
+    total_bytes: int,
+    *,
+    enabled: bool = True,
+) -> Iterator[tuple[threading.Event, ScanProgress | None]]:
+    """Yield a cooperative cancel event and a TTY-only row/byte progress callback."""
+    cancel_event = threading.Event()
+    previous_handler = None
+
+    def request_cancel(signum: int, frame: object) -> None:
+        if cancel_event.is_set():
+            raise KeyboardInterrupt
+        cancel_event.set()
+
+    if threading.current_thread() is threading.main_thread():
+        previous_handler = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, request_cancel)
+    try:
+        with scan_progress(description, total_bytes, enabled=enabled) as update:
+            yield cancel_event, update
+    finally:
+        if previous_handler is not None:
+            signal.signal(signal.SIGINT, previous_handler)
+
+
+@contextmanager
+def cancellable_byte_progress(
+    description: str,
+    total_bytes: int,
+    *,
+    enabled: bool = True,
+) -> Iterator[tuple[threading.Event, Callable[[int, int], None] | None]]:
+    """Byte-transfer progress with a cancel event set by the first Ctrl-C."""
+    cancel_event = threading.Event()
+    previous_handler = None
+
+    def request_cancel(signum: int, frame: object) -> None:
+        if cancel_event.is_set():
+            raise KeyboardInterrupt
+        cancel_event.set()
+
+    if threading.current_thread() is threading.main_thread():
+        previous_handler = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, request_cancel)
+    try:
+        with byte_progress(description, total_bytes, enabled=enabled) as update:
+            yield cancel_event, update
+    finally:
+        if previous_handler is not None:
+            signal.signal(signal.SIGINT, previous_handler)
 
 
 @contextmanager
