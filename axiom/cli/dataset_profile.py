@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import typer
+from axiom.cli.errors import emit_error
 from rich.console import Console
 from rich.table import Table
 from axiom.datasets.profiler import profile_jsonl
@@ -22,13 +23,13 @@ def register(dataset_app: typer.Typer) -> None:
   scan_pii: bool=typer.Option(False,"--scan-pii",help="Explicitly scan local string values for common PII patterns; matched values are never shown."),
  ) -> None:
   """Profile bounded JSONL structure and privacy-safe diagnostics."""
-  if path.suffix.lower()!=".jsonl": raise typer.BadParameter("Only .jsonl files are supported.")
+  if path.suffix.lower()!=".jsonl": emit_error("Only .jsonl files are supported.", code="unsupported_dataset_format")
   duplicate_fields=[field.strip() for field in duplicate_key.split(",") if field.strip()]
   selected_text_fields=[field.strip() for field in text_fields.split(",") if field.strip()]
   selected_rules=[field.strip() for field in sensitive_rule.split(",") if field.strip()]
   excluded_fields=[field.strip() for field in ignore_sensitive_field.split(",") if field.strip()]
   try: report=profile_jsonl(path,max_rows=max_rows,max_bytes=max_mb*1024*1024,duplicate_key_fields=duplicate_fields,duplicate_rate_threshold=duplicate_rate_threshold,text_fields=selected_text_fields,sensitive_field_rules=selected_rules,ignored_sensitive_fields=excluded_fields,scan_pii=scan_pii)
-  except (OSError,ValueError) as exc: console.print(f"[red]Profile failed:[/red] {exc}"); raise typer.Exit(code=1) from exc
+  except (OSError,ValueError) as exc: emit_error(str(exc), code="dataset_profile_failed")
   table=Table(title="AXIOM DATASET PROFILE"); table.add_column("Metric"); table.add_column("Value",justify="right")
   for key in ("valid_rows","invalid_rows","empty_rows","duplicate_rows","unique_fields_tracked","bytes_scanned"): table.add_row(key.replace("_"," ").title(),str(report[key]))
   table.add_row("UTF-8 errors",str(report["diagnostics"]["encoding_errors"]))
@@ -56,14 +57,14 @@ def register(dataset_app: typer.Typer) -> None:
   parent_manifest_sha256: str=typer.Option(None,"--parent-manifest-sha256",help="Optional SHA-256 of the source manifest to link this file in a lineage chain."),
  ) -> None:
   """Print a bounded SHA-256 provenance manifest without dataset values."""
-  if path.suffix.lower()!=".jsonl": raise typer.BadParameter("Only .jsonl files are supported.")
+  if path.suffix.lower()!=".jsonl": emit_error("Only .jsonl files are supported.", code="unsupported_dataset_format")
   try:
    source=path.expanduser().resolve(strict=True)
    with source.open("rb") as stream:
     size=source.stat().st_size
     manifest=create_dataset_manifest(stream,file_name=source.name,relative_path=source.name,file_size_bytes=size,max_bytes=max_mb*1024*1024,parent_manifest_sha256=parent_manifest_sha256)
   except (OSError,ValueError) as exc:
-   console.print(f"[red]Manifest failed:[/red] {exc}"); raise typer.Exit(code=1) from exc
+   emit_error(str(exc), code="dataset_manifest_failed")
   console.print_json(json.dumps(manifest,ensure_ascii=False))
 
  @dataset_app.command("preview-clean")
@@ -73,12 +74,12 @@ def register(dataset_app: typer.Typer) -> None:
   max_mb: int=typer.Option(64,min=1,max=256),
  ) -> None:
   """Preview JSONL cleaning counts without writing or changing a file."""
-  if path.suffix.lower()!=".jsonl": raise typer.BadParameter("Only .jsonl files are supported.")
+  if path.suffix.lower()!=".jsonl": emit_error("Only .jsonl files are supported.", code="unsupported_dataset_format")
   try:
    source=path.expanduser().resolve(strict=True)
    with source.open("rb") as stream:
     size=source.stat().st_size
     preview=preview_jsonl_cleaning(stream,file_name=source.name,file_size_bytes=size,max_bytes=max_mb*1024*1024,max_rows=max_rows)
   except (OSError,ValueError) as exc:
-   console.print(f"[red]Preview failed:[/red] {exc}"); raise typer.Exit(code=1) from exc
+   emit_error(str(exc), code="dataset_clean_preview_failed")
   console.print_json(json.dumps(preview,ensure_ascii=False))
