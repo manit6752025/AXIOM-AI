@@ -261,7 +261,7 @@ def remote_run(
     try: result = studio.run_remote_chat(base_url, api_key, model, prompt, max_tokens=max_tokens)
     except (ValueError, studio.ModelStudioError) as exc: _fail(str(exc))
     console.print(result["response"])
-    console.print(f"\\n[dim]Provider: {result['base_url']} · model: {result['model']} · tokens: {result['completion_tokens']}[/dim]")
+    console.print(f"\n[dim]Provider: {result['base_url']} · model: {result['model']} · tokens: {result['completion_tokens']}[/dim]")
 
 def register_model_studio(model_app: typer.Typer) -> None:
     """Attach `axiom model studio ...` commands to the existing model family."""
