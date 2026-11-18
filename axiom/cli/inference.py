@@ -6,6 +6,8 @@ from pathlib import Path
 import time
 
 import typer
+
+from axiom.cli.interactive import confirm as safe_confirm
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -187,7 +189,7 @@ def infer_remove(
     json_output: bool = typer.Option(False, "--json", help="Print the removal report as JSON."),
 ) -> None:
     """Remove an installed Ollama model tag. This deletes local model weights for that tag."""
-    if not yes and not typer.confirm(f"Permanently remove the downloaded Ollama model tag {model!r}?", default=False):
+    if not yes and not safe_confirm(f"Permanently remove the downloaded Ollama model tag {model!r}?", default=False):
         console.print("Model removal cancelled.")
         raise typer.Exit(code=0)
     try:
