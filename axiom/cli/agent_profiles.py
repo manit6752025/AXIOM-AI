@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import typer
+
+from axiom.cli.errors import emit_error
 from rich.console import Console
 from rich.table import Table
 
@@ -20,8 +22,7 @@ def register(app: typer.Typer) -> None:
         try:
             document = AgentProfileStore().load()
         except AgentProfileError as exc:
-            console.print(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(code=1) from exc
+            emit_error(str(exc), code="agent_profile_error")
         if json_output:
             typer.echo(json.dumps(document, indent=2, sort_keys=True))
             return
@@ -44,8 +45,7 @@ def register(app: typer.Typer) -> None:
         try:
             profile = AgentProfileStore().create(name, capability)
         except AgentProfileError as exc:
-            console.print(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(code=1) from exc
+            emit_error(str(exc), code="agent_profile_error")
         if json_output:
             typer.echo(json.dumps(profile, indent=2, sort_keys=True))
         else:
@@ -61,8 +61,7 @@ def register(app: typer.Typer) -> None:
         try:
             profile = AgentProfileStore().update_capabilities(profile_id, capability)
         except AgentProfileError as exc:
-            console.print(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(code=1) from exc
+            emit_error(str(exc), code="agent_profile_error")
         if json_output:
             typer.echo(json.dumps(profile, indent=2, sort_keys=True))
         else:
@@ -80,6 +79,5 @@ def register(app: typer.Typer) -> None:
         try:
             result = AgentProfileStore().delete(profile_id)
         except AgentProfileError as exc:
-            console.print(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(code=1) from exc
+            emit_error(str(exc), code="agent_profile_error")
         console.print(f"[green]Deleted[/green] {result['deleted_id']}.")
