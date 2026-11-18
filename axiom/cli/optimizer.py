@@ -61,12 +61,13 @@ def run(
         profile = safe_prompt(
             "\nChoose agent profile (1-8)",
             type=int,
+            non_interactive_hint="Supply --profile 1 through 8 to select an agent profile.",
         )
 
     selected = get_profile(profile)
 
     if not model:
-        model = safe_prompt("\nHugging Face model ID or local model path")
+        model = safe_prompt("\nHugging Face model ID or local model path", non_interactive_hint="Supply --model with a local path or Hugging Face repository ID.")
 
     if not output:
         safe_name = model.replace("/", "__").replace("\\", "__")
