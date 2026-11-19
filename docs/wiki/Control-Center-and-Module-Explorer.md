@@ -20,6 +20,19 @@ The palette is a local navigation/action surface. It does not search workspace
 records, execute model or workflow jobs, or expose commands that require
 additional destructive confirmation.
 
+## Deep links and browser history
+
+Control Center pages support direct links using the `page` query parameter,
+for example `/?page=models`, `/?page=training`, `/?page=settings`, and
+`/?page=api-playground`. A direct link opens the selected page after the local
+administrator session is restored. Sidebar, command-palette, and in-page
+navigation update the URL with browser history entries; **Back** and
+**Forward** restore both the page content and the selected navigation item.
+Unknown page slugs fall back to the Control Center overview.
+
+The URL represents the current browser view only. It does not include
+workspace credentials, filesystem paths, or private model/dataset contents.
+
 ## Module Explorer
 
 The beta.4 Module Explorer is a searchable index of current GUI pages, CLI command families, and API surfaces described by the live OpenAPI reference. GUI destinations navigate to an existing page; CLI-only entries provide copyable command guidance rather than pretending a browser can execute arbitrary shell commands.

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — workspace deep links and history
+
+- Documented direct `?page=` links for Control Center views and added browser coverage for reload persistence, sidebar navigation, back/forward restoration, API Playground links, and unsupported page fallback.
+
 ## Unreleased — global command palette
 
 - Extended the Ctrl/Command+K palette to search and execute page navigation plus local actions for theme switching, password changes, and sign-out; added keyboard and browser regression tests.
