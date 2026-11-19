@@ -38,6 +38,11 @@ from axiom.cli.mobile_bridge import register_mobile_bridge
 from axiom.cli.engine import engine_app
 from axiom.core.hardware import detect_hardware, estimate_model_fit
 from axiom.core.experiments import ExperimentStore
+from axiom.core.plan_reproducibility import (
+    PLANNER_ALGORITHM_VERSION,
+    diff_plan_records,
+    reproducible_plan_document,
+)
 from axiom.core.integrations import (
     AgentIntegration,
     IntegrationRegistry,
@@ -460,6 +465,60 @@ def experiment_show(experiment_id: str) -> None:
     if record is None:
         _cli_error(f"Experiment not found: {experiment_id}")
     console.print_json(json.dumps(record, ensure_ascii=False))
+
+
+@experiment_app.command("print")
+def experiment_print(experiment_id: str) -> None:
+    """Print a deterministic JSON representation of an immutable saved plan."""
+    try:
+        record = ExperimentStore().get(experiment_id)
+        if record is None:
+            _cli_error(f"Experiment not found: {experiment_id}")
+        snapshot = reproducible_plan_document(record)
+    except (OSError, ValueError) as exc:
+        _cli_error(str(exc))
+    typer.echo(json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False))
+
+
+@experiment_app.command("diff")
+def experiment_diff(
+    left_id: str,
+    right_id: str,
+    json_output: bool = typer.Option(False, "--json", help="Emit the field-level comparison as JSON."),
+) -> None:
+    """Diff two saved plan snapshots without regenerating estimates or running training."""
+    try:
+        store = ExperimentStore()
+        left = store.get(left_id)
+        right = store.get(right_id)
+        if left is None:
+            _cli_error(f"Experiment not found: {left_id}")
+        if right is None:
+            _cli_error(f"Experiment not found: {right_id}")
+        result = diff_plan_records(left, right)
+    except (OSError, ValueError) as exc:
+        _cli_error(str(exc))
+    if json_output:
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False))
+        return
+    status = "IDENTICAL" if result["identical"] else "CHANGED"
+    console.print(f"Saved plan comparison: [bold]{status}[/bold]")
+    console.print(f"Left:  {left_id} · SHA-256 {result['left']['fingerprint']}")
+    console.print(f"Right: {right_id} · SHA-256 {result['right']['fingerprint']}")
+    if not result["changes"]:
+        console.print("No recorded input, hardware, planner, or estimate differences.")
+        return
+    table = Table(title=f"{len(result['changes'])} saved plan field(s) changed")
+    table.add_column("Category")
+    table.add_column("Field")
+    table.add_column("Before")
+    table.add_column("After")
+    for change in result["changes"]:
+        before = json.dumps(change["before"], ensure_ascii=False, sort_keys=True) if change["before_present"] else "<missing>"
+        after = json.dumps(change["after"], ensure_ascii=False, sort_keys=True) if change["after_present"] else "<missing>"
+        table.add_row(change["category"], change["path"], before[:100], after[:100])
+    console.print(table)
+    console.print(result["scope_note"])
 
 
 @experiment_app.command("update")
@@ -1085,6 +1144,8 @@ def train_plan(
             "tags": tags or [],
             "parameter_billions": parameters,
             "requested_method": method.lower(),
+            "planner_algorithm_version": PLANNER_ALGORITHM_VERSION,
+            "axiom_version": __version__,
             "status": "planned",
             "hardware": hardware.__dict__,
             "plan": plan.__dict__,
