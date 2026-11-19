@@ -957,9 +957,14 @@ async def workspace_import_metadata(
     media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
     if media_type not in {ARCHIVE_FORMAT, "application/zip", "application/octet-stream"}:
         raise HTTPException(status_code=415, detail="Upload a supported AXIOM workspace metadata ZIP archive.")
-    data = await request.body()
-    if len(data) > MAX_ARCHIVE_BYTES:
-        raise HTTPException(status_code=413, detail="Workspace metadata archive exceeds the 24 MiB limit.")
+    chunks: list[bytes] = []
+    total_bytes = 0
+    async for chunk in request.stream():
+        total_bytes += len(chunk)
+        if total_bytes > MAX_ARCHIVE_BYTES:
+            raise HTTPException(status_code=413, detail="Workspace metadata archive exceeds the 24 MiB limit.")
+        chunks.append(chunk)
+    data = b"".join(chunks)
     try:
         result = import_workspace_metadata(data, Path.cwd(), replace=replace)
     except (OSError, ValueError) as exc:
