@@ -41,6 +41,32 @@ Remote metadata and downloads require network access. Model inspection does not 
 
 Dataset support focuses on JSONL. Structural validity does not prove semantic quality or compliance. PII checks, where supported, are opt-in heuristics. `preview-clean` does not write a file; `clean` is a separate explicit write operation.
 
+## Reproducible plan snapshots and diffs
+
+    axiom train plan 7 --method qlora --save --name "Qwen baseline" --json
+    axiom experiment list --json
+    axiom experiment print <experiment-id> > saved-plan.json
+    axiom experiment diff <baseline-id> <candidate-id> --json
+
+`experiment print` emits deterministic, sorted JSON from the immutable saved
+snapshot. Its SHA-256 fingerprint covers the saved planning inputs, captured
+hardware, planner provenance, and exact estimate; it deliberately excludes
+display-only labels, notes, tags, and creation time. `experiment diff` compares
+two snapshots field by field and reports input, hardware, planner, and estimate
+changes. Neither command reruns the planner, starts a training job, or claims
+that the saved estimate is a benchmark.
+
+New snapshots record the planner algorithm version and AXIOM version. Older
+records remain printable, but unknown provenance is reported as unknown rather
+than inferred from the currently installed build. A matching fingerprint means
+the stored snapshot content matches; it does not guarantee identical runtime
+behavior, dependencies, hardware availability, or training results.
+
+The same read-only snapshot and diff operations are available at
+`GET /api/workspace/experiments/{id}/reproducible` and
+`GET /api/workspace/experiments/{left_id}/diff/{right_id}`, and from the
+Training page's **Saved plan tools** section.
+
 ## Workspace metadata transfer
 
     axiom workspace metadata export --output ./axiom-workspace-metadata.zip
