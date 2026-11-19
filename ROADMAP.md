@@ -42,7 +42,7 @@ feature exists or a delivery-date promise.
 ### 03 · Control Center GUI
 
 - [R025 · Implemented; tests passing] Preserve the existing responsive sidebar and collapsed state, persistent dark/light theme, topbar controls, active-page navigation, and browser back/forward restoration. Added browser acceptance coverage for desktop collapse/expand, theme persistence across reload, responsive mobile navigation, and history-driven page state. Verified with full browser E2E plus Python, lint, production build, and Ubuntu/macOS/Windows release checks.
-- [R026 · Planned] Add shared accessible form, table, dialog, and empty-state patterns.
+- [R026 · Implemented; tests passing] Add shared accessible form, table, dialog, and empty-state patterns. New `FormField`, `DataTable`, `AccessibleDialog`, and `EmptyState` primitives provide associated labels/hints/errors, captioned semantic tables with scoped headers, modal focus management/Escape handling, and polite live announcements. Migrated password-change and saved-plan diff flows, added focused Playwright checks for focus wrapping, descriptions, empty states, and table semantics, and documented contributor use/limitations. Verified with 40 browser tests, Python suite, ESLint, strict TypeScript/production build, and Ubuntu/macOS/Windows static release checks.
 - [R027 · In progress; validation pending] Add a global command palette with page and action search.
 - [R028 · In progress; validation pending] Add deep links and browser-history navigation for workspace pages.
 - [R029 · Planned] Add global loading, retry, stale-data, and offline indicators.
