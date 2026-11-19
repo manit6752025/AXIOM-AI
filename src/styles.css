@@ -2271,3 +2271,14 @@ html[data-accent="violet"] .app-shell.light {
 .empty-state[role="status"] { outline: none; }
 
 .field-error { display: block; color: var(--danger); font-size: 10px; line-height: 1.5; }
+
+
+/* Persistent backend, stale-data, and request-loading feedback. */
+.global-api-status { min-width: 0; display: inline-flex; align-items: center; gap: 7px; padding: 0 7px; border-left: 1px solid var(--line); }
+.global-api-status-copy { max-width: 116px; overflow: hidden; color: var(--muted); font-size: 9px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.global-api-loading { color: var(--accent); font-size: 8px; font-weight: 800; letter-spacing: .05em; white-space: nowrap; }
+.global-api-retry { width: 25px; height: 25px; flex: 0 0 auto; display: inline-grid; place-items: center; border: 1px solid var(--line); border-radius: 2px; background: transparent; color: var(--muted); cursor: pointer; }
+.global-api-retry:hover { border-color: var(--accent); color: var(--accent); }
+.global-api-retry:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 1120px) { .global-api-status-copy { display: none; } }
+@media (max-width: 760px) { .global-api-loading { display: none; } .global-api-status { gap: 5px; padding: 0 4px; } }

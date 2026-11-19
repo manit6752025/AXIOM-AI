@@ -20,6 +20,23 @@ The palette is a local navigation/action surface. It does not search workspace
 records, execute model or workflow jobs, or expose commands that require
 additional destructive confirmation.
 
+## Global loading and backend status
+
+The authenticated Control Center top bar displays the local API connection
+state on every workspace page. It shows **Checking**, **Online**, **Offline**,
+or **Stale**, the age of the last successful response when relevant, and a
+manual **Retry backend connection** control. Requests made through the typed
+JSON API client contribute to a shared in-flight loading count so users can
+see when workspace data is being refreshed.
+
+Health checks run when the authenticated shell opens and then follow the
+Dashboard refresh preference; low-power mode disables periodic checks.
+Manual retry remains available. A successful response from any typed JSON
+request refreshes the last-success timestamp. The stale label means no
+successful response has been observed for more than one minute; it is a
+connectivity freshness hint, not a claim that individual cached records have
+expired. Streaming requests are not included in the shared request counter.
+
 ## Deep links and browser history
 
 Control Center pages support direct links using the `page` query parameter,

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — global API status and loading feedback
+
+- Added shared request lifecycle signals in the typed API client and a persistent top-bar backend status with stale-response detection, in-flight request count, manual retry, and preference-aware health polling.
+- Added browser acceptance for offline-to-online recovery and loading feedback while a workspace request is pending.
+
 ## Unreleased — workspace deep links and history
 
 - Documented direct `?page=` links for Control Center views and added browser coverage for reload persistence, sidebar navigation, back/forward restoration, API Playground links, and unsupported page fallback.

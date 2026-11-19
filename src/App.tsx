@@ -172,6 +172,14 @@ type Notice = {
   tone: Tone;
 };
 
+type BackendStatus = "checking" | "online" | "offline";
+
+type BackendConnection = {
+  status: BackendStatus;
+  lastCheckedAt: number | null;
+  lastSuccessAt: number | null;
+};
+
 const navItems: NavItem[] = [
   {
     id: "optimizer",
@@ -720,6 +728,13 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [backendConnection, setBackendConnection] = useState<BackendConnection>({
+    status: "checking",
+    lastCheckedAt: null,
+    lastSuccessAt: null,
+  });
+  const [pendingApiRequests, setPendingApiRequests] = useState(0);
+  const [clockNow, setClockNow] = useState(() => Date.now());
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -728,6 +743,65 @@ function App() {
     document.documentElement.dataset.accent = preferences.accentColor;
     document.documentElement.dataset.reducedMotion = String(preferences.reduceMotion || preferences.lowPowerMode);
   }, [theme, preferences]);
+
+  const checkBackend = useCallback(async () => {
+    setBackendConnection((current) => ({
+      ...current,
+      status: current.status === "online" ? "online" : "checking",
+    }));
+    try {
+      const health = await axiomApi.health();
+      const checkedAt = Date.now();
+      setBackendConnection((current) => ({
+        status: health.status === "ok" ? "online" : "offline",
+        lastCheckedAt: checkedAt,
+        lastSuccessAt: health.status === "ok" ? checkedAt : current.lastSuccessAt,
+      }));
+    } catch {
+      setBackendConnection((current) => ({
+        ...current,
+        status: "offline",
+        lastCheckedAt: Date.now(),
+      }));
+    }
+  }, []);
+
+  useEffect(() => {
+    const onRequestStart = () => setPendingApiRequests((count) => count + 1);
+    const onRequestEnd = (event: Event) => {
+      setPendingApiRequests((count) => Math.max(0, count - 1));
+      const detail = (event as CustomEvent<{ ok?: boolean; at?: number }>).detail;
+      if (detail?.ok && typeof detail.at === "number") {
+        setBackendConnection((current) => ({ ...current, lastSuccessAt: detail.at ?? current.lastSuccessAt }));
+      }
+    };
+    window.addEventListener("axiom:api-request-start", onRequestStart);
+    window.addEventListener("axiom:api-request-end", onRequestEnd);
+    return () => {
+      window.removeEventListener("axiom:api-request-start", onRequestStart);
+      window.removeEventListener("axiom:api-request-end", onRequestEnd);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authenticated) {
+      setBackendConnection({ status: "checking", lastCheckedAt: null, lastSuccessAt: null });
+      return;
+    }
+    void checkBackend();
+    const intervalSeconds = preferences.lowPowerMode ? 0 : preferences.dashboardRefreshSeconds;
+    const timer = intervalSeconds > 0
+      ? window.setInterval(() => void checkBackend(), Math.max(15, intervalSeconds) * 1000)
+      : undefined;
+    return () => {
+      if (timer !== undefined) window.clearInterval(timer);
+    };
+  }, [authenticated, preferences.lowPowerMode, preferences.dashboardRefreshSeconds, checkBackend]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const restorePage = () => setPage(pageFromLocation());
@@ -840,6 +914,10 @@ function App() {
     setNotice({ message, tone });
   };
 
+  const backendStale = backendConnection.status === "online"
+    && backendConnection.lastSuccessAt !== null
+    && clockNow - backendConnection.lastSuccessAt > 60_000;
+
   const navigate = (nextPage: Page) => {
     if (nextPage !== page) {
       const url = new URL(window.location.href);
@@ -942,6 +1020,12 @@ function App() {
           onLogout={logout}
           onChangePassword={() => setChangePasswordOpen(true)}
           navigate={navigate}
+          backendStatus={backendConnection.status}
+          backendStale={backendStale}
+          backendLastSuccessAt={backendConnection.lastSuccessAt}
+          pendingApiRequests={pendingApiRequests}
+          clockNow={clockNow}
+          onRetryBackend={() => void checkBackend()}
         />
 
         <main id="main-content" className="page-wrap" tabIndex={-1}>
@@ -1011,6 +1095,20 @@ function Welcome({
     <div className={`auth-layout ${theme}`}>
       <div className="auth-topline">
         <BrandLockup />
+        <div className="global-api-status" role="group" aria-label="Backend connection">
+          <span role="status" aria-live="polite" title={backendDetail}>
+            <StatusPill tone={backendTone}>{backendLabel}</StatusPill>
+          </span>
+          <span className="global-api-status-copy">{backendDetail}</span>
+          {pendingApiRequests > 0 && (
+            <span className="global-api-loading" role="status" aria-live="polite">
+              {pendingApiRequests} {pendingApiRequests === 1 ? "REQUEST" : "REQUESTS"} LOADING
+            </span>
+          )}
+          <button type="button" className="global-api-retry" aria-label="Retry backend connection" title="Recheck the local API connection" onClick={onRetryBackend}>
+            <RefreshCcw size={13} />
+          </button>
+        </div>
         <ThemeToggle theme={theme} setTheme={setTheme} />
       </div>
 
@@ -1444,6 +1542,12 @@ function Topbar({
   onLogout,
   onChangePassword,
   navigate,
+  backendStatus,
+  backendStale,
+  backendLastSuccessAt,
+  pendingApiRequests,
+  clockNow,
+  onRetryBackend,
 }: {
   theme: Theme;
   setTheme: (theme: Theme) => void;
@@ -1453,6 +1557,12 @@ function Topbar({
   onLogout: () => void;
   onChangePassword: () => void;
   navigate: (page: Page) => void;
+  backendStatus: BackendStatus;
+  backendStale: boolean;
+  backendLastSuccessAt: number | null;
+  pendingApiRequests: number;
+  clockNow: number;
+  onRetryBackend: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1460,6 +1570,15 @@ function Topbar({
   const [profileOpen, setProfileOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const meta = pageMeta[page];
+  const backendLabel = backendStatus === "checking" ? "CHECKING"
+    : backendStatus === "offline" ? "OFFLINE"
+      : backendStale ? "STALE" : "ONLINE";
+  const backendTone: Tone = backendStatus === "offline" || backendStale
+    ? "warning" : backendStatus === "online" ? "success" : "neutral";
+  const backendDetail = backendStatus === "offline"
+    ? backendLastSuccessAt === null ? "No successful response yet" : `Last success ${Math.max(0, Math.floor((clockNow - backendLastSuccessAt) / 1000))}s ago`
+    : backendStale ? "No successful response in the last minute"
+      : backendStatus === "checking" ? "Checking local API" : "Local API connected";
   const results = useMemo<CommandPaletteItem[]>(() => {
     const pages: CommandPaletteItem[] = navItems.map((item) => ({
       id: `page:${item.id}`,

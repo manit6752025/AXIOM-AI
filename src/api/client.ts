@@ -1193,6 +1193,9 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
     headers.set("Content-Type", "application/json");
   }
 
+  let succeeded = false;
+  window.dispatchEvent(new CustomEvent("axiom:api-request-start", { detail: { path } }));
+
   try {
     const response = await fetch(`${API_BASE}${path}`, {
       ...init,
@@ -1218,6 +1221,7 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
       throw new Error(`${messageFromPayload(payload, `AXIOM request failed (${response.status})`)} (request ID ${responseRequestId})`);
     }
 
+    succeeded = true;
     return payload as T;
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
@@ -1229,6 +1233,9 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
     throw error;
   } finally {
     window.clearTimeout(timeout);
+    window.dispatchEvent(new CustomEvent("axiom:api-request-end", {
+      detail: { path, ok: succeeded, at: Date.now() },
+    }));
   }
 }
 
