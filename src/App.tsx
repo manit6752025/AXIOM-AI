@@ -1095,20 +1095,6 @@ function Welcome({
     <div className={`auth-layout ${theme}`}>
       <div className="auth-topline">
         <BrandLockup />
-        <div className="global-api-status" role="group" aria-label="Backend connection">
-          <span role="status" aria-live="polite" title={backendDetail}>
-            <StatusPill tone={backendTone}>{backendLabel}</StatusPill>
-          </span>
-          <span className="global-api-status-copy">{backendDetail}</span>
-          {pendingApiRequests > 0 && (
-            <span className="global-api-loading" role="status" aria-live="polite">
-              {pendingApiRequests} {pendingApiRequests === 1 ? "REQUEST" : "REQUESTS"} LOADING
-            </span>
-          )}
-          <button type="button" className="global-api-retry" aria-label="Retry backend connection" title="Recheck the local API connection" onClick={onRetryBackend}>
-            <RefreshCcw size={13} />
-          </button>
-        </div>
         <ThemeToggle theme={theme} setTheme={setTheme} />
       </div>
 
@@ -1709,6 +1695,20 @@ function Topbar({
               <div className="command-hint"><kbd>↑↓</kbd> move <kbd>↵</kbd> open <kbd>esc</kbd> close</div>
             </div>
           )}
+        </div>
+        <div className="global-api-status" role="group" aria-label="Backend connection">
+          <span role="status" aria-live="polite" title={backendDetail}>
+            <StatusPill tone={backendTone}>{backendLabel}</StatusPill>
+          </span>
+          <span className="global-api-status-copy">{backendDetail}</span>
+          {pendingApiRequests > 0 && (
+            <span className="global-api-loading" role="status" aria-live="polite">
+              {pendingApiRequests} {pendingApiRequests === 1 ? "REQUEST" : "REQUESTS"} LOADING
+            </span>
+          )}
+          <button type="button" className="global-api-retry" aria-label="Retry backend connection" title="Recheck the local API connection" onClick={onRetryBackend}>
+            <RefreshCcw size={13} />
+          </button>
         </div>
         <ThemeToggle theme={theme} setTheme={setTheme} />
         <div className="profile-menu">
