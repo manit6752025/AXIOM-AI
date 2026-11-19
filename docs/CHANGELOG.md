@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — global command palette
+
+- Extended the Ctrl/Command+K palette to search and execute page navigation plus local actions for theme switching, password changes, and sign-out; added keyboard and browser regression tests.
+
 ## Unreleased — shared accessible Control Center patterns
 
 - Added reusable form-field, semantic data-table, focus-managed dialog, and politely announced empty-state primitives; migrated password change and saved-plan comparisons to the shared patterns.

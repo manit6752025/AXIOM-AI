@@ -158,6 +158,15 @@ type NavItem = {
   section?: string;
 };
 
+type CommandPaletteItem = {
+  id: string;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+  page?: Page;
+  action?: () => void;
+};
+
 type Notice = {
   message: string;
   tone: Tone;
@@ -1451,11 +1460,51 @@ function Topbar({
   const [profileOpen, setProfileOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const meta = pageMeta[page];
-  const results = useMemo(() => {
+  const results = useMemo<CommandPaletteItem[]>(() => {
+    const pages: CommandPaletteItem[] = navItems.map((item) => ({
+      id: `page:${item.id}`,
+      label: item.label,
+      description: item.description,
+      icon: item.icon,
+      page: item.id,
+    }));
+    const actions: CommandPaletteItem[] = [
+      {
+        id: "action:theme",
+        label: `Switch to ${theme === "dark" ? "light" : "dark"} theme`,
+        description: `Change the current ${theme} appearance`,
+        icon: theme === "dark" ? Sun : Moon,
+        action: () => setTheme(theme === "dark" ? "light" : "dark"),
+      },
+      {
+        id: "action:password",
+        label: "Change administrator password",
+        description: "Open the local administrator password dialog",
+        icon: KeyRound,
+        action: onChangePassword,
+      },
+      {
+        id: "action:sign-out",
+        label: "Sign out",
+        description: "End the current administrator session",
+        icon: ArrowUpRight,
+        action: onLogout,
+      },
+    ];
     const normalized = query.trim().toLowerCase();
-    if (!normalized) return navItems.slice(0, 5);
-    return navItems.filter((item) => `${item.label} ${item.description}`.toLowerCase().includes(normalized));
-  }, [query]);
+    if (!normalized) return [...pages.slice(0, 5), ...actions];
+    return [...pages, ...actions].filter((item) =>
+      `${item.label} ${item.description}`.toLowerCase().includes(normalized)
+    );
+  }, [query, theme, setTheme, onChangePassword, onLogout]);
+
+  const executeResult = (item: CommandPaletteItem) => {
+    if (item.page) navigate(item.page);
+    else item.action?.();
+    setSearchOpen(false);
+    setQuery("");
+    searchRef.current?.blur();
+  };
 
   useEffect(() => setActiveResult(0), [query]);
 
@@ -1492,8 +1541,8 @@ function Topbar({
           <input
             ref={searchRef}
             value={query}
-            placeholder="Jump to a workspace view"
-            aria-label="Search workspace views"
+            placeholder="Search pages and actions"
+            aria-label="Search pages and actions"
             aria-expanded={searchOpen}
             aria-controls="workspace-search-results"
             onFocus={() => setSearchOpen(true)}
@@ -1512,16 +1561,15 @@ function Topbar({
                 setActiveResult((current) => (current - 1 + results.length) % results.length);
               }
               if (event.key === "Enter" && results[activeResult]) {
-                navigate(results[activeResult].id);
-                setSearchOpen(false);
-                setQuery("");
+                event.preventDefault();
+                executeResult(results[activeResult]);
               }
             }}
           />
           <kbd><Command size={11} /> K</kbd>
           {searchOpen && (
-            <div id="workspace-search-results" className="command-menu" role="listbox" aria-label="Workspace views">
-              <div className="command-menu-label">NAVIGATE</div>
+            <div id="workspace-search-results" className="command-menu" role="listbox" aria-label="Pages and actions">
+              <div className="command-menu-label">PAGES AND ACTIONS</div>
               {results.length > 0 ? results.map((item, index) => {
                 const Icon = item.icon;
                 return (
@@ -1531,14 +1579,14 @@ function Topbar({
                     aria-selected={index === activeResult}
                     key={item.id}
                     onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => { navigate(item.id); setSearchOpen(false); setQuery(""); }}
+                    onClick={() => executeResult(item)}
                   >
                     <Icon size={16} />
                     <span><b>{item.label}</b><small>{item.description}</small></span>
-                    {item.id === page && <Check size={15} />}
+                    {item.page === page && <Check size={15} />}
                   </button>
                 );
-              }) : <div className="command-empty">No workspace views match "{query}".</div>}
+              }) : <div className="command-empty">No matching pages or actions for "{query}".</div>}
               <div className="command-hint"><kbd>↑↓</kbd> move <kbd>↵</kbd> open <kbd>esc</kbd> close</div>
             </div>
           )}
