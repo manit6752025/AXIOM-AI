@@ -114,8 +114,16 @@ The command `axiom config validate --path axiom.yaml --json` emits a
 versioned validation report with a stable `error_code` and safe
 `suggestions` when it finds a problem. The suggestions are advisory:
 `repair_applied` remains false and the command never rewrites the supplied
-file. Symlinks are rejected, file contents are not echoed, and oversized files are
-rejected before their contents are read.
+file. Stable codes distinguish missing files, non-regular paths, symlinks,
+unreadable files, files over 256 KiB, malformed YAML, non-mapping documents,
+and known sections with the wrong shape. The validator opens regular files
+without following a final symlink and reads no more than 256 KiB plus one byte
+before deciding whether the file is oversized. File values are not echoed.
+
+Configuration validation is intentionally a local CLI operation because it
+accepts a user-selected filesystem path; it is not exposed as a network API or
+a GUI action. Review and apply any suggested edits yourself, then validate
+again.
 
 ## Machine-readable output
 
