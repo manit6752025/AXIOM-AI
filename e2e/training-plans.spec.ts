@@ -123,4 +123,8 @@ test("Training prints a reproducible saved plan and diffs two snapshots", async 
   await expect(page.getByText("3 recorded field(s) changed")).toBeVisible();
   await expect(page.getByText("inputs.parameter_billions", { exact: true })).toBeVisible();
   await expect(page.getByText("hardware.vram_gb", { exact: true })).toBeVisible();
+  const diffTable = page.getByRole("table", { name: "Saved plan field differences" });
+  await expect(diffTable).toBeVisible();
+  await expect(diffTable.getByRole("columnheader")).toHaveText(["Field", "Category", "Baseline", "Comparison"]);
+  await expect(diffTable.getByRole("row")).toHaveCount(4);
 });

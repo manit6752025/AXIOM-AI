@@ -12,6 +12,12 @@ import AgentProfiles from "./components/AgentProfiles";
 import ModelStudioPanel from "./components/ModelStudioPanel";
 import LocalFineTuningPanel from "./components/LocalFineTuningPanel";
 import {
+  AccessibleDialog,
+  DataTable,
+  EmptyState,
+  FormField as Field,
+} from "./components/ui/AccessiblePatterns";
+import {
   axiomApi,
   type DatasetCleaningPreview,
   type DatasetManifest,
@@ -1239,30 +1245,6 @@ function getPasswordChecks(password: string) {
     lower: /[a-z]/.test(password),
     number: /[0-9]/.test(password),
   };
-}
-
-function Field({
-  label,
-  htmlFor,
-  hint,
-  hintTone = "default",
-  action,
-  children,
-}: {
-  label: string;
-  htmlFor: string;
-  hint?: string;
-  hintTone?: "default" | "success";
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div className="field">
-      <div className="field-label-row"><label htmlFor={htmlFor}>{label}</label>{action}</div>
-      <div className="input-shell">{children}</div>
-      {hint && <small className={hintTone === "success" ? "success-text" : ""}>{hint}</small>}
-    </div>
-  );
 }
 
 function Requirement({ ok, label }: { ok: boolean; label: string }) {
@@ -2770,7 +2752,17 @@ function Training({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
       </div>}
       {planDiff && <div className="surface-divider">
         <div className="setting-row"><div><b>{planDiff.identical ? "Snapshots are identical" : `${planDiff.changes.length} recorded field(s) changed`}</b><span>{planDiff.left.fingerprint.slice(0, 16)} → {planDiff.right.fingerprint.slice(0, 16)}</span></div><StatusPill tone={planDiff.identical ? "success" : "warning"}>{planDiff.identical ? "IDENTICAL" : "CHANGED"}</StatusPill></div>
-        {planDiff.changes.length > 0 ? <div className="module-list">{planDiff.changes.map((change) => <div className="module-row" key={change.path}><span className="module-icon"><GitBranch size={16} /></span><span className="module-copy"><b>{change.path}</b><small>{change.category} · before: {change.before_present ? JSON.stringify(change.before) : "missing"} · after: {change.after_present ? JSON.stringify(change.after) : "missing"}</small></span></div>)}</div> : <p className="quiet-note">Captured inputs, hardware, planner provenance, and estimates match exactly.</p>}
+        {planDiff.changes.length > 0 ? <DataTable
+           caption="Saved plan field differences"
+           rowKey={(change) => change.path}
+           rows={planDiff.changes}
+           columns={[
+             { key: "path", header: "Field", render: (change) => change.path },
+             { key: "category", header: "Category", render: (change) => change.category },
+             { key: "before", header: "Baseline", render: (change) => change.before_present ? JSON.stringify(change.before) : "Missing" },
+             { key: "after", header: "Comparison", render: (change) => change.after_present ? JSON.stringify(change.after) : "Missing" },
+           ]}
+         /> : <p className="quiet-note">Captured inputs, hardware, planner provenance, and estimates match exactly.</p>}
         <p className="quiet-note">{planDiff.scope_note}</p>
       </div>}
     </Surface>
@@ -4008,10 +4000,6 @@ function InfoCard({ icon: Icon, label, value, detail, tone }: { icon: LucideIcon
   return <div className="info-card"><div className="info-card-head"><span>{label}</span><Icon size={17} /></div><strong>{value}</strong><StatusPill tone={tone}>{detail}</StatusPill></div>;
 }
 
-function EmptyState({ icon: Icon, title, description, action }: { icon: LucideIcon; title: string; description: string; action?: ReactNode }) {
-  return <div className="empty-state"><div className="empty-icon"><Icon size={20} /></div><h3>{title}</h3><p>{description}</p>{action && <div className="empty-action">{action}</div>}</div>;
-}
-
 function StatusPill({ tone, children }: { tone: Tone; children: ReactNode }) {
   return <span className={`status-pill ${tone}`}><i />{children}</span>;
 }
@@ -4045,14 +4033,7 @@ function ChangePasswordDialog({ onClose, onSuccess }: { onClose: () => void; onS
   const checks = getPasswordChecks(next);
   const complete = Object.values(checks).every(Boolean) && next.length > 0 && next === confirm;
 
-  useEffect(() => {
-    closeRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !saving) onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, saving]);
+
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -4079,9 +4060,8 @@ function ChangePasswordDialog({ onClose, onSuccess }: { onClose: () => void; onS
     }
   }
 
-  return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
-    <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="password-dialog-title" aria-describedby="password-dialog-description" onMouseDown={(event) => event.stopPropagation()}>
-      {success ? <div className="dialog-success"><div className="success-mark"><Check size={24} /></div><p className="eyebrow">SECURITY / UPDATED</p><h2>Password changed.</h2><p id="password-dialog-description">Returning to the AXIOM sign in screen...</p></div> : <form onSubmit={submit}>
+  return <AccessibleDialog titleId="password-dialog-title" descriptionId="password-dialog-description" onClose={onClose} closeDisabled={saving} initialFocusRef={closeRef}>
+      {success ? <div className="dialog-success"><div className="success-mark"><Check size={24} /></div><p className="eyebrow">SECURITY / UPDATED</p><h2 id="password-dialog-title">Password changed.</h2><p id="password-dialog-description">Returning to the AXIOM sign in screen...</p></div> : <form onSubmit={submit}>
         <div className="dialog-head"><div><p className="eyebrow">SECURITY / LOCAL ADMINISTRATOR</p><h2 id="password-dialog-title">Change password</h2></div><button ref={closeRef} type="button" className="icon-button" aria-label="Close change password dialog" onClick={onClose}><X size={17} /></button></div>
         <p id="password-dialog-description" className="form-intro">Changing the password ends the current session after the update.</p>
         <Field label="Current password" htmlFor="current-password" action={<button type="button" className="field-action" aria-pressed={showCurrent} onClick={() => setShowCurrent((value) => !value)}>{showCurrent ? "Hide" : "Show"}</button>}><input id="current-password" type={showCurrent ? "text" : "password"} value={current} onChange={(event) => setCurrent(event.target.value)} autoComplete="current-password" /></Field>
@@ -4091,8 +4071,7 @@ function ChangePasswordDialog({ onClose, onSuccess }: { onClose: () => void; onS
         {error && <InlineAlert tone="danger" role="alert">{error}</InlineAlert>}
         <button type="submit" className="button primary-button full-width" disabled={!complete || saving}>{saving ? "Changing password..." : "Change password"}<ArrowRight size={17} /></button>
       </form>}
-    </section>
-  </div>;
+  </AccessibleDialog>;
 }
 
 function NoticeToast({ notice, onDismiss }: { notice: Notice; onDismiss: () => void }) {

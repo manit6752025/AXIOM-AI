@@ -15,6 +15,20 @@ We aim to make the AXIOM landing page, terminal guidance, and documentation unde
 
 These are goals for ongoing development. AXIOM has not yet completed a comprehensive accessibility evaluation, so no WCAG conformance level is claimed.
 
+## Shared interface patterns
+
+The Control Center uses shared components in `src/components/ui/AccessiblePatterns.tsx`:
+
+- `FormField` provides a visible programmatic label and optional explanatory hint.
+- `DataTable` renders a semantic table with a caption, column headers, and a clear empty-row message.
+- `AccessibleDialog` provides a labelled modal, initial focus, Escape handling, and a keyboard focus loop.
+- `EmptyState` announces dynamically rendered no-data states politely through a status region.
+
+Use these patterns when adding new forms, tabular data, confirmation dialogs, or
+empty views. They are UI building blocks, not a guarantee that every existing
+control has been migrated or that all screen-reader/browser combinations have
+been audited.
+
 ## Contributor expectations
 
 Accessibility is part of feature quality. For user-facing changes, contributors should:

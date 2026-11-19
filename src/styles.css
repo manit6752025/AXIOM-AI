@@ -2257,3 +2257,15 @@ html[data-accent="violet"] .app-shell.light {
   --accent-ink: #ffffff;
 }
 
+
+
+/* Shared accessible data table used for structured plan comparisons and reports. */
+.accessible-table-wrap { width: 100%; overflow-x: auto; margin: 12px 0; border: 1px solid var(--line); border-radius: 4px; }
+.accessible-data-table { width: 100%; border-collapse: collapse; color: var(--ink); font-size: 11px; text-align: left; }
+.accessible-data-table caption { padding: 10px 12px; color: var(--muted); text-align: left; font-size: 10px; }
+.accessible-data-table th, .accessible-data-table td { padding: 10px 12px; border-top: 1px solid var(--line); vertical-align: top; }
+.accessible-data-table th { background: var(--surface-soft); color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: .06em; }
+.accessible-data-table td { overflow-wrap: anywhere; }
+.accessible-data-table tbody tr:nth-child(even) { background: var(--surface-soft); }
+.accessible-data-table-empty { padding: 18px 12px !important; color: var(--muted); text-align: center; }
+.empty-state[role="status"] { outline: none; }

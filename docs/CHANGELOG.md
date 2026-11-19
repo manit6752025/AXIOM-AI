@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — shared accessible Control Center patterns
+
+- Added reusable form-field, semantic data-table, focus-managed dialog, and politely announced empty-state primitives; migrated password change and saved-plan comparisons to the shared patterns.
+- Added browser checks for dialog labelling/focus wrapping, empty-state announcements, and saved-plan table semantics.
+
 ## Unreleased — Control Center shell regression coverage
 
 - Added browser acceptance coverage for the preserved sidebar, responsive mobile navigation, topbar theme toggle and persistence, collapsed sidebar state, and browser-history page restoration.
