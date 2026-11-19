@@ -405,6 +405,8 @@ def import_workspace_metadata(
     incoming = _read_archive(data)
     directory = _metadata_directory(root, create=True)
     lock_path = directory / ".metadata-transfer.lock"
+    if lock_path.is_symlink():
+        raise ValueError("Workspace metadata transfer lock must not be a symbolic link.")
 
     with file_lock(lock_path):
         before: dict[str, bytes | None] = {}
@@ -485,7 +487,11 @@ def import_workspace_metadata(
 
     return {
         "imported": {
-            name: len(values) if isinstance(values, list) else len(values["profiles"])
+            name: (
+                len(values) if isinstance(values, list)
+                else len(values["profiles"]) if replace
+                else sum(profile["id"] != "default" for profile in values["profiles"])
+            )
             for name, values in incoming.items()
         },
         "mode": "replace" if replace else "merge",
