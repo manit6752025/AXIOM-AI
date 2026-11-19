@@ -197,6 +197,7 @@ def test_workspace_metadata_import_rejects_checksum_tampering_and_zip_traversal(
 
     traversal = io.BytesIO()
     with zipfile.ZipFile(traversal, "w") as target:
+        target.writestr("manifest.json", b"{}")
         target.writestr("../../outside.txt", b"unsafe")
     with pytest.raises(ValueError, match="unsupported or unsafe"):
         import_workspace_metadata(traversal.getvalue(), root)
