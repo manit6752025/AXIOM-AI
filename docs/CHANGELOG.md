@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — CLI/API/Control Center command reference
+
+- Expanded the wiki command reference to index every registered root CLI command and map major feature families to representative typed API endpoints and Control Center pages.
+- Added a contract test that compares the command index, API examples, and GUI navigation labels with the current source surfaces; documents CLI-only host/process operations explicitly.
+
 ## Unreleased — CLI exit-code contract
 
 - Documented exit statuses for success, operational/validation errors, usage or unsafe-output rejections, and cooperative cancellation.
