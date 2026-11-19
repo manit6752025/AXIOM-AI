@@ -245,6 +245,20 @@ code, kbd { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospac
 .plan-result-grid b { margin-top: 6px; color: var(--ink-strong); font-size: 11px; overflow-wrap: anywhere; }
 .experiment-save-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
 .experiment-save-row .quiet-note { margin: 0; }
+.plan-reproducible-json {
+  max-height: 460px;
+  overflow: auto;
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink-strong);
+  font: 11px/1.65 var(--font-mono, ui-monospace, monospace);
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.plan-reproducible-json code { color: inherit; }
 .experiment-row .module-copy { flex: 1; }
 .experiment-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0 0 14px; }
 .experiment-filters .event-filter { max-width: none; margin: 0; }
