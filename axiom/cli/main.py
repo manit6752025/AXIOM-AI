@@ -109,6 +109,7 @@ from axiom.cli.extended import dataset_inspection_payload, register as register_
 from axiom.cli.agent_profiles import register as register_agent_profiles
 from axiom.cli.model_studio import register_model_studio
 from axiom.cli.fine_tuning import register as register_fine_tuning_cli
+from axiom.cli.workspace_metadata import register as register_workspace_metadata_cli
 
 register_extended_cli(app, model_app, dataset_app)
 register_dataset_profile(dataset_app)
@@ -117,6 +118,7 @@ register_agent_profiles(app)
 register_tools_cli(app, tools_app)
 register_headroom_cli(app)
 register_fine_tuning_cli(train_app)
+register_workspace_metadata_cli(app)
 
 
 console = Console()
