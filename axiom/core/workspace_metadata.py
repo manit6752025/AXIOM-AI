@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+from contextlib import nullcontext
 import json
 import os
 import stat
@@ -117,7 +118,10 @@ def export_workspace_metadata(
 
     directory = _metadata_directory(root)
     lock_path = directory / ".metadata-transfer.lock"
-    with file_lock(lock_path):
+    if lock_path.is_symlink():
+        raise ValueError("Workspace metadata transfer lock must not be a symbolic link.")
+    lock_context = file_lock(lock_path) if directory.exists() else nullcontext()
+    with lock_context:
         members: dict[str, bytes] = {}
         collection_info: dict[str, dict[str, Any]] = {}
         total = 0
@@ -216,7 +220,14 @@ def _validate_workflows(value: Any) -> list[dict[str, Any]]:
             raise ValueError("Workflow metadata contains missing or duplicate IDs.")
         if not isinstance(name, str) or not isinstance(nodes, list) or not isinstance(edges, list):
             raise ValueError("Workflow metadata contains an invalid graph.")
-        validate_workflow_graph(name, nodes, edges)
+        if not all(isinstance(node, dict) for node in nodes) or not all(
+            isinstance(edge, dict) for edge in edges
+        ):
+            raise ValueError("Workflow metadata contains invalid nodes or connections.")
+        try:
+            validate_workflow_graph(name, nodes, edges)
+        except (AttributeError, TypeError) as exc:
+            raise ValueError("Workflow metadata contains an invalid graph.") from exc
         version = record.get("schema_version", WORKFLOW_SCHEMA_VERSION)
         revision = record.get("revision", 1)
         versions = record.get("versions", [])
@@ -330,6 +341,7 @@ def _read_archive(data: bytes) -> dict[str, Any]:
                 or (mode and not stat.S_ISREG(mode))
                 or info.flag_bits & 0x1
                 or info.file_size > MAX_COLLECTION_BYTES
+                or info.compress_type not in {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED}
             ):
                 raise ValueError("Workspace metadata archive contains an unsupported or unsafe entry.")
             total += info.file_size
@@ -337,7 +349,7 @@ def _read_archive(data: bytes) -> dict[str, Any]:
             raise ValueError("Workspace metadata archive exceeds the uncompressed size limit.")
         try:
             manifest = json.loads(archive.read("manifest.json"))
-        except (KeyError, UnicodeError, json.JSONDecodeError, RuntimeError) as exc:
+        except (KeyError, UnicodeError, json.JSONDecodeError, RuntimeError, zipfile.BadZipFile) as exc:
             raise ValueError("Workspace metadata archive manifest is invalid.") from exc
         if (
             not isinstance(manifest, dict)
@@ -357,7 +369,10 @@ def _read_archive(data: bytes) -> dict[str, Any]:
             expected_names.add(member)
             if descriptor.get("file") != member or member not in names:
                 raise ValueError("Workspace metadata archive is missing a declared collection.")
-            payload = archive.read(member)
+            try:
+                payload = archive.read(member)
+            except (RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
+                raise ValueError(f"Workspace metadata collection '{name}' could not be read safely.") from exc
             if (
                 descriptor.get("size_bytes") != len(payload)
                 or descriptor.get("sha256") != hashlib.sha256(payload).hexdigest()
