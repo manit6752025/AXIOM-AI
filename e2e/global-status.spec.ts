@@ -2,10 +2,11 @@ import { expect, test } from "@playwright/test";
 import { ensureAuthenticated } from "./helpers/auth";
 
 test("global backend status retries offline connections and shows request loading", async ({ page }) => {
+  let allowHealth = false;
   let healthCalls = 0;
   await page.route("**/api/health", async (route) => {
     healthCalls += 1;
-    if (healthCalls === 1) {
+    if (!allowHealth) {
       await route.fulfill({
         status: 503,
         contentType: "application/json",
@@ -23,6 +24,7 @@ test("global backend status retries offline connections and shows request loadin
   await ensureAuthenticated(page);
   const status = page.getByRole("group", { name: "Backend connection" });
   await expect(status.getByText("OFFLINE", { exact: true })).toBeVisible();
+  allowHealth = true;
   await status.getByRole("button", { name: "Retry backend connection" }).click();
   await expect(status.getByText("ONLINE", { exact: true })).toBeVisible();
   expect(healthCalls).toBeGreaterThanOrEqual(2);
