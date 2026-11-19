@@ -9,7 +9,7 @@ test("shared confirmation dialog exposes labels and traps keyboard focus", async
   const dialog = page.getByRole("dialog", { name: "Change password" });
   await expect(dialog).toBeVisible();
   await expect(page.getByLabel("Current password")).toBeVisible();
-  await expect(page.getByLabel("New password")).toBeVisible();
+  await expect(page.getByLabel("New password", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Confirm new password")).toBeVisible();
   await expect(page.getByRole("button", { name: "Close change password dialog" })).toBeFocused();
 
@@ -17,6 +17,11 @@ test("shared confirmation dialog exposes labels and traps keyboard focus", async
   await expect(page.locator("#confirm-password")).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "Close change password dialog" })).toBeFocused();
+
+  await page.locator("#confirm-password").fill("partial");
+  await expect(page.locator("#confirm-password")).toHaveAttribute("aria-describedby", "confirm-password-hint");
+  await expect(page.locator("#confirm-password")).toHaveAttribute("aria-invalid", "false");
+  await expect(page.locator("#confirm-password-hint")).toHaveText("Passwords do not match");
 
   await page.keyboard.press("Escape");
   await expect(dialog).not.toBeVisible();

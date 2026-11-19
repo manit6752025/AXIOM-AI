@@ -19,7 +19,7 @@ These are goals for ongoing development. AXIOM has not yet completed a comprehen
 
 The Control Center uses shared components in `src/components/ui/AccessiblePatterns.tsx`:
 
-- `FormField` provides a visible programmatic label and optional explanatory hint.
+- `FormField` provides a visible programmatic label and associates optional hints/errors with the control using `aria-describedby` and `aria-invalid`.
 - `DataTable` renders a semantic table with a caption, column headers, and a clear empty-row message.
 - `AccessibleDialog` provides a labelled modal, initial focus, Escape handling, and a keyboard focus loop.
 - `EmptyState` announces dynamically rendered no-data states politely through a status region.

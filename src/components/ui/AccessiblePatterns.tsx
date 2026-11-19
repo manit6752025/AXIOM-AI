@@ -1,11 +1,12 @@
 import type { LucideIcon } from "lucide-react";
-import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import { cloneElement, isValidElement, useEffect, useRef, type ReactNode, type RefObject } from "react";
 
 type FieldProps = {
   label: string;
   htmlFor: string;
   hint?: string;
   hintTone?: "default" | "success";
+  error?: string;
   action?: ReactNode;
   children: ReactNode;
 };
@@ -15,14 +16,33 @@ export function FormField({
   htmlFor,
   hint,
   hintTone = "default",
+  error,
   action,
   children,
 }: FieldProps) {
+  type ControlAccessibilityProps = {
+    "aria-describedby"?: string;
+    "aria-invalid"?: boolean;
+  };
+  const control = isValidElement<ControlAccessibilityProps>(children) ? children : null;
+  const describedBy = [
+    control?.props["aria-describedby"],
+    hint ? `${htmlFor}-hint` : undefined,
+    error ? `${htmlFor}-error` : undefined,
+  ].filter(Boolean).join(" ");
+  const accessibleControl = control
+    ? cloneElement(control, {
+      "aria-describedby": describedBy || undefined,
+      "aria-invalid": error ? true : control.props["aria-invalid"],
+    })
+    : children;
+
   return (
     <div className="field">
       <div className="field-label-row"><label htmlFor={htmlFor}>{label}</label>{action}</div>
-      <div className="input-shell">{children}</div>
+      <div className="input-shell">{accessibleControl}</div>
       {hint && <small id={`${htmlFor}-hint`} className={hintTone === "success" ? "success-text" : ""}>{hint}</small>}
+      {error && <small id={`${htmlFor}-error`} className="field-error" role="alert">{error}</small>}
     </div>
   );
 }

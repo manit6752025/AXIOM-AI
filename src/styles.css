@@ -2269,3 +2269,5 @@ html[data-accent="violet"] .app-shell.light {
 .accessible-data-table tbody tr:nth-child(even) { background: var(--surface-soft); }
 .accessible-data-table-empty { padding: 18px 12px !important; color: var(--muted); text-align: center; }
 .empty-state[role="status"] { outline: none; }
+
+.field-error { display: block; color: var(--danger); font-size: 10px; line-height: 1.5; }
