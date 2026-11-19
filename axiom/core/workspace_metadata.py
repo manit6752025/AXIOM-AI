@@ -455,7 +455,7 @@ def import_workspace_metadata(
                     os.close(directory_fd)
             except OSError:
                 pass
-        except OSError as exc:
+        except BaseException as exc:
             rollback_errors: list[str] = []
             for filename in reversed(replaced):
                 destination = directory / filename
@@ -479,7 +479,9 @@ def import_workspace_metadata(
                     "Workspace metadata import failed and rollback could not restore: "
                     + ", ".join(rollback_errors)
                 ) from exc
-            raise ValueError("Workspace metadata import could not be committed; prior files were restored.") from exc
+            if isinstance(exc, OSError):
+                raise ValueError("Workspace metadata import could not be committed; prior files were restored.") from exc
+            raise
         finally:
             for temporary in staged.values():
                 try:
