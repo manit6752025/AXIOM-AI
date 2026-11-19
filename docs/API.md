@@ -149,3 +149,13 @@ cancelled. If cancellation is requested during Ollama registration after the GGU
 file is downloaded, that complete file remains in its selected local destination;
 AXIOM does not delete a successful download while cancelling a later registration
 step.
+
+
+## Workspace metadata transfer
+
+- `GET /api/workspace/metadata/export`: returns a versioned ZIP archive with media type `application/vnd.axiom.workspace-metadata+zip`. The archive contains the model registry, workflow designs, experiment plans, evaluation reports, and agent task profiles.
+- `POST /api/workspace/metadata/import`: accepts the raw ZIP bytes with `Content-Type: application/vnd.axiom.workspace-metadata+zip` (also accepts `application/zip` or `application/octet-stream`). It validates the archive manifest, member allowlist, size limits, SHA-256 checksums, schemas, and record conflicts before applying changes.
+- The default import mode merges records and rejects duplicate IDs, model names/sources, or agent-profile IDs/names. `?replace=true` replaces only collections included in the archive; omitted collections remain unchanged.
+- The response reports per-collection imported counts, mode, and excluded categories. Invalid archives return HTTP 422; uploads over 24 MiB return HTTP 413 and unsupported media types return HTTP 415.
+
+The archive is not a complete workspace backup. It excludes `axiom.yaml`, credentials, MCP permission grants, external integration commands and URLs, prediction-job history, runtime traces, datasets, model weights, checkpoints, generated artifacts, and temporary files. Some included metadata can still contain local filesystem paths; review archives before sharing. Imports never extract arbitrary ZIP paths and use staged, restrictive-permission writes with rollback on commit failure.
