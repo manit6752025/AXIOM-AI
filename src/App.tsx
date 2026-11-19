@@ -23,6 +23,8 @@ import {
   type TrainingPlan as TrainingPlanResult,
   type WorkspaceDataset,
   type WorkspaceExperiment,
+  type ReproduciblePlanSnapshot,
+  type SavedPlanDiff,
   type WorkspaceEvaluationRun,
   type WorkspaceEvent,
   type WorkspaceDiagnostics,
@@ -2571,10 +2573,34 @@ function Training({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
   const [busy, setBusy] = useState(false);
   const [savingExperiment, setSavingExperiment] = useState(false);
   const [savedExperimentId, setSavedExperimentId] = useState("");
+  const [savedPlans, setSavedPlans] = useState<WorkspaceExperiment[]>([]);
+  const [savedPlansLoading, setSavedPlansLoading] = useState(false);
+  const [snapshotRecordId, setSnapshotRecordId] = useState("");
+  const [snapshot, setSnapshot] = useState<ReproduciblePlanSnapshot | null>(null);
+  const [comparisonLeftId, setComparisonLeftId] = useState("");
+  const [comparisonRightId, setComparisonRightId] = useState("");
+  const [planDiff, setPlanDiff] = useState<SavedPlanDiff | null>(null);
+  const [planToolsBusy, setPlanToolsBusy] = useState(false);
   const [error, setError] = useState("");
+
+  const refreshSavedPlans = async () => {
+    setSavedPlansLoading(true);
+    try {
+      const page = await axiomApi.experimentsPage({ limit: 100, offset: 0 });
+      setSavedPlans(page.experiments);
+      setComparisonLeftId((current) => current || page.experiments[1]?.id || page.experiments[0]?.id || "");
+      setComparisonRightId((current) => current || page.experiments[0]?.id || "");
+      setSnapshotRecordId((current) => current || page.experiments[0]?.id || "");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Saved plan history unavailable.");
+    } finally {
+      setSavedPlansLoading(false);
+    }
+  };
 
   useEffect(() => {
     axiomApi.runtime().then(setHardware).catch(() => setHardware(null));
+    void refreshSavedPlans();
   }, []);
 
   const createPlan = async () => {
@@ -2608,11 +2634,56 @@ function Training({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
         plan_snapshot: plan,
       });
       setSavedExperimentId(result.experiment.id);
+      setSnapshotRecordId(result.experiment.id);
+      setComparisonRightId(result.experiment.id);
+      setSnapshot(null);
+      setPlanDiff(null);
+      await refreshSavedPlans();
       onNotify("Plan saved to persistent experiment history. No job was started.", "success");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Experiment could not be saved.");
     } finally {
       setSavingExperiment(false);
+    }
+  };
+
+  const printSavedPlan = async () => {
+    if (!snapshotRecordId) return;
+    setPlanToolsBusy(true);
+    setError("");
+    setPlanDiff(null);
+    try {
+      const result = await axiomApi.reproducibleExperiment(snapshotRecordId);
+      setSnapshot(result.snapshot);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Saved plan snapshot could not be printed.");
+    } finally {
+      setPlanToolsBusy(false);
+    }
+  };
+
+  const compareSavedPlans = async () => {
+    if (!comparisonLeftId || !comparisonRightId) return;
+    setPlanToolsBusy(true);
+    setError("");
+    setSnapshot(null);
+    try {
+      const result = await axiomApi.diffExperiments(comparisonLeftId, comparisonRightId);
+      setPlanDiff(result.diff);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Saved plan snapshots could not be compared.");
+    } finally {
+      setPlanToolsBusy(false);
+    }
+  };
+
+  const copySavedSnapshot = async () => {
+    if (!snapshot) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(snapshot, null, 2));
+      onNotify("Canonical plan snapshot copied as JSON.", "success");
+    } catch {
+      setError("Clipboard access was unavailable. Select and copy the JSON snapshot below.");
     }
   };
 
@@ -2651,6 +2722,58 @@ function Training({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
         </> : <EmptyState icon={Hammer} title="No plan generated" description="Choose a model size and method to receive a reproducible hardware-aware starting point." action={<CliReference command="axiom train plan 7 --method qlora" />} />}
       </Surface>
     </div>
+    <Surface title="Saved plan tools" eyebrow="REPRODUCIBLE SNAPSHOTS · FIELD-LEVEL DIFF">
+      <p className="quiet-note">Print a stable JSON document from the exact saved inputs, hardware snapshot, planner version, and estimate. Compare two saved snapshots without recalculating either plan. A fingerprint identifies the recorded content; it is not a training-run or benchmark result.</p>
+      <div className="settings-preference-grid">
+        <label className="field settings-field">
+          <span className="field-label-row"><span>Print saved snapshot</span></span>
+          <select aria-label="Saved plan to print" value={snapshotRecordId} onChange={(event) => { setSnapshotRecordId(event.target.value); setSnapshot(null); }}>
+            <option value="">Choose a saved plan</option>
+            {savedPlans.map((record) => <option key={record.id} value={record.id}>{record.name} · {record.id.slice(0, 8)}</option>)}
+          </select>
+        </label>
+        <div className="settings-field">
+          <span className="field-label-row"><span>Reproducible output</span></span>
+          <button type="button" className="button secondary-button" onClick={() => void printSavedPlan()} disabled={!snapshotRecordId || planToolsBusy}><FileCode2 size={15} /> Print canonical JSON</button>
+        </div>
+      </div>
+      <div className="surface-divider" />
+      <div className="settings-preference-grid">
+        <label className="field settings-field">
+          <span className="field-label-row"><span>Compare baseline</span></span>
+          <select aria-label="Baseline saved plan" value={comparisonLeftId} onChange={(event) => { setComparisonLeftId(event.target.value); setPlanDiff(null); }}>
+            <option value="">Choose baseline</option>
+            {savedPlans.map((record) => <option key={record.id} value={record.id}>{record.name} · {record.id.slice(0, 8)}</option>)}
+          </select>
+        </label>
+        <label className="field settings-field">
+          <span className="field-label-row"><span>Compare against</span></span>
+          <select aria-label="Comparison saved plan" value={comparisonRightId} onChange={(event) => { setComparisonRightId(event.target.value); setPlanDiff(null); }}>
+            <option value="">Choose comparison</option>
+            {savedPlans.map((record) => <option key={record.id} value={record.id}>{record.name} · {record.id.slice(0, 8)}</option>)}
+          </select>
+        </label>
+      </div>
+      <div className="settings-save-row">
+        <button type="button" className="button secondary-button" onClick={() => void compareSavedPlans()} disabled={!comparisonLeftId || !comparisonRightId || planToolsBusy}><GitBranch size={15} /> Diff saved plans</button>
+        <button type="button" className="button secondary-button" onClick={() => void refreshSavedPlans()} disabled={savedPlansLoading || planToolsBusy}><RefreshCcw size={15} /> Refresh history</button>
+      </div>
+      {savedPlansLoading && <p className="quiet-note">Loading saved plan history…</p>}
+      {!savedPlansLoading && savedPlans.length === 0 && <EmptyState icon={FileCode2} title="No saved snapshots" description="Generate and save a plan to enable reproducible printing and comparisons." />}
+      {snapshot && <div className="surface-divider">
+        <div className="setting-row">
+          <div><b>Saved plan fingerprint</b><span className="mono-text">{snapshot.fingerprint.value}</span></div>
+          <button type="button" className="button secondary-button" onClick={() => void copySavedSnapshot()}><Copy size={15} /> Copy JSON</button>
+        </div>
+        <pre className="plan-reproducible-json"><code>{JSON.stringify(snapshot, null, 2)}</code></pre>
+        <p className="quiet-note">{snapshot.execution.scope_note}</p>
+      </div>}
+      {planDiff && <div className="surface-divider">
+        <div className="setting-row"><div><b>{planDiff.identical ? "Snapshots are identical" : `${planDiff.changes.length} recorded field(s) changed`}</b><span>{planDiff.left.fingerprint.slice(0, 16)} → {planDiff.right.fingerprint.slice(0, 16)}</span></div><StatusPill tone={planDiff.identical ? "success" : "warning"}>{planDiff.identical ? "IDENTICAL" : "CHANGED"}</StatusPill></div>
+        {planDiff.changes.length > 0 ? <div className="module-list">{planDiff.changes.map((change) => <div className="module-row" key={change.path}><span className="module-icon"><GitBranch size={16} /></span><span className="module-copy"><b>{change.path}</b><small>{change.category} · before: {change.before_present ? JSON.stringify(change.before) : "missing"} · after: {change.after_present ? JSON.stringify(change.after) : "missing"}</small></span></div>)}</div> : <p className="quiet-note">Captured inputs, hardware, planner provenance, and estimates match exactly.</p>}
+        <p className="quiet-note">{planDiff.scope_note}</p>
+      </div>}
+    </Surface>
     <LocalFineTuningPanel />
   </FeaturePage>;
 }
