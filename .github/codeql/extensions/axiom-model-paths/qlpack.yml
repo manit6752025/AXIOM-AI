@@ -1,7 +1,0 @@
-name: axiom/axiom-model-paths
-version: 0.1.0
-library: true
-extensionTargets:
-  codeql/python-all: "*"
-dataExtensions:
-  - models/**/*.yml
