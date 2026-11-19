@@ -1,0 +1,7 @@
+* [Home](Home)
+* [Getting Started](Getting-Started)
+* [Features](Features)
+* [CLI Reference](CLI-Reference)
+* [Roadmap](Roadmap)
+* [Security and Privacy](Security-and-Privacy)
+* [Releases](Releases)

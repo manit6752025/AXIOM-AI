@@ -1,0 +1,380 @@
+{
+  "schema_version": 1,
+  "snapshot_date": "2026-10-20",
+  "source": "Pasted text(9).txt — AXIOM Roadmap supplied in this conversation; cross-checked against the current public ROADMAP.md status count.",
+  "total_deliverables": 120,
+  "status_counts": {
+    "Implemented; tests passing": 29,
+    "Planned": 68,
+    "In progress; validation pending": 22,
+    "In progress": 1
+  },
+  "open_count": 91,
+  "open_items": [
+    {
+      "id": "R002",
+      "status": "Planned"
+    },
+    {
+      "id": "R003",
+      "status": "Planned"
+    },
+    {
+      "id": "R006",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R007",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R008",
+      "status": "Planned"
+    },
+    {
+      "id": "R009",
+      "status": "Planned"
+    },
+    {
+      "id": "R010",
+      "status": "Planned"
+    },
+    {
+      "id": "R011",
+      "status": "Planned"
+    },
+    {
+      "id": "R012",
+      "status": "Planned"
+    },
+    {
+      "id": "R014",
+      "status": "Planned"
+    },
+    {
+      "id": "R015",
+      "status": "Planned"
+    },
+    {
+      "id": "R016",
+      "status": "Planned"
+    },
+    {
+      "id": "R017",
+      "status": "Planned"
+    },
+    {
+      "id": "R018",
+      "status": "Planned"
+    },
+    {
+      "id": "R019",
+      "status": "Planned"
+    },
+    {
+      "id": "R020",
+      "status": "Planned"
+    },
+    {
+      "id": "R021",
+      "status": "Planned"
+    },
+    {
+      "id": "R022",
+      "status": "Planned"
+    },
+    {
+      "id": "R023",
+      "status": "Planned"
+    },
+    {
+      "id": "R024",
+      "status": "Planned"
+    },
+    {
+      "id": "R025",
+      "status": "Planned"
+    },
+    {
+      "id": "R026",
+      "status": "Planned"
+    },
+    {
+      "id": "R027",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R028",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R029",
+      "status": "Planned"
+    },
+    {
+      "id": "R030",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R031",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R032",
+      "status": "Planned"
+    },
+    {
+      "id": "R033",
+      "status": "Planned"
+    },
+    {
+      "id": "R034",
+      "status": "Planned"
+    },
+    {
+      "id": "R035",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R036",
+      "status": "Planned"
+    },
+    {
+      "id": "R037",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R038",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R039",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R040",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R041",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R042",
+      "status": "Planned"
+    },
+    {
+      "id": "R043",
+      "status": "Planned"
+    },
+    {
+      "id": "R044",
+      "status": "Planned"
+    },
+    {
+      "id": "R045",
+      "status": "Planned"
+    },
+    {
+      "id": "R046",
+      "status": "Planned"
+    },
+    {
+      "id": "R047",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R048",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R061",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R062",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R063",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R064",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R065",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R066",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R067",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R069",
+      "status": "Planned"
+    },
+    {
+      "id": "R070",
+      "status": "Planned"
+    },
+    {
+      "id": "R071",
+      "status": "In progress"
+    },
+    {
+      "id": "R078",
+      "status": "Planned"
+    },
+    {
+      "id": "R085",
+      "status": "Planned"
+    },
+    {
+      "id": "R086",
+      "status": "Planned"
+    },
+    {
+      "id": "R087",
+      "status": "Planned"
+    },
+    {
+      "id": "R088",
+      "status": "Planned"
+    },
+    {
+      "id": "R089",
+      "status": "Planned"
+    },
+    {
+      "id": "R090",
+      "status": "Planned"
+    },
+    {
+      "id": "R091",
+      "status": "Planned"
+    },
+    {
+      "id": "R092",
+      "status": "Planned"
+    },
+    {
+      "id": "R093",
+      "status": "Planned"
+    },
+    {
+      "id": "R094",
+      "status": "Planned"
+    },
+    {
+      "id": "R095",
+      "status": "Planned"
+    },
+    {
+      "id": "R096",
+      "status": "Planned"
+    },
+    {
+      "id": "R097",
+      "status": "Planned"
+    },
+    {
+      "id": "R098",
+      "status": "In progress; validation pending"
+    },
+    {
+      "id": "R099",
+      "status": "Planned"
+    },
+    {
+      "id": "R100",
+      "status": "Planned"
+    },
+    {
+      "id": "R101",
+      "status": "Planned"
+    },
+    {
+      "id": "R102",
+      "status": "Planned"
+    },
+    {
+      "id": "R103",
+      "status": "Planned"
+    },
+    {
+      "id": "R104",
+      "status": "Planned"
+    },
+    {
+      "id": "R105",
+      "status": "Planned"
+    },
+    {
+      "id": "R106",
+      "status": "Planned"
+    },
+    {
+      "id": "R107",
+      "status": "Planned"
+    },
+    {
+      "id": "R108",
+      "status": "Planned"
+    },
+    {
+      "id": "R109",
+      "status": "Planned"
+    },
+    {
+      "id": "R110",
+      "status": "Planned"
+    },
+    {
+      "id": "R111",
+      "status": "Planned"
+    },
+    {
+      "id": "R112",
+      "status": "Planned"
+    },
+    {
+      "id": "R113",
+      "status": "Planned"
+    },
+    {
+      "id": "R114",
+      "status": "Planned"
+    },
+    {
+      "id": "R115",
+      "status": "Planned"
+    },
+    {
+      "id": "R116",
+      "status": "Planned"
+    },
+    {
+      "id": "R117",
+      "status": "Planned"
+    },
+    {
+      "id": "R118",
+      "status": "Planned"
+    },
+    {
+      "id": "R119",
+      "status": "Planned"
+    },
+    {
+      "id": "R120",
+      "status": "Planned"
+    }
+  ],
+  "note": "Snapshot only. The feature pack does not rewrite ROADMAP.md status markers; roadmap status must only change after each delivery gate passes."
+}

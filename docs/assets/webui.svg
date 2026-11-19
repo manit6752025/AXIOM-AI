@@ -1,0 +1,117 @@
+<svg width="1000" height="620" viewBox="0 0 1000 620" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Animated AXIOM Web UI: Quantization Lab comparing FP16, INT8 and INT4 size estimates against detected memory, with an Optimizer recommendation" xmlns:c2pa="http://c2pa.org/manifest"><metadata><c2pa:manifest>AAAWgmp1bWIAAAAeanVtZGMycGEAEQAQgAAAqgA4m3EDYzJwYQAAABZcanVtYgAAAEdqdW1kYzJtYQARABCAAACqADibcQN1cm46YzJwYTo2ZGM4OThjMS1kMmU2LTQzYzktYmYyNC1jYzQ2YTM3MzNkNWYAAAADl2p1bWIAAAApanVtZGMyYXMAEQAQgAAAqgA4m3EDYzJwYS5hc3NlcnRpb25zAAAAALxqdW1iAAAARGp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuaW5ncmVkaWVudC52MwAAAAAYYzJzaPz3/90ns4xrwjvQh7NSsk8AAABwY2JvcqNpZGM6Zm9ybWF0bWltYWdlL3N2Zyt4bWxqaW5zdGFuY2VJRHgseG1wOmlpZDpmYWE4ZjFmMi1iZjE4LTQ2ZTUtYTI0Ny05MDJmZWRmZjVkNTNscmVsYXRpb25zaGlwaHBhcmVudE9mAAAB4mp1bWIAAABBanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5hY3Rpb25zLnYyAAAAABhjMnNowoAx9LV3K8XD4UVUWPMQXwAAAZljYm9yomdhY3Rpb25zgqJmYWN0aW9ua2MycGEub3BlbmVkanBhcmFtZXRlcnOha2luZ3JlZGllbnRzgaJjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFggweGTgWnTqlqm9NP6/RZFIhtvg+8OTktBeF2ZnvIHzUukZmFjdGlvbngdY29tLmFudGhyb3BpYy5jbGF1ZGUucHJvdmlkZWRqcGFyYW1ldGVyc6F4H2NvbS5hbnRocm9waWMub3JpZ2luLWNvbmZpZGVuY2VndW5rbm93bmtkZXNjcmlwdGlvbnhmQ2xhdWRlIHByb3ZpZGVkIHRoaXMgZmlsZSBhdCB0aGUgcmVxdWVzdCBvZiBhIHVzZXIgYW5kIG1heSBoYXZlIGNyZWF0ZWQgb3IgbW9kaWZpZWQgdGhlIGZpbGUgY29udGVudHMubXNvZnR3YXJlQWdlbnShZG5hbWVmQ2xhdWRlcmFsbEFjdGlvbnNJbmNsdWRlZPUAAADIanVtYgAAAEBqdW1kY2JvcgARABCAAACqADibcRNjMnBhLmhhc2guZGF0YQAAAAAYYzJzaETT3QxStNSCL3xL7+VcOIMAAACAY2JvcqVjYWxnZnNoYTI1NmNwYWRMAAAAAAAAAAAAAAAAZGhhc2hYIBLGQa3GSe/sEpvljLOvQRlDFt9olsoC+GxxZ5DJ/HePZG5hbWVuanVtYmYgbWFuaWZlc3RqZXhjbHVzaW9uc4GiZXN0YXJ0GQFLZmxlbmd0aBkeBAAAAj5qdW1iAAAAJ2p1bWRjMmNsABEAEIAAAKoAOJtxA2MycGEuY2xhaW0udjIAAAACD2Nib3KlY2FsZ2ZzaGEyNTZpc2lnbmF0dXJleE1zZWxmI2p1bWJmPS9jMnBhL3VybjpjMnBhOjZkYzg5OGMxLWQyZTYtNDNjOS1iZjI0LWNjNDZhMzczM2Q1Zi9jMnBhLnNpZ25hdHVyZWppbnN0YW5jZUlEeCx4bXA6aWlkOjRiMTY3ZWExLWI1M2ItNGMzMi1hOGFkLWE4ODJlMWIyZGY0NXJjcmVhdGVkX2Fzc2VydGlvbnODomN1cmx4LXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaW5ncmVkaWVudC52M2RoYXNoWCDB4ZOBadOqWqb00/r9FkUiG2+D7w5OS0F4XZme8gfNS6JjdXJseCpzZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmFjdGlvbnMudjJkaGFzaFggD2ZQt+dSSez7Cvz2u/6+wQflmSSBIwedbPCvnGTqvoWiY3VybHgpc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5oYXNoLmRhdGFkaGFzaFgg7WkMlR5CX1Oge1549uRuPsi9Rv0G022FOgo7ZnAH7ZB0Y2xhaW1fZ2VuZXJhdG9yX2luZm+jZG5hbWVvQW50aHJvcGljIEZpbGVzZ3ZlcnNpb25lMS4wLjBrc3BlY1ZlcnNpb25lMi40LjAAABA4anVtYgAAAChqdW1kYzJjcwARABCAAACqADibcQNjMnBhLnNpZ25hdHVyZQAAABAIY2JvctKEWQISogEmGCFZAgowggIGMIIBjaADAgECAhRA5aAK7sI50L64g/oGQgU9Z1UTADAKBggqhkjOPQQDAzBJMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEuMCwGA1UEAxMlQW50aHJvcGljIENvbnRlbnQgQ3JlZGVudGlhbHMgUm9vdCBDQTAeFw0yNjA4MDcxODQzNTZaFw0yODA4MDYxOTQzNTZaMEQxFzAVBgNVBAoTDkFudGhyb3BpYywgUEJDMSkwJwYDVQQDEyBBbnRocm9waWMgQ2xhdWRlIENvbnRlbnQgU2lnbmluZzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJh6CmvLUBgFFNU0vUKlOVtE6djd17L5SuwX0LemFisBM3dkd/3cyjxFA3Qo5S46fX0/ihY0VZ7mfb9KF703t5OjWDBWMA4GA1UdDwEB/wQEAwIHgDAVBgNVHSUEDjAMBgorBgEEAYPoXgIBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUzlHiBIFOZFsj+OPEz5o+nMHXXMIwCgYIKoZIzj0EAwMDZwAwZAIwMXMdFJ4BetLLVY7ORuE9noqbbAZOZn/aArXyTwFAZfKrPzxF2vPoJNf1+UCdg1XGAjBwX1zd9WGqYkqmL5SFqw1QySjr1zJfpJM9+1rdDwSPLMOPOjKuiXjoU/pUUeG9RwmhY3BhZFkNngAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPZYQE4BKS0PTTSxITDDBcx0zl3OtZBe0gk6JPyfabNDFysFo3/Q2T8jjsQeE0IcCLmXKc6nPvQ2ePaAe+vXb5KxGSA=</c2pa:manifest></metadata>
+  <defs>
+    <linearGradient id="chrome" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e293b"/><stop offset="1" stop-color="#0f172a"/></linearGradient>
+    <linearGradient id="tfg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#a78bfa"/></linearGradient>
+    <radialGradient id="glow" cx="70%" cy="0%" r="80%"><stop offset="0" stop-color="#0ea5e9" stop-opacity=".12"/><stop offset="1" stop-color="#0ea5e9" stop-opacity="0"/></radialGradient>
+  </defs>
+  <style>
+    .m{font-family:'SF Mono','JetBrains Mono',Menlo,Consolas,'Liberation Mono',monospace}
+    .s{font-family:-apple-system,'Segoe UI',Inter,Helvetica,Arial,sans-serif}
+    .live{animation:live 1.8s ease-in-out infinite}
+    .dash{stroke-dasharray:5 5;animation:march 1.2s linear infinite}
+    @keyframes live{0%,100%{opacity:1}50%{opacity:.3}}
+    @keyframes march{to{stroke-dashoffset:-20}}
+    @keyframes bar0{0.0%{width:102.0px;fill:#22c55e}30.0%{width:102.0px;fill:#22c55e}35.0%{width:238.0px;fill:#ef4444}63.333%{width:238.0px;fill:#ef4444}68.333%{width:442.0px;fill:#ef4444}96.667%{width:442.0px;fill:#ef4444}100.0%{width:102.0px;fill:#22c55e}}
+#bar0{animation:bar0 12.0s ease-in-out infinite}
+@keyframes bar1{0.0%{width:51.0px;fill:#22c55e}30.0%{width:51.0px;fill:#22c55e}35.0%{width:119.0px;fill:#22c55e}63.333%{width:119.0px;fill:#22c55e}68.333%{width:221.0px;fill:#ef4444}96.667%{width:221.0px;fill:#ef4444}100.0%{width:51.0px;fill:#22c55e}}
+#bar1{animation:bar1 12.0s ease-in-out infinite}
+@keyframes bar2{0.0%{width:25.5px;fill:#22c55e}30.0%{width:25.5px;fill:#22c55e}35.0%{width:59.5px;fill:#22c55e}63.333%{width:59.5px;fill:#22c55e}68.333%{width:110.5px;fill:#22c55e}96.667%{width:110.5px;fill:#22c55e}100.0%{width:25.5px;fill:#22c55e}}
+#bar2{animation:bar2 12.0s ease-in-out infinite}
+@keyframes thumb{0.0%{transform:translateX(0px)}30.0%{transform:translateX(0px)}35.0%{transform:translateX(133px)}63.333%{transform:translateX(133px)}68.333%{transform:translateX(333px)}96.667%{transform:translateX(333px)}100.0%{transform:translateX(0px)}}
+#thumb,#thumbfill{animation:thumb 12.0s ease-in-out infinite}
+@keyframes tfill{0.0%{width:67px}30.0%{width:67px}35.0%{width:200px}63.333%{width:200px}68.333%{width:400px}96.667%{width:400px}100.0%{width:67px}}
+#tfill{animation:tfill 12.0s ease-in-out infinite}
+@keyframes ph0{0.0%{opacity:1}28.333%{opacity:1}31.667%{opacity:0}98.333%{opacity:0}100.0%{opacity:1}}
+.ph0{animation:ph0 12.0s linear infinite}
+@keyframes ph1{0.0%{opacity:0}31.667%{opacity:0}35.833%{opacity:1}61.667%{opacity:1}65.833%{opacity:0}100.0%{opacity:0}}
+.ph1{animation:ph1 12.0s linear infinite}
+@keyframes ph2{0.0%{opacity:0}65.833%{opacity:0}70.0%{opacity:1}95.833%{opacity:1}99.167%{opacity:0}100.0%{opacity:0}}
+.ph2{animation:ph2 12.0s linear infinite}
+  </style>
+  <rect x="0.5" y="0.5" width="999" height="619" rx="14" fill="#0a0e1c" stroke="#1e3a5f"/>
+  <rect x="0.5" y="0.5" width="999" height="619" rx="14" fill="url(#glow)"/>
+  <path d="M0.5 14.5a14 14 0 0 1 14-14h971a14 14 0 0 1 14 14V44H0.5z" fill="url(#chrome)"/>
+  <circle cx="26" cy="23" r="6" fill="#ef4444"/><circle cx="48" cy="23" r="6" fill="#f59e0b"/><circle cx="70" cy="23" r="6" fill="#22c55e"/>
+  <rect x="300" y="11" width="400" height="24" rx="12" fill="#0b1224" stroke="#1e3a5f"/>
+  <text class="m" x="500" y="27" font-size="12" fill="#7dd3fc" text-anchor="middle">http://127.0.0.1:53142</text>
+  <rect x="0.5" y="44" width="190" height="575" fill="#080b17"/>
+  <path d="M190.5 44V619" stroke="#1e293b"/>
+  <text class="s" x="34" y="84" font-size="20" font-weight="800" fill="#e0f2fe" letter-spacing="4">AXIOM</text>
+  <text class="m" x="34" y="102" font-size="10" fill="#64748b">v0.3.0-beta.1</text>
+  <text class="s" x="34" y="130" font-size="14" fill="#94a3b8" font-weight="400">Summary</text>
+<text class="s" x="34" y="170" font-size="14" fill="#94a3b8" font-weight="400">Models</text>
+<text class="s" x="34" y="210" font-size="14" fill="#94a3b8" font-weight="400">Datasets</text>
+<text class="s" x="34" y="250" font-size="14" fill="#94a3b8" font-weight="400">Optimizer</text>
+<rect x="14" y="268" width="162" height="34" rx="8" fill="#0ea5e9" fill-opacity=".14" stroke="#0ea5e9" stroke-opacity=".4"/><rect id="navbar" x="14" y="268" width="3" height="34" rx="1.5" fill="#38bdf8"/>
+<text class="s" x="34" y="290" font-size="14" fill="#e0f2fe" font-weight="600">Quantization Lab</text>
+<text class="s" x="34" y="330" font-size="14" fill="#94a3b8" font-weight="400">Tools</text>
+  <circle class="live" cx="38" cy="590" r="4" fill="#22c55e"/>
+  <text class="m" x="50" y="594" font-size="11" fill="#64748b">daemon running</text>
+
+  <text class="s" x="230" y="86" font-size="22" font-weight="700" fill="#f1f5f9">Quantization Lab</text>
+  <text class="s" x="230" y="108" font-size="13" fill="#94a3b8">Compare FP16, INT8 and INT4 size estimates against the memory AXIOM detects.</text>
+
+  <g class="m" font-size="12">
+    <rect x="230" y="124" width="132" height="26" rx="13" fill="#1e293b"/><text x="296" y="141" fill="#cbd5e1" text-anchor="middle">GPU · 12 GB VRAM</text>
+    <rect x="372" y="124" width="92" height="26" rx="13" fill="#1e293b"/><text x="418" y="141" fill="#cbd5e1" text-anchor="middle">RAM · 32 GB</text>
+    <rect x="474" y="124" width="104" height="26" rx="13" fill="#1e293b"/><text x="526" y="141" fill="#4ade80" text-anchor="middle">CUDA ready</text>
+    <rect x="588" y="124" width="104" height="26" rx="13" fill="#f59e0b" fill-opacity=".1" stroke="#f59e0b" stroke-opacity=".4"/><text x="640" y="141" fill="#fbbf24" text-anchor="middle">sample data</text>
+  </g>
+
+  <rect x="230" y="168" width="740" height="250" rx="14" fill="#0f172a" stroke="#1e293b"/>
+  <text class="s" x="252" y="198" font-size="13" fill="#94a3b8" letter-spacing="1">MODEL SIZE</text>
+  <rect x="300" y="222" width="400" height="6" rx="3" fill="#1e293b"/>
+  <rect id="tfill" x="300" y="222" width="67" height="6" rx="3" fill="url(#tfg)"/>
+  <circle id="thumb" cx="367" cy="225" r="9" fill="#e0f2fe" stroke="#38bdf8" stroke-width="3"/>
+  <g class="s" font-size="12" fill="#64748b" text-anchor="middle"><text x="367" y="250">3B</text><text x="500" y="250">7B</text><text x="700" y="250">13B</text></g>
+
+  <path class="dash" d="M504.0 262V404" stroke="#f59e0b" stroke-width="1.5"/>
+  <text class="m" x="512.0" y="270" font-size="11" fill="#fbbf24">detected 12 GB</text>
+  <g class="m" font-size="14" fill="#cbd5e1"><text x="252" y="289">FP16</text><text x="252" y="339">INT8</text><text x="252" y="389">INT4</text></g>
+  <rect x="300" y="272" width="442" height="24" rx="6" fill="#111a2e"/>
+  <rect x="300" y="322" width="442" height="24" rx="6" fill="#111a2e"/>
+  <rect x="300" y="372" width="442" height="24" rx="6" fill="#111a2e"/>
+  <rect id="bar0" x="300" y="272" width="102" height="24" rx="6" fill="#22c55e"/>
+  <rect id="bar1" x="300" y="322" width="51" height="24" rx="6" fill="#22c55e"/>
+  <rect id="bar2" x="300" y="372" width="25.5" height="24" rx="6" fill="#22c55e"/>
+
+  <rect x="230" y="434" width="740" height="150" rx="14" fill="#0f172a" stroke="#1e293b"/>
+  <text class="s" x="252" y="462" font-size="13" fill="#94a3b8" letter-spacing="1">OPTIMIZER</text>
+  <rect x="860" y="448" width="94" height="22" rx="11" fill="#a78bfa" fill-opacity=".12" stroke="#a78bfa" stroke-opacity=".4"/>
+  <text class="m" x="907" y="463" font-size="11" fill="#c4b5fd" text-anchor="middle">estimate only</text>
+  <g class="ph0">
+<text class="m" x="367" y="209" font-size="12" fill="#e2e8f0" text-anchor="middle" font-weight="700">3B params</text>
+<text class="m" x="945" y="288" font-size="13" text-anchor="end" fill="#e2e8f0">6.0 GB  <tspan fill="#4ade80" font-weight="700">fits</tspan></text>
+<text class="m" x="945" y="338" font-size="13" text-anchor="end" fill="#e2e8f0">3.0 GB  <tspan fill="#4ade80" font-weight="700">fits</tspan></text>
+<text class="m" x="945" y="388" font-size="13" text-anchor="end" fill="#e2e8f0">1.5 GB  <tspan fill="#4ade80" font-weight="700">fits</tspan></text>
+<text class="s" x="260" y="500" font-size="17" font-weight="600" fill="#f1f5f9">LoRA on FP16 weights looks comfortable</text>
+<rect x="260" y="522" width="56" height="26" rx="13" fill="#38bdf8" fill-opacity=".12" stroke="#38bdf8" stroke-opacity=".5"/>
+<text class="m" x="288.0" y="539" font-size="12" fill="#38bdf8" text-anchor="middle">LoRA</text>
+<rect x="326" y="522" width="96" height="26" rx="13" fill="#38bdf8" fill-opacity=".12" stroke="#38bdf8" stroke-opacity=".5"/>
+<text class="m" x="374.0" y="539" font-size="12" fill="#38bdf8" text-anchor="middle">FP16 base</text>
+</g>
+<g class="ph1">
+<text class="m" x="500" y="209" font-size="12" fill="#e2e8f0" text-anchor="middle" font-weight="700">7B params</text>
+<text class="m" x="945" y="288" font-size="13" text-anchor="end" fill="#e2e8f0">14.0 GB  <tspan fill="#f87171" font-weight="700">over</tspan></text>
+<text class="m" x="945" y="338" font-size="13" text-anchor="end" fill="#e2e8f0">7.0 GB  <tspan fill="#4ade80" font-weight="700">fits</tspan></text>
+<text class="m" x="945" y="388" font-size="13" text-anchor="end" fill="#e2e8f0">3.5 GB  <tspan fill="#4ade80" font-weight="700">fits</tspan></text>
+<text class="s" x="260" y="500" font-size="17" font-weight="600" fill="#f1f5f9">QLoRA with an INT4 base is the safest start</text>
+<rect x="260" y="522" width="64" height="26" rx="13" fill="#38bdf8" fill-opacity=".12" stroke="#38bdf8" stroke-opacity=".5"/>
+<text class="m" x="292.0" y="539" font-size="12" fill="#38bdf8" text-anchor="middle">QLoRA</text>
+<rect x="334" y="522" width="96" height="26" rx="13" fill="#38bdf8" fill-opacity=".12" stroke="#38bdf8" stroke-opacity=".5"/>
+<text class="m" x="382.0" y="539" font-size="12" fill="#38bdf8" text-anchor="middle">INT4 base</text>
+</g>
+<g class="ph2">
+<text class="m" x="700" y="209" font-size="12" fill="#e2e8f0" text-anchor="middle" font-weight="700">13B params</text>
+<text class="m" x="945" y="288" font-size="13" text-anchor="end" fill="#e2e8f0">26.0 GB  <tspan fill="#f87171" font-weight="700">over</tspan></text>
+<text class="m" x="945" y="338" font-size="13" text-anchor="end" fill="#e2e8f0">13.0 GB  <tspan fill="#f87171" font-weight="700">over</tspan></text>
+<text class="m" x="945" y="388" font-size="13" text-anchor="end" fill="#e2e8f0">6.5 GB  <tspan fill="#4ade80" font-weight="700">fits</tspan></text>
+<text class="s" x="260" y="500" font-size="17" font-weight="600" fill="#f1f5f9">INT4 only, and expect tight headroom</text>
+<rect x="260" y="522" width="64" height="26" rx="13" fill="#38bdf8" fill-opacity=".12" stroke="#38bdf8" stroke-opacity=".5"/>
+<text class="m" x="292.0" y="539" font-size="12" fill="#38bdf8" text-anchor="middle">QLoRA</text>
+<rect x="334" y="522" width="96" height="26" rx="13" fill="#38bdf8" fill-opacity=".12" stroke="#38bdf8" stroke-opacity=".5"/>
+<text class="m" x="382.0" y="539" font-size="12" fill="#38bdf8" text-anchor="middle">INT4 base</text>
+<rect x="440" y="522" width="64" height="26" rx="13" fill="#f59e0b" fill-opacity=".12" stroke="#f59e0b" stroke-opacity=".5"/>
+<text class="m" x="472.0" y="539" font-size="12" fill="#f59e0b" text-anchor="middle">tight</text>
+</g>
+</svg>

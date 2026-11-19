@@ -1,0 +1,95 @@
+{
+  "name": "AXIOM-AI roadmap feature pack",
+  "generated_at": "2026-10-20",
+  "repository": "NetCore-Technologies/AXIOM-AI",
+  "repository_branch": "main",
+  "roadmap_blob_sha": "873b35c1eade5c6c401add7c982436b5d423f806",
+  "scope": "Local-only reviewable code overlay; no remote writes",
+  "files": [
+    {
+      "path": "FEATURE-PACK-README.md",
+      "bytes": 2943,
+      "sha256": "ac1ab71dcafcf57cd42f5917f007516523c262dcd91471edc23156068b83d407"
+    },
+    {
+      "path": "QA-REPORT.md",
+      "bytes": 3341,
+      "sha256": "bf1cae12b0ab60402e4bd7714befe807f8d7ee65228b72a99801cff36a8131d1"
+    },
+    {
+      "path": "ROADMAP-STATUS-SNAPSHOT.json",
+      "bytes": 713,
+      "sha256": "a590c082713f60fd53533b6778c7f7d29e3dbaf0d6bcd0f7f5fccc9cfeecb67a"
+    },
+    {
+      "path": "SCOPE.md",
+      "bytes": 3121,
+      "sha256": "9cf3c5eed1cc91aa8287aaee0f773091d813fc78a1efc18dfa028c58d8202050"
+    },
+    {
+      "path": "apply_feature_pack.py",
+      "bytes": 30251,
+      "sha256": "fd4614fb8ecfe096fbd066ea1ca37780f856fbaeaf638c2892f05773c1ead4e3"
+    },
+    {
+      "path": "overlay/axiom/api/diagnostics.py",
+      "bytes": 1890,
+      "sha256": "bbd7f7ba5807b8c1d71a804b65f384d85c41d560dd7b36503b910b1761678991"
+    },
+    {
+      "path": "overlay/axiom/cli/roadmap.py",
+      "bytes": 1975,
+      "sha256": "7a6b321d3fe663d5dbd42e15980e5fd08ff543dc74e7331c91c526dc3464adb9"
+    },
+    {
+      "path": "overlay/axiom/cli/support_bundle.py",
+      "bytes": 3524,
+      "sha256": "b54bb7456d45f525930cefcdcc94ec95466c94cd4da7cbb9fc1a90c9a1dab064"
+    },
+    {
+      "path": "overlay/axiom/core/diagnostics.py",
+      "bytes": 15917,
+      "sha256": "875eb49f09f564634b72464e70fb7a49ec8ed8058b21e483553c71ee738ee66d"
+    },
+    {
+      "path": "overlay/axiom/core/roadmap.py",
+      "bytes": 4562,
+      "sha256": "d35255b236fae3e3122f6b42c14843424831fca2c99350c3a16052c96bfa9fc7"
+    },
+    {
+      "path": "overlay/docs/Diagnostics-and-Support.md",
+      "bytes": 2864,
+      "sha256": "08a03967df6b92f9412f1e818403a700425d1817d10b7805a3a02ee32b147ec3"
+    },
+    {
+      "path": "overlay/tests/test_roadmap_audit.py",
+      "bytes": 3462,
+      "sha256": "f7c30966d3618994fc6dfbb585ecb0e281c7dcaf1287112b0da8032d3320ecdf"
+    },
+    {
+      "path": "overlay/tests/test_support_bundle_cli.py",
+      "bytes": 1704,
+      "sha256": "b14159c2786afa2eed9ce361257d3d7221c35462231521539b6819fef29aab39"
+    },
+    {
+      "path": "overlay/tests/test_workspace_diagnostics.py",
+      "bytes": 4128,
+      "sha256": "6256aaaa93e2acd6c8c7a83f299c43209ee276c71c0112b4b148f538b3a44b53"
+    },
+    {
+      "path": "overlay/tests/test_workspace_diagnostics_api.py",
+      "bytes": 3212,
+      "sha256": "3afd0e71b417251523b385e5bbe8bb9a81a0eee9f6845749c4b4e8a02cbc3c5e"
+    }
+  ],
+  "validation": {
+    "focused_tests": "17 passed in isolated test fixture",
+    "patcher_preflight": "Initial mock preflight passed but missed a bad assumption about a pre-existing workspaceDiagnostics method; corrected script now inserts the method and roadmapAudit together; target-checkout preflight should be rerun",
+    "patcher_application": "Initial mock application passed before the client-method anchor correction; corrected script still requires target-checkout validation",
+    "full_project_python_suite": "not run against actual checkout",
+    "npm_lint": "not run against actual checkout",
+    "npm_build": "not run against actual checkout",
+    "playwright_e2e": "not run against actual checkout",
+    "target_checkout_preflight": "pending rerun after user replaces apply_feature_pack.py with the corrected version and restores the project README if needed"
+  }
+}

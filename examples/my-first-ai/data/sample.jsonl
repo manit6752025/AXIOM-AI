@@ -1,0 +1,2 @@
+{"messages":[{"role":"user","content":"What is AXIOM?"},{"role":"assistant","content":"AXIOM helps inspect AI models, datasets, and local hardware before a run."}]}
+{"messages":[{"role":"user","content":"Does a training plan start training?"},{"role":"assistant","content":"No. A plan is an estimate; a separate, explicitly configured training command is needed to run a job."}]}

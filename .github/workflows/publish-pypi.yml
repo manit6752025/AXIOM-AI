@@ -1,0 +1,157 @@
+name: Publish AXIOM to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: Build and validate distributions
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install packaging tools
+        run: python -m pip install --upgrade pip build twine packaging
+
+      - name: Verify tag matches project version
+        env:
+          EXPECTED_TAG: ${{ env.TAG }}
+        run: |
+          set -euo pipefail
+          python - "$EXPECTED_TAG" <<'PY'
+          import re
+          import sys
+          import tomllib
+          from pathlib import Path
+
+          from packaging.version import Version
+
+          tag = sys.argv[1]
+          if not tag.startswith("v"):
+              raise SystemExit(f"release tag must start with v: {tag}")
+
+          project = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          module = re.search(
+              r'__version__ = "(.+?)"', Path("axiom/version.py").read_text()
+          ).group(1)
+
+          if not Version(project) == Version(module) == Version(tag[1:]):
+              raise SystemExit(
+                  f"version mismatch: tag={tag} pyproject={project} version.py={module}"
+              )
+          print(f"Packaging AXIOM {Version(project)} from {tag}")
+          PY
+
+      - name: Build the web UI into the package
+        run: bash scripts/build_webui.sh
+
+      - name: Build wheel and source distribution
+        run: |
+          set -euo pipefail
+          rm -rf python-dist
+          python -m build --sdist --wheel --outdir python-dist
+
+      - name: Validate distributions
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          output = Path("python-dist")
+          wheels = sorted(output.glob("*.whl"))
+          sdists = sorted(output.glob("*.tar.gz"))
+          if len(wheels) != 1 or len(sdists) != 1:
+              raise SystemExit(
+                  f"Expected exactly one wheel and one source archive in {output}; "
+                  f"found {len(wheels)} wheel(s) and {len(sdists)} source archive(s)."
+              )
+          print(f"Validating wheel: {wheels[0]}")
+          print(f"Validating source archive: {sdists[0]}")
+          PY
+          python -m twine check python-dist/*.whl python-dist/*.tar.gz
+          unzip -l python-dist/*.whl | grep -q 'axiom/webui/index.html'
+          python -m pip install --force-reinstall python-dist/*.whl
+          axiom version
+          python -m pip check
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiom-python-dist-${{ env.TAG }}
+          path: python-dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish distributions to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/axiom-all
+
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: axiom-python-dist-${{ env.TAG }}
+          path: dist
+
+      - name: Verify downloaded artifacts contain only distributions
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          output = Path("dist")
+          wheels = sorted(output.glob("*.whl"))
+          sdists = sorted(output.glob("*.tar.gz"))
+          expected = {wheels[0].name, sdists[0].name} if len(wheels) == 1 and len(sdists) == 1 else set()
+          unexpected = sorted(
+              entry.name
+              for entry in output.iterdir()
+              if entry.is_dir() or entry.name not in expected
+          )
+          if len(wheels) != 1 or len(sdists) != 1 or unexpected:
+              raise SystemExit(
+                  f"Unexpected PyPI artifact contents: wheels={len(wheels)}, "
+                  f"sdists={len(sdists)}, unexpected_entries={unexpected}"
+              )
+          print("Downloaded wheel and source archive are ready to publish.")
+          PY
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true

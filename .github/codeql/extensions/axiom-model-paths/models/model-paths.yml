@@ -1,0 +1,9 @@
+extensions:
+  - addsTo:
+      pack: codeql/python-all
+      extensible: barrierModel
+    data:
+      - ["axiom.api.model_paths", "Member[validate_model_path].Argument[0].ReturnValue", "path-injection"]
+      - ["axiom.api.model_paths", "Member[validate_output_path].Argument[0].ReturnValue", "path-injection"]
+      - ["axiom.api.model_paths", "Member[validate_child_path].Argument[0].ReturnValue", "path-injection"]
+      - ["axiom.api.model_paths", "Member[validate_child_path].Argument[1].ReturnValue", "path-injection"]

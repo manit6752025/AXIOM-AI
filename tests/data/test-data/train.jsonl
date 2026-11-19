@@ -1,0 +1,6 @@
+{"instruction":"What is 2+2?","output":"4"}
+{"instruction":"What is 3+3?","output":"6"}
+{"instruction":"What is the capital of Australia?","output":"Canberra"}
+{"instruction":"Explain TCP briefly.","output":"TCP is a connection-oriented transport protocol."}
+{"instruction":"What is 2+2?","output":"4"}
+this-is-invalid-json

@@ -1,0 +1,15 @@
+services:
+  axiom:
+    image: ghcr.io/manit6752025/axiom-ai:latest
+    restart: unless-stopped
+    ports:
+      # Keep the powerful workspace API on this machine by default.
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - ./workspace:/workspace
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

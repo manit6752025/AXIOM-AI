@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "axiom-all"
+version = "0.3.0-beta.8"
+description = "Local-first CLI and daemon for inspecting models, datasets, and hardware-aware AI plans."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+keywords = ["ai", "cli", "machine-learning", "local-first", "hardware"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "click>=8.5,<8.6",
+    # Typer 0.26+ vendors Click; keep the external Click integration consistent until AXIOM migrates its completion code.
+    "typer>=0.12,<0.26",
+    "pydantic>=2.7",
+    "rich>=13.7",
+    "fastapi>=0.115",
+    "mcp[cli]>=2.0,<3",
+    "huggingface_hub>=1.27,<2",
+    "pyyaml>=6.0",
+    "uvicorn[standard]>=0.30"
+]
+
+[project.optional-dependencies]
+native-inference = [
+    "torch>=2.2",
+    "tokenizers>=0.19",
+    "safetensors>=0.4",
+    "gguf>=0.10.0",
+    "numpy>=1.24",
+    "jinja2>=3.1",
+]
+training = [
+    "torch>=2.2",
+    "transformers>=5,<6",
+    "peft>=0.20.0",
+    "accelerate>=1.1.0",
+    "tokenizers>=0.19",
+    "safetensors>=0.4",
+]
+test = [
+    "pytest>=8.3",
+    "numpy>=1.24",
+]
+
+[project.scripts]
+axiom = "axiom.cli.main:app"
+
+[project.urls]
+Homepage = "https://manit6752025.github.io/AXIOM-AI/"
+Repository = "https://github.com/manit6752025/AXIOM-AI"
+Documentation = "https://github.com/manit6752025/AXIOM-AI/wiki/Home"
+Issues = "https://github.com/manit6752025/AXIOM-AI/issues"
+Changelog = "https://github.com/manit6752025/AXIOM-AI/blob/latest/development/docs/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+include = ["axiom*"]
+
+[tool.setuptools.package-data]
+axiom = ["webui/*", "webui/**/*"]

@@ -1,0 +1,605 @@
+name: AXIOM Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to build"
+        required: true
+        type: string
+        default: "v0.3.0-beta.3"
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  windows:
+    name: Windows build
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Build web UI into the Python package
+        shell: bash
+        run: bash scripts/build_webui.sh
+
+      - name: Install AXIOM
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+          pip install "pyinstaller>=6.22,<7"
+
+      - name: Verify web UI is packaged
+        shell: bash
+        run: |
+          python -c "import axiom, pathlib; p = pathlib.Path(axiom.__file__).parent / 'webui' / 'index.html'; assert p.exists(), p"
+
+      - name: Build AXIOM executable
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force build, out -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force out | Out-Null
+
+          pyinstaller `
+            --noconfirm `
+            --clean `
+            --onefile `
+            --name AXIOM `
+            --collect-data axiom `
+            scripts/build_entry.py
+
+          Copy-Item dist/AXIOM.exe "out/AXIOM-$env:TAG-windows-x64.exe"
+
+      - name: Upload Windows binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiom-windows
+          path: out/*.exe
+          if-no-files-found: error
+
+  linux:
+    name: Linux build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev patchelf
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Build web UI into the Python package
+        shell: bash
+        run: bash scripts/build_webui.sh
+
+      - name: Install AXIOM
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+          pip install "pyinstaller>=6.22,<7"
+
+      - name: Verify web UI is packaged
+        shell: bash
+        run: |
+          python -c "import axiom, pathlib; p = pathlib.Path(axiom.__file__).parent / 'webui' / 'index.html'; assert p.exists(), p"
+
+      - name: Download AppImage tool
+        run: |
+          curl -fsSL \
+            -o appimagetool.AppImage \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool.AppImage
+
+      - name: Build Linux release assets
+        run: |
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" \
+            bash scripts/build_linux_release.sh \
+            "$TAG" \
+            out \
+            "$PWD/appimagetool.AppImage"
+
+      - name: Smoke test Linux release assets
+        run: |
+          set -euo pipefail
+
+          onefile="out/AXIOM-${TAG}-linux-x64.elf"
+          onedir="build/linux-release/onedir-dist/AXIOM/AXIOM"
+          "$onefile" --no-banner version
+          "$onedir" --no-banner version
+
+          daemon_log="$(mktemp)"
+          bundle_manifest="$(mktemp)"
+          daemon_pid=""
+          cleanup() {
+            if [[ -n "$daemon_pid" ]] && kill -0 "$daemon_pid" 2>/dev/null; then
+              kill "$daemon_pid" 2>/dev/null || true
+              wait "$daemon_pid" 2>/dev/null || true
+            fi
+            rm -f "$daemon_log"
+            rm -f "$bundle_manifest"
+          }
+          trap cleanup EXIT
+
+          "$onedir" --no-banner daemon --port 0 >"$daemon_log" 2>&1 &
+          daemon_pid=$!
+          daemon_url=""
+          for _ in {1..20}; do
+            daemon_url="$(sed -n 's/^AXIOM daemon listening at //p' "$daemon_log" | head -n 1)"
+            [[ -n "$daemon_url" ]] && break
+            kill -0 "$daemon_pid" 2>/dev/null || {
+              cat "$daemon_log"
+              exit 1
+            }
+            sleep 1
+          done
+          [[ -n "$daemon_url" ]]
+          curl --fail --silent --show-error "$daemon_url/health" | grep -q '"status": "ok"'
+
+          tar -tzf "out/AXIOM-${TAG}-linux-x64.tar.gz" >"$bundle_manifest"
+          grep -q '^AXIOM/AXIOM$' "$bundle_manifest"
+          dpkg-deb --info "out/AXIOM-${TAG}-linux-x64.deb" >/dev/null
+          bash -n scripts/build_linux_release.sh
+          bash -n "out/AXIOM-${TAG}-linux-x64.sh"
+          bash -n installers/install.sh
+          bash installers/install.sh --help >/dev/null
+
+      - name: Upload Linux binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiom-linux
+          path: out/*
+          if-no-files-found: error
+
+  macos:
+    name: macOS ${{ matrix.arch }} package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Build web UI into the Python package
+        shell: bash
+        run: bash scripts/build_webui.sh
+
+      - name: Install AXIOM and PyInstaller
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install . pyinstaller
+
+      - name: Verify web UI is packaged
+        shell: bash
+        run: |
+          python -c "import axiom, pathlib; p = pathlib.Path(axiom.__file__).parent / 'webui' / 'index.html'; assert p.exists(), p"
+
+      - name: Build standalone AXIOM CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/axiom_entry.py" <<'PYENTRY'
+          from axiom.cli.main import app
+
+          if __name__ == "__main__":
+              app()
+          PYENTRY
+          python -m PyInstaller \
+            --noconfirm \
+            --clean \
+            --onefile \
+            --name axiom \
+            --collect-all axiom \
+            --distpath "$RUNNER_TEMP/pyinstaller-dist" \
+            --workpath "$RUNNER_TEMP/pyinstaller-work" \
+            --specpath "$RUNNER_TEMP/pyinstaller-spec" \
+            "$RUNNER_TEMP/axiom_entry.py"
+          test -x "$RUNNER_TEMP/pyinstaller-dist/axiom"
+          "$RUNNER_TEMP/pyinstaller-dist/axiom" --help >/dev/null
+
+      - name: Package DMG and tarball
+        shell: bash
+        env:
+          PACKAGE_ARCH: ${{ matrix.arch }}
+          RELEASE_TAG: ${{ env.TAG }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          STAGE="$RUNNER_TEMP/axiom-macos-stage"
+          OUT="$RUNNER_TEMP/axiom-macos-output"
+          mkdir -p "$STAGE" "$OUT"
+          cp "$RUNNER_TEMP/pyinstaller-dist/axiom" "$STAGE/axiom"
+          chmod 755 "$STAGE/axiom"
+          cat > "$STAGE/README-macos.txt" <<'README'
+          AXIOM AI — macOS CLI package
+
+          Architecture: see the package file name (arm64 or x64).
+
+          The package contains the standalone `axiom` command. Open Terminal and run:
+              ./axiom --help
+
+          To install for the current user, run `install-axiom.command` from this folder.
+
+          This community-built package is not Apple Developer ID signed or notarized.
+          macOS may display a Gatekeeper warning. Review the source and checksums before use.
+          README
+          cat > "$STAGE/install-axiom.command" <<'INSTALL'
+          #!/bin/bash
+          set -euo pipefail
+          HERE="$(cd "$(dirname "$0")" && pwd)"
+          DEST="$HOME/.local/bin"
+          mkdir -p "$DEST"
+          install -m 755 "$HERE/axiom" "$DEST/axiom"
+          echo "Installed AXIOM CLI to $DEST/axiom"
+          echo 'Ensure $HOME/.local/bin is included in your PATH.'
+          read -r -p 'Press Enter to close...' _ || true
+          INSTALL
+          chmod 755 "$STAGE/install-axiom.command"
+          DMG="$OUT/AXIOM-AI-${VERSION}-macos-${PACKAGE_ARCH}.dmg"
+          TAR="$OUT/AXIOM-AI-${VERSION}-macos-${PACKAGE_ARCH}.tar.gz"
+          SUM="$OUT/SHA256SUMS-macos-${PACKAGE_ARCH}.txt"
+          tar -czf "$TAR" -C "$STAGE" axiom README-macos.txt install-axiom.command
+          hdiutil create -quiet -volname "AXIOM AI ${VERSION} ${PACKAGE_ARCH}" \
+            -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+          (cd "$OUT" && shasum -a 256 "$(basename "$DMG")" "$(basename "$TAR")" > "$(basename "$SUM")")
+          ls -lh "$DMG" "$TAR" "$SUM"
+
+      - name: Upload macOS release packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiom-macos-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/axiom-macos-output/*.dmg
+            ${{ runner.temp }}/axiom-macos-output/*.tar.gz
+            ${{ runner.temp }}/axiom-macos-output/SHA256SUMS-macos-*.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-packaging:
+    name: Windows MSI + scripts
+    needs: windows
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Windows binary
+        uses: actions/download-artifact@v4
+        with:
+          name: axiom-windows
+          path: input
+
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          choco install wixtoolset -y --no-progress
+
+      - name: Create MSI, PS1 and BAT
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $exe = Get-ChildItem input -Filter *.exe |
+            Select-Object -First 1
+
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item $exe.FullName "out/AXIOM-$env:TAG-windows-x64.exe" -Force
+
+          $bat = @"
+          @echo off
+          setlocal
+          set "AXIOM_EXE=%~dp0AXIOM-$env:TAG-windows-x64.exe"
+          if not exist "%AXIOM_EXE%" (
+            echo AXIOM executable not found.
+            exit /b 1
+          )
+          start "" "%AXIOM_EXE%" %*
+          endlocal
+          "@
+          $bat | Set-Content -Encoding ASCII "out/AXIOM-$env:TAG-windows-x64.bat"
+
+          $ps1 = @"
+          param(
+            [switch]`$NoStart
+          )
+
+          `$ErrorActionPreference = "Stop"
+
+          `$source = Join-Path `$PSScriptRoot "AXIOM-$env:TAG-windows-x64.exe"
+          `$targetDir = Join-Path `$env:LOCALAPPDATA "AXIOM"
+          `$target = Join-Path `$targetDir "AXIOM.exe"
+
+          if (-not (Test-Path `$source)) {
+            throw "AXIOM executable not found next to installer."
+          }
+
+          New-Item -ItemType Directory -Force -Path `$targetDir | Out-Null
+          Copy-Item `$source `$target -Force
+
+          Write-Host "AXIOM installed to `$target"
+
+          if (-not `$NoStart) {
+            Start-Process `$target
+          }
+          "@
+          $ps1 | Set-Content -Encoding UTF8 "out/AXIOM-$env:TAG-windows-x64.ps1"
+
+          if ($env:TAG -match '^v(\d+\.\d+\.\d+)-(?:beta|b)\.(\d+)$') {
+            $version = "$($Matches[1]).$($Matches[2])"
+          }
+          elseif ($env:TAG -match '^v(\d+\.\d+\.\d+)$') {
+            $version = "$($Matches[1]).0"
+          }
+          else {
+            throw "Unsupported AXIOM release tag: $env:TAG"
+          }
+
+          $candle = Get-ChildItem `
+            "C:\Program Files (x86)\WiX Toolset v3.*\bin\candle.exe" `
+            -Recurse |
+            Select-Object -First 1
+
+          $light = Get-ChildItem `
+            "C:\Program Files (x86)\WiX Toolset v3.*\bin\light.exe" `
+            -Recurse |
+            Select-Object -First 1
+
+          $exePath = (Resolve-Path "out/AXIOM-$env:TAG-windows-x64.exe").Path
+
+          @"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+            <Product
+              Id="*"
+              Name="AXIOM"
+              Language="1033"
+              Version="$version"
+              Manufacturer="NetCore Technologies"
+              UpgradeCode="{7D9D4EF3-53A3-4CFD-9C75-1C5E8C66A120}">
+
+              <Package
+                InstallerVersion="500"
+                Compressed="yes"
+                InstallScope="perUser"
+                Platform="x64" />
+
+              <MajorUpgrade
+                DowngradeErrorMessage="A newer version of AXIOM is already installed." />
+
+              <MediaTemplate />
+
+              <Directory Id="TARGETDIR" Name="SourceDir">
+                <Directory Id="ProgramFiles64Folder">
+                  <Directory Id="INSTALLFOLDER" Name="AXIOM">
+                    <Component Id="AXIOMExecutable" Guid="*">
+                      <File
+                        Id="AXIOMExe"
+                        Source="$exePath"
+                        KeyPath="yes"
+                        Checksum="yes" />
+                    </Component>
+                  </Directory>
+                </Directory>
+              </Directory>
+
+              <Feature Id="AXIOMFeature" Title="AXIOM" Level="1">
+                <ComponentRef Id="AXIOMExecutable" />
+              </Feature>
+            </Product>
+          </Wix>
+          "@ | Set-Content -Encoding UTF8 wix.wxs
+
+          Push-Location (Get-Location)
+          & $candle.FullName -arch x64 wix.wxs
+          & $light.FullName wix.wixobj -o "out/AXIOM-$env:TAG-windows-x64.msi"
+          Pop-Location
+
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiom-windows-release
+          path: out/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish AXIOM Release
+    needs: [windows-packaging, linux, macos]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Windows release
+        uses: actions/download-artifact@v4
+        with:
+          name: axiom-windows-release
+          path: release
+
+      - name: Download Linux release
+        uses: actions/download-artifact@v4
+        with:
+          name: axiom-linux
+          path: release
+
+      - name: Download macOS Apple Silicon release
+        uses: actions/download-artifact@v4
+        with:
+          name: axiom-macos-arm64
+          path: release
+
+      - name: Download macOS Intel release
+        uses: actions/download-artifact@v4
+        with:
+          name: axiom-macos-x64
+          path: release
+
+      - name: Validate assets
+        run: |
+          set -euo pipefail
+
+          [[ -f "release/AXIOM-${TAG}-windows-x64.exe" ]]
+          [[ -f "release/AXIOM-${TAG}-windows-x64.msi" ]]
+          [[ -f "release/AXIOM-${TAG}-windows-x64.ps1" ]]
+          [[ -f "release/AXIOM-${TAG}-windows-x64.bat" ]]
+
+          [[ -f "release/AXIOM-${TAG}-linux-x64.deb" ]]
+          [[ -f "release/AXIOM-${TAG}-linux-x64.AppImage" ]]
+          [[ -f "release/AXIOM-${TAG}-linux-x64.sh" ]]
+          [[ -f "release/AXIOM-${TAG}-linux-x64.elf" ]]
+
+          [[ -f "release/AXIOM-${TAG}-linux-x64.tar.gz" ]]
+
+          [[ -f "release/AXIOM-AI-${TAG#v}-macos-arm64.dmg" ]]
+          [[ -f "release/AXIOM-AI-${TAG#v}-macos-arm64.tar.gz" ]]
+          [[ -f "release/SHA256SUMS-macos-arm64.txt" ]]
+          [[ -f "release/AXIOM-AI-${TAG#v}-macos-x64.dmg" ]]
+          [[ -f "release/AXIOM-AI-${TAG#v}-macos-x64.tar.gz" ]]
+          [[ -f "release/SHA256SUMS-macos-x64.txt" ]]
+
+          echo "All required Windows, Linux, and macOS assets exist."
+
+      - name: Generate checksums
+        run: |
+          cd release
+
+          mapfile -t release_binaries < <(find . -maxdepth 1 -type f -name 'AXIOM-*' -print | sort)
+          if (( ${#release_binaries[@]} == 0 )); then
+            echo "No AXIOM release binaries found for checksumming." >&2
+            exit 1
+          fi
+          sha256sum "${release_binaries[@]#./}" > SHA256SUMS
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: AXIOM ${{ env.TAG }} — CLI, Local Daemon & Release Packaging
+          body: |
+            # AXIOM ${{ env.TAG }}
+
+            AXIOM is a terminal-first local AI engineering toolkit with a small loopback daemon and cross-platform release packaging.
+
+            ## Highlights
+
+            - Interactive AXIOM startup welcome with local next steps
+            - Model, dataset, hardware, and training-plan CLI workflows
+            - Dependency-free daemon with a free loopback port by default
+            - Cross-platform release packaging
+            - Local web UI bundled inside every package (exe, msi, deb, AppImage, tar.gz, elf, dmg)
+
+            ## Downloads
+
+            ### Windows
+            - `.exe` — portable executable
+            - `.msi` — Windows installer
+            - `.ps1` — PowerShell installer
+            - `.bat` — Windows launcher
+
+            ### Linux
+            - `.deb` — Debian package
+            - `.AppImage` — portable desktop package
+            - `.tar.gz` — recommended fast-start terminal bundle
+            - `.sh` — local installer
+            - `.elf` — single-file Linux executable
+
+            ### macOS
+            - `macos-arm64.dmg` / `.tar.gz` — Apple Silicon package
+            - `macos-x64.dmg` / `.tar.gz` — Intel package
+            - `SHA256SUMS-macos-*.txt` — per-architecture checksums
+
+            ## Verification
+
+            `SHA256SUMS` contains checksums for all release binaries.
+
+            ## Beta
+
+            AXIOM is still under active development. The CLI and local daemon are the supported product surface; deeper runtime integration continues in upcoming releases.
+
+            **Build AI. Own AI.**
+
+            © 2026 NetCore Technologies
+          files: release/*
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          prerelease: ${{ contains(env.TAG, '-beta.') || contains(env.TAG, '-b.') }}
+          generate_release_notes: false
+
+  installer-smoke:
+    name: Published Linux installer smoke test
+    needs: publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Install pinned release into user-scoped paths
+        env:
+          HOME: ${{ runner.temp }}/axiom-home
+          AXIOM_RELEASE_TAG: ${{ env.TAG }}
+          AXIOM_INSTALL_DIR: ${{ runner.temp }}/axiom-data
+          AXIOM_BIN_DIR: ${{ runner.temp }}/axiom-bin
+        run: |
+          set -euo pipefail
+          bash installers/install.sh
+          test -x "$AXIOM_BIN_DIR/axiom"
+          "$AXIOM_BIN_DIR/axiom" --no-banner version

@@ -1,0 +1,8 @@
+#!/usr/bin/env python3
+import argparse
+from axiom.optimizer.interactive import run_questionnaire
+
+p = argparse.ArgumentParser(description="AXIOM interactive model optimizer")
+p.add_argument("model", help="Hugging Face model ID or local model path")
+args = p.parse_args()
+run_questionnaire(args.model)

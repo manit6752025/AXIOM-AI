@@ -1,0 +1,52 @@
+# Node
+node_modules/
+dist/
+
+# TypeScript
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+*.coverage
+.coverage
+*.whl
+
+# AXIOM local state
+.axiom/
+test-results/
+playwright-report/
+*.log
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Frontend build/dependencies
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Python build/dependencies
+.venv/
+__pycache__/
+*.egg-info/
+build/
+
+# Local AXIOM state
+.axiom/
+
+# Generated web UI bundle
+axiom/webui/
+
+# Local patch backup snapshots (never source files)
+.axiom-patch-backups/

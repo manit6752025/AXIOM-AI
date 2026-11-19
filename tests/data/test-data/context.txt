@@ -1,0 +1,7 @@
+The deployment began at 09:41.
+The frontend compiled successfully.
+The authentication service restarted at 09:43.
+The API started returning HTTP 500 errors immediately afterward.
+Database migrations completed successfully.
+The WAN connection remained healthy.
+The release was deployed to production.

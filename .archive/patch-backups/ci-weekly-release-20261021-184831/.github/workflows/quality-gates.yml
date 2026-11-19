@@ -1,0 +1,58 @@
+name: AXIOM quality gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cross-platform-smoke:
+    name: Static release contract (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate release contract and GUI/API wiring
+        run: python scripts/release_smoke.py
+      - name: Compile Python source
+        run: python -m compileall -q axiom scripts/release_smoke.py
+
+  full-validation:
+    name: Python, lint, production build and browser E2E
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install Python package and test dependencies
+        run: python -m pip install -e '.[test]'
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Static acceptance checks
+        run: python scripts/release_smoke.py
+      - name: Python tests
+        run: python -m pytest -q
+      - name: ESLint
+        run: npm run lint
+      - name: TypeScript and production build
+        run: npm run build
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Browser acceptance tests
+        run: npm run e2e

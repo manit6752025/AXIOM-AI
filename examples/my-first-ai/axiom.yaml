@@ -1,0 +1,30 @@
+# Starter project configuration.
+# Leave model and dataset unset until you have chosen compatible, local inputs.
+# A valid scaffold is not the same as a ready-to-run training configuration.
+project:
+  name: my-first-ai
+  version: 0.1.0
+
+model:
+  # Select a supported base model before training.
+  base: null
+  source: null
+
+dataset:
+  # Set this to your own JSONL dataset path when ready.
+  source: null
+  format: jsonl
+
+training:
+  # Choose a method and learning rate only after reviewing model and hardware.
+  method: null
+  epochs: 1
+  learning_rate: null
+
+evaluation:
+  # Evaluation needs predictions or a workflow that produces them.
+  enabled: true
+
+deployment:
+  # This records intent only; it does not deploy a model.
+  target: local

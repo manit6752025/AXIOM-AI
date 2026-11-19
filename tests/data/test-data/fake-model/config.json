@@ -1,0 +1,8 @@
+{
+  "model_type": "qwen2",
+  "architectures": ["Qwen2ForCausalLM"],
+  "hidden_size": 512,
+  "intermediate_size": 13696,
+  "num_hidden_layers": 2,
+  "vocab_size": 151936
+}
