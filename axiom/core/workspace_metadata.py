@@ -151,6 +151,8 @@ def export_workspace_metadata(
             "excluded": list(_EXCLUDED),
         }
         manifest_bytes = _json_bytes(manifest)
+        if total + len(manifest_bytes) > MAX_TOTAL_UNCOMPRESSED_BYTES:
+            raise ValueError("Workspace metadata archive including its manifest exceeds the 20 MiB uncompressed limit.")
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as bundle:
             for name, payload in [("manifest.json", manifest_bytes), *members.items()]:
@@ -374,8 +376,10 @@ def _read_archive(data: bytes) -> dict[str, Any]:
             except (RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
                 raise ValueError(f"Workspace metadata collection '{name}' could not be read safely.") from exc
             if (
-                descriptor.get("size_bytes") != len(payload)
-                or descriptor.get("sha256") != hashlib.sha256(payload).hexdigest()
+                type(descriptor.get("size_bytes")) is not int
+                or descriptor["size_bytes"] != len(payload)
+                or not isinstance(descriptor.get("sha256"), str)
+                or descriptor["sha256"] != hashlib.sha256(payload).hexdigest()
             ):
                 raise ValueError(f"Workspace metadata collection '{name}' failed its checksum.")
             try:
@@ -384,7 +388,7 @@ def _read_archive(data: bytes) -> dict[str, Any]:
                 raise ValueError(f"Workspace metadata collection '{name}' is invalid JSON.") from exc
             validated = _validate_collection(name, decoded)
             expected_count = len(validated) if isinstance(validated, list) else len(validated["profiles"])
-            if descriptor.get("records") != expected_count:
+            if type(descriptor.get("records")) is not int or descriptor["records"] != expected_count:
                 raise ValueError(f"Workspace metadata collection '{name}' has an invalid record count.")
             result[name] = validated
         if set(names) != expected_names:
