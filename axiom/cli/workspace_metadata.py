@@ -29,12 +29,19 @@ def _resolve_root(workspace: Path | None) -> Path:
         raise typer.BadParameter("Workspace directory could not be resolved safely.") from exc
 
 
-def _write_archive(path: Path, archive: bytes, *, force: bool) -> Path:
+def _write_archive(path: Path, archive: bytes, *, force: bool, workspace_root: Path) -> Path:
     destination = path.expanduser()
     if destination.exists() and destination.is_dir():
         raise ValueError("Archive output path is a directory.")
     if destination.is_symlink():
         raise ValueError("Archive output path must not be a symbolic link.")
+    try:
+        metadata_root = (workspace_root / ".axiom").resolve(strict=False)
+        destination_resolved = destination.resolve(strict=False)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError("Archive output path could not be resolved safely.") from exc
+    if destination_resolved.is_relative_to(metadata_root):
+        raise ValueError("Workspace metadata archives must be written outside the .axiom metadata directory.")
     if destination.exists() and not force:
         raise FileExistsError("Archive output already exists; pass --force to replace it.")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -78,7 +85,7 @@ def export_metadata(
     try:
         root = _resolve_root(workspace)
         archive = export_workspace_metadata(root)
-        destination = _write_archive(output, archive, force=force)
+        destination = _write_archive(output, archive, force=force, workspace_root=root)
     except FileExistsError as exc:
         console.print(f"[red]Error:[/red] {exc}", stderr=True)
         raise typer.Exit(code=1) from exc
