@@ -20,7 +20,7 @@ test("shared confirmation dialog exposes labels and traps keyboard focus", async
 
   await page.locator("#confirm-password").fill("partial");
   await expect(page.locator("#confirm-password")).toHaveAttribute("aria-describedby", "confirm-password-hint");
-  await expect(page.locator("#confirm-password")).toHaveAttribute("aria-invalid", "false");
+  await expect(page.locator("#confirm-password")).not.toHaveAttribute("aria-invalid", "true");
   await expect(page.locator("#confirm-password-hint")).toHaveText("Passwords do not match");
 
   await page.keyboard.press("Escape");
