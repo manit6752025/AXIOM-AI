@@ -7,7 +7,7 @@ from pathlib import Path
 
 import typer
 
-from axiom.cli.errors import emit_error
+from axiom.cli.errors import EXIT_CODE_USAGE, emit_error
 
 from axiom.core.diagnostics import create_support_bundle
 
@@ -32,14 +32,14 @@ def register(app: typer.Typer) -> None:
         """Export privacy-safe diagnostics for support; never include data files."""
         destination = output.expanduser()
         if destination.is_symlink():
-            emit_error("Output path must not be a symbolic link.", code="support_bundle_symlink", exit_code=2)
+            emit_error("Output path must not be a symbolic link.", code="support_bundle_symlink", exit_code=EXIT_CODE_USAGE)
         if destination.exists() and not destination.is_file():
-            emit_error("Output path must be a regular file.", code="support_bundle_not_file", exit_code=2)
+            emit_error("Output path must be a regular file.", code="support_bundle_not_file", exit_code=EXIT_CODE_USAGE)
         if destination.exists() and not force:
-            emit_error("Output file already exists; pass --force to replace it.", code="support_bundle_exists", exit_code=2)
+            emit_error("Output file already exists; pass --force to replace it.", code="support_bundle_exists", exit_code=EXIT_CODE_USAGE)
         parent = destination.parent
         if parent.is_symlink() or not parent.is_dir():
-            emit_error("Output parent must be an existing, non-symlink directory.", code="support_bundle_invalid_parent", exit_code=2)
+            emit_error("Output parent must be an existing, non-symlink directory.", code="support_bundle_invalid_parent", exit_code=EXIT_CODE_USAGE)
         try:
             archive = create_support_bundle(workspace)
             flags = os.O_WRONLY | os.O_CREAT
@@ -58,7 +58,7 @@ def register(app: typer.Typer) -> None:
                     pass
                 raise
         except FileExistsError:
-            emit_error("Output file already exists; pass --force to replace it.", code="support_bundle_exists", exit_code=2)
+            emit_error("Output file already exists; pass --force to replace it.", code="support_bundle_exists", exit_code=EXIT_CODE_USAGE)
         except (OSError, ValueError) as exc:
             emit_error(f"Could not write support bundle ({type(exc).__name__}).", code="support_bundle_write_failed")
 

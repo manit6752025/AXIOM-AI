@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — CLI exit-code contract
+
+- Documented exit statuses for success, operational/validation errors, usage or unsafe-output rejections, and cooperative cancellation.
+- Centralized AXIOM's numeric exit-code constants and added regressions for JSON failure envelopes, Click usage failures, support-bundle safety rejections, and Ctrl+C cancellation.
+
 ## Unreleased — reproducible training-plan snapshots
 
 - Added canonical saved-plan JSON printing with stable SHA-256 fingerprints and field-level comparisons across planning inputs, captured hardware, planner provenance, and estimates.
