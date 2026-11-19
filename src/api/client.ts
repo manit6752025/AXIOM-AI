@@ -806,9 +806,47 @@ export type WorkspaceExperiment = {
   tags: string[];
   parameter_billions: number;
   requested_method: string;
+  planner_algorithm_version?: number;
+  axiom_version?: string;
   status: "planned";
   hardware?: HardwareSnapshot;
   plan: TrainingPlan;
+};
+
+export type ReproduciblePlanSnapshot = {
+  format: "application/vnd.axiom.training-plan+json;version=1";
+  schema_version: 1;
+  planner: {
+    algorithm_version: number | null;
+    axiom_version: string | null;
+    snapshot_kind: "saved_estimate";
+  };
+  inputs: {
+    parameter_billions: number;
+    requested_method: string;
+    model: string | null;
+    dataset: string | null;
+  };
+  hardware: HardwareSnapshot;
+  plan: TrainingPlan;
+  execution: { started: false; scope_note: string };
+  fingerprint: { algorithm: "sha256"; value: string };
+};
+
+export type SavedPlanDiff = {
+  schema_version: 1;
+  left: { id: string | null; name: string | null; fingerprint: string };
+  right: { id: string | null; name: string | null; fingerprint: string };
+  identical: boolean;
+  changes: Array<{
+    path: string;
+    category: "inputs" | "hardware" | "planner" | "estimate" | "format" | "metadata";
+    before_present: boolean;
+    before: unknown;
+    after_present: boolean;
+    after: unknown;
+  }>;
+  scope_note: string;
 };
 
 export type WorkspaceExperimentPage = {
@@ -1671,6 +1709,16 @@ export const axiomApi = {
       method: "POST",
       body: JSON.stringify(experiment),
     }),
+
+  reproducibleExperiment: (id: string) =>
+    requestJson<{ snapshot: ReproduciblePlanSnapshot }>(
+      `/api/workspace/experiments/${encodeURIComponent(id)}/reproducible`,
+    ),
+
+  diffExperiments: (leftId: string, rightId: string) =>
+    requestJson<{ diff: SavedPlanDiff }>(
+      `/api/workspace/experiments/${encodeURIComponent(leftId)}/diff/${encodeURIComponent(rightId)}`,
+    ),
 
   updateExperiment: (id: string, metadata: { name: string; notes: string | null; tags: string[] }) =>
     requestJson<{ experiment: WorkspaceExperiment; plan_immutable: boolean }>(
