@@ -272,3 +272,23 @@ def test_workspace_metadata_api_export_and_import(tmp_path, monkeypatch):
         assert imported.json()["mode"] == "merge"
 
     assert len(ModelRegistry(destination / ".axiom").list()) == 1
+
+
+def test_workspace_metadata_export_refuses_live_metadata_destination(tmp_path):
+    root = tmp_path / "workspace"
+    root.mkdir()
+    model_store = ModelRegistry(root / ".axiom")
+    model_store.add(Model(name="Keep registry", source="models/keep"))
+    live_registry = root / ".axiom" / "models.json"
+    before = live_registry.read_bytes()
+
+    result = runner.invoke(app, [
+        "workspace", "metadata", "export",
+        "--workspace", str(root),
+        "--output", str(live_registry),
+        "--force",
+        "--json",
+    ])
+
+    assert result.exit_code == 1
+    assert live_registry.read_bytes() == before
