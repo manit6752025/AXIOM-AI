@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — Control Center shell regression coverage
+
+- Added browser acceptance coverage for the preserved sidebar, responsive mobile navigation, topbar theme toggle and persistence, collapsed sidebar state, and browser-history page restoration.
+
 ## Unreleased — CLI/API/Control Center command reference
 
 - Expanded the wiki command reference to index every registered root CLI command and map major feature families to representative typed API endpoints and Control Center pages.
