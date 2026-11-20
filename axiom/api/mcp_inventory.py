@@ -97,5 +97,7 @@ async def inspect_mcp_server_schemas(name: str) -> dict[str, Any]:
             "invalid_name": 422,
             "invalid_timeout": 422,
             "missing_command": 409,
+            "server_unverified": 409,
+            "server_blocked": 403,
         }.get(exc.code, 503)
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
