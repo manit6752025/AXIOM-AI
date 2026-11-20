@@ -38,3 +38,24 @@ The beta.4 Playground is limited to a fixed GET-only allowlist, bounded request 
 Capture the endpoint, sanitized response, HTTP status, and request/correlation ID when visible. Remove credentials, private paths, configuration values, and sensitive response data before filing an issue.
 
 Related: [Control Center and Module Explorer](Control-Center-and-Module-Explorer), [Troubleshooting](Troubleshooting).
+
+
+## Workspace path boundaries
+
+File and model selectors use workspace-relative paths. The shared path
+resolver rejects absolute paths, drive-qualified paths, parent-directory
+components, empty components, backslashes, control characters, and oversized
+inputs. It ignores symlinked directories during discovery and rejects a
+symlinked workspace root or final symlink entry.
+
+When a selected regular file is opened on POSIX, AXIOM walks each directory
+component from an open directory descriptor with `O_DIRECTORY | O_NOFOLLOW`,
+then opens the final file with `O_NOFOLLOW` and verifies its descriptor is a
+regular file. This prevents a symlinked parent directory from being substituted
+between path selection and file opening. The resolver and opener do not follow
+the final or intermediate symlink paths on this supported POSIX path.
+
+This boundary is not a substitute for workspace ownership controls. Protect
+the workspace against untrusted local writers, review external mounts and
+hard-linked content, and keep file access limited to the paths and operations
+the feature explicitly supports.
