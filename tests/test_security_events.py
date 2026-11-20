@@ -184,6 +184,7 @@ def test_tool_decisions_store_only_redacted_argument_names_and_verify_chain(tmp_
     page = store.list_page()
     assert page["privacy"]["tool_decisions_audited"] is True
     assert page["privacy"]["argument_values_stored"] is False
+    assert store.export()["integrity"]["schema_version"] == 2
 
 
 def test_legacy_security_journal_upgrades_to_v2_on_first_tool_decision(tmp_path: Path):
