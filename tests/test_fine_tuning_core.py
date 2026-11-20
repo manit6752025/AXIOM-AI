@@ -246,8 +246,6 @@ def test_completed_training_step_is_recorded_before_pending_cancellation(monkeyp
 
 
 def _create_resume_fixture(config, *, completed_steps=2):
-    from pathlib import Path
-
     from axiom.core.fine_tuning_checkpoints import model_tree_fingerprint, save_checkpoint
 
     class Model:
