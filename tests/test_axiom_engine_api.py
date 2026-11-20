@@ -511,10 +511,25 @@ def test_quantization_estimator_compares_formats_against_memory_budgets(tmp_path
     report = response.json()
     assert report["schema_version"] == 1
     assert report["model"]["name"] == "tiny-llama"
+    assert report["model"]["estimated_parameter_count"] == 632
     assert report["request"]["context_length"] == 16
     assert report["assumptions"]["kv_cache_context_length"] == 16
     assert report["assumptions"]["kv_prefill_temporary_context_length"] == 0
     candidates = {item["format"]: item for item in report["candidates"]}
+    expected_numeric = {
+        "int4": (0.000000338, 0.000000238, 0.000001907, 0.000002981, [0.000002534, 0.000003726]),
+        "int8": (0.000000618, 0.000000238, 0.000001907, 0.000003317, [0.000002819, 0.000004146]),
+        "bf16": (0.000001177, 0.000000238, 0.000001907, 0.000003988, [0.000003389, 0.000004984]),
+        "fp16": (0.000001177, 0.000000238, 0.000001907, 0.000003988, [0.000003389, 0.000004984]),
+        "fp32": (0.000002354, 0.000000477, 0.000001907, 0.000005686, [0.000004833, 0.000007108]),
+    }
+    for name, (weight, kv_cache, workspace, total, uncertainty) in expected_numeric.items():
+        item = candidates[name]
+        assert item["estimated_weight_gib"] == weight
+        assert item["estimated_kv_cache_gib"] == kv_cache
+        assert item["estimated_workspace_gib"] == workspace
+        assert item["estimated_total_gib"] == total
+        assert item["estimated_range_gib"] == uncertainty
     assert set(candidates) == {"int4", "int8", "bf16", "fp16", "fp32"}
     assert candidates["int4"]["estimated_total_gib"] > 0
     assert all(item["estimated_kv_prefill_temporary_gib"] == 0 for item in candidates.values())
@@ -534,6 +549,53 @@ def test_quantization_estimator_compares_formats_against_memory_budgets(tmp_path
     assert report["assumptions"]["uncertainty_range_percent"] == {"low": -15, "high": 25}
     assert "not predict model quality/speed" in report["scope_note"]
     assert "not inspect tensor contents" in report["scope_note"]
+
+
+def test_quantization_estimator_separates_mistral_retained_cache_and_prefill_temporary(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "models"
+    model = root / "tiny-mistral"
+    model.mkdir(parents=True)
+    (model / "config.json").write_text(json.dumps({
+        "model_type": "mistral",
+        "architectures": ["MistralForCausalLM"],
+        "hidden_size": 8,
+        "intermediate_size": 12,
+        "num_hidden_layers": 1,
+        "num_attention_heads": 2,
+        "num_key_value_heads": 1,
+        "vocab_size": 8,
+        "max_position_embeddings": 32,
+        "sliding_window": 4,
+        "rms_norm_eps": 1e-6,
+        "rope_theta": 10000.0,
+        "bos_token_id": 1,
+        "tie_word_embeddings": False,
+    }), encoding="utf-8")
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(root))
+
+    response = _client().post("/api/engine/quantization/estimate", json={
+        "model_path": str(model),
+        "context_length": 16,
+        "batch_size": 2,
+        "ram_budget_gib": 8,
+    })
+
+    assert response.status_code == 200, response.text
+    report = response.json()
+    assert report["model"]["estimated_parameter_count"] == 632
+    assumptions = report["assumptions"]
+    assert assumptions["kv_cache_context_length"] == 4
+    assert assumptions["kv_prefill_temporary_context_length"] == 16
+    candidates = {item["format"]: item for item in report["candidates"]}
+    bf16 = candidates["bf16"]
+    assert bf16["estimated_weight_gib"] == 0.000001177
+    assert bf16["estimated_kv_cache_gib"] == 0.000000119
+    assert bf16["estimated_kv_prefill_temporary_gib"] == 0.000000477
+    assert bf16["estimated_workspace_gib"] == 0.000003815
+    assert bf16["estimated_total_gib"] == 0.000006706
+    assert bf16["estimated_range_gib"] == [0.0000057, 0.000008382]
+    assert report["assumptions"]["safety_margin_percent"] == 20
+    assert report["assumptions"]["uncertainty_range_percent"] == {"low": -15, "high": 25}
 
 
 def test_quantization_estimator_reports_no_native_fit_for_small_budget(tmp_path, monkeypatch) -> None:
