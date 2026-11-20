@@ -72,6 +72,21 @@ export type EngineFabricReport = {
   security: { network_scope: string; environment_proxies_used: false; remote_endpoints_configurable: false; credentials_sent: false; model_downloads_started: false; processes_launched: false };
   scope_note: string;
 };
+export type EngineFabricSavedProfile = {
+  id: string; name: string; backend_id: EngineFabricChatResult["backend_id"]; model: string;
+  created_at: string; updated_at: string;
+};
+export type EngineFabricProfileReport = {
+  schema_version: 1; profiles: EngineFabricSavedProfile[]; total: number; max_profiles: number;
+  credentials_persisted: false; custom_endpoints_persisted: false;
+};
+export type EngineFabricProfileConnection = {
+  profile_id: string; backend_id: EngineFabricChatResult["backend_id"]; model: string;
+  status: "verified"; checked_at: string;
+  connection_scope: "one_shot_local_health_and_model_inventory_check";
+  persistent_connection: false; credentials_persisted: false; custom_endpoints_persisted: false;
+  processes_started: false;
+};
 export type EngineFabricChatResult = {
   schema_version: number; backend_id: "axiom-native" | "ollama" | "llama-cpp" | "lm-studio" | "vllm" | "llama-cpp-python";
   backend_name: string; model: string; response: string; done: boolean;
@@ -2211,6 +2226,13 @@ export const axiomApi = {
   }, 300_000),
   axiomEngineStatus: () => requestJson<AxiomEngineStatus>("/api/engine/status"),
   engineBackends: (profile: EngineFabricProfile = "balanced") => requestJson<EngineFabricReport>("/api/engine/backends?" + new URLSearchParams({ profile })),
+  engineBackendProfiles: () => requestJson<EngineFabricProfileReport>("/api/engine/backends/profiles"),
+  saveEngineBackendProfile: (input: { name: string; backend_id: EngineFabricChatResult["backend_id"]; model: string }) =>
+    requestJson<{ profile: EngineFabricSavedProfile; credentials_persisted: false; custom_endpoints_persisted: false }>("/api/engine/backends/profiles", { method: "POST", body: JSON.stringify(input) }),
+  deleteEngineBackendProfile: (id: string) =>
+    requestJson<{ deleted: EngineFabricSavedProfile; credentials_persisted: false }>(`/api/engine/backends/profiles/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  connectEngineBackendProfile: (id: string) =>
+    requestJson<EngineFabricProfileConnection>(`/api/engine/backends/profiles/${encodeURIComponent(id)}/connect`, { method: "POST", body: JSON.stringify({}) }),
   engineBackendChat: (input: { backend_id: EngineFabricChatResult["backend_id"]; model: string; messages: Array<{ role: "system" | "user" | "assistant"; content: string }>; max_new_tokens: number; temperature: number; top_p: number; top_k: number; min_p: number; repetition_penalty: number; seed: number | null; stop_sequences: string[] }) =>
     requestJson<EngineFabricChatResult>("/api/engine/backends/chat", { method: "POST", body: JSON.stringify(input) }, 300_000),
   engineBackendAutoChat: (input: { profile: EngineFabricProfile; model: string; messages: Array<{ role: "system" | "user" | "assistant"; content: string }>; max_new_tokens: number; temperature: number; top_p: number; top_k: number; min_p: number; repetition_penalty: number; seed: number | null; stop_sequences: string[] }) =>
