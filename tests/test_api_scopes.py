@@ -66,6 +66,12 @@ def test_read_token_can_inspect_validate_and_dry_run_but_not_mutate(tmp_path, mo
 
         assert client.get("/api/health").status_code == 200
         assert client.get("/api/workflows", headers=read_headers).status_code == 200
+        security_audit = client.get("/api/security/audit", headers=read_headers)
+        assert security_audit.status_code == 200
+        audit_payload = security_audit.json()
+        assert audit_payload["schema_version"] == 1
+        assert READ_TOKEN not in security_audit.text
+        assert WRITE_TOKEN not in security_audit.text
 
         validation = client.post(
             "/api/workflows/validate",
