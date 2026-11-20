@@ -402,7 +402,7 @@ def inspect(root: Path) -> dict[str, Any]:
         "pyproject.toml", "axiom/version.py", "ROADMAP.md", "src/App.tsx",
         "src/api/client.ts", "src/components/ApiPlayground.tsx", "src/components/RuntimeConnectorPanel.tsx", "src/components/AgentProfiles.tsx", "src/components/LocalInferencePanel.tsx", "src/components/RuntimeTracePanel.tsx", "src/components/EngineTelemetryMonitor.tsx", "src/components/LocalAxiomEnginePanel.tsx", "src/components/ModelStudioPanel.tsx", "src/styles.css",
         "axiom/api/server.py", "axiom/api/workspace.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/api/model_studio.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/model_studio.py", "axiom/core/runtime_traces.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/core/engine_fabric_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "axiom/cli/model_studio.py", "scripts/release_smoke.py",
-        "tests/test_release_smoke.py", "tests/test_ollama_service.py", "tests/test_ollama_service_api.py", "tests/test_ollama_model_operations.py", "tests/test_cli_inference.py", "tests/test_axiom_engine.py", "tests/test_axiom_engine_api.py", "tests/test_axiom_engine_cli.py", "tests/test_native_engine.py", "tests/test_model_studio.py", "tests/test_cli_model_studio_jobs.py", "e2e/axiom-engine.spec.ts", "e2e/helpers/auth.ts", "e2e/modules.spec.ts", "e2e/workflows.spec.ts", "e2e/evaluation.spec.ts",
+        "tests/test_release_smoke.py", "tests/test_ollama_service.py", "tests/test_ollama_service_api.py", "tests/test_ollama_model_operations.py", "tests/test_cli_inference.py", "tests/test_axiom_engine.py", "tests/test_axiom_engine_api.py", "tests/test_axiom_engine_cli.py", "tests/test_native_engine.py", "tests/test_model_studio.py", "tests/test_engine_runtime_status.py", "tests/test_cli_model_studio_jobs.py", "e2e/axiom-engine.spec.ts", "e2e/helpers/auth.ts", "e2e/modules.spec.ts", "e2e/workflows.spec.ts", "e2e/evaluation.spec.ts",
         "e2e/model-registry-filters.spec.ts", "e2e/ollama-service.spec.ts", "e2e/inference-benchmark.spec.ts", "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/axiom-engine.spec.ts", "tests/test_workspace_model_registry_filters.py", "tests/test_workflow_store_pagination.py", "tests/test_workflow_api_pagination.py", "tests/test_workflow_cli.py",
         "tests/test_model_compatibility.py", "tests/test_inference_benchmark.py", "tests/test_inference_benchmark_api.py", "tests/test_runtime_traces.py", "tests/test_runtime_traces_api.py", "tests/test_runtime_discovery.py", "tests/test_runtime_discovery_api.py", "tests/test_agent_profiles.py", "tests/test_agent_profiles_api.py", "tests/test_agent_profiles_cli.py", "tests/test_engine_fabric_profiles.py", "tests/test_engine_fabric_profiles_api.py", "tests/test_engine_fabric_profiles_cli.py", "e2e/api-playground.spec.ts", "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts", "e2e/engine-fabric.spec.ts",
         "docs/Runtime-Discovery.md", "docs/Agent-Profiles.md", "docs/Api-Playground.md", "docs/Inference-Benchmarking.md", "docs/Local-Engine.md", "docs/Engine-Fabric.md", ".github/workflows/quality-gates.yml", ".github/workflows/nightly-build.yml",
@@ -512,6 +512,7 @@ def inspect(root: Path) -> dict[str, Any]:
     native_model_studio_cli_tests = (root / "tests/test_cli_model_studio_jobs.py").read_text(encoding="utf-8")
     native_engine_api_tests = (root / "tests/test_axiom_engine_api.py").read_text(encoding="utf-8")
     native_engine_tests = (root / "tests/test_native_engine.py").read_text(encoding="utf-8")
+    native_runtime_status_tests = (root / "tests/test_engine_runtime_status.py").read_text(encoding="utf-8")
     native_engine_cli_tests = (root / "tests/test_axiom_engine_cli.py").read_text(encoding="utf-8")
     native_engine_e2e = (root / "e2e/axiom-engine.spec.ts").read_text(encoding="utf-8")
     native_engine_cli = (root / "axiom/cli/engine.py").read_text(encoding="utf-8")
@@ -569,6 +570,16 @@ def inspect(root: Path) -> dict[str, Any]:
             "stages downloads before publishing", "public Llama/Mistral/Qwen2/Qwen3 safetensors",
             "CPU, NVIDIA CUDA, AMD ROCm, Apple Metal/MPS, and Intel XPU",
             "remote model code", "does not silently route generation through another engine",
+        )),
+        ("native dependency/device readiness regression tests", native_runtime_status_tests, (
+            "test_runtime_status_reports_required_and_optional_dependency_readiness",
+            "test_runtime_status_fails_closed_for_missing_or_unsupported_dependencies",
+            "test_runtime_status_fails_closed_when_no_device_can_initialize",
+            "test_runtime_status_recommends_the_first_available_accelerator_then_cpu",
+            "test_runtime_status_reports_loaded_architecture_device_and_memory_mode",
+        )),
+        ("native API status regression", native_engine_api_tests, (
+            "test_engine_status_api_exposes_native_dependency_and_device_readiness",
         )),
         ("native architecture regression tests", native_engine_tests, (
             "test_native_config_accepts_llama_mistral_qwen2_and_qwen3",
