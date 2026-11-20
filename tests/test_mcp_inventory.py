@@ -207,6 +207,39 @@ def test_inventory_rejects_nul_and_oversized_commands(tmp_path, monkeypatch):
     assert "secret" not in str(result)
 
 
+def test_handshake_negotiates_with_real_mcp_stdio_server(tmp_path, monkeypatch):
+    import shlex
+    import sys
+
+    monkeypatch.chdir(tmp_path)
+    server_script = tmp_path / "mcp_probe.py"
+    server_script.write_text(
+        "from mcp.server import MCPServer\n"
+        "server = MCPServer('AXIOM Inventory Probe')\n"
+        "if __name__ == '__main__':\n"
+        "    server.run()\n",
+        encoding="utf-8",
+    )
+    IntegrationRegistry().add(
+        AgentIntegration(
+            "Process Probe",
+            IntegrationType.MCP,
+            command=shlex.join([sys.executable, str(server_script)]),
+        )
+    )
+
+    result = asyncio.run(
+        mcp_inventory.inspect_mcp_server("Process Probe", timeout_seconds=10)
+    )
+
+    assert result["status"] == "ok", result
+    assert result["transport"] == "stdio"
+    assert result["server_name"] == "AXIOM Inventory Probe"
+    assert result["protocol_version"]
+    assert result["tool_execution_performed"] is False
+    assert result["schemas_enumerated"] is False
+
+
 def test_handshake_rejects_unknown_server_and_invalid_timeout(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _add_server()
