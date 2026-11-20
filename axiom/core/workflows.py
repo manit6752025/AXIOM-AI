@@ -74,6 +74,18 @@ def workflow_node_port_schema(node_type: str) -> dict[str, Any]:
     return json.loads(json.dumps(schema))
 
 
+def _normalize_persisted_workflow_graph(
+    nodes: Any,
+    edges: Any,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    # Older releases allowed an empty draft placeholder in the local store.
+    # Preserve it during reads/migration; actual validation and new saves still
+    # require at least one node.
+    if nodes == [] and edges == []:
+        return [], []
+    return normalize_workflow_graph(nodes, edges)
+
+
 def normalize_workflow_graph(
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
@@ -274,11 +286,11 @@ class WorkflowStore:
             ):
                 raise ValueError(f"Invalid workflow schema in {self.records_file}")
             try:
-                record["nodes"], record["edges"] = normalize_workflow_graph(
+                record["nodes"], record["edges"] = _normalize_persisted_workflow_graph(
                     record.get("nodes"), record.get("edges"),
                 )
                 for version in record["versions"]:
-                    version["nodes"], version["edges"] = normalize_workflow_graph(
+                    version["nodes"], version["edges"] = _normalize_persisted_workflow_graph(
                         version.get("nodes"), version.get("edges"),
                     )
             except (TypeError, ValueError) as exc:
