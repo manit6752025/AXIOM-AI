@@ -52,9 +52,9 @@ def test_profile_store_validates_provider_url_limits_and_secret_fields(tmp_path)
         name="Custom endpoint",
         provider="openai-compatible",
         model="model",
-        base_url="https://provider.example/api/v1/",
+        base_url="https://93.184.216.34/api/v1/",
     )
-    assert profile["base_url"] == "https://provider.example/api/v1"
+    assert profile["base_url"] == "https://93.184.216.34/api/v1"
     raw = json.loads(store.path.read_text(encoding="utf-8"))
     raw["profiles"][0]["api_key"] = "must-not-be-persisted"
     store.path.write_text(json.dumps(raw), encoding="utf-8")
