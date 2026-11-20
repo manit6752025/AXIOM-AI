@@ -84,3 +84,72 @@ def test_help_describes_local_observed_behavior():
     assert "local model paths" in model_result.stdout
     assert project_result.exit_code == 0
     assert "expected AXIOM project paths" in project_result.stdout
+
+
+def test_gui_help_exposes_refresh_option():
+    result = runner.invoke(app, ["gui", "--help"])
+    assert result.exit_code == 0
+    assert "--refresh" in result.stdout
+    assert "browser storage" in result.stdout
+
+
+def test_refresh_control_center_runs_lint_then_build_without_deleting_ui(tmp_path, monkeypatch):
+    import types
+    import axiom.cli.main as main_cli
+
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/copy_webui.mjs").write_text("// copy", encoding="utf-8")
+    (tmp_path / "axiom/webui").mkdir(parents=True)
+    previous_index = tmp_path / "axiom/webui/index.html"
+    previous_index.write_text("previous UI", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(main_cli.shutil, "which", lambda command: "/usr/bin/npm")
+
+    def fake_run(args, *, cwd, check):
+        calls.append((args, cwd, check))
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(main_cli.subprocess, "run", fake_run)
+    main_cli._refresh_control_center(tmp_path)
+
+    assert [call[0][-1] for call in calls] == ["lint", "build"]
+    assert all(call[1] == tmp_path and call[2] is False for call in calls)
+    assert previous_index.read_text(encoding="utf-8") == "previous UI"
+
+
+def test_update_cli_check_never_installs(monkeypatch):
+    import axiom.cli.main as main_cli
+
+    monkeypatch.setattr(main_cli.updater, "check_for_update", lambda current, channel: {
+        "channel": channel, "current_version": current, "latest_version": "9.9.9",
+        "update_available": True, "release": {"html_url": "https://example.invalid/release"},
+    })
+    monkeypatch.setattr(
+        main_cli.updater,
+        "download_and_install",
+        lambda version: (_ for _ in ()).throw(AssertionError("check must not install")),
+    )
+    result = runner.invoke(app, ["--no-banner", "update", "--check"])
+    assert result.exit_code == 0, result.output
+    assert "Update available" in result.stdout
+    assert "axiom update --auto" in result.stdout
+
+
+def test_update_cli_auto_installs_without_prompt(monkeypatch):
+    import axiom.cli.main as main_cli
+
+    observed = []
+    monkeypatch.setattr(main_cli.updater, "check_for_update", lambda current, channel: {
+        "channel": channel, "current_version": current, "latest_version": "9.9.9",
+        "update_available": True, "release": {"html_url": "https://example.invalid/release"},
+    })
+    monkeypatch.setattr(main_cli.updater, "download_and_install", lambda version: (
+        observed.append(version) or {
+            "installed_version": version, "user_data_preserved": True, "restart_required": True,
+        }
+    ))
+    result = runner.invoke(app, ["--no-banner", "update", "--auto"])
+    assert result.exit_code == 0, result.output
+    assert observed == ["9.9.9"]
+    assert "browser storage were left in place" in result.stdout
