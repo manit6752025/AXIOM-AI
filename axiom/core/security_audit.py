@@ -114,10 +114,11 @@ def _package_integrity_check(
         )
 
     metadata_name = str(distribution.metadata.get("Name", "")).strip()
-    canonical = lambda value: re.sub(r"[-_.]+", "-", value).lower()
+    def canonical_name(value: str) -> str:
+        return re.sub(r"[-_.]+", "-", value).lower()
     version = str(distribution.version)
     problems: list[str] = []
-    if not metadata_name or canonical(metadata_name) != canonical(distribution_name):
+    if not metadata_name or canonical_name(metadata_name) != canonical_name(distribution_name):
         problems.append("distribution metadata name does not match the required package")
 
     minimum = _MINIMUM_VERSIONS[distribution_name]
@@ -174,7 +175,7 @@ def _package_integrity_check(
     bounded = True
     verified_bytes = 0
     for package_file in files:
-        if hashed_files >= 256 or verified_bytes >= 8 * 1024 * 1024:
+        if hashed_files >= 128 or verified_bytes >= 4 * 1024 * 1024:
             bounded = False
             break
         relative = Path(str(package_file))
@@ -219,7 +220,7 @@ def _package_integrity_check(
                 if recorded_size is not None and int(recorded_size) != info.st_size:
                     problems.append("an installed package file size does not match RECORD")
                     continue
-                if info.st_size > 8 * 1024 * 1024 or verified_bytes + info.st_size > 8 * 1024 * 1024:
+                if info.st_size > 4 * 1024 * 1024 or verified_bytes + info.st_size > 4 * 1024 * 1024:
                     bounded = False
                     break
                 hasher = hashlib.new(algorithm)
@@ -261,6 +262,7 @@ def _package_integrity_check(
                 "below the supported minimum",
                 "resolves from the workspace",
                 "cannot be resolved",
+                "could not be opened safely",
             )
         ) else "warn"
         detail = f"{distribution_name} {version}: " + "; ".join(dict.fromkeys(problems)) + f". Verified {verified} hashed file(s)."
