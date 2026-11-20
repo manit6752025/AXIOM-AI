@@ -515,7 +515,7 @@ def validate_config(
         or not 0 <= checkpoint_interval <= _MAX_CHECKPOINT_INTERVAL
     ):
         raise ValueError(f"Checkpoint interval must be between 0 and {_MAX_CHECKPOINT_INTERVAL} steps.")
-    if output_policy not in {"new", "empty", "resume"}:
+    if not isinstance(output_policy, str) or output_policy not in {"new", "empty", "resume"}:
         raise ValueError("Output policy must be 'new', 'empty', or 'resume'.")
 
     resume_state: dict[str, Any] | None = None
@@ -1721,6 +1721,34 @@ def execute_finetuning_job(
                 on_progress(updated)
             check_cancel()
 
+        def checkpoint_progress(summary: dict[str, Any]) -> None:
+            current = _read_job(job_id)
+            if current is None:
+                return
+            message = f"Saved verified checkpoint at step {summary.get('latest_step', 0)}."
+            _update_job(
+                job_id,
+                checkpoint=summary,
+                logs=[*current.get("logs", []), message][-80:],
+            )
+
+        def resume_progress(summary: dict[str, Any]) -> None:
+            current = _read_job(job_id)
+            if current is None:
+                return
+            step = summary.get("latest_step", 0)
+            loss = summary.get("last_loss")
+            changes: dict[str, Any] = {
+                "completed_steps": step,
+                "checkpoint": {
+                    key: value for key, value in summary.items() if key != "last_loss"
+                },
+                "logs": [*current.get("logs", []), f"Resumed verified checkpoint at step {step}."][-80:],
+            }
+            if isinstance(loss, (int, float)) and not isinstance(loss, bool) and math.isfinite(float(loss)):
+                changes["loss"] = float(loss)
+            _update_job(job_id, **changes)
+
         result = _run_transformers(
             job["config"],
             progress,
@@ -1728,6 +1756,8 @@ def execute_finetuning_job(
             begin_finalizing=lambda: _begin_finalizing(job_id),
             workspace_guard_check=check_workspace,
             workspace_guard=workspace_guard,
+            on_checkpoint=checkpoint_progress,
+            on_resume=resume_progress,
         )
         current = _read_job(job_id) or job
         _update_job(
