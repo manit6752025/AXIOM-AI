@@ -1368,7 +1368,11 @@ def _run_transformers(
     resume_checkpoint: Path | None = None
     resume_state: dict[str, Any] | None = None
     resume_payload: dict[str, Any] | None = None
-    base_model_fingerprint = model_tree_fingerprint(Path(model_path))
+    base_model_fingerprint = (
+        model_tree_fingerprint(Path(model_path))
+        if config["checkpoint_interval"] > 0
+        else None
+    )
     if config["output_policy"] == "resume":
         _assert_output_ready_for_finalization(output_dir)
         try:
