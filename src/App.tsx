@@ -4339,7 +4339,7 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
                 </div>
                 <p className="quiet-note">
                   {schemaResults[server.name].tools?.length || 0} tools · {schemaResults[server.name].resources?.length || 0} resources · {schemaResults[server.name].resource_templates?.length || 0} templates · {schemaResults[server.name].duration_ms} ms
-                  {Object.values(schemaResults[server.name].truncated || {}).some(Boolean) ? " · list truncated at the safety limit" : ""}
+                  {Object.values(schemaResults[server.name].truncated || {}).some(Boolean) ? " · list truncated at the safety limit" : ""}{schemaResults[server.name].resource_templates_supported === false ? " · server does not support resource templates" : ""}
                 </p>
                 {(schemaResults[server.name].tools || []).map((tool) => <details className="mcp-schema-detail" key={tool.name}>
                   <summary><b>{tool.name}</b>{tool.description ? ` · ${tool.description}` : ""}</summary>
