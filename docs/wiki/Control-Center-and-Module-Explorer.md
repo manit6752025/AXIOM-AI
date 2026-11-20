@@ -61,6 +61,19 @@ after a page is selected. Automated browser checks exercise 320px, 360px,
 horizontal overflow. This is responsive regression coverage, not certification
 for every device or browser.
 
+## Export and download boundaries
+
+The Control Center uses distinct export formats for distinct purposes:
+
+- **Model registry JSON** exports the versioned model metadata registry only. It does not download or package model weights.
+- **Dataset manifest JSON** exports file identity, size, lineage, and checksum metadata only; it never contains dataset row values. Dataset quality and cleaning-preview JSONs contain bounded report/preview metadata, not a replacement dataset. A cleaning preview does not write an output file.
+- **Evaluation report JSON** contains aggregate metrics, fingerprints, and optional run provenance. Raw prediction/reference text is not persisted in the report.
+- **Workflow reproducibility JSON** records the saved graph revision, planning inputs, hardware snapshot, seed, and software provenance. Exporting it does not run a workflow or create a job.
+- **Workspace metadata ZIP** includes supported registry/workflow/plan/report/profile metadata. Credentials, MCP grants, external integration secrets/commands, datasets, model weights, checkpoints, and generated files are excluded.
+- **Support bundle ZIP** is a privacy-minimized diagnostic artifact, but it should still be reviewed before sharing because workspace or environment metadata may be sensitive.
+
+Exports are generated as explicit browser downloads with stable filenames. They do not silently copy, move, rewrite, or delete source workspace files.
+
 ## Deep links and browser history
 
 Control Center pages support direct links using the `page` query parameter,

@@ -92,4 +92,10 @@ test("evaluation form submits selected fields and displays persisted aggregate r
   });
   await expect(page.getByText(/2 samples · exact 0.500/)).toBeVisible();
   await expect(page.getByText("Precomputed outputs only", { exact: true })).toBeVisible();
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Export evaluation offline evaluation report as JSON" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("axiom-evaluation-evaluation-1.json");
 });

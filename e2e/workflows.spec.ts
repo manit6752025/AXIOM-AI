@@ -173,5 +173,10 @@ test("workflow autosave and dry-run stay planning-only", async ({ page }) => {
   await expect(page.getByText("NOT EXECUTED")).toBeVisible();
   await expect(page.locator("body")).toContainText("8.2 GB");
   await expect(page.getByText(/seed 42 \(not applied\)/i)).toBeVisible();
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Export manifest" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("workflow-workflow-1-reproducibility.json");
   expect(createdJob).toBe(false);
 });

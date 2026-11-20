@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — explicit export and local-file boundaries
+
+- Added browser coverage for model registry JSON, dataset manifest JSON, evaluation report JSON, workflow reproducibility manifests, workspace metadata ZIP, and diagnostic support-bundle ZIP downloads.
+- Documented which exports contain metadata/aggregate reports, which artifacts are excluded, and why support bundles should be reviewed before sharing.
+
 ## Unreleased — refresh cadence and reduced-motion settings
 
 - Honor the selected 5–120 second Control Center health polling interval instead of clamping short user-selected intervals to 15 seconds.
