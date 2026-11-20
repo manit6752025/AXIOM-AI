@@ -106,7 +106,7 @@ feature exists or a delivery-date promise.
 - [R075 · Implemented; tests passing] Persist exact plan snapshots across API, GUI, and CLI; reject stale GUI snapshots.
 - [R076 · Implemented; tests passing] Add experiment search, exact-tag filters, pagination, and deletion controls.
 - [R077 · Implemented; tests passing] Add evaluation dataset selection and split provenance.
-- [R078 · In progress] Add versioned benchmark-adapter contracts declaring runtime readiness evidence, exact model-inventory requirements, supported formats, request/sampling capabilities and bounded workload limits; enforce a generation-free API/CLI/Runtime UI preflight before every benchmark.
+- [R078 · Implemented; tests passing] Add versioned benchmark-adapter contracts declaring runtime readiness evidence, exact model-inventory requirements, supported formats, request/sampling capabilities and bounded workload limits; enforce a generation-free API/CLI/Runtime UI preflight before every benchmark. Verified with 950 Python tests, 61 Playwright browser tests, ESLint, TypeScript/production build, and Ubuntu/Windows/macOS release-contract checks (quality-gates run #44705243533).
 - [R079 · Implemented; tests passing] Add documented exact-match and micro token-overlap metrics for precomputed text outputs.
 - [R080 · Implemented; tests passing] Add immutable baseline creation, selection, and comparison.
 - [R081 · Implemented; tests passing] Add configurable score-drop thresholds and regression gates.
