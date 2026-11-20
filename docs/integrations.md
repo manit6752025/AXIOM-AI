@@ -530,3 +530,42 @@ dashboard is always the user's explicit action. AXIOM makes no savings claim for
 any effect must be measured in the user's own workload and environment.
 
 This separation keeps the architecture modular and prevents AXIOM from becoming tied to a single agent runtime.
+
+
+## MCP server inventory and protocol handshake inspection
+
+The Control Center's **MCP tools and permission profiles** page and the CLI can
+show the workspace's registered MCP stdio servers:
+
+```bash
+axiom integration list --json
+```
+
+The API's `GET /api/mcp/servers` endpoint is a passive inventory. It reads the
+workspace-local integration registry and returns the server name, transport,
+executable name, argument count, and an explicit `not_inspected` state. It does
+not spawn the registered process, connect to it, or enumerate schemas. Command
+arguments and full command strings are deliberately not returned.
+
+A protocol check is an explicit process start. Select **Inspect handshake** in
+the Control Center or run:
+
+```bash
+axiom integration handshake "Local MCP" --json
+```
+
+The `POST /api/mcp/servers/{name}/handshake` endpoint starts only the selected
+registered stdio command, without a shell, and negotiates the MCP protocol using
+the SDK's automatic handshake/discovery mode. The check is bounded to ten
+seconds (and never more than fifteen seconds), then the SDK tears down the
+child process. The child receives the SDK's minimal allow-listed environment;
+AXIOM does not forward its process environment, API keys, or other credentials.
+Standard error is discarded rather than returned to the caller.
+
+R101 intentionally stops at protocol metadata: it reports the negotiated
+protocol version, server name/version when provided, and presence of top-level
+capabilities. It does not call `tools/list`, `resources/list`,
+`prompts/list`, or `tools/call`; it does not inspect tool schemas or execute
+any remote capability. Schema browsing is a separate feature and remains
+opt-in. A timeout or failed handshake returns a bounded status and generic
+message without exposing command arguments, child output, or exception text.
