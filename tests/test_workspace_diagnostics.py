@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from axiom.core.diagnostics import create_support_bundle, diagnose_workspace, discover_workspace_root
+from axiom.core import diagnostics as diagnostics_module
 
 
 def _project(root: Path, config: str | None = None) -> Path:
@@ -90,3 +91,50 @@ def test_metadata_symlink_is_reported_without_following_it(tmp_path: Path):
     check = next(c for c in report["checks"] if c["id"] == "workspace.path.models")
     assert check["status"] == "fail"
     assert "outside" not in check["detail"]
+
+
+def test_dependency_diagnostics_rejects_versions_below_project_minimum(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(diagnostics_module, "_module_available", lambda _name: True)
+
+    def installed_version(distribution_name: str) -> str:
+        return "0.114.0" if distribution_name == "fastapi" else "99.0.0"
+
+    monkeypatch.setattr(diagnostics_module.importlib.metadata, "version", installed_version)
+    report = diagnose_workspace(_project(tmp_path / "project"))
+    check = next(item for item in report["checks"] if item["id"] == "dependency.fastapi")
+
+    assert check["status"] == "fail"
+    assert "0.114.0" in check["detail"]
+    assert "0.115" in check["detail"]
+    assert report["summary"]["outdated_dependencies"] == ["fastapi"]
+
+
+def test_dependency_diagnostics_report_missing_distribution_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(diagnostics_module, "_module_available", lambda _name: True)
+
+    def missing_version(distribution_name: str) -> str:
+        raise diagnostics_module.importlib.metadata.PackageNotFoundError(distribution_name)
+
+    monkeypatch.setattr(diagnostics_module.importlib.metadata, "version", missing_version)
+    report = diagnose_workspace(_project(tmp_path / "project"))
+    check = next(item for item in report["checks"] if item["id"] == "dependency.typer")
+
+    assert check["status"] == "fail"
+    assert "distribution metadata is missing" in check["detail"]
+    assert "typer" in report["summary"]["missing_dependencies"]
+
+
+def test_config_diagnostics_reject_group_or_other_writable_file(tmp_path: Path):
+    import os
+
+    if os.name != "posix":
+        pytest.skip("POSIX permission bits are not available on this platform")
+    root = _project(tmp_path / "project", "project:\\n  name: demo\\n")
+    config = root / "axiom.yaml"
+    config.chmod(0o666)
+
+    report = diagnose_workspace(root)
+    check = next(item for item in report["checks"] if item["id"] == "workspace.config.permissions")
+
+    assert check["status"] == "fail"
+    assert "group or other users" in check["detail"]
