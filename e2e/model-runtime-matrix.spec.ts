@@ -97,6 +97,10 @@ test("Models page displays explicit local runtime version and format evidence", 
   });
   await page.route("**/api/workspace/models**", async (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/api/workspace/models/runtime-matrix") {
+      await route.fallback();
+      return;
+    }
     if (url.pathname === "/api/workspace/models" && route.request().method() === "GET") {
       await route.fulfill({ json: { models: [], total: 0, limit: 25, offset: 0, has_more: false } });
       return;
