@@ -144,7 +144,7 @@ export default function LocalFineTuningPanel() {
       </div>
       <div className="integration-form-actions">
         <button type="submit" className="button primary-button" disabled={!canStart}><Play size={15} /> {starting ? "Starting…" : busy ? "Training is active" : "Start local fine-tuning"}</button>
-        {job && ["queued", "running"].includes(job.status) && <button type="button" className="button secondary-button" onClick={() => void cancel()} disabled={cancelling}><Square size={13} /> {cancelling ? "Requesting stop…" : "Cancel training"}</button>}
+        {job?.cancellation.requestable && <button type="button" className="button secondary-button" onClick={() => void cancel()} disabled={cancelling}><Square size={13} /> {cancelling ? "Requesting stop…" : "Cancel training"}</button>}
         {job && <span className="quiet-note"><Activity size={14} /> {job.completed_steps}/{job.config.max_steps} steps</span>}
       </div>
     </form>
