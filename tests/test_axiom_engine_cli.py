@@ -597,7 +597,16 @@ def test_engine_benchmark_requirements_command_returns_preflight_without_generat
 
 def test_engine_benchmark_requirements_command_exits_nonzero_on_preflight_failure(monkeypatch):
     monkeypatch.setattr(engine_cli, "inspect_engine_backend_benchmark_requirements", lambda backend, model: {
-        "requirements": {"scope_note": "Local only."},
+        "requirements": {
+            "adapter_id": "axiom-engine-fabric-benchmark-v1:ollama",
+            "runtime": {"component": "ollama", "endpoint": "http://127.0.0.1:11434"},
+            "model": {
+                "inventory_source": "http://127.0.0.1:11434/api/tags",
+                "selection": "exact_model_id",
+                "supported_formats": ["Ollama library models"],
+            },
+            "scope_note": "Local only.",
+        },
         "preflight": {"status": "model_not_found", "reason": "Exact model ID was not discovered."},
         "can_benchmark": False,
     })
