@@ -30,6 +30,22 @@ empty views. They are UI building blocks, not a guarantee that every existing
 control has been migrated or that all screen-reader/browser combinations have
 been audited.
 
+## Keyboard navigation and live announcements
+
+The global Ctrl/Command+K palette follows the combobox/listbox interaction
+pattern. Arrow Up/Down moves the active result, Home/End jumps to the first or
+last result, Enter executes the active page or local action, and Escape closes
+the palette. The input exposes its active option through
+`aria-activedescendant`; a polite live region announces the result count,
+current selection, and no-match state. Result options expose their position in
+the filtered set.
+
+The shared interface also uses labelled modal dialogs with focus management,
+polite status regions for loading/operation feedback, and descriptive live
+updates for backend connection and in-flight requests. Automated browser tests
+verify these specific contracts; they do not replace testing with multiple
+screen readers and browser combinations.
+
 ## Contributor expectations
 
 Accessibility is part of feature quality. For user-facing changes, contributors should:

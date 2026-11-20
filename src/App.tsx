@@ -1649,8 +1649,15 @@ function Topbar({
             value={query}
             placeholder="Search pages and actions"
             aria-label="Search pages and actions"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-haspopup="listbox"
             aria-expanded={searchOpen}
             aria-controls="workspace-search-results"
+            aria-activedescendant={searchOpen && results[activeResult]
+              ? `command-result-${results[activeResult].id.replaceAll(":", "-")}`
+              : undefined}
+            aria-describedby="command-palette-keyboard-hint"
             onFocus={() => setSearchOpen(true)}
             onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }}
             onKeyDown={(event) => {
@@ -1665,6 +1672,14 @@ function Topbar({
               if (event.key === "ArrowUp" && results.length) {
                 event.preventDefault();
                 setActiveResult((current) => (current - 1 + results.length) % results.length);
+              }
+              if (event.key === "Home" && results.length) {
+                event.preventDefault();
+                setActiveResult(0);
+              }
+              if (event.key === "End" && results.length) {
+                event.preventDefault();
+                setActiveResult(results.length - 1);
               }
               if (event.key === "Enter" && results[activeResult]) {
                 event.preventDefault();
@@ -1681,10 +1696,14 @@ function Topbar({
                 return (
                   <button
                     type="button"
+                    id={`command-result-${item.id.replaceAll(":", "-")}`}
                     role="option"
                     aria-selected={index === activeResult}
+                    aria-posinset={index + 1}
+                    aria-setsize={results.length}
                     key={item.id}
                     onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setActiveResult(index)}
                     onClick={() => executeResult(item)}
                   >
                     <Icon size={16} />
@@ -1693,9 +1712,16 @@ function Topbar({
                   </button>
                 );
               }) : <div className="command-empty">No matching pages or actions for "{query}".</div>}
-              <div className="command-hint"><kbd>↑↓</kbd> move <kbd>↵</kbd> open <kbd>esc</kbd> close</div>
+              <div id="command-palette-keyboard-hint" className="command-hint"><kbd>↑↓</kbd> move <kbd>Home/End</kbd> jump <kbd>↵</kbd> run <kbd>esc</kbd> close</div>
             </div>
           )}
+          <span id="command-palette-announcement" className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+            {searchOpen
+              ? results.length === 0
+                ? `No pages or actions match ${query.trim() || "the current search"}.`
+                : `${results.length} results. ${results[activeResult]?.label ?? results[0].label} selected. Use arrow keys to move, Home or End to jump, Enter to run, and Escape to close.`
+              : ""}
+          </span>
         </div>
         <div className="global-api-status" role="group" aria-label="Backend connection">
           <span role="status" aria-live="polite" title={backendDetail}>

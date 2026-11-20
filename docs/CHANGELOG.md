@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — keyboard and screen-reader command navigation
+
+- Added a combobox/listbox accessibility contract to the global command palette, including active-descendant tracking, result position metadata, Home/End navigation, and polite announcements for result counts, selected commands, and no matches.
+- Added Playwright coverage for keyboard selection, active option exposure, result announcements, and empty-result feedback.
+
 ## Unreleased — consistent destructive-action confirmations
 
 - Added a shared accessible confirmation dialog and migrated model registry removal, saved-plan and evaluation-report deletion, and workspace metadata merge/replace. Confirmation starts with Cancel focused and disables dismissal while an operation is in flight.
