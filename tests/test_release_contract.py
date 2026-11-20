@@ -166,13 +166,3 @@ def test_control_center_bundle_is_staged_and_atomically_swapped():
     assert "await rename(backup, target)" in copier
     assert "activated = true" in copier
 
-
-def test_codeql_scans_python_and_typescript_on_active_development_branch():
-    workflow = (ROOT / ".github/workflows/codeql.yml").read_text(encoding="utf-8")
-    assert "github/codeql-action/init@v4" in workflow
-    assert "github/codeql-action/analyze@v4" in workflow
-    assert "languages: python,javascript-typescript" in workflow
-    assert "build-mode: none" in workflow
-    assert "security-events: write" in workflow
-    assert "implement/roadmap" in workflow
-    assert "pull_request:" in workflow and "schedule:" in workflow

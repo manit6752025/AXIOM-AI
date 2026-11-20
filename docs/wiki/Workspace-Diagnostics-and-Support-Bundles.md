@@ -35,7 +35,10 @@ Related: [Troubleshooting](Troubleshooting), [Local API and Security](Local-API-
 
 ## Automated code scanning
 
-The repository's CodeQL workflow analyzes Python and JavaScript/TypeScript on
-pushes and pull requests targeting `main`, `latest/development`, and
-`implement/roadmap`, with a weekly scheduled scan. Alerts are published through
-GitHub code scanning; the workflow is not a CVE database or runtime malware scan.
+GitHub reports that this repository already has CodeQL **default setup** enabled.
+Use the GitHub-managed default scan and review its Code scanning alerts in the
+repository Security tab. Do not add an advanced CodeQL workflow alongside that
+setup: GitHub rejects SARIF uploads from advanced workflows while default setup
+is enabled. This is source-code analysis, not a CVE database or runtime malware
+scan; inspect and triage the GitHub alerts separately from local package-integrity
+checks.
