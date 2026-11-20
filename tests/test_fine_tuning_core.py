@@ -201,3 +201,44 @@ def test_public_job_reports_explicit_cancellation_contract(status, requested, re
         "boundary": "before worker start or between training steps; adapter finalization is not interruptible",
         "unavailable_reason": reason,
     }
+
+
+def test_completed_training_step_is_recorded_before_pending_cancellation(monkeypatch):
+    job = {
+        "id": "c" * 32,
+        "status": "queued",
+        "cancel_requested": False,
+        "config": {"max_steps": 3},
+        "completed_steps": 0,
+        "loss": None,
+        "logs": ["Job queued."],
+    }
+
+    def read_job(_job_id):
+        return dict(job)
+
+    def update_job(_job_id, **changes):
+        target = changes.get("status")
+        if isinstance(target, str):
+            fine_tuning._validate_job_transition(job["status"], target)
+        job.update(changes)
+        return dict(job)
+
+    def run_transformers(_config, progress, **_kwargs):
+        # Simulate cancellation arriving after the optimizer has completed step 1.
+        job.update(status="cancelling", cancel_requested=True)
+        progress(1, 0.25)
+        raise AssertionError("The progress callback should observe cancellation.")
+
+    monkeypatch.setattr(fine_tuning, "_read_job", read_job)
+    monkeypatch.setattr(fine_tuning, "_update_job", update_job)
+    monkeypatch.setattr(fine_tuning, "_run_transformers", run_transformers)
+    monkeypatch.setattr(fine_tuning, "_release_lock", lambda _job_id: None)
+
+    fine_tuning.execute_finetuning_job(job["id"])
+
+    assert job["status"] == "cancelled"
+    assert job["cancel_requested"] is True
+    assert job["completed_steps"] == 1
+    assert job["loss"] == 0.25
+    assert any("Step 1/3" in entry for entry in job["logs"])
