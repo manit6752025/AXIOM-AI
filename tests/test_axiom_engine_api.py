@@ -1128,3 +1128,21 @@ def test_engine_fabric_benchmark_requirements_endpoint_returns_live_preflight(mo
 def test_engine_fabric_benchmark_requirements_rejects_unknown_adapter():
     response = _client().get("/api/engine/backends/benchmark-requirements?backend_id=remote&model=tiny-local")
     assert response.status_code == 422
+
+
+def test_engine_fabric_benchmark_endpoint_returns_conflict_when_preflight_fails(monkeypatch):
+    from axiom.core.engine_fabric import EngineFabricBenchmarkRequirementError
+
+    def reject_preflight(*_args, **_kwargs):
+        raise EngineFabricBenchmarkRequirementError("The exact model ID is not advertised by the selected runtime.")
+
+    monkeypatch.setattr(engine_api, "run_engine_backend_benchmark", reject_preflight)
+    response = _client().post("/api/engine/backends/benchmark", json={
+        "backend_id": "ollama",
+        "model": "missing-model",
+        "prompt": "This must never generate.",
+        "warmup_runs": 0,
+        "iterations": 1,
+    })
+    assert response.status_code == 409
+    assert "exact model ID" in response.json()["detail"]
