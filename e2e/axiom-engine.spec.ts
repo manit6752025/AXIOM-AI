@@ -217,7 +217,7 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(engine).toContainText("GGUF");
   await expect(engine).toContainText("dequantizing GGUF tensors to floating-point");
   await expect(engine.getByText("ENGINE READY")).toBeVisible();
-  const executionDevice = engine.getByLabel("Execution device");
+  const executionDevice = engine.getByLabel("Execution device", { exact: true });
   await expect(executionDevice).toHaveValue("auto");
   await expect(engine).toContainText("Recommended: cpu");
   await expect(executionDevice.locator('option[value="cuda"]')).toBeDisabled();
