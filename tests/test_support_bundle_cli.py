@@ -21,13 +21,13 @@ def _private_workspace(root: Path) -> tuple[Path, tuple[str, ...]]:
         "CLI_SUPPORT_ENV_SECRET",
     )
     (root / "axiom.yaml").write_text(
-        f"project:\\n  name: bundle-test\\napi_key: {secrets[0]}\\n",
+        f"project:\n  name: bundle-test\napi_key: {secrets[0]}\n",
         encoding="utf-8",
     )
     data = root / "data"
     data.mkdir()
     (data / "private.jsonl").write_text(
-        json.dumps({"text": secrets[1]}) + "\\n",
+        json.dumps({"text": secrets[1]}) + "\n",
         encoding="utf-8",
     )
     return root, secrets
