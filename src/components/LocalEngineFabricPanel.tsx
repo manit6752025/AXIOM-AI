@@ -232,9 +232,11 @@ export default function LocalEngineFabricPanel() {
   const disconnectConnectorProfile = () => {
     setConnectionVerified(false);
     setResult(null);
+    setPrompt("");
+    setModel("");
     setBenchmarkPreflight(null);
     setBenchmarkResults([]);
-    setError("Disconnected from this AXIOM session. The external runtime remains running and is not stopped.");
+    setError("Disconnected from this AXIOM session. The external runtime remains running and is not stopped. Your saved profile is retained for a later reconnect.");
   };
 
   const deleteConnectorProfile = async () => {
