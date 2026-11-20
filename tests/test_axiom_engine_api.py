@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from threading import Event
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 import pytest
@@ -176,7 +176,7 @@ def test_native_benchmark_api_signals_worker_when_client_disconnects(tmp_path, m
         model_path=str(model), prompt="private benchmark prompt", iterations=1, max_new_tokens=8,
     )
 
-    with pytest.raises(Exception) as error:
+    with pytest.raises(HTTPException) as error:
         asyncio.run(engine_api.engine_benchmark(request, DisconnectedRequest()))
 
     assert getattr(error.value, "status_code", None) == 499
