@@ -17,13 +17,17 @@ Open **Runtime → Unified LLM client**. Choose a provider and load its model ca
 
 Cloud requests are blocked until the user confirms that the selected provider receives the conversation. Provider credentials are sent in the HTTPS provider authorization header and are not written to AXIOM workspace files or settings by this client. The browser form keeps the current key in component memory while the panel is mounted; use **Disconnect** to clear the key, consent and in-memory conversation, or leave the page when finished.
 
-The panel supports up to 25 browser-local provider profiles. A profile stores only its name, provider ID, model ID and (for the custom adapter) a public HTTPS `/v1` endpoint. It never stores API keys, prompts, system instructions or chat history. Profile metadata remains in this browser's local storage and is not synchronized with the workspace or CLI. After reloading, apply a profile, enter its cloud key again if required, and explicitly **Connect** to verify its model catalogue. The connection indicator reports the last successful catalogue request; it is not a persistent socket or a credential vault. Cloud chat still requires a separate consent checkbox for every request. A cloud provider processes data under its own policies, so never send secrets or private data without reviewing those terms.
+The panel supports up to 25 provider profiles in the active workspace. The API stores only their name, provider ID, model ID and (for the custom adapter) a public HTTPS `/v1` endpoint in `.axiom/llm-provider-profiles.json`; it enforces a 64 KiB store bound, restrictive file permissions, a fixed provider allowlist and schema validation. The browser also maintains a metadata-only cache for offline access. Profiles are available to the CLI through `axiom llm profile list/save/delete/connect`. Neither storage path accepts API keys, prompts, system instructions or chat history. After reloading or changing computers, apply a profile, enter its cloud key again if required, and explicitly **Connect** to verify its model catalogue. The connection indicator reports a successful catalogue check; it is not a persistent socket or a credential vault. CLI/API connect calls likewise verify the catalogue and immediately discard the request key. Cloud chat still requires a separate consent checkbox for every request. A cloud provider processes data under its own policies, so never send secrets or private data without reviewing those terms.
 
 ## CLI
 
 ```bash
 axiom llm providers
 axiom llm providers --json
+axiom llm profile save "Team DeepSeek" --provider deepseek --model deepseek-chat
+axiom llm profile list
+axiom llm profile connect PROFILE_ID
+axiom llm profile delete PROFILE_ID --yes
 axiom llm models --provider axiom-local
 axiom llm models --provider ollama-local
 axiom llm models --provider deepseek
@@ -36,6 +40,8 @@ Cloud commands prompt for the API key with hidden input unless the environment v
 ## HTTP API
 
 - `GET /api/llm/providers` — provider capabilities without credentials or network requests.
+- `GET /api/llm/profiles`, `POST /api/llm/profiles`, and `DELETE /api/llm/profiles/{id}` — manage bounded, workspace-local, metadata-only profiles.
+- `POST /api/llm/profiles/{id}/connect` — perform a one-shot provider catalogue check using an optional request-only key; no socket or credential is retained.
 - `POST /api/llm/models` — list local trusted models or request a cloud provider catalogue.
 - `POST /api/llm/chat` — generate a single text completion with bounded input/output limits.
 
