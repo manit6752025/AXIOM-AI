@@ -242,3 +242,145 @@ def test_completed_training_step_is_recorded_before_pending_cancellation(monkeyp
     assert job["completed_steps"] == 1
     assert job["loss"] == 0.25
     assert any("Step 1/3" in entry for entry in job["logs"])
+
+
+def _create_resume_fixture(config, *, completed_steps=2):
+    from pathlib import Path
+
+    from axiom.core.fine_tuning_checkpoints import model_tree_fingerprint, save_checkpoint
+
+    class Model:
+        def save_pretrained(self, destination, *, safe_serialization):
+            assert safe_serialization is True
+            folder = Path(destination)
+            (folder / "adapter_config.json").write_text('{"r":4}', encoding="utf-8")
+            (folder / "adapter_model.safetensors").write_bytes(b"adapter")
+
+    class Torch:
+        @staticmethod
+        def save(payload, destination):
+            Path(destination).write_bytes(b"optimizer")
+
+    model_path = Path(config["model_path"]).resolve()
+    dataset_path = Path(config["dataset_path"]).resolve()
+    output_dir = Path(config["output_dir"]).resolve()
+    output_dir.mkdir()
+    _, dataset_sha256 = fine_tuning._load_training_texts(
+        {"dataset_path": str(dataset_path), "text_field": config.get("text_field", "text")},
+        include_fingerprint=True,
+    )
+    save_checkpoint(
+        output_dir,
+        completed_steps,
+        model=Model(),
+        torch_module=Torch(),
+        optimizer_payload={"optimizer_state_dict": {}, "order": [0], "position": 1},
+        training_metadata={
+            "model_path": str(model_path),
+            "model_fingerprint": model_tree_fingerprint(model_path),
+            "dataset_path": str(dataset_path),
+            "dataset_sha256": dataset_sha256,
+            "text_field": config.get("text_field", "text"),
+            "sequence_length": config.get("sequence_length", 64),
+            "learning_rate": config.get("learning_rate", 0.0001),
+            "lora_rank": config.get("lora_rank", 4),
+            "output_dir": str(output_dir),
+            "seed": fine_tuning.AXIOM_TRAINING_SEED,
+            "target_modules": ["q_proj"],
+            "device": "cpu",
+            "cuda_device_count": 0,
+            "dataset_rows": 1,
+            "last_loss": 0.25,
+        },
+    )
+
+
+def test_checkpoint_interval_and_output_policy_defaults_are_backward_compatible(tmp_path):
+    config = make_inputs(tmp_path)
+    result = fine_tuning.validate_config(config)
+
+    assert result["checkpoint_interval"] == 0
+    assert result["output_policy"] == "empty"
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("checkpoint_interval", -1, "Checkpoint interval"),
+        ("checkpoint_interval", 1001, "Checkpoint interval"),
+        ("checkpoint_interval", True, "Checkpoint interval"),
+        ("output_policy", "overwrite", "Output policy"),
+        ("output_policy", ["resume"], "Output policy"),
+    ],
+)
+def test_checkpoint_and_output_policy_bounds_are_validated(tmp_path, key, value, message):
+    config = make_inputs(tmp_path)
+    config[key] = value
+
+    with pytest.raises(ValueError, match=message):
+        fine_tuning.validate_config(config)
+
+
+def test_new_output_policy_rejects_existing_directory_even_when_empty(tmp_path):
+    config = make_inputs(tmp_path)
+    Path(config["output_dir"]).mkdir()
+    config["output_policy"] = "new"
+
+    with pytest.raises(ValueError, match="new.*does not already exist"):
+        fine_tuning.validate_config(config)
+
+
+def test_empty_output_policy_rejects_existing_files(tmp_path):
+    config = make_inputs(tmp_path)
+    output = Path(config["output_dir"])
+    output.mkdir()
+    (output / "do-not-overwrite.txt").write_text("keep", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="new or existing empty directory"):
+        fine_tuning.validate_config(config)
+
+
+def test_resume_policy_requires_checkpointing_and_complete_checkpoint(tmp_path):
+    config = make_inputs(tmp_path)
+    config["output_policy"] = "resume"
+
+    with pytest.raises(ValueError, match="checkpointing to remain enabled"):
+        fine_tuning.validate_config(config)
+
+    config["checkpoint_interval"] = 1
+    Path(config["output_dir"]).mkdir()
+    with pytest.raises(ValueError, match="Resume policy requires at least one"):
+        fine_tuning.validate_config(config)
+
+
+def test_resume_policy_accepts_matching_verified_checkpoint(tmp_path):
+    config = make_inputs(tmp_path)
+    config.update(checkpoint_interval=2, output_policy="empty")
+    _create_resume_fixture(config)
+    config["checkpoint_interval"] = 2
+    config["output_policy"] = "resume"
+    config["max_steps"] = 4
+
+    validated = fine_tuning.validate_config(config)
+
+    assert validated["output_policy"] == "resume"
+    assert validated["checkpoint_interval"] == 2
+
+
+def test_resume_policy_rejects_changed_dataset_contents(tmp_path):
+    config = make_inputs(tmp_path)
+    _create_resume_fixture(config)
+    config.update(checkpoint_interval=1, output_policy="resume")
+    Path(config["dataset_path"]).write_text('{"text":"changed"}\\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="dataset contents"):
+        fine_tuning.validate_config(config)
+
+
+def test_resume_policy_rejects_lower_maximum_than_latest_checkpoint(tmp_path):
+    config = make_inputs(tmp_path)
+    _create_resume_fixture(config, completed_steps=2)
+    config.update(checkpoint_interval=1, output_policy="resume", max_steps=1)
+
+    with pytest.raises(ValueError, match="cannot be lower than the latest checkpoint"):
+        fine_tuning.validate_config(config)
