@@ -8,6 +8,14 @@ test("Training page submits a bounded local LoRA job and displays its status", a
     schema_version: 1,
     id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     status: "queued",
+    cancellation: {
+      supported: true,
+      requested: false,
+      requestable: true,
+      mode: "cooperative",
+      boundary: "before worker start or between training steps; adapter finalization is not interruptible",
+      unavailable_reason: null,
+    },
     created_at: "2026-10-21T00:00:00Z",
     updated_at: "2026-10-21T00:00:00Z",
     started_at: null,
@@ -31,6 +39,7 @@ test("Training page submits a bounded local LoRA job and displays its status", a
 
   let submittedConfig: Record<string, unknown> | undefined;
   let postRequestCount = 0;
+  let currentJob = queuedJob;
 
   await ensureAuthenticated(page);
 
@@ -90,11 +99,33 @@ test("Training page submits a bounded local LoRA job and displays its status", a
       return;
     }
 
+    if (/\/jobs\/[^/]+\/cancel$/.test(pathname) && method === "POST") {
+      currentJob = {
+        ...currentJob,
+        status: "cancelling",
+        cancel_requested: true,
+        cancellation: {
+          supported: true,
+          requested: true,
+          requestable: false,
+          mode: "cooperative",
+          boundary: "before worker start or between training steps; adapter finalization is not interruptible",
+          unavailable_reason: "already_requested",
+        },
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(currentJob),
+      });
+      return;
+    }
+
     if (/\/jobs\/[^/]+$/.test(pathname) && method === "GET") {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(queuedJob),
+        body: JSON.stringify(currentJob),
       });
       return;
     }
@@ -157,4 +188,11 @@ test("Training page submits a bounded local LoRA job and displays its status", a
   const jobStatus = page.locator('[aria-label="Fine-tuning job status"]');
   await expect(jobStatus).toBeVisible({ timeout: 10_000 });
   await expect(jobStatus).toContainText(/queued/i);
+  const cancellationResponse = page.waitForResponse((response) =>
+    response.request().method() === "POST"
+    && new URL(response.url()).pathname.endsWith("/jobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/cancel"));
+  await page.getByRole("button", { name: "Cancel training" }).click();
+  expect((await cancellationResponse).status()).toBe(200);
+  await expect(jobStatus).toContainText(/cancelling/i);
+  await expect(page.getByRole("button", { name: "Cancel training" })).toHaveCount(0);
 });
