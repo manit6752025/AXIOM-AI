@@ -4239,8 +4239,8 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
           ownership_verified: false,
         } : server),
       } : current);
-      setHandshakeResults((current) => ({ ...current, [name]: undefined as never }));
-      setSchemaResults((current) => ({ ...current, [name]: undefined as never }));
+      setHandshakeResults((current) => Object.fromEntries(Object.entries(current).filter(([serverName]) => serverName !== name)));
+      setSchemaResults((current) => Object.fromEntries(Object.entries(current).filter(([serverName]) => serverName !== name)));
       onNotify(`Saved trust and ownership for ${name}.`, "success");
     } catch (cause) {
       setServerInventoryError(cause instanceof Error ? cause.message : "MCP trust metadata could not be saved.");
@@ -4380,7 +4380,7 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
             <div className="mcp-server-trust">
               <div className="field-label-row">
                 <StatusPill tone={server.trust_status === "trusted" ? "success" : server.trust_status === "blocked" ? "danger" : "warning"}>{server.trust_status.toUpperCase()}</StatusPill>
-                <span className="quiet-note">{server.connection_state.replace("_", " ")}{server.last_inspected_at ? ` · checked ${new Date(server.last_inspected_at).toLocaleString()}` : ""}</span>
+                <span className="quiet-note">{server.connection_state.replace("_", " ")}{server.last_inspected_at ? ` · checked ${new Date(server.last_inspected_at).toLocaleString()}` : ""}{server.last_connection_error ? ` · ${server.last_connection_error}` : ""}</span>
               </div>
               <div className="mcp-server-trust-fields">
                 <label className="field">
