@@ -20,6 +20,7 @@ from rich.table import Table
 
 from axiom.daemon import local_summary
 from axiom.core.diagnostics import diagnose_workspace
+from axiom.core.security_audit import audit_security_posture
 from axiom.cli.support_bundle import register as register_support_bundle_cli
 from axiom.cli.roadmap import roadmap_app as roadmap_cli_app
 from axiom.datasets.inspector import inspect_dataset
@@ -27,6 +28,7 @@ from axiom.version import __version__
 from axiom.path_safety import SafePathError, open_regular_file
 
 AXIOM_VERSION = __version__
+security_app = typer.Typer(help="Audit local configuration, permissions, API credentials, and network exposure.", no_args_is_help=True)
 MAX_CONFIG_VALIDATION_BYTES = 256 * 1024
 console = Console()
 
@@ -138,6 +140,46 @@ def print_next_commands(commands: tuple[str, ...]) -> None:
 
 
 def register(app, model_app, dataset_app) -> None:
+
+    app.add_typer(security_app, name="security")
+
+    @security_app.command("audit")
+    def security_audit(
+        workspace: str | None = typer.Option(None, "--workspace", help="Workspace directory to inspect."),
+        daemon_host: str = typer.Option("127.0.0.1", "--daemon-host", help="Daemon bind host profile to audit; this does not change a running listener."),
+        allow_network: bool = typer.Option(False, "--allow-network", help="Audit the explicit non-loopback daemon opt-in profile."),
+        json_output: bool = typer.Option(False, "--json", help="Emit stable machine-readable security findings."),
+        strict: bool = typer.Option(False, "--strict", help="Treat warnings as command failures."),
+    ) -> None:
+        """Audit the current workspace and configured local API security posture."""
+        try:
+            report = audit_security_posture(
+                workspace,
+                daemon_host=daemon_host,
+                allow_network=allow_network,
+            )
+        except (OSError, ValueError):
+            if json_errors_enabled():
+                emit_error("Security posture could not be audited safely.", code="security_audit_failed", exit_code=2)
+            if json_output:
+                typer.echo(json.dumps({"schema_version": 1, "status": "error", "message": "Security posture could not be audited safely.", "exit_code": 2}, sort_keys=True))
+                raise typer.Exit(code=2)
+            emit_error("Security posture could not be audited safely.", code="security_audit_failed", exit_code=2)
+        payload = {"schema_version": 1, **report}
+        if json_output:
+            typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            typer.echo("AXIOM Security Audit")
+            typer.echo(f"Workspace: {report['workspace']['name']}")
+            for check in report["checks"]:
+                marker = "OK" if check["status"] == "pass" else "FAIL" if check["status"] == "fail" else "WARN" if check["status"] == "warn" else "INFO"
+                typer.echo(f"[{marker:<4}] {check['title']}: {check['detail']}")
+                if check["remediation"]:
+                    typer.echo(f"       Next: {check['remediation']}")
+            summary = report["summary"]
+            typer.echo(f"Security audit complete: {summary['passed']} passed, {summary['warnings']} warning(s), {summary['failed']} failed")
+        if report["summary"]["failed"] or (strict and report["summary"]["warnings"]):
+            raise typer.Exit(code=1)
 
     @app.command("doctor")
     def doctor(
