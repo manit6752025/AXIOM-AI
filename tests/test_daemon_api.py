@@ -4,6 +4,7 @@ from http.client import HTTPConnection
 import pytest
 
 import axiom.daemon as daemon_module
+from axiom.daemon_api import WorkspacePathError, resolve_in_workspace
 
 serve_in_thread = daemon_module.serve_in_thread
 
@@ -157,3 +158,17 @@ def test_web_ui_missing_bundle_explains_how_to_build(server, tmp_path, monkeypat
     status, payload = get_json(server, "/ui/")
     assert status == 404
     assert payload["error"] == "web_ui_missing"
+
+
+def test_resolve_in_workspace_rejects_symlinked_root(tmp_path):
+    real_root = tmp_path / "real-workspace"
+    real_root.mkdir()
+    (real_root / "data.txt").write_text("private", encoding="utf-8")
+    alias = tmp_path / "workspace-link"
+    try:
+        alias.symlink_to(real_root, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Directory symlinks are not available: {exc}")
+
+    with pytest.raises(WorkspacePathError, match="workspace root"):
+        resolve_in_workspace("data.txt", alias)
