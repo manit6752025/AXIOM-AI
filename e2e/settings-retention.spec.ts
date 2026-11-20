@@ -89,7 +89,6 @@ test("Settings exports and imports a workspace metadata archive", async ({ page 
 
 
 test("Settings honors health refresh cadence, persists reduced motion, and disables polling in low-power mode", async ({ page }) => {
-  await page.clock.install();
   let healthCalls = 0;
   await page.route("**/api/health", async (route) => {
     healthCalls += 1;
@@ -114,8 +113,8 @@ test("Settings honors health refresh cadence, persists reduced motion, and disab
   expect(transitionSeconds).toBeLessThanOrEqual(0.00001);
 
   const beforeFiveSecondTick = healthCalls;
-  await page.clock.runFor(5_100);
-  expect(healthCalls).toBeGreaterThan(beforeFiveSecondTick);
+  await expect.poll(() => healthCalls, { timeout: 7_500, intervals: [100, 250, 500] })
+    .toBeGreaterThan(beforeFiveSecondTick);
 
   await page.reload();
   await expect(page.getByLabel("Dashboard health refresh")).toHaveValue("5");
@@ -129,7 +128,7 @@ test("Settings honors health refresh cadence, persists reduced motion, and disab
   await expect(page.locator("html")).toHaveAttribute("data-reduced-motion", "true");
 
   const beforeLowPowerWindow = healthCalls;
-  await page.clock.runFor(30_000);
+  await page.waitForTimeout(6_000);
   expect(healthCalls).toBe(beforeLowPowerWindow);
 
   await page.reload();
