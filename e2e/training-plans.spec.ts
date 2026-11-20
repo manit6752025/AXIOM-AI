@@ -100,6 +100,8 @@ test("Training prints a reproducible saved plan and diffs two snapshots", async 
           { path: "inputs.parameter_billions", category: "inputs", before_present: true, before: 7, after_present: true, after: 13 },
           { path: "hardware.vram_gb", category: "hardware", before_present: true, before: 16, after_present: true, after: 24 },
           { path: "plan.sequence_length", category: "estimate", before_present: true, before: 4096, after_present: true, after: 2048 },
+          { path: "reproducibility.seed", category: "provenance", before_present: true, before: 42, after_present: true, after: 1234 },
+          { path: "reproducibility.software.packages.torch", category: "provenance", before_present: true, before: "2.4.0", after_present: true, after: "2.5.0" },
         ],
         scope_note: "Saved snapshots only; no planner calculation or training execution.",
       } } });
@@ -138,16 +140,17 @@ test("Training prints a reproducible saved plan and diffs two snapshots", async 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download manifest" }).click();
   const manifestDownload = await downloadPromise;
-  expect(manifestDownload.suggestedFilename()).toMatch(/^axiom-training-plan-[a-f0-9]{12}\\.json$/);
+  expect(manifestDownload.suggestedFilename()).toMatch(/^axiom-training-plan-[a-f0-9]{12}\.json$/);
 
   await page.getByLabel("Baseline saved plan").selectOption("plan-left");
   await page.getByLabel("Comparison saved plan").selectOption("plan-right");
   await page.getByRole("button", { name: "Diff saved plans" }).click();
-  await expect(page.getByText("3 recorded field(s) changed")).toBeVisible();
+  await expect(page.getByText("5 recorded field(s) changed")).toBeVisible();
   await expect(page.getByText("inputs.parameter_billions", { exact: true })).toBeVisible();
+  await expect(page.getByText("reproducibility.seed", { exact: true })).toBeVisible();
   await expect(page.getByText("hardware.vram_gb", { exact: true })).toBeVisible();
   const diffTable = page.getByRole("table", { name: "Saved plan field differences" });
   await expect(diffTable).toBeVisible();
   await expect(diffTable.getByRole("columnheader")).toHaveText(["Field", "Category", "Baseline", "Comparison"]);
-  await expect(diffTable.getByRole("row")).toHaveCount(4);
+  await expect(diffTable.getByRole("row")).toHaveCount(6);
 });
