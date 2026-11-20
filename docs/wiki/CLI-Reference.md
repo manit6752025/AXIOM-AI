@@ -29,7 +29,7 @@ final authority for those details.
 | Training and evaluation | `axiom train`, `axiom experiment`, `axiom evaluation` |
 | Local inference and providers | `axiom infer`, `axiom engine`, `axiom llm`, `axiom ai`, `axiom optimize`, `axiom supercompress` |
 | Agent, tools, and integrations | `axiom agent-profile`, `axiom mcp`, `axiom integration`, `axiom tools`, `axiom session`, `axiom headroom`, `axiom mobile-bridge` |
-| Host and application lifecycle | `axiom system`, `axiom version`, `axiom init`, `axiom daemon`, `axiom gui`, `axiom ui`, `axiom completion` |
+| Host and application lifecycle | `axiom system`, `axiom version`, `axiom update`, `axiom init`, `axiom daemon`, `axiom gui`, `axiom ui`, `axiom completion` |
 
 Useful command examples:
 
@@ -42,6 +42,9 @@ axiom experiment print <experiment-id>
 axiom experiment diff <baseline-id> <candidate-id> --json
 axiom evaluation list --json
 axiom engine discover --json
+axiom update --check
+axiom update --auto
+axiom gui --refresh
 axiom infer service status --json
 axiom workspace metadata export --output ./axiom-workspace-metadata.zip
 axiom config validate --path ./axiom.yaml --json
@@ -65,6 +68,12 @@ control. The API remains bounded by its route schemas and permission policy.
 | Local inference and engine | `infer`, `engine`, `system`, `headroom` | `/api/inference/generate`, `/api/inference/status`, `/api/engine/status`, `/api/engine/telemetry` | Runtime |
 | LLM providers and optimization | `llm`, `ai`, `optimize`, `supercompress` | `/api/llm/providers`, `/api/llm/models`, `/api/llm/chat`, `/api/optimizer/plan` | Runtime, Model Studio |
 | Agents, permissions, and connectors | `agent-profile`, `mcp`, `security`, `integration`, `tools`, `session`, `mobile-bridge` | `/api/agent-profiles`, `/api/security/audit`, `/api/security/tool-permissions`, `/api/diagnostics/runtime-connectors` | Agent Profiles, Settings, API Playground |
+
+## Update and GUI refresh
+
+`axiom update --check` inspects the beta channel without installing. Use `--channel stable` to exclude prereleases, or `axiom update --auto` to fetch and install the exact newer release. The updater verifies the PyPI wheel digest and AXIOM package/version metadata before invoking pip in the active Python environment. It does not operate on model directories, workspaces, account databases, configuration or browser storage. Restart AXIOM after installation.
+
+`axiom gui --refresh` is a source-checkout workflow: it runs frontend lint and production build, then opens a cache-busted Control Center URL on the same origin. It may reuse an already-running local GUI server and never clears localStorage/sessionStorage. Install the source checkout once with `python -m pip install -e .` to expose the `axiom` console command in the active environment.
 
 ## Security commands
 
