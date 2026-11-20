@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from urllib.parse import urlsplit
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -22,6 +23,10 @@ class Model:
     architecture: str | None = None
     license: str | None = None
     license_review: str = "unreviewed"
+    source_attribution: str | None = None
+    source_url: str | None = None
+    source_revision: str | None = None
+    license_review_notes: str | None = None
     tags: list[str] = field(default_factory=list)
     favorite: bool = False
     content_sha256: str | None = None
@@ -41,11 +46,38 @@ class Model:
             ("quantization", self.quantization, 80),
             ("architecture", self.architecture, 160),
             ("license", self.license, 120),
+            ("source_attribution", self.source_attribution, 200),
+            ("source_revision", self.source_revision, 160),
+            ("license_review_notes", self.license_review_notes, 1000),
         ):
             if value is not None and (not isinstance(value, str) or len(value) > limit):
                 raise TypeError(f"Model {label} metadata is invalid.")
         if self.license_review not in {"unreviewed", "approved", "restricted", "unknown"}:
             raise TypeError("Model license_review metadata is invalid.")
+        if self.source_attribution is not None and not self.source_attribution.strip():
+            raise TypeError("Model source_attribution must contain non-whitespace text when provided.")
+        if self.source_revision is not None and not self.source_revision.strip():
+            raise TypeError("Model source_revision must contain non-whitespace text when provided.")
+        if self.source_url is not None:
+            if (
+                not isinstance(self.source_url, str)
+                or self.source_url != self.source_url.strip()
+                or len(self.source_url) > 2048
+                or any(ord(char) < 32 for char in self.source_url)
+            ):
+                raise TypeError("Model source_url must be a trimmed HTTP(S) URL of at most 2048 characters.")
+            try:
+                parsed_source_url = urlsplit(self.source_url)
+                _ = parsed_source_url.port
+            except ValueError as exc:
+                raise TypeError("Model source_url must be valid HTTP(S) without embedded credentials.") from exc
+            if (
+                parsed_source_url.scheme.lower() not in {"http", "https"}
+                or not parsed_source_url.hostname
+                or parsed_source_url.username is not None
+                or parsed_source_url.password is not None
+            ):
+                raise TypeError("Model source_url must be valid HTTP(S) without embedded credentials.")
         if (
             not isinstance(self.tags, list)
             or len(self.tags) > 32
