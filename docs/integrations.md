@@ -547,12 +547,18 @@ executable name, argument count, and an explicit `not_inspected` state. It does
 not spawn the registered process, connect to it, or enumerate schemas. Command
 arguments and full command strings are deliberately not returned.
 
-A protocol check is an explicit process start. Select **Inspect handshake** in
-the Control Center or run:
+A protocol check is an explicit process start. New servers are unverified by
+default. First review the registered command and explicitly trust the server:
 
 ```bash
+axiom integration trust "Local MCP" trusted --owner-type workspace --owner-label "Research Team"
 axiom integration handshake "Local MCP" --json
 ```
+
+A blocked or unverified server cannot be started by the handshake or schema
+inspection commands. The trust label and owner information are stored locally
+per server. Owner labels are user-declared metadata, not authenticated identity
+claims.
 
 The `POST /api/mcp/servers/{name}/handshake` endpoint starts only the selected
 registered stdio command, without a shell, and negotiates the MCP protocol using
@@ -573,7 +579,7 @@ message without exposing command arguments, child output, or exception text.
 
 ## Read-only MCP tool and resource schema browsing
 
-Once a server is registered, choose **Browse schemas** in the Control Center,
+Once a server is registered and explicitly marked trusted, choose **Browse schemas** in the Control Center,
 or run:
 
 ```bash
@@ -598,3 +604,35 @@ Failed checks return generic errors without child stderr or exception details.
 
 
 Some MCP servers expose resources but do not implement the optional resource-template listing method. In that case AXIOM preserves the tool and fixed-resource results and marks resource templates as unsupported instead of failing the entire schema inspection.
+
+
+## Per-server trust, ownership and connection state
+
+Every MCP registry entry carries independent trust, ownership, and last
+inspection state:
+
+- **Trust** is `unverified`, `trusted`, or `blocked`. New and legacy entries
+  default to `unverified`. AXIOM refuses to start an unverified or blocked
+  process for either handshake or schema inspection. The owner must explicitly
+  set `trusted` before inspection; a blocked entry remains denied.
+- **Ownership** is a bounded owner category (`unknown`, `workspace`, or
+  `external`) and optional 96-character label. These values are user-declared
+  metadata. AXIOM does not authenticate or verify the named owner.
+- **Connection state** records the last metadata-only inspection as
+  `not_inspected`, `connected`, `failed`, or `timeout`, with an ISO
+  timestamp and an allowlisted error code when applicable. It is a persisted
+  last-check result, not a live session indicator.
+
+Trust/ownership changes are available in the Control Center, through
+`PATCH /api/mcp/servers/{name}/trust`, and through:
+
+```bash
+axiom integration trust "Local MCP" trusted --owner-type external --owner-label "Vendor MCP"
+axiom integration trust "Local MCP" blocked
+axiom integration mcp-list --json
+```
+
+The trust update writes the workspace-local registry atomically. It does not
+grant any AXIOM tools or change MCP tool permissions. Marking a server trusted
+only permits explicit metadata inspection; it does not authorize tool calls,
+resource reads, or prompt execution.
