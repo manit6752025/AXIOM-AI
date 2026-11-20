@@ -281,3 +281,104 @@ def test_model_registry_workspace_labels_persist_and_enforce_bounds(tmp_path):
     for labels in invalid_values:
         with pytest.raises(TypeError, match="workspace_labels"):
             Model(name="Invalid labels", source=f"org/invalid-{len(str(labels))}", workspace_labels=labels)
+
+
+def test_model_source_attribution_and_license_review_persist_and_validate(tmp_path):
+    registry = ModelRegistry(tmp_path / "registry")
+    model = Model(
+        name="Attributed model",
+        source="org/attributed",
+        license="Apache-2.0",
+        license_review="unreviewed",
+        source_attribution="Example Research",
+        source_url="https://huggingface.co/example/model",
+        source_revision="0123456789abcdef",
+        license_review_notes="Review is pending.",
+    )
+    registry.add(model)
+
+    loaded = registry.get(model.id)
+    assert loaded is not None
+    assert loaded.source_attribution == "Example Research"
+    assert loaded.source_url == "https://huggingface.co/example/model"
+    assert loaded.source_revision == "0123456789abcdef"
+    assert loaded.license_review == "unreviewed"
+    assert loaded.license_review_notes == "Review is pending."
+
+    updated = registry.update(model.id, {
+        "license_review": "restricted",
+        "license_review_notes": "Commercial use requires additional review.",
+        "source_revision": "fedcba9876543210",
+    })
+    assert updated is not None
+    assert updated.license_review == "restricted"
+    assert updated.license_review_notes == "Commercial use requires additional review."
+    assert updated.source_revision == "fedcba9876543210"
+
+    persisted = json.loads((tmp_path / "registry" / "models.json").read_text(encoding="utf-8"))
+    assert persisted[0]["source_attribution"] == "Example Research"
+    assert persisted[0]["license_review"] == "restricted"
+
+    invalid_urls = (
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "https://user:password@example.com/model",
+        "https://example.com:invalid/model",
+        " https://example.com/model",
+    )
+    for index, source_url in enumerate(invalid_urls):
+        with pytest.raises(TypeError, match="source_url"):
+            Model(name="Unsafe URL", source=f"org/unsafe-{index}", source_url=source_url)
+
+    for index, review_state in enumerate(("approved-ish", "", None)):
+        with pytest.raises(TypeError, match="license_review"):
+            Model(name="Invalid review", source=f"org/review-{index}", license_review=review_state)
+
+
+def test_model_attribution_and_license_review_api_round_trip(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from axiom.api.server import create_app
+
+    monkeypatch.chdir(tmp_path)
+    with TestClient(create_app()) as client:
+        created = client.post("/api/workspace/models", json={
+            "name": "API attributed model",
+            "source": "org/api-attributed",
+            "format": "safetensors",
+            "license": "Apache-2.0",
+            "license_review": "unreviewed",
+            "source_attribution": "Example Foundation",
+            "source_url": "https://example.org/models/api-attributed",
+            "source_revision": "release-2026-10",
+            "license_review_notes": "Pending human review.",
+        })
+        assert created.status_code == 201
+        record = created.json()["model"]
+        assert record["source_attribution"] == "Example Foundation"
+        assert record["source_url"] == "https://example.org/models/api-attributed"
+        assert record["source_revision"] == "release-2026-10"
+        assert record["license_review"] == "unreviewed"
+
+        updated = client.patch(f"/api/workspace/models/{record['id']}", json={
+            "license_review": "approved",
+            "license_review_notes": "Reviewed against the linked model card.",
+            "source_revision": "commit-abc123",
+        })
+        assert updated.status_code == 200
+        assert updated.json()["model"]["license_review"] == "approved"
+        assert updated.json()["model"]["source_revision"] == "commit-abc123"
+
+        unsafe_url = client.post("/api/workspace/models", json={
+            "name": "Unsafe URL model",
+            "source": "org/unsafe-api",
+            "source_url": "https://user:password@example.org/model",
+        })
+        assert unsafe_url.status_code == 422
+
+        invalid_review = client.post("/api/workspace/models", json={
+            "name": "Invalid review state",
+            "source": "org/invalid-review",
+            "license_review": "approved-by-axiom",
+        })
+        assert invalid_review.status_code == 422
