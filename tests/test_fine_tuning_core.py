@@ -372,7 +372,7 @@ def test_resume_policy_rejects_changed_dataset_contents(tmp_path):
     config = make_inputs(tmp_path)
     _create_resume_fixture(config)
     config.update(checkpoint_interval=1, output_policy="resume")
-    Path(config["dataset_path"]).write_text('{"text":"changed"}\\n', encoding="utf-8")
+    Path(config["dataset_path"]).write_text('{"text":"changed"}\n', encoding="utf-8")
 
     with pytest.raises(ValueError, match="dataset contents"):
         fine_tuning.validate_config(config)
