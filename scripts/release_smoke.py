@@ -400,9 +400,9 @@ def inspect(root: Path) -> dict[str, Any]:
     warnings: list[str] = []
     required = [
         "pyproject.toml", "axiom/version.py", "ROADMAP.md", "src/App.tsx",
-        "src/api/client.ts", "src/components/ApiPlayground.tsx", "src/components/RuntimeConnectorPanel.tsx", "src/components/AgentProfiles.tsx", "src/components/LocalInferencePanel.tsx", "src/components/RuntimeTracePanel.tsx", "src/components/EngineTelemetryMonitor.tsx", "src/styles.css",
-        "axiom/api/server.py", "axiom/api/workspace.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/runtime_traces.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/core/engine_fabric_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "scripts/release_smoke.py",
-        "tests/test_release_smoke.py", "tests/test_ollama_service.py", "tests/test_ollama_service_api.py", "tests/test_ollama_model_operations.py", "tests/test_cli_inference.py", "tests/test_axiom_engine.py", "tests/test_axiom_engine_api.py", "tests/test_axiom_engine_cli.py", "tests/test_native_engine.py", "e2e/axiom-engine.spec.ts", "e2e/helpers/auth.ts", "e2e/modules.spec.ts", "e2e/workflows.spec.ts", "e2e/evaluation.spec.ts",
+        "src/api/client.ts", "src/components/ApiPlayground.tsx", "src/components/RuntimeConnectorPanel.tsx", "src/components/AgentProfiles.tsx", "src/components/LocalInferencePanel.tsx", "src/components/RuntimeTracePanel.tsx", "src/components/EngineTelemetryMonitor.tsx", "src/components/LocalAxiomEnginePanel.tsx", "src/components/ModelStudioPanel.tsx", "src/styles.css",
+        "axiom/api/server.py", "axiom/api/workspace.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/api/model_studio.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/model_studio.py", "axiom/core/runtime_traces.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/core/engine_fabric_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "axiom/cli/model_studio.py", "scripts/release_smoke.py",
+        "tests/test_release_smoke.py", "tests/test_ollama_service.py", "tests/test_ollama_service_api.py", "tests/test_ollama_model_operations.py", "tests/test_cli_inference.py", "tests/test_axiom_engine.py", "tests/test_axiom_engine_api.py", "tests/test_axiom_engine_cli.py", "tests/test_native_engine.py", "tests/test_model_studio.py", "tests/test_cli_model_studio_jobs.py", "e2e/axiom-engine.spec.ts", "e2e/helpers/auth.ts", "e2e/modules.spec.ts", "e2e/workflows.spec.ts", "e2e/evaluation.spec.ts",
         "e2e/model-registry-filters.spec.ts", "e2e/ollama-service.spec.ts", "e2e/inference-benchmark.spec.ts", "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/axiom-engine.spec.ts", "tests/test_workspace_model_registry_filters.py", "tests/test_workflow_store_pagination.py", "tests/test_workflow_api_pagination.py", "tests/test_workflow_cli.py",
         "tests/test_model_compatibility.py", "tests/test_inference_benchmark.py", "tests/test_inference_benchmark_api.py", "tests/test_runtime_traces.py", "tests/test_runtime_traces_api.py", "tests/test_runtime_discovery.py", "tests/test_runtime_discovery_api.py", "tests/test_agent_profiles.py", "tests/test_agent_profiles_api.py", "tests/test_agent_profiles_cli.py", "tests/test_engine_fabric_profiles.py", "tests/test_engine_fabric_profiles_api.py", "tests/test_engine_fabric_profiles_cli.py", "e2e/api-playground.spec.ts", "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts", "e2e/engine-fabric.spec.ts",
         "docs/Runtime-Discovery.md", "docs/Agent-Profiles.md", "docs/Api-Playground.md", "docs/Inference-Benchmarking.md", "docs/Local-Engine.md", "docs/Engine-Fabric.md", ".github/workflows/quality-gates.yml", ".github/workflows/nightly-build.yml",
@@ -501,6 +501,88 @@ def inspect(root: Path) -> dict[str, Any]:
     engine_panel = (root / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
     engine_e2e = (root / "e2e/axiom-engine.spec.ts").read_text(encoding="utf-8")
     failures.extend(engine_security_and_lifecycle_issues(engine_source, native_source, engine_api, client, engine_panel, engine_e2e))
+    native_model_studio = (root / "axiom/core/model_studio.py").read_text(encoding="utf-8")
+    native_model_studio_api = (root / "axiom/api/model_studio.py").read_text(encoding="utf-8")
+    native_model_studio_cli = (root / "axiom/cli/model_studio.py").read_text(encoding="utf-8")
+    native_model_studio_panel = (root / "src/components/ModelStudioPanel.tsx").read_text(encoding="utf-8")
+    native_engine_panel = (root / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
+    native_engine_cli = (root / "axiom/cli/engine.py").read_text(encoding="utf-8")
+    native_engine_docs = (root / "docs/Local-Engine.md").read_text(encoding="utf-8")
+    native_model_studio_tests = (root / "tests/test_model_studio.py").read_text(encoding="utf-8")
+    native_model_studio_cli_tests = (root / "tests/test_cli_model_studio_jobs.py").read_text(encoding="utf-8")
+    native_engine_api_tests = (root / "tests/test_axiom_engine_api.py").read_text(encoding="utf-8")
+    native_engine_tests = (root / "tests/test_native_engine.py").read_text(encoding="utf-8")
+    native_engine_cli_tests = (root / "tests/test_axiom_engine_cli.py").read_text(encoding="utf-8")
+    native_engine_e2e = (root / "e2e/axiom-engine.spec.ts").read_text(encoding="utf-8")
+    native_model_studio_e2e = (root / "e2e/model-studio.spec.ts").read_text(encoding="utf-8")
+
+    native_readiness_contracts = (
+        ("dependency readiness", engine_source, (
+            'minimum_versions = {"torch": "2.2.0", "tokenizers": "0.19.0", "safetensors": "0.4.0"}',
+            '"ready": ready', '"packages": packages', '"versions": versions', '"minimum_versions": minimum_versions',
+            '"architecture": _LOADED_ARCHITECTURE', '"loaded_device":', '"devices": devices',
+            '"recommended_device": recommended_device', '"remote_code": False',
+            '"supported_model_types": ["llama", "mistral", "qwen2", "qwen3"]',
+        )),
+        ("explicit device selection", engine_source, (
+            'choices = {"auto", "cpu", "cuda", "rocm", "mps", "xpu"}',
+            "def _resolve_execution_device(", "torch_name = \"cuda\" if selected[\"id\"] == \"rocm\" else selected[\"id\"]",
+        )),
+        ("staged public native model acquisition", native_model_studio, (
+            "def pull_native_model(", 'staging = root / f".{model_name}.', "os.replace(staging, target)",
+            "on_progress=on_progress", "cancel_event=cancel_event", '"remote_code_executed": False',
+            "NativeLlamaConfig.from_mapping(config)", "_MAX_NATIVE_MODEL_BYTES",
+        )),
+        ("Model Studio API", native_model_studio_api, (
+            'Literal["pull", "pull_native", "install_gguf", "convert_gguf"]',
+            '@router.post("/jobs", status_code=202)', "studio.start_job(request.model_dump())",
+            '@router.post("/jobs/{job_id}/cancel")',
+        )),
+        ("Model Studio CLI", native_model_studio_cli, (
+            '@studio_app.command("pull-native")', "studio.pull_native_model(",
+            "cancellable_byte_progress", "cancel_event=cancel_event", "progress=progress",
+        )),
+        ("Model Studio GUI", native_model_studio_panel, (
+            "Pull a model for AXIOM Native Engine", 'operation:"pull_native"',
+            "Pull native checkpoint", "job.progress_bytes", "Cancel operation",
+        )),
+        ("native Runtime GUI", native_engine_panel, (
+            'aria-label="Execution device"', "status?.devices", "status?.recommended_device",
+            "GENERATED ON THIS MACHINE", "LOCAL ONLY",
+        )),
+        ("native model and execution docs", native_engine_docs, (
+            "stages downloads before publishing", "public Llama/Mistral/Qwen2/Qwen3 safetensors",
+            "CPU, NVIDIA CUDA, AMD ROCm, Apple Metal/MPS, and Intel XPU",
+            "remote model code", "does not call Transformers model.generate",
+        )),
+        ("native architecture regression tests", native_engine_tests, (
+            "test_native_config_accepts_llama_mistral_qwen2_and_qwen3",
+            "test_dynamic_ntk_rope_scaling_extends_context_and_matches_frequency_formula",
+            "test_native_config_supports_yarn_rope_scaling_formula",
+            "test_native_grouped_query_attention_matches_expanded_reference",
+            "test_native_generate_batch_bounds_same_length_microbatches_and_preserves_order",
+        )),
+        ("native pull core/API tests", native_model_studio_tests, (
+            "test_native_hub_pull_installs_only_supported_safetensors_assets",
+            "test_native_hub_pull_rejects_unsupported_architecture_before_weights",
+        )),
+        ("native pull CLI progress/cancellation tests", native_model_studio_cli_tests, (
+            "test_model_studio_native_download_receives_progress_and_cancel_callbacks",
+            "test_model_studio_native_download_reports_cooperative_cancel",
+        )),
+        ("native engine API/CLI pull tests", native_engine_api_tests + native_engine_cli_tests, (
+            "test_native_engine_pull_endpoint_starts_model_studio_job",
+            "test_engine_pull_downloads_native_model_for_axiom_runtime",
+        )),
+        ("native GUI/browser acquisition coverage", native_model_studio_e2e + native_engine_e2e, (
+            "Pull native checkpoint", "operation: \"pull_native\"",
+            "aria-label=\\\"Execution device\\\"",
+        )),
+    )
+    for label, source, tokens in native_readiness_contracts:
+        for token in tokens:
+            if token not in source:
+                failures.append(f"R087 native-engine {label} contract is missing: {token}")
     cli_main_source = (root / "axiom/cli/main.py").read_text(encoding="utf-8")
     cli_extended_source = (root / "axiom/cli/extended.py").read_text(encoding="utf-8")
     cli_json_tests = (root / "tests/test_cli_json.py").read_text(encoding="utf-8")
