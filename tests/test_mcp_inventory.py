@@ -1,0 +1,181 @@
+from __future__ import annotations
+
+import asyncio
+from types import SimpleNamespace
+
+import pytest
+
+from axiom.core.integrations import AgentIntegration, IntegrationRegistry, IntegrationType
+from axiom.core import mcp_inventory
+
+
+def _add_server(command: str = 'python -u -m example.server --config "private path.json"') -> None:
+    IntegrationRegistry().add(
+        AgentIntegration(
+            name="Local MCP",
+            type=IntegrationType.MCP,
+            command=command,
+            description="Test MCP process",
+        )
+    )
+
+
+def test_inventory_is_passive_bounded_and_only_lists_mcp_servers(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    registry = IntegrationRegistry()
+    registry.add(AgentIntegration("Local MCP", IntegrationType.MCP, command="python -m example"))
+    registry.add(AgentIntegration("Local CLI", IntegrationType.CLI, command="tool"))
+    registry.add(AgentIntegration("Remote API", IntegrationType.HTTP, url="https://example.invalid"))
+
+    result = mcp_inventory.list_mcp_servers()
+
+    assert result["total"] == 1
+    assert result["servers"] == [{
+        "name": "Local MCP",
+        "transport": "stdio",
+        "configured": True,
+        "executable": "python",
+        "argument_count": 2,
+        "connection_state": "not_inspected",
+    }]
+    assert "starts the registered process" in result["inspection_note"]
+    assert registry.path.exists()
+
+
+def test_inventory_does_not_create_metadata_when_registry_is_missing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    result = mcp_inventory.list_mcp_servers()
+
+    assert result["total"] == 0
+    assert not (tmp_path / ".axiom").exists()
+
+
+def test_inventory_redacts_command_arguments_and_marks_invalid_commands(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    IntegrationRegistry().add(
+        AgentIntegration("Bad quoting", IntegrationType.MCP, command='python "unterminated')
+    )
+
+    result = mcp_inventory.list_mcp_servers()
+
+    assert result["total"] == 1
+    assert result["servers"][0]["configured"] is False
+    assert result["servers"][0]["executable"] is None
+    assert "unterminated" not in str(result)
+
+
+def test_handshake_uses_stdio_without_shell_or_inherited_environment(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _add_server()
+    observed = {}
+
+    class FakeClient:
+        def __init__(self, transport, *, mode, read_timeout_seconds):
+            observed["transport"] = transport
+            observed["mode"] = mode
+            observed["read_timeout_seconds"] = read_timeout_seconds
+            self.protocol_version = "2025-11-25"
+            self.server_info = SimpleNamespace(name="Example MCP", version="2.4.1")
+            self.server_capabilities = SimpleNamespace(
+                tools=object(), resources=None, prompts=object(),
+                logging=None, completions=None,
+            )
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    def fake_stdio_client(parameters, *, errlog):
+        observed["command"] = parameters.command
+        observed["args"] = parameters.args
+        observed["env"] = parameters.env
+        observed["errlog"] = errlog
+        return object()
+
+    monkeypatch.setattr(mcp_inventory, "Client", FakeClient)
+    monkeypatch.setattr(mcp_inventory, "stdio_client", fake_stdio_client)
+
+    result = asyncio.run(mcp_inventory.inspect_mcp_server("local mcp"))
+
+    assert result["status"] == "ok"
+    assert result["transport"] == "stdio"
+    assert result["name"] == "Local MCP"
+    assert result["protocol_version"] == "2025-11-25"
+    assert result["server_name"] == "Example MCP"
+    assert result["server_version"] == "2.4.1"
+    assert result["capabilities"] == {
+        "tools": True, "resources": False, "prompts": True,
+        "logging": False, "completions": False,
+    }
+    assert result["tool_execution_performed"] is False
+    assert result["schemas_enumerated"] is False
+    assert observed["command"] == "python"
+    assert observed["args"] == ["-u", "-m", "example.server", "--config", "private path.json"]
+    assert observed["env"] is None
+    assert observed["mode"] == "auto"
+    assert observed["read_timeout_seconds"] == mcp_inventory.DEFAULT_HANDSHAKE_TIMEOUT_SECONDS
+    assert observed["errlog"] is not None
+
+
+def test_handshake_timeout_is_safe_and_never_returns_process_output(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _add_server()
+
+    class SlowClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            await asyncio.sleep(2)
+
+        async def __aexit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(mcp_inventory, "Client", SlowClient)
+    monkeypatch.setattr(mcp_inventory, "stdio_client", lambda *_args, **_kwargs: object())
+
+    result = asyncio.run(mcp_inventory.inspect_mcp_server("Local MCP", timeout_seconds=1))
+
+    assert result["status"] == "timeout"
+    assert result["error_code"] == "handshake_timeout"
+    assert result["tool_execution_performed"] is False
+    assert result["schemas_enumerated"] is False
+    assert "private path.json" not in str(result)
+
+
+def test_handshake_failures_do_not_disclose_command_or_exception_details(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _add_server()
+
+    class BrokenClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            raise RuntimeError("token=secret-value private path.json")
+
+    monkeypatch.setattr(mcp_inventory, "Client", BrokenClient)
+    monkeypatch.setattr(mcp_inventory, "stdio_client", lambda *_args, **_kwargs: object())
+
+    result = asyncio.run(mcp_inventory.inspect_mcp_server("Local MCP"))
+
+    assert result["status"] == "error"
+    assert result["error_code"] == "handshake_failed"
+    assert "secret-value" not in str(result)
+    assert "private path.json" not in str(result)
+
+
+def test_handshake_rejects_unknown_server_and_invalid_timeout(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _add_server()
+
+    with pytest.raises(mcp_inventory.McpInventoryError) as missing:
+        asyncio.run(mcp_inventory.inspect_mcp_server("unknown"))
+    assert missing.value.code == "not_found"
+
+    with pytest.raises(mcp_inventory.McpInventoryError) as invalid_timeout:
+        asyncio.run(mcp_inventory.inspect_mcp_server("Local MCP", timeout_seconds=30))
+    assert invalid_timeout.value.code == "invalid_timeout"
