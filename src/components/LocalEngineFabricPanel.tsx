@@ -37,6 +37,7 @@ export default function LocalEngineFabricPanel() {
   const [connectionVerified, setConnectionVerified] = useState(false);
 
   const refresh = async (nextProfile = profile) => {
+    setConnectionVerified(false);
     setLoading(true);
     setError("");
     try {
@@ -203,7 +204,7 @@ export default function LocalEngineFabricPanel() {
     setResult(null);
     setConnectionVerified(false);
     setBenchmarkPreflight(null);
-    setError("Profile loaded. Connect verifies the local health and exact model inventory before dispatch.");
+    setError("");
   };
 
   const connectConnectorProfile = async () => {
@@ -336,7 +337,7 @@ export default function LocalEngineFabricPanel() {
       <div className="two-column-grid">
         <label className="field">
           <span className="field-label-row"><span>Saved Engine Fabric profile</span></span>
-          <select aria-label="Saved Engine Fabric profile" value={selectedProfileId} onChange={(event) => setSelectedProfileId(event.target.value)}>
+          <select aria-label="Saved Engine Fabric profile" value={selectedProfileId} onChange={(event) => { setSelectedProfileId(event.target.value); setConnectionVerified(false); setResult(null); }}>
             <option value="">Choose a saved local profile</option>
             {savedProfiles.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.backend_id} · {item.model}</option>)}
           </select>
@@ -408,12 +409,12 @@ export default function LocalEngineFabricPanel() {
             <small>Automatic routing stays local and only fails over to ready services advertising the exact same model ID.</small>
           </label>
           {routingMode === "selected" && <label className="field"><span className="field-label-row"><span>Local engine</span></span>
-            <select aria-label="Local engine" value={selectedBackend} onChange={(event) => { const id = event.target.value; setSelectedBackend(id); setResult(null); const target = report?.backends.find((item) => item.id === id); setModel(target?.models[0] ?? ""); }} disabled={loading || running}>
+            <select aria-label="Local engine" value={selectedBackend} onChange={(event) => { const id = event.target.value; setSelectedBackend(id); setConnectionVerified(false); setResult(null); const target = report?.backends.find((item) => item.id === id); setModel(target?.models[0] ?? ""); }} disabled={loading || running}>
               {choices.map((item) => <option key={item.id} value={item.id}>{item.name} — {formatStatus(item.status)}</option>)}
             </select>
           </label>}
           <label className="field"><span className="field-label-row"><span>Model ID</span></span>
-            <input list="axiom-fabric-model-options" value={model} onChange={(event) => setModel(event.target.value)} maxLength={120} required placeholder={routingMode === "auto" ? "Exact model ID shared by matching local services" : "Model ID reported by the selected local server"} disabled={running || (routingMode === "selected" && (!selected || selected.status !== "ready"))} />
+            <input list="axiom-fabric-model-options" value={model} onChange={(event) => { setModel(event.target.value); setConnectionVerified(false); }} maxLength={120} required placeholder={routingMode === "auto" ? "Exact model ID shared by matching local services" : "Model ID reported by the selected local server"} disabled={running || (routingMode === "selected" && (!selected || selected.status !== "ready"))} />
             <datalist id="axiom-fabric-model-options">{modelOptions.map((name) => <option key={name} value={name} />)}</datalist>
             <small>{routingMode === "auto" ? "Pick an ID shared by a ready local service; model names do not guarantee identical weights across engines." : selected?.status === "ready" ? "Choose an ID from this service or enter its exact configured alias." : "Start the selected service and refresh discovery to enable local chat."}</small>
           </label>
