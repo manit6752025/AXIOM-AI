@@ -420,6 +420,9 @@ def test_schema_inspection_timeout_returns_no_child_output(tmp_path, monkeypatch
         async def __aenter__(self):
             await asyncio.sleep(2)
 
+        async def __aexit__(self, *_args):
+            return None
+
     monkeypatch.setattr(mcp_inventory, "Client", SlowClient)
     monkeypatch.setattr(mcp_inventory, "stdio_client", lambda *_args, **_kwargs: object())
 
