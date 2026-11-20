@@ -153,6 +153,15 @@ class IntegrationRegistry:
             if not self.path.exists():
                 atomic_write_text(self.path, "[]\n")
 
+    def _ensure_safe_registry_path(self) -> None:
+        """Reject symlinked or non-regular registry paths before metadata writes."""
+        if self.root.is_symlink() or self.path.is_symlink() or self.lock_file.is_symlink():
+            raise ValueError("Integration registry path must not be a symbolic link.")
+        if not self.root.exists() or not self.root.is_dir():
+            raise LookupError("Integration registry does not exist.")
+        if not self.path.exists() or not self.path.is_file():
+            raise LookupError("Integration registry file does not exist.")
+
     def _read(self) -> list[AgentIntegration]:
         if not self.path.exists():
             return []
@@ -233,8 +242,7 @@ class IntegrationRegistry:
             "owner_type": owner_type,
             "owner_label": owner_label,
         }
-        if not self.path.exists():
-            raise LookupError(f"MCP server not found: {name}")
+        self._ensure_safe_registry_path()
         with file_lock(self.lock_file):
             integrations = self._read()
             updated: AgentIntegration | None = None
@@ -271,6 +279,7 @@ class IntegrationRegistry:
             "last_inspected_at": last_inspected_at,
             "last_connection_error": last_connection_error,
         }
+        self._ensure_safe_registry_path()
         with file_lock(self.lock_file):
             integrations = self._read()
             updated: AgentIntegration | None = None
