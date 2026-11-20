@@ -468,11 +468,9 @@ def test_mcp_tool_invocation_is_denied_until_explicit_profile_grant(tmp_path, mo
     assert result["name"] == "AXIOM"
     assert result["version"]
 
+    journal_path = tmp_path / ".axiom" / "security-events.json"
     decisions = [
-        event for event in ToolPermissionStore().workspace_root.joinpath(".axiom", "security-events.json").read_text(encoding="utf-8")
-        and __import__("json").loads(
-            ToolPermissionStore().workspace_root.joinpath(".axiom", "security-events.json").read_text(encoding="utf-8")
-        )["events"]
+        event for event in json.loads(journal_path.read_text(encoding="utf-8"))["events"]
         if event["event_type"] == "mcp.tool.decision" and event["tool_name"] == "axiom_info"
     ]
     assert [event["decision"] for event in decisions] == ["denied", "allowed"]
