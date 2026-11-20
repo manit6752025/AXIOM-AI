@@ -118,7 +118,11 @@ export default function LocalFineTuningPanel() {
   };
 
   const busy = Boolean(job && activeStates.has(job.status));
-  const canStart = Boolean(runtime?.can_start && !busy && !starting && modelPath.trim() && datasetPath.trim() && outputDir.trim());
+  const checkpointControlsValid = Number.isInteger(Number(checkpointInterval))
+    && Number(checkpointInterval) >= 0
+    && Number(checkpointInterval) <= 1000
+    && (outputPolicy !== "resume" || Number(checkpointInterval) > 0);
+  const canStart = Boolean(runtime?.can_start && !busy && !starting && checkpointControlsValid && modelPath.trim() && datasetPath.trim() && outputDir.trim());
 
   return <section className="surface local-finetuning-panel" aria-label="Local LoRA fine-tuning">
     <div className="surface-head">
