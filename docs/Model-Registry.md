@@ -6,7 +6,11 @@ The Control Center's **Models** page reads from the local AXIOM model registry. 
 
 Each registry record supports a stable ID, display name, source or local path, format,
 parameter metadata, quantization, architecture, licence, tags, favorite status,
-optional SHA-256 content digest, and optional `size_bytes`. Weight size is the
+optional SHA-256 content digest, optional `size_bytes`, and workspace labels.
+Workspace labels are separate from classification tags: a model may be tagged
+`chat` and labelled `production` or `team-a` without mixing those namespaces.
+Up to 32 workspace labels are accepted, each a non-empty string of at most 40
+characters. Weight size is the
 combined weight-file size in bytes when known; it is metadata, not a live disk
 measurement. Discovering and inspecting a local model folder pre-fills the size
 from the files found during that bounded inspection. Manual registration can
@@ -22,7 +26,8 @@ candidate record before writing it.
 The Models page displays known sizes and exposes the size and digest fields in
 the registration form. The CLI accepts `--size-bytes` for both
 `axiom model add` and `axiom model update`; `axiom model list` displays
-the stored byte count. These operations update registry metadata only and do
+the stored byte count. Repeat `--workspace-label` when adding/updating models;
+`--clear-workspace-labels` explicitly clears the separate workspace labels. These operations update registry metadata only and do
 not hash, move, download, or rewrite model weights.
 
 ## Duplicate protection
@@ -42,7 +47,7 @@ metadata available for correction.
 
 The Models page provides server-side inventory controls:
 
-- **Search metadata** performs a case-insensitive substring search across name, source, format, parameter metadata, quantization, architecture, licence, and tags.
+- **Search metadata** performs a case-insensitive substring search across name, source, format, parameter metadata, quantization, architecture, licence, classification tags, and workspace labels.
 - **Exact format** matches the format label case-insensitively, such as gguf or safetensors.
 - **Exact tag** matches an entire tag label case-insensitively; it does not match a partial tag.
 - **Favorites only** limits results to records marked as favorites.
