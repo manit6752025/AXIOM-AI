@@ -1,6 +1,6 @@
 # AXIOM Model Registry
 
-The Control Center's **Models** page reads from the local AXIOM model registry. Registry actions operate on metadata; removing a registry record does not delete the model's weight files.
+The Control Center's **Models** page reads from the local AXIOM model registry. Registry actions operate on metadata; removing a registry record does not delete the model's weight files. The CLI requires confirmation for removal: interactive users are prompted with a safe default of **No**, while scripted or JSON use must pass `--yes`. The JSON response explicitly reports `"weights_deleted": false`.
 
 ## Registered metadata and validation
 

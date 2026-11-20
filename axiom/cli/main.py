@@ -1352,9 +1352,29 @@ def model_import(
 @model_app.command("remove")
 def model_remove(
     model_id: str,
+    yes: bool = typer.Option(False, "--yes", "-y", help="Confirm removal without prompting."),
     json_output: bool = typer.Option(False, "--json", help="Emit the removed record as JSON."),
 ) -> None:
-    """Remove one model record by its stable registry ID."""
+    """Remove registry metadata only; never delete model weight files."""
+    if not yes:
+        message = "Model removal requires explicit confirmation; pass --yes for scripted removal."
+        if json_output:
+            _cli_command_error(
+                message,
+                code="model_remove_confirmation_required",
+                json_output=True,
+                legacy_payload={"schema_version": 1, "error": {
+                    "code": "model_remove_confirmation_required",
+                    "message": message,
+                }},
+            )
+        if not safe_confirm(
+            f"Remove registry metadata for model {model_id}? Model weight files will be left untouched",
+            default=False,
+        ):
+            console.print("[yellow]Cancelled. Registry metadata was not changed.[/yellow]")
+            return
+
     registry = ModelRegistry()
     try:
         removed = registry.remove(model_id)
@@ -1368,11 +1388,19 @@ def model_remove(
             "No registered model has that ID.", code="model_not_found", json_output=json_output,
             legacy_payload={"schema_version": 1, "error": {"code": "model_not_found", "message": "No registered model has that ID."}},
         )
-    payload = {"schema_version": 1, "removed": True, "model": removed.to_dict()}
+    payload = {
+        "schema_version": 1,
+        "removed": True,
+        "weights_deleted": False,
+        "model": removed.to_dict(),
+    }
     if json_output:
         typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     else:
-        console.print(f"[green]✓[/green] Removed model: {removed.name} ({removed.id})")
+        console.print(
+            f"[green]✓[/green] Removed registry metadata: {removed.name} ({removed.id}). "
+            "[dim]Model weight files were left untouched.[/dim]"
+        )
 
 
 @model_app.command("favorite")
