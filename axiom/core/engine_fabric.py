@@ -254,7 +254,7 @@ def benchmark_adapter_requirements(backend_id: str) -> dict[str, Any]:
     """Describe the exact runtime, model inventory and request contract for a benchmark adapter."""
     if backend_id == "axiom-native":
         runtime = {"kind": "in_process", "component": "AXIOM Native Engine", "readiness_evidence": "Native runtime dependencies are ready and a uniquely named trusted local model is discoverable.", "endpoint": None, "inventory_route": "AXIOM trusted model roots (native model discovery)"}
-        model = {"selection": "exact_model_id", "inventory_source": "AXIOM native model discovery under configured trusted roots", "supported_formats": ["safetensors", "supported dense GGUF"], "must_be_discoverable": True, "notes": "Model aliases must be unique; arbitrary filesystem paths are not accepted as model IDs."}
+        model = {"selection": "exact_model_id", "inventory_source": "AXIOM native model discovery under configured trusted roots", "supported_formats": ["Floating-point safetensors"], "must_be_discoverable": True, "notes": "Model aliases must be unique; arbitrary filesystem paths are not accepted as model IDs."}
         chat_route = "in-process native chat"
     else:
         definition = _BACKEND_BY_ID.get(backend_id)
