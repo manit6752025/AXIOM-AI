@@ -233,7 +233,7 @@ def test_doctor_json_reports_dependency_versions_and_schema(tmp_path: Path):
 
 
 def test_security_audit_json_reports_checks_without_secrets(tmp_path: Path, monkeypatch):
-    (tmp_path / "axiom.yaml").write_text("project:\\n  name: security-cli\\n", encoding="utf-8")
+    (tmp_path / "axiom.yaml").write_text("project:\n  name: security-cli\n", encoding="utf-8")
     monkeypatch.delenv("AXIOM_API_READ_TOKEN", raising=False)
     monkeypatch.delenv("AXIOM_API_WRITE_TOKEN", raising=False)
     monkeypatch.delenv("AXIOM_OPENAI_API_TOKEN", raising=False)
