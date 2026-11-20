@@ -322,9 +322,10 @@ experiment history, account databases or browser storage. Restart AXIOM after
 installation. `--check` never installs.
 
 `axiom gui --refresh` is for source checkouts. It runs `npm run lint` then
-`npm run build`, reuses a healthy GUI server already bound to the configured
-port, and opens a cache-busted URL on the same loopback origin. It does not
-clear localStorage or sessionStorage; use the same browser tab to retain
-sessionStorage. Keep the port stable (default 40507) to retain the origin's
-sign-in state. Packaged installs without frontend source should use a release
-update instead.
+`npm run build`. Existing Control Center tabs poll a no-cache build fingerprint
+and reload themselves when the new `index.html` is present. The reload keeps
+the same origin and browser tab, so localStorage and sessionStorage (including
+the active tab session) remain intact. A healthy GUI API already bound to the
+configured port is reused; no second API process or duplicate tab is needed.
+Keep the port stable (default 40507) to retain the origin's sign-in state.
+Packaged installs without frontend source should use a release update instead.

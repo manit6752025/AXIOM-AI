@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+import axiom.api.server as server_module
 from axiom.api.server import _required_api_scope, create_app
 
 
@@ -132,3 +133,17 @@ def test_same_origin_control_center_remains_available_with_scopes_enabled(tmp_pa
             },
         )
         assert response.status_code == 200
+
+
+def test_ui_build_fingerprint_is_public_and_not_cacheable(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    webui = tmp_path / "axiom" / "webui"
+    webui.mkdir(parents=True)
+    (webui / "index.html").write_text("<html>AXIOM</html>", encoding="utf-8")
+    monkeypatch.setattr(server_module, "__file__", str(tmp_path / "axiom" / "api" / "server.py"))
+    with TestClient(create_app()) as client:
+        response = client.get("/api/ui/build")
+    assert response.status_code == 200, response.text
+    assert len(response.json()["fingerprint"]) == 64
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert response.headers["pragma"] == "no-cache"

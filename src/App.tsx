@@ -757,6 +757,39 @@ function App() {
   useEffect(() => installFrontendErrorHandlers(), []);
 
   useEffect(() => {
+    let baseline: string | null = null;
+    let checking = false;
+    let stopped = false;
+    const inspectBuild = async () => {
+      if (stopped || checking || document.visibilityState === "hidden") return;
+      checking = true;
+      try {
+        const latest = await axiomApi.uiBuildFingerprint();
+        if (stopped) return;
+        if (baseline === null) {
+          baseline = latest.fingerprint;
+        } else if (latest.fingerprint !== baseline) {
+          stopped = true;
+          // A same-origin reload preserves localStorage and this tab's sessionStorage.
+          window.location.reload();
+        }
+      } catch {
+        // Older packaged servers and temporarily restarting APIs simply skip a poll.
+      } finally {
+        checking = false;
+      }
+    };
+    const interval = window.setInterval(() => void inspectBuild(), 2_000);
+    document.addEventListener("visibilitychange", inspectBuild);
+    void inspectBuild();
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", inspectBuild);
+    };
+  }, []);
+
+  useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
     document.documentElement.dataset.density = preferences.density;

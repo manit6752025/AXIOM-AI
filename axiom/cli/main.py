@@ -717,11 +717,9 @@ def start_gui(
     except OSError as exc:
         listener.close()
         if refresh and _existing_gui_is_ready(port):
-            ui_url = f"http://127.0.0.1:{port}/ui/?axiom_refresh={time.time_ns()}"
-            console.print(f"[bold green]AXIOM Control Center assets refreshed[/bold green]  {ui_url}")
-            console.print("Reused the running API and browser origin; local sign-in and browser storage were not cleared.")
-            if open_browser:
-                webbrowser.open(ui_url, new=0)
+            console.print("[bold green]AXIOM Control Center assets refreshed[/bold green]")
+            console.print("The open Control Center tab will detect the new build and reload itself on the same origin.")
+            console.print("Local sign-in, localStorage and the tab's sessionStorage are preserved.")
             return
         _cli_error(f"Could not start the local Control Center: {exc}")
 
@@ -763,12 +761,12 @@ def start_gui(
         _cli_error(f"The local API did not become ready. Check the AXIOM installation and try again (request ID {last_request_id}).")
 
     ui_url = f"{base_url}/ui/"
-    if refresh:
-        ui_url += f"?axiom_refresh={time.time_ns()}"
     console.print(f"[bold green]AXIOM Control Center ready[/bold green]  {ui_url}")
     console.print("The local API is bound to loopback. Press Ctrl-C to stop it.")
+    if refresh:
+        console.print("Open Control Center tabs reload automatically when the rebuilt UI is detected.")
     if open_browser:
-        webbrowser.open(ui_url, new=0 if refresh else 2)
+        webbrowser.open(ui_url, new=2)
 
     try:
         thread.join()
