@@ -68,6 +68,20 @@ def test_inventory_is_passive_bounded_and_only_lists_mcp_servers(tmp_path, monke
     assert registry.path.exists()
 
 
+def test_windows_command_parser_preserves_quoted_paths_and_backslashes():
+    command = '"C:\\Program Files\\AXIOM\\python.exe" -m sample.server --config "D:\\model data\\config.json"'
+
+    parts = mcp_inventory._command_parts(command, windows=True)
+
+    assert parts == [
+        "C:\\Program Files\\AXIOM\\python.exe",
+        "-m",
+        "sample.server",
+        "--config",
+        "D:\\model data\\config.json",
+    ]
+
+
 def test_inventory_does_not_create_metadata_when_registry_is_missing(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
