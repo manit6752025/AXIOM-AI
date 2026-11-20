@@ -43,6 +43,7 @@ from axiom.core.plan_reproducibility import (
     reproducible_plan_document,
 )
 from axiom.version import __version__
+from axiom.core.workspace_context import active_workspace_id
 from axiom.core.workspace_metadata import (
     ARCHIVE_FORMAT,
     MAX_ARCHIVE_BYTES,
@@ -51,8 +52,12 @@ from axiom.core.workspace_metadata import (
 )
 
 router = APIRouter(prefix="/api/workspace", tags=["workspace"])
-_events: deque[dict[str, Any]] = deque(maxlen=100)
+_events_by_workspace: dict[str, deque[dict[str, Any]]] = {}
 _events_lock = Lock()
+
+
+def _event_workspace_key() -> str:
+    return active_workspace_id() or "__default__"
 _allowed_actions = {
     "dashboard.module_details",
     "models.add",
@@ -269,7 +274,8 @@ def record_workspace_event(action: str, detail: str | None = None) -> dict[str, 
         "timestamp": datetime.now(UTC).isoformat(),
     }
     with _events_lock:
-        _events.appendleft(event)
+        buffer = _events_by_workspace.setdefault(_event_workspace_key(), deque(maxlen=100))
+        buffer.appendleft(event)
     return event
 
 
@@ -289,7 +295,7 @@ def workspace_events(
 ) -> dict[str, Any]:
     """Return a bounded, newest-first page of recent workspace events."""
     with _events_lock:
-        events = list(_events)
+        events = list(_events_by_workspace.get(_event_workspace_key(), ()))
     needle = search.strip().casefold()
     if needle:
         events = [

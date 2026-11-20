@@ -124,3 +124,32 @@ def test_trace_listing_rejects_invalid_offsets(offset: int) -> None:
 def test_trace_listing_rejects_overlong_search() -> None:
     with pytest.raises(ValueError, match="search"):
         list_runtime_traces(10, 0, "x" * 121)
+
+
+
+def test_runtime_trace_buffers_are_separate_for_each_workspace():
+    from pathlib import Path
+
+    from axiom.core.workspace_context import reset_workspace_context, set_workspace_context
+
+    first = set_workspace_context(Path("/workspace/one"), "ws-" + "1" * 32)
+    try:
+        clear_runtime_traces()
+        _record(10)
+    finally:
+        reset_workspace_context(first)
+
+    second = set_workspace_context(Path("/workspace/two"), "ws-" + "2" * 32)
+    try:
+        clear_runtime_traces()
+        _record(20)
+        assert [item["request_id"] for item in list_runtime_traces()["traces"]] == ["request-020"]
+    finally:
+        reset_workspace_context(second)
+
+    first = set_workspace_context(Path("/workspace/one"), "ws-" + "1" * 32)
+    try:
+        assert [item["request_id"] for item in list_runtime_traces()["traces"]] == ["request-010"]
+        clear_runtime_traces()
+    finally:
+        reset_workspace_context(first)

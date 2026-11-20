@@ -39,6 +39,7 @@ import {
   type RuntimeSnapshot,
   type TrainingPlan as TrainingPlanResult,
   type WorkspaceDataset,
+  type WorkspaceCatalog,
   type WorkspaceExperiment,
   type ReproduciblePlanSnapshot,
   type SavedPlanDiff,
@@ -1694,7 +1695,7 @@ function Sidebar({
           </div>
           <p id="workspace-dialog-description" className="quiet-note">
             {workspaceDialog === "create"
-              ? "Create an isolated local workspace with its own model registry, workflow history, datasets, evaluations and saved connector settings."
+              ? "Create an isolated local workspace with its own model registry, native model storage, datasets, evaluations, workflow history and saved connector settings. An already-running Ollama service remains a shared local runtime."
               : "Rename this workspace without moving or changing any of its local data."}
           </p>
           <label className="field">
@@ -3927,7 +3928,7 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
       <div className="workflow-deploy-row">
         <div className="workflow-deploy-copy">
           <b>Publish to another workspace</b>
-          <small>Copy the saved graph into a workspace with its own models, datasets and workflow history. Publishing does not run training or evaluation.</small>
+          <small>Copy the saved graph into a workspace with its own model registry, native model storage, datasets and workflow history. A running Ollama daemon remains shared. Publishing does not run training or evaluation.</small>
         </div>
         <label className="field workflow-deploy-target">
           <span className="field-label-row"><span>Target workspace</span></span>

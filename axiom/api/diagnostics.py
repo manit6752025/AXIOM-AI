@@ -25,7 +25,7 @@ def workspace_diagnostics() -> dict:
 def download_support_bundle() -> Response:
     """Download a support archive containing only privacy-safe metadata."""
     try:
-        content = create_support_bundle()
+        content = create_support_bundle(active_workspace_root())
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="The support bundle could not be generated safely.") from exc
     return Response(
