@@ -466,7 +466,7 @@ class SecurityEventStore:
                 "reviewer_identity_verified": False if review else None,
             })
         integrity = {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": self._loaded_schema_version,
             "valid": True,
             "event_count": len(events),
             "max_events": MAX_EVENTS,
