@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import errno
 import hashlib
 import io
 import os
@@ -102,6 +103,8 @@ def _safe_artifact_file(path: str | Path) -> tuple[Path, BinaryIO, int]:
     except ValueError:
         raise
     except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise ValueError("Release artifact path must not be a symbolic link.") from exc
         raise ValueError("Release artifact could not be opened safely.") from exc
 
 
