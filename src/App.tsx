@@ -49,7 +49,9 @@ import {
   type WorkspaceModel,
   type WorkspaceModelCompatibility,
   type WorkspaceWorkflow,
+  type WorkflowEdge,
   type WorkflowNode,
+  type WorkflowNodePortSchema,
   type WorkflowNodeType,
   type WorkflowDryRun,
   type WorkflowTemplate,
@@ -3297,6 +3299,88 @@ const workflowNodeLabels: Record<WorkflowNodeType, string> = {
   "report.export": "Export report",
 };
 
+const workflowNodePortSchemas: Record<WorkflowNodeType, WorkflowNodePortSchema> = {
+  "dataset.profile": {
+    inputs: [{ id: "artifact", data_type: "artifact", required: false }],
+    outputs: [
+      { id: "dataset", data_type: "dataset", required: false },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    required_any_inputs: [],
+  },
+  "model.inspect": {
+    inputs: [{ id: "artifact", data_type: "artifact", required: false }],
+    outputs: [
+      { id: "model", data_type: "model", required: false },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    required_any_inputs: [],
+  },
+  "training.plan": {
+    inputs: [
+      { id: "dataset", data_type: "dataset", required: true },
+      { id: "model", data_type: "model", required: true },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    outputs: [
+      { id: "plan", data_type: "plan", required: false },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    required_any_inputs: [],
+  },
+  "evaluation.run": {
+    inputs: [
+      { id: "plan", data_type: "plan", required: true },
+      { id: "dataset", data_type: "dataset", required: false },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    outputs: [
+      { id: "evaluation", data_type: "evaluation", required: false },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    required_any_inputs: [],
+  },
+  "report.export": {
+    inputs: [
+      { id: "dataset", data_type: "dataset", required: false },
+      { id: "plan", data_type: "plan", required: false },
+      { id: "evaluation", data_type: "evaluation", required: false },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    outputs: [
+      { id: "report", data_type: "report", required: false },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    required_any_inputs: ["dataset", "plan", "evaluation"],
+  },
+};
+
+function getWorkflowNodePorts(node: WorkflowNode): WorkflowNodePortSchema {
+  return node.ports ?? workflowNodePortSchemas[node.type];
+}
+
+function createWorkflowEdge(
+  source: WorkflowNode,
+  target: WorkflowNode,
+  allowGenericArtifact = false,
+): WorkflowEdge | null {
+  const sourcePorts = getWorkflowNodePorts(source).outputs;
+  const targetPorts = getWorkflowNodePorts(target).inputs;
+  const candidates = sourcePorts.flatMap((sourcePort) =>
+    targetPorts
+      .filter((targetPort) => targetPort.data_type === sourcePort.data_type)
+      .map((targetPort) => ({ sourcePort, targetPort })),
+  );
+  const selected = candidates.find((candidate) => candidate.sourcePort.data_type !== "artifact")
+    ?? (allowGenericArtifact ? candidates.find((candidate) => candidate.sourcePort.data_type === "artifact") : undefined);
+  return selected ? {
+    source: source.id,
+    target: target.id,
+    source_port: selected.sourcePort.id,
+    target_port: selected.targetPort.id,
+  } : null;
+}
+
 function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => void }) {
   const [workflows, setWorkflows] = useState<WorkspaceWorkflow[]>([]);
   const [workflowTotal, setWorkflowTotal] = useState(0);
@@ -3310,11 +3394,14 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
   const [templateId, setTemplateId] = useState("");
   const [name, setName] = useState("New local workflow");
   const [nodes, setNodes] = useState<WorkflowNode[]>([]);
-  const [edges, setEdges] = useState<Array<{ source: string; target: string }>>([]);
+  const [edges, setEdges] = useState<WorkflowEdge[]>([]);
   const [nodeType, setNodeType] = useState<WorkflowNodeType>("dataset.profile");
+  const [connectionSourceId, setConnectionSourceId] = useState("");
+  const [connectionTargetId, setConnectionTargetId] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [validation, setValidation] = useState("");
+  const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [dryRun, setDryRun] = useState<WorkflowDryRun | null>(null);
   const [dryRunBusy, setDryRunBusy] = useState(false);
@@ -3399,7 +3486,10 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
     setName("New local workflow");
     setNodes([]);
     setEdges([]);
+    setConnectionSourceId("");
+    setConnectionTargetId("");
     setValidation("");
+    setValidationWarnings([]);
     setError("");
     setDryRun(null);
   };
@@ -3411,7 +3501,10 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
     setName(selected.name);
     setNodes(selected.nodes);
     setEdges(selected.edges);
+    setConnectionSourceId(selected.nodes[0]?.id ?? "");
+    setConnectionTargetId(selected.nodes.at(-1)?.id ?? "");
     setValidation("");
+    setValidationWarnings([]);
     setError("");
     setDryRun(null);
   };
@@ -3421,9 +3514,12 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
     if (!template) return;
     setWorkflowId(null);
     setName(template.name);
-    setNodes(template.nodes.map((node) => ({ ...node })));
+    setNodes(template.nodes.map((node) => ({ ...node, ports: node.ports ?? workflowNodePortSchemas[node.type] })));
     setEdges(template.edges.map((edge) => ({ ...edge })));
+    setConnectionSourceId(template.nodes[0]?.id ?? "");
+    setConnectionTargetId(template.nodes.at(-1)?.id ?? "");
     setValidation("");
+    setValidationWarnings([]);
     setError("");
     setDryRun(null);
   };
@@ -3438,7 +3534,10 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
       setName(result.workflow.name);
       setNodes(result.workflow.nodes);
       setEdges(result.workflow.edges);
+      setConnectionSourceId(result.workflow.nodes[0]?.id ?? "");
+      setConnectionTargetId(result.workflow.nodes.at(-1)?.id ?? "");
       setValidation("Copied as a new revision-1 design");
+      setValidationWarnings([]);
       setDryRun(null);
       onNotify("Workflow duplicated locally.", "success");
       await refresh();
@@ -3452,18 +3551,79 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
   const addNode = () => {
     if (nodes.length >= 64) return;
     const id = `step-${crypto.randomUUID()}`;
-    const previous = nodes.at(-1);
-    setNodes((current) => [...current, { id, type: nodeType }]);
-    if (previous) setEdges((current) => [...current, { source: previous.id, target: id }]);
+    const node: WorkflowNode = { id, type: nodeType, ports: workflowNodePortSchemas[nodeType] };
+    const occupiedInputs = new Set<string>();
+    const autoConnections = nodes.flatMap((existing) => {
+      const edge = createWorkflowEdge(existing, node);
+      if (!edge || occupiedInputs.has(edge.target_port ?? "")) return [];
+      occupiedInputs.add(edge.target_port ?? "");
+      return [edge];
+    });
+    setNodes((current) => [...current, node]);
+    setEdges((current) => [...current, ...autoConnections]);
+    setConnectionSourceId((current) => current || nodes[0]?.id || id);
+    setConnectionTargetId(id);
     setValidation("");
+    setValidationWarnings([]);
+    setDryRun(null);
+  };
+
+  const addConnection = () => {
+    const source = nodes.find((node) => node.id === connectionSourceId);
+    const target = nodes.find((node) => node.id === connectionTargetId);
+    if (!source || !target) {
+      setError("Choose an existing source step and target step.");
+      return;
+    }
+    if (source.id === target.id) {
+      setError("A workflow step cannot connect to itself.");
+      return;
+    }
+    const edge = createWorkflowEdge(source, target, true);
+    if (!edge) {
+      setError("These steps do not expose compatible output and input ports.");
+      return;
+    }
+    if (edges.some((existing) =>
+      existing.source === edge.source
+      && existing.target === edge.target
+      && existing.source_port === edge.source_port
+      && existing.target_port === edge.target_port
+    )) {
+      setError("That port connection already exists.");
+      return;
+    }
+    if (edges.some((existing) => existing.target === edge.target && existing.target_port === edge.target_port)) {
+      setError(`Input ${edge.target_port} already has a connection.`);
+      return;
+    }
+    setEdges((current) => [...current, edge]);
+    setError("");
+    setValidation("");
+    setValidationWarnings([]);
+    setDryRun(null);
+  };
+
+  const removeConnection = (edge: WorkflowEdge) => {
+    setEdges((current) => current.filter((existing) => !(
+      existing.source === edge.source
+      && existing.target === edge.target
+      && existing.source_port === edge.source_port
+      && existing.target_port === edge.target_port
+    )));
+    setValidation("");
+    setValidationWarnings([]);
     setDryRun(null);
   };
 
   const removeNode = (id: string) => {
     const remaining = nodes.filter((node) => node.id !== id);
     setNodes(remaining);
-    setEdges(remaining.slice(1).map((node, index) => ({ source: remaining[index].id, target: node.id })));
+    setEdges((current) => current.filter((edge) => edge.source !== id && edge.target !== id));
+    if (connectionSourceId === id) setConnectionSourceId(remaining[0]?.id ?? "");
+    if (connectionTargetId === id) setConnectionTargetId(remaining.at(-1)?.id ?? "");
     setValidation("");
+    setValidationWarnings([]);
     setDryRun(null);
   };
 
@@ -3501,10 +3661,13 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
     setValidation("");
     try {
       const result = await axiomApi.validateWorkflow({ name, nodes, edges });
-      setValidation(`${result.node_count} steps · ${result.connection_count} connections · no cycles`);
+      const warnings = (result.missing_inputs ?? []).map((item) => `${item.node_id} · ${item.port_id}: ${item.reason}`);
+      setValidation(`${result.node_count} steps · ${result.connection_count} connections · no cycles${warnings.length ? ` · ${warnings.length} input warning(s)` : " · required inputs connected"}`);
+      setValidationWarnings(warnings);
       return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Workflow validation failed.");
+      setValidationWarnings([]);
       return false;
     }
   };
@@ -3563,12 +3726,55 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
           <label className="field"><span className="field-label-row"><span>Planned seed</span></span><input inputMode="numeric" value={dryRunSeed} onChange={(event) => { setDryRunSeed(event.target.value); setDryRun(null); }} maxLength={10} /></label>
         </div>
         <label className="workflow-autosave-toggle"><input type="checkbox" checked={autosaveEnabled} onChange={(event) => setAutosaveEnabled(event.target.checked)} /><span><b>Autosave selected workflow</b><small>Existing saved designs update locally 900 ms after an edit; new workflows still require Save workflow.</small></span></label>
-        {nodes.length ? <div className="workflow-canvas" aria-label="Workflow steps">{nodes.map((node, index) => <Fragment key={node.id}>
-          {index > 0 && <div className="workflow-connector" aria-hidden="true"><ArrowRight size={16} /></div>}
-          <div className="workflow-node"><span className="workflow-node-number">{String(index + 1).padStart(2, "0")}</span><b>{workflowNodeLabels[node.type]}</b><button type="button" className="workflow-node-remove" onClick={() => removeNode(node.id)} aria-label={`Remove ${workflowNodeLabels[node.type]} step`}><X size={13} /></button><small>{node.type}</small></div>
-        </Fragment>)}</div> : <EmptyState icon={GitBranch} title="Start with a workflow step" description="Add typed steps and the builder will connect them in order. The backend checks IDs, references, duplicates, size, and cycles." />}
+        {nodes.length ? <>
+          <div className="workflow-canvas" aria-label="Workflow graph nodes">
+            {nodes.map((node, index) => {
+              const ports = getWorkflowNodePorts(node);
+              return <div className="workflow-node" key={node.id}>
+                <div className="workflow-node-heading">
+                  <span className="workflow-node-number">{String(index + 1).padStart(2, "0")}</span>
+                  <b>{workflowNodeLabels[node.type]}</b>
+                  <button type="button" className="workflow-node-remove" onClick={() => removeNode(node.id)} aria-label={`Remove ${workflowNodeLabels[node.type]} step`}><X size={13} /></button>
+                </div>
+                <small className="workflow-node-id">{node.id} · {node.type}</small>
+                <div className="workflow-port-columns">
+                  <div><span className="workflow-port-heading">INPUTS</span>{ports.inputs.map((port) => <span className={`workflow-port ${port.required ? "required" : ""}`} key={port.id}>{port.id} · {port.data_type}{port.required ? " · required" : ""}</span>)}</div>
+                  <div><span className="workflow-port-heading">OUTPUTS</span>{ports.outputs.map((port) => <span className="workflow-port" key={port.id}>{port.id} · {port.data_type}</span>)}</div>
+                </div>
+              </div>;
+            })}
+          </div>
+          <div className="workflow-connection-controls">
+            <label className="field"><span className="field-label-row"><span>From step</span></span>
+              <select aria-label="Connection source" value={connectionSourceId} onChange={(event) => setConnectionSourceId(event.target.value)}>
+                <option value="">Choose source</option>
+                {nodes.map((node) => <option key={node.id} value={node.id}>{workflowNodeLabels[node.type]} · {node.id.slice(0, 8)}</option>)}
+              </select>
+            </label>
+            <label className="field"><span className="field-label-row"><span>To step</span></span>
+              <select aria-label="Connection target" value={connectionTargetId} onChange={(event) => setConnectionTargetId(event.target.value)}>
+                <option value="">Choose target</option>
+                {nodes.map((node) => <option key={node.id} value={node.id}>{workflowNodeLabels[node.type]} · {node.id.slice(0, 8)}</option>)}
+              </select>
+            </label>
+            <button type="button" className="button secondary-button" onClick={addConnection} disabled={nodes.length < 2 || saving}><GitBranch size={15} /> Add connection</button>
+          </div>
+          <div className="workflow-edge-list" aria-label="Workflow connections">
+            <div className="workflow-edge-list-heading">CONNECTIONS · {edges.length}</div>
+            {edges.length ? edges.map((edge, index) => {
+              const source = nodes.find((node) => node.id === edge.source);
+              const target = nodes.find((node) => node.id === edge.target);
+              return <div className="workflow-edge-row" key={`${edge.source}:${edge.source_port}:${edge.target}:${edge.target_port}:${index}`}>
+                <span><b>{source ? workflowNodeLabels[source.type] : edge.source}</b><small>{edge.source_port ?? "legacy output"}</small></span>
+                <ArrowRight size={15} aria-hidden="true" />
+                <span><b>{target ? workflowNodeLabels[target.type] : edge.target}</b><small>{edge.target_port ?? "legacy input"}</small></span>
+                <button type="button" className="workflow-node-remove" onClick={() => removeConnection(edge)} aria-label={`Remove connection from ${edge.source} to ${edge.target}`}><X size={13} /></button>
+              </div>;
+            }) : <p className="quiet-note">No connections yet. Add a compatible edge between two steps.</p>}
+          </div>
+        </> : <EmptyState icon={GitBranch} title="Start with a workflow step" description="Add typed steps, then connect their compatible ports. The backend validates port types, required inputs, duplicate links and cycles." />}
         {error && <InlineAlert tone="warning" role="alert">{error}</InlineAlert>}
-        {validation && <InlineAlert tone="success">{validation}</InlineAlert>}
+        {validation && <InlineAlert tone={validationWarnings.length ? "warning" : "success"}>{validation}{validationWarnings.length > 0 && <ul>{validationWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}</InlineAlert>}
         <div className="integration-form-actions">
           <button type="button" className="button secondary-button" onClick={() => void runDryRun()} disabled={!workflowId || workflowDirty || saving || dryRunBusy}>{dryRunBusy ? "Estimating…" : workflowDirty ? "Save to dry-run changes" : "Dry-run saved graph"}</button>
           <button type="button" className="button secondary-button" onClick={() => void validateGraph()} disabled={saving}>Validate graph</button>

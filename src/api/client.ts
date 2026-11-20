@@ -1031,8 +1031,27 @@ export type WorkflowNodeType =
   | "evaluation.run"
   | "report.export";
 
-export type WorkflowNode = { id: string; type: WorkflowNodeType };
-export type WorkflowEdge = { source: string; target: string };
+export type WorkflowPortDefinition = {
+  id: string;
+  data_type: string;
+  required: boolean;
+};
+export type WorkflowNodePortSchema = {
+  inputs: WorkflowPortDefinition[];
+  outputs: WorkflowPortDefinition[];
+  required_any_inputs: string[];
+};
+export type WorkflowNode = {
+  id: string;
+  type: WorkflowNodeType;
+  ports?: WorkflowNodePortSchema;
+};
+export type WorkflowEdge = {
+  source: string;
+  target: string;
+  source_port?: string;
+  target_port?: string;
+};
 export type WorkspaceWorkflowVersion = {
   revision: number;
   updated_at: string;

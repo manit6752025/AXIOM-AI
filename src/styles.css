@@ -278,13 +278,28 @@ code, kbd { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospac
 .workflow-version-list > div { display: grid; gap: 4px; padding: 9px 10px; border: 1px solid var(--line); background: var(--surface-alt); }
 .workflow-version-list b { color: var(--ink); font-size: 10px; }
 .workflow-version-list small { color: var(--faint); font-size: 9px; }
-.workflow-canvas { display: flex; align-items: center; gap: 12px; min-height: 150px; margin: 18px 0; padding: 16px; overflow-x: auto; border: 1px solid var(--line); background: var(--surface-alt); }
-.workflow-node { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 10px; min-width: 190px; padding: 13px; border: 1px solid var(--line); background: var(--surface); }
+.workflow-canvas { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); align-items: stretch; gap: 12px; min-height: 140px; margin: 18px 0; padding: 14px; border: 1px solid var(--line); background: var(--surface-alt); }
+.workflow-node { display: grid; align-content: start; gap: 9px; min-width: 0; padding: 12px; border: 1px solid var(--line); background: var(--surface); }
+.workflow-node-heading { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.workflow-node-id { color: var(--faint); font-size: 9px; overflow-wrap: anywhere; }
+.workflow-port-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.workflow-port-columns > div { display: grid; align-content: start; gap: 5px; min-width: 0; }
+.workflow-port-heading, .workflow-edge-list-heading { color: var(--muted); font-size: 8px; font-weight: 750; letter-spacing: .12em; }
+.workflow-port { padding: 4px 6px; border: 1px solid var(--line); color: var(--muted); font-size: 8px; overflow-wrap: anywhere; }
+.workflow-port.required { border-color: var(--warning); color: var(--ink); }
 .workflow-node-number { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 9px; font-weight: 750; }
 .workflow-node b { color: var(--ink); font-size: 10px; }
 .workflow-node small { grid-column: 2; color: var(--faint); font-size: 9px; }
 .workflow-node-remove { display: grid; width: 23px; height: 23px; place-items: center; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
 .workflow-node-remove:hover { border-color: var(--danger); color: var(--danger); }
+.workflow-connection-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: 10px; margin: 10px 0 16px; }
+.workflow-edge-list { display: grid; gap: 8px; margin: 12px 0 18px; }
+.workflow-edge-list-heading { margin-bottom: 2px; }
+.workflow-edge-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--line); background: var(--surface); }
+.workflow-edge-row > span { display: grid; gap: 3px; min-width: 0; }
+.workflow-edge-row b { color: var(--ink); font-size: 9px; }
+.workflow-edge-row small { color: var(--muted); font-size: 8px; overflow-wrap: anywhere; }
+.workflow-edge-row > svg { color: var(--accent); }
 .workflow-connector { display: grid; flex: 0 0 20px; place-items: center; color: var(--accent); }
 .workflow-list-item { width: 100%; text-align: left; cursor: pointer; }
 .workflow-list-item.selected { border-color: var(--accent); }
@@ -316,7 +331,11 @@ code, kbd { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospac
 .llm-client-panel .llm-message-role { color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: .12em; }
 .llm-client-panel .llm-message .local-inference-output { margin: 0; padding: 0; border: 0; background: transparent; color: var(--ink); font-size: 12px; line-height: 1.7; }
 .llm-client-panel .local-inference-output { white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (max-width: 720px) { .llm-client-panel .surface-head { align-items: flex-start; flex-wrap: wrap; } }
+@media (max-width: 720px) {
+  .llm-client-panel .surface-head { align-items: flex-start; flex-wrap: wrap; }
+  .workflow-connection-controls { grid-template-columns: minmax(0, 1fr); }
+  .workflow-edge-row { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto; gap: 6px; }
+}
 
 .two-column-grid, .mcp-layout, .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
 .two-column-grid > .surface, .mcp-layout > .surface { min-height: 300px; }
