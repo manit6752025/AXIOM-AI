@@ -214,3 +214,59 @@ export function AccessibleDialog({
     </div>
   );
 }
+
+
+type ConfirmationDialogProps = {
+  titleId: string;
+  descriptionId: string;
+  eyebrow?: string;
+  title: string;
+  description: string;
+  confirmLabel: string;
+  confirmTone?: "danger" | "primary";
+  cancelLabel?: string;
+  busyLabel?: string;
+  busy?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+};
+
+export function ConfirmationDialog({
+  titleId,
+  descriptionId,
+  eyebrow = "CONFIRM ACTION",
+  title,
+  description,
+  confirmLabel,
+  confirmTone = "danger",
+  cancelLabel = "Cancel",
+  busyLabel = "Working…",
+  busy = false,
+  onCancel,
+  onConfirm,
+}: ConfirmationDialogProps) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  return (
+    <AccessibleDialog
+      titleId={titleId}
+      descriptionId={descriptionId}
+      onClose={onCancel}
+      closeDisabled={busy}
+      initialFocusRef={cancelRef}
+    >
+      <div className="dialog-head">
+        <div>
+          <p className="eyebrow">{eyebrow}</p>
+          <h2 id={titleId}>{title}</h2>
+        </div>
+      </div>
+      <p id={descriptionId} className="quiet-note">{description}</p>
+      <div className="integration-form-actions">
+        <button ref={cancelRef} type="button" className="button secondary-button" onClick={onCancel} disabled={busy}>{cancelLabel}</button>
+        <button type="button" className={`button ${confirmTone === "danger" ? "danger-button" : "primary-button"}`} onClick={onConfirm} disabled={busy}>
+          {busy ? busyLabel : confirmLabel}
+        </button>
+      </div>
+    </AccessibleDialog>
+  );
+}

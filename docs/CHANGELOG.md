@@ -1,9 +1,9 @@
 # Changelog
 
-## Unreleased — bounded model and dataset inventory controls
+## Unreleased — consistent destructive-action confirmations
 
-- Added server-side model metadata search, exact format/tag and favorite filters, stable sorting (including numeric parameter sizes), and bounded pagination; dataset inventory supports server-side path search, stable pagination, and an explicit 5,000-entry scan cap.
-- Added browser-local model filter presets (up to 20, metadata-only), typed API coverage, and GUI query/persistence regression tests.
+- Added a shared accessible confirmation dialog and migrated model registry removal, saved-plan and evaluation-report deletion, and workspace metadata merge/replace. Confirmation starts with Cancel focused and disables dismissal while an operation is in flight.
+- Added browser coverage that cancellation makes no DELETE request and confirmation performs exactly one, plus an accessible archive-replace confirmation flow.
 
 ## Unreleased — global API status and loading feedback
 

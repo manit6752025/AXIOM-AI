@@ -13,6 +13,7 @@ import ModelStudioPanel from "./components/ModelStudioPanel";
 import LocalFineTuningPanel from "./components/LocalFineTuningPanel";
 import {
   AccessibleDialog,
+  ConfirmationDialog,
   DataTable,
   EmptyState,
   FormField as Field,
@@ -2342,7 +2343,7 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
       {error ? <InlineAlert tone="warning" role="alert">{error}</InlineAlert> : null}
       {loading ? <div className="loading-state" role="status">Loading model registry…</div> : models.length ? <><div className="module-list">{models.map((model) => <div className="module-row model-registry-row" key={model.id}><span className="module-icon"><BrainCircuit size={17} /></span><span className="module-copy"><b>{model.name}</b><small>{model.source} · {model.format}{model.parameters ? ` · ${model.parameters}` : ""}{model.quantization ? ` · ${model.quantization}` : ""}{model.architecture ? ` · ${model.architecture}` : ""}{model.license ? ` · ${model.license}` : ""}{model.tags?.length ? ` · ${model.tags.join(", ")}` : ""}</small></span><button type="button" className="icon-button" aria-label={`${model.favorite ? "Remove" : "Add"} ${model.name} ${model.favorite ? "favorite" : "to favorites"}`} title={model.favorite ? "Remove favorite" : "Add favorite"} onClick={() => void toggleFavorite(model)}><Star size={15} fill={model.favorite ? "currentColor" : "none"} /></button><button type="button" className="icon-button" aria-label={`Check hardware fit for ${model.name}`} title={compatibilityBusyId === model.id ? "Checking hardware fit…" : "Estimate hardware fit"} disabled={compatibilityBusyId === model.id} onClick={() => void inspectCompatibility(model)}><Gauge size={15} /></button><button type="button" className="icon-button danger-icon-button" aria-label={`Remove ${model.name} from registry`} title="Remove registry entry" onClick={() => setRemoving(model)}><Trash2 size={15} /></button></div>)}</div>{hasMore && <div className="pagination-actions"><button type="button" className="button secondary-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more models"}</button></div>}</> : <EmptyState icon={BrainCircuit} title="Registry is empty" description="Register model metadata here or use the CLI. Model files remain where they are." action={<CliReference command="axiom model add my-model local safetensors" />} />}
     </Surface>
-    {removing && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !removingBusy) setRemoving(null); }}><section className="dialog" role="dialog" aria-modal="true" aria-labelledby="remove-model-title"><div className="dialog-head"><div><p className="eyebrow">CONFIRM REGISTRY CHANGE</p><h2 id="remove-model-title">Remove {removing.name}?</h2></div><button type="button" className="icon-button" aria-label="Close confirmation" onClick={() => setRemoving(null)} disabled={removingBusy}><X size={16} /></button></div><p className="quiet-note">This removes only its AXIOM registry metadata. Local model weights will not be deleted.</p><div className="integration-form-actions"><button type="button" className="button secondary-button" onClick={() => setRemoving(null)} disabled={removingBusy}>Cancel</button><button type="button" className="button danger-button" onClick={() => void removeModel()} disabled={removingBusy}>{removingBusy ? "Removing…" : "Remove registry entry"}</button></div></section></div>}
+    {removing && <ConfirmationDialog titleId="remove-model-title" descriptionId="remove-model-description" eyebrow="CONFIRM REGISTRY CHANGE" title={`Remove ${removing.name}?`} description="This removes only its AXIOM registry metadata. Local model weights will not be deleted." confirmLabel="Remove registry entry" busyLabel="Removing…" busy={removingBusy} onCancel={() => setRemoving(null)} onConfirm={() => void removeModel()} />}
     <ModelStudioPanel />
   </FeaturePage>;
 }
@@ -3178,8 +3179,8 @@ function Evaluation({ onNotify }: { onNotify: (message: string, tone?: Tone) => 
     </Surface>
     <Callout tone="info" title="Precomputed outputs only">Evaluation scores compare existing reference and prediction text. AXIOM does not execute a model, and these text metrics are not a substitute for task-specific human review. Prediction-job provenance records paths and generation settings so you can identify the run later; it cannot guarantee exact reproduction if model files, runtime versions, or hardware change.</Callout>
     {editing && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setEditing(null); }}><section className="dialog" role="dialog" aria-modal="true" aria-labelledby="edit-experiment-title"><div className="dialog-head"><div><p className="eyebrow">METADATA ONLY</p><h2 id="edit-experiment-title">Edit {editing.name}</h2></div><button type="button" className="icon-button" aria-label="Close edit dialog" onClick={() => setEditing(null)} disabled={saving}><X size={16} /></button></div><p className="quiet-note">Editing does not change the saved hardware-aware plan snapshot.</p><label className="field"><span className="field-label-row"><span>Name</span></span><input value={editName} onChange={(event) => setEditName(event.target.value)} maxLength={120} /></label><label className="field"><span className="field-label-row"><span>Notes</span></span><textarea value={editNotes} onChange={(event) => setEditNotes(event.target.value)} maxLength={1000} rows={3} /></label><label className="field"><span className="field-label-row"><span>Tags, comma separated</span></span><input value={editTags} onChange={(event) => setEditTags(event.target.value)} maxLength={1400} placeholder="baseline, review" /></label><div className="integration-form-actions"><button type="button" className="button secondary-button" onClick={() => setEditing(null)} disabled={saving}>Cancel</button><button type="button" className="button primary-button" onClick={() => void saveMetadata()} disabled={saving || !editName.trim()}>{saving ? "Saving…" : "Save metadata"}</button></div></section></div>}
-    {deleting && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setDeleting(null); }}><section className="dialog" role="dialog" aria-modal="true" aria-labelledby="delete-experiment-title"><div className="dialog-head"><div><p className="eyebrow">CONFIRM DELETION</p><h2 id="delete-experiment-title">Delete {deleting.name}?</h2></div><button type="button" className="icon-button" aria-label="Close delete confirmation" onClick={() => setDeleting(null)} disabled={saving}><X size={16} /></button></div><p className="quiet-note">This removes the saved plan record only. No model, dataset, or run artifacts are deleted.</p><div className="integration-form-actions"><button type="button" className="button secondary-button" onClick={() => setDeleting(null)} disabled={saving}>Cancel</button><button type="button" className="button danger-button" onClick={() => void removeExperiment()} disabled={saving}>{saving ? "Deleting…" : "Delete plan record"}</button></div></section></div>}
-    {deletingRun && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setDeletingRun(null); }}><section className="dialog" role="dialog" aria-modal="true" aria-labelledby="delete-evaluation-title"><div className="dialog-head"><div><p className="eyebrow">CONFIRM DELETION</p><h2 id="delete-evaluation-title">Delete {deletingRun.name}?</h2></div><button type="button" className="icon-button" aria-label="Close delete confirmation" onClick={() => setDeletingRun(null)} disabled={saving}><X size={16} /></button></div><p className="quiet-note">This removes only the saved aggregate report. The source dataset is unchanged.</p><div className="integration-form-actions"><button type="button" className="button secondary-button" onClick={() => setDeletingRun(null)} disabled={saving}>Cancel</button><button type="button" className="button danger-button" onClick={() => void removeEvaluationRun()} disabled={saving}>{saving ? "Deleting…" : "Delete report"}</button></div></section></div>}
+    {deleting && <ConfirmationDialog titleId="delete-experiment-title" descriptionId="delete-experiment-description" eyebrow="CONFIRM DELETION" title={`Delete ${deleting.name}?`} description="This removes the saved plan record only. No model, dataset, or run artifacts are deleted." confirmLabel="Delete plan record" busyLabel="Deleting…" busy={saving} onCancel={() => setDeleting(null)} onConfirm={() => void removeExperiment()} />}
+    {deletingRun && <ConfirmationDialog titleId="delete-evaluation-title" descriptionId="delete-evaluation-description" eyebrow="CONFIRM DELETION" title={`Delete ${deletingRun.name}?`} description="This removes only the saved aggregate report. The source dataset is unchanged." confirmLabel="Delete report" busyLabel="Deleting…" busy={saving} onCancel={() => setDeletingRun(null)} onConfirm={() => void removeEvaluationRun()} />}
   </FeaturePage>;
 }
 
@@ -3986,6 +3987,7 @@ function SettingsPage({
   const [saved, setSaved] = useState(false);
   const [metadataBusy, setMetadataBusy] = useState(false);
   const [metadataReplace, setMetadataReplace] = useState(false);
+  const [pendingMetadataImport, setPendingMetadataImport] = useState<{ file: File; replace: boolean } | null>(null);
   const [metadataMessage, setMetadataMessage] = useState("");
   const [metadataError, setMetadataError] = useState("");
   const conflict = draft.lowPowerMode && draft.dashboardRefreshSeconds > 0;
@@ -4027,22 +4029,25 @@ function SettingsPage({
     }
   };
 
-  const importWorkspaceMetadata = async (file: File | null) => {
+  const importWorkspaceMetadata = (file: File | null) => {
     if (!file) return;
-    if (!window.confirm(
-      metadataReplace
-        ? "Replace the matching metadata collections in this workspace? Other files will not be changed."
-        : "Merge the metadata from this archive into this workspace? Existing records are preserved and conflicts are rejected.",
-    )) return;
+    setMetadataError("");
+    setPendingMetadataImport({ file, replace: metadataReplace });
+  };
+
+  const confirmWorkspaceMetadataImport = async () => {
+    if (!pendingMetadataImport) return;
     setMetadataBusy(true);
     setMetadataError("");
     setMetadataMessage("");
     try {
-      const result = await axiomApi.importWorkspaceMetadata(file, metadataReplace);
+      const result = await axiomApi.importWorkspaceMetadata(pendingMetadataImport.file, pendingMetadataImport.replace);
       const counts = Object.entries(result.imported).map(([name, count]) => `${name.replaceAll("_", " ")}: ${count}`).join(" · ");
       setMetadataMessage(`Metadata ${result.mode} completed. ${counts}`);
+      setPendingMetadataImport(null);
     } catch (error) {
       setMetadataError(error instanceof Error ? error.message : "Workspace metadata import failed.");
+      setPendingMetadataImport(null);
     } finally {
       setMetadataBusy(false);
     }
@@ -4155,6 +4160,21 @@ function SettingsPage({
         <Callout tone="info" title="Local API integration">The dashboard, model registry, dataset profiler, training planner, hardware snapshot, persistent plan history, diagnostics, and event log share the local FastAPI contract. CLI mapping opens these GUI equivalents rather than pretending terminal-only shell operations run inside the browser.</Callout>
       </Surface>
     </div>
+    {pendingMetadataImport && <ConfirmationDialog
+      titleId="metadata-import-title"
+      descriptionId="metadata-import-description"
+      eyebrow={pendingMetadataImport.replace ? "REPLACE WORKSPACE METADATA" : "MERGE WORKSPACE METADATA"}
+      title={pendingMetadataImport.replace ? "Replace included collections?" : "Merge workspace metadata?"}
+      description={pendingMetadataImport.replace
+        ? "Matching collections present in this archive will be replaced. Collections omitted from the archive and unrelated files remain unchanged."
+        : "Metadata from this archive will be merged into the workspace. Existing records are preserved and conflicting IDs are rejected."}
+      confirmLabel={pendingMetadataImport.replace ? "Replace included collections" : "Merge metadata"}
+      confirmTone={pendingMetadataImport.replace ? "danger" : "primary"}
+      busyLabel="Importing…"
+      busy={metadataBusy}
+      onCancel={() => setPendingMetadataImport(null)}
+      onConfirm={() => void confirmWorkspaceMetadataImport()}
+    />}
   </FeaturePage>;
 }
 

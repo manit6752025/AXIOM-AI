@@ -73,13 +73,16 @@ test("Settings exports and imports a workspace metadata archive", async ({ page 
       }),
     });
   });
-  page.on("dialog", (dialog) => dialog.accept());
   await page.getByLabel("Replace included metadata collections").check();
   await page.getByLabel("Import workspace metadata archive").setInputFiles({
     name: "workspace.zip",
     mimeType: "application/vnd.axiom.workspace-metadata+zip",
     buffer: Buffer.from("PK\\u0003\\u0004AXIOM-IMPORT"),
   });
+  const confirmation = page.getByRole("dialog", { name: "Replace included collections?" });
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await confirmation.getByRole("button", { name: "Replace included collections" }).click();
   await expect(page.locator(".inline-alert.success[role=\"status\"]")).toContainText("Metadata replace completed");
   expect(uploadedBody?.toString()).toBe("PK\\u0003\\u0004AXIOM-IMPORT");
 });

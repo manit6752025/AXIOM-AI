@@ -22,6 +22,7 @@ The Control Center uses shared components in `src/components/ui/AccessiblePatter
 - `FormField` provides a visible programmatic label and associates optional hints/errors with the control using `aria-describedby` and `aria-invalid`.
 - `DataTable` renders a semantic table with a caption, column headers, and a clear empty-row message.
 - `AccessibleDialog` provides a labelled modal, initial focus, Escape handling, and a keyboard focus loop.
+- `ConfirmationDialog` standardizes destructive-action copy, safe initial focus on Cancel, busy-state locking, and explicit cancel/confirm controls; use it for registry removal, report deletion, and archive replacement.
 - `EmptyState` announces dynamically rendered no-data states politely through a status region.
 
 Use these patterns when adding new forms, tabular data, confirmation dialogs, or
