@@ -627,13 +627,13 @@ def inspect(root: Path) -> dict[str, Any]:
     fabric_profiles_docs = (root / "docs/Engine-Fabric.md").read_text(encoding="utf-8")
     if not all(token in fabric_profiles_core for token in ("MAX_PROFILES = 25", "custom_endpoints_persisted", "credentials_persisted")):
         failures.append("Engine Fabric workspace profile storage is missing its bounds or secret-exclusion contract.")
-    if not all(token in fabric_profiles_api for token in ('@router.get("/backends/profiles")', '@router.post("/backends/profiles")', '@router.delete("/backends/profiles/{profile_id}")', '@router.post("/backends/profiles/{profile_id}/connect")')):
+    if not all(token in fabric_profiles_api for token in ('@router.get("/backends/profiles")', '@router.post("/backends/profiles", status_code=201)', '@router.delete("/backends/profiles/{profile_id}")', '@router.post("/backends/profiles/{profile_id}/connect")')):
         failures.append("Engine Fabric profile CRUD and one-shot verification routes are incomplete.")
     if not all(token in fabric_profiles_cli for token in ('@engine_profile_app.command("save")', '@engine_profile_app.command("list")', '@engine_profile_app.command("connect")', '@engine_profile_app.command("delete")')):
         failures.append("Engine Fabric CLI profile commands are incomplete.")
     if not all(token in fabric_profiles_client for token in ("engineBackendProfiles", "saveEngineBackendProfile", "deleteEngineBackendProfile", "connectEngineBackendProfile")):
         failures.append("Engine Fabric profile API methods are incomplete in the typed client.")
-    if not all(token in fabric_profiles_ui for token in ("Saved local connector profiles", "Connect", "Disconnect", "credentials")):
+    if not all(token in fabric_profiles_ui for token in ("Saved local connector profiles", "Connect", "Disconnect", "API keys", "endpoint URLs")):
         failures.append("Engine Fabric GUI profile lifecycle controls are incomplete.")
     if not all(token in fabric_profiles_e2e for token in ("Saved Engine Fabric profile", "VERIFIED THIS SESSION", "NOT CONNECTED", "external runtime remains running")):
         failures.append("Engine Fabric connector profile lifecycle is missing browser acceptance coverage.")
