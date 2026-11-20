@@ -694,16 +694,23 @@ def test_engine_stream_endpoint_yields_token_snapshots_and_final_metrics(tmp_pat
         "generated_at": "2026-10-22T00:00:00+00:00",
         "local_only": True,
     }
-    monkeypatch.setattr(engine_api, "generate_local_stream", lambda *_args, **_kwargs: iter([
-        {"type": "token", "response": "Hel", "completion_tokens": 1},
-        {"type": "complete", "result": completed},
-    ]))
+    captured: dict[str, object] = {}
+
+    def fake_stream(*_args, **kwargs):
+        captured.update(kwargs)
+        return iter([
+            {"type": "token", "response": "Hel", "completion_tokens": 1},
+            {"type": "complete", "result": completed},
+        ])
+
+    monkeypatch.setattr(engine_api, "generate_local_stream", fake_stream)
 
     response = _client().post("/api/engine/generate/stream", json={
-        "model_path": str(model), "prompt": "hello", "max_new_tokens": 2, "temperature": 0,
+        "model_path": str(model), "prompt": "hello", "max_new_tokens": 2, "temperature": 0, "device": "cuda",
     })
 
     assert response.status_code == 200
+    assert captured["device_preference"] == "cuda"
     assert response.headers["content-type"].startswith("application/x-ndjson")
     events = [json.loads(line) for line in response.text.splitlines()]
     assert events[0] == {"type": "token", "response": "Hel", "completion_tokens": 1}
