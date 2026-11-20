@@ -1,6 +1,6 @@
 import pytest
 
-from axiom.path_safety import SafePathError, find_existing_relative_path
+from axiom.path_safety import SafePathError, find_existing_relative_path, open_regular_file
 
 
 def test_resolves_existing_relative_file(tmp_path):
@@ -43,3 +43,80 @@ def test_rejects_symlinked_file(tmp_path):
 
     with pytest.raises(SafePathError):
         find_existing_relative_path(root, "leak.txt", allow_directories=False)
+
+
+def test_rejects_symlinked_workspace_root(tmp_path):
+    root = tmp_path / "real-workspace"
+    root.mkdir()
+    (root / "inside.txt").write_text("private", encoding="utf-8")
+    alias = tmp_path / "workspace-link"
+    try:
+        alias.symlink_to(root, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Directory symlinks are not available: {exc}")
+
+    with pytest.raises(SafePathError, match="workspace root"):
+        find_existing_relative_path(alias, "inside.txt")
+
+
+def test_symlinked_intermediate_directory_is_never_walked(tmp_path):
+    root = tmp_path / "workspace"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("private", encoding="utf-8")
+    alias = root / "external"
+    try:
+        alias.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Directory symlinks are not available: {exc}")
+
+    with pytest.raises((SafePathError, FileNotFoundError)):
+        find_existing_relative_path(root, "external/secret.txt", allow_directories=False)
+
+
+def test_open_regular_file_rejects_final_symlink(tmp_path):
+    if not getattr(__import__("os"), "O_NOFOLLOW", 0):
+        pytest.skip("Final-component O_NOFOLLOW is unavailable on this platform")
+    root = tmp_path / "workspace"
+    root.mkdir()
+    outside = tmp_path / "secret.txt"
+    outside.write_text("private", encoding="utf-8")
+    link = root / "secret.txt"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"File symlinks are not available: {exc}")
+
+    with pytest.raises(OSError):
+        open_regular_file(link)
+
+
+def test_open_regular_file_rejects_symlinked_parent_directory(tmp_path):
+    import os
+
+    if os.name != "posix" or not getattr(os, "O_DIRECTORY", 0) or not getattr(os, "O_NOFOLLOW", 0):
+        pytest.skip("POSIX O_DIRECTORY/O_NOFOLLOW traversal is unavailable")
+    root = tmp_path / "workspace"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.txt"
+    secret.write_text("private", encoding="utf-8")
+    alias = root / "parent"
+    try:
+        alias.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Directory symlinks are not available: {exc}")
+
+    with pytest.raises(OSError):
+        open_regular_file(alias / "secret.txt")
+
+
+def test_open_regular_file_rejects_parent_components(tmp_path):
+    import os
+
+    target = tmp_path / "secret.txt"
+    target.write_text("private", encoding="utf-8")
+    with pytest.raises(SafePathError, match="parent-directory"):
+        open_regular_file(target.parent / ".." / target.name)
