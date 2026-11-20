@@ -550,6 +550,17 @@ def inspect(root: Path) -> dict[str, Any]:
         ("native Engine CLI surface", native_engine_cli, (
             'def engine_pull(', 'device: str = typer.Option("auto", "--device"',
         )),
+        ("native API device dispatch", engine_api, (
+            'device: str = Field(default="auto", pattern="^(auto|cpu|cuda|rocm|mps|xpu)$")',
+            "device_preference=request.device",
+        )),
+        ("native API device regression", native_engine_api_tests, (
+            "test_engine_stream_endpoint_yields_token_snapshots_and_final_metrics",
+            'captured["device_preference"] == "cuda"',
+        )),
+        ("native CLI device regression", native_engine_cli_tests, (
+            "test_engine_run_passes_explicit_device_to_native_stream",
+        )),
         ("native Runtime GUI", native_engine_panel, (
             'aria-label="Execution device"', "status?.devices", "status?.recommended_device",
             "GENERATED ON THIS MACHINE", "LOCAL ONLY",
@@ -587,6 +598,12 @@ def inspect(root: Path) -> dict[str, Any]:
             "local_only: true", "remote_code: false", "engineLoaded = true",
             'getByRole("button", { name: "Run with AXIOM Engine" })',
             'getByRole("button", { name: "Unload model" })',
+            'getByLabel("Execution device")',
+            'option[value="cuda"]',
+            'option[value="rocm"]',
+            'option[value="mps"]',
+            'option[value="xpu"]',
+            'expect(requestBody.device).toBe("cpu")',
         )),
     )
     for label, source, tokens in native_readiness_contracts:
