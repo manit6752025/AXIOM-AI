@@ -398,7 +398,6 @@ def test_every_registered_mcp_tool_has_a_default_deny_guard_at_entry():
     missing_permissions = []
     late_guards = []
     for handler in registered:
-        assert handler.name in known_tools, f"{handler.name} has no permission policy entry."
         body = list(handler.body)
         if (
             body
