@@ -90,6 +90,8 @@ def _safe_artifact_file(path: str | Path) -> tuple[Path, BinaryIO, int]:
         else:
             if candidate.is_symlink():
                 raise ValueError("Release artifact path must not be a symbolic link.")
+            if any(parent.is_symlink() for parent in candidate.parents):
+                raise ValueError("Release artifact parent path must not contain a symbolic link.")
             descriptor = os.open(candidate, flags)
         stream = os.fdopen(descriptor, "rb")
         info = os.fstat(stream.fileno())
