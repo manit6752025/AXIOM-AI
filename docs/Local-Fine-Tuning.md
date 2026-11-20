@@ -38,6 +38,45 @@ axiom --no-banner train status JOB_ID
 
 The `train jobs` command accepts `--limit` (1–100) and `--offset` (0–5,000), and its JSON output includes total, next-page, and bounded-scan metadata. The Control Center Training panel exposes the same history in pages of ten and lets you select a previous job to inspect its logs and output.
 
+## Job lifecycle and cancellation contract
+
+Local LoRA job records expose the following explicit states:
+
+`queued → running → finalizing → completed`
+
+Cancellation follows a separate cooperative path:
+
+`queued/running → cancelling → cancelled`
+
+A worker can also reach `failed` from any active state. Terminal states
+(`completed`, `cancelled`, and `failed`) cannot be reopened. The backend
+validates each transition while holding the shared job-state lock; it rejects
+transitions such as `finalizing → cancelling` and
+`cancelled → running`.
+
+Every job summary exposes a `cancellation` object with `supported`,
+`requested`, `requestable`, `mode`, `boundary`, and
+`unavailable_reason`. A cancellation request changes the state to
+`cancelling`; it does not claim that the worker has stopped. The worker checks
+for cancellation before beginning and between safe training steps. Once
+`finalizing` begins, adapter persistence is not interrupted. Clients should
+use `requestable` rather than infer cancellation capability from a hard-coded
+list of status strings, and should wait for the terminal `cancelled` state
+before treating the run as stopped.
+
+The CLI supports `axiom train cancel JOB_ID [--json]`; the API endpoint is
+`POST /api/fine-tuning/jobs/{job_id}/cancel`. Repeated cancellation requests
+are idempotent while the job is already `cancelling`. Requests against
+finalizing or terminal jobs return the unchanged state and an explanatory
+`unavailable_reason`.
+
+**Workflow execution boundary:** saved visual workflows and their dry-runs
+remain design/planning-only and always report `execution_status:
+not_executable`. The lifecycle above describes actual local fine-tuning jobs;
+it does not imply that workflow graph nodes can be executed or cancelled. A
+workflow runner still needs explicit per-node input/output contracts and
+execution policies before graph execution can safely be introduced.
+
 ## Control Center and API
 
 Open **Training** in the Control Center. The **Local LoRA fine-tuning** panel lets you supply local paths and bounded training settings, start a job, inspect progress, and request cancellation. Cancellation stops at a safe training boundary; the panel shows `cancelling` until the worker confirms `cancelled`. After training steps finish, the job enters `finalizing` while adapter files are saved, and cancellation is no longer accepted. The API endpoints are `GET /api/fine-tuning/runtime`, `GET /api/fine-tuning/jobs`, `GET /api/fine-tuning/jobs/{job_id}`, `POST /api/fine-tuning/jobs`, and `POST /api/fine-tuning/jobs/{job_id}/cancel`.
