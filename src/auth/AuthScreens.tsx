@@ -101,7 +101,7 @@ function PasswordField({
 function Brand() {
   return (
     <div className="axiom-auth-brand">
-      <img className="axiom-auth-mark" src="/axiom-mark.svg" alt="" aria-hidden="true" width={42} height={42} />
+      <img className="axiom-auth-mark" src="./axiom-mark.svg" alt="" aria-hidden="true" width={42} height={42} />
 
       <div>
         <strong>AXIOM</strong>
