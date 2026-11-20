@@ -222,6 +222,7 @@ test("workflow autosave and dry-run stay planning-only", async ({ page }) => {
 test("workflow editor creates a branching graph with typed input/output ports", async ({ page }) => {
   let createdPayload: { name: string; nodes: Array<{ id: string; type: string; ports?: unknown }>; edges: Array<Record<string, string>> } | null = null;
   let validationPayload: typeof createdPayload = null;
+  let savedWorkflow: Record<string, unknown> | null = null;
 
   await page.route("**/api/workflows**", async (route) => {
     const request = route.request();
@@ -233,7 +234,15 @@ test("workflow editor creates a branching graph with typed input/output ports", 
     }
     if (request.method() === "GET" && url.pathname === "/api/workflows") {
       await route.fulfill({
-        json: { workflows: [], total: 0, limit: 20, offset: 0, has_more: false, next_cursor: null, filters: { search: "" } },
+        json: {
+          workflows: savedWorkflow ? [savedWorkflow] : [],
+          total: savedWorkflow ? 1 : 0,
+          limit: 20,
+          offset: 0,
+          has_more: false,
+          next_cursor: null,
+          filters: { search: "" },
+        },
       });
       return;
     }
@@ -252,21 +261,17 @@ test("workflow editor creates a branching graph with typed input/output ports", 
     if (request.method() === "POST" && url.pathname === "/api/workflows") {
       createdPayload = request.postDataJSON() as typeof createdPayload;
       const now = "2026-11-20T00:00:00Z";
-      await route.fulfill({
-        status: 201,
-        json: {
-          workflow: {
-            ...createdPayload,
-            id: "workflow-branch",
-            created_at: now,
-            updated_at: now,
-            schema_version: 2,
-            revision: 1,
-            versions: [],
-            execution_status: "not_executable",
-          },
-        },
-      });
+      savedWorkflow = {
+        ...createdPayload,
+        id: "workflow-branch",
+        created_at: now,
+        updated_at: now,
+        schema_version: 2,
+        revision: 1,
+        versions: [],
+        execution_status: "not_executable",
+      };
+      await route.fulfill({ status: 201, json: { workflow: savedWorkflow } });
       return;
     }
     await route.continue();
