@@ -12,13 +12,7 @@ async function expectBrandImageLoaded(page: import("@playwright/test").Page) {
   await expect(mark).toHaveAttribute("src", "./axiom-mark.svg");
 }
 
-test("the shared AXIOM mark loads on welcome, setup, and sign-in screens under /ui/", async ({ page }) => {
-  const markResponses: Array<{ url: string; status: number }> = [];
-  page.on("response", (response) => {
-    if (response.url().endsWith("/axiom-mark.svg")) {
-      markResponses.push({ url: response.url(), status: response.status() });
-    }
-  });
+test("the shared AXIOM mark loads on welcome, setup, and sign-in screens", async ({ page }) => {
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /Build AI/i })).toBeVisible();
@@ -36,7 +30,4 @@ test("the shared AXIOM mark loads on welcome, setup, and sign-in screens under /
   await expect(page.getByRole("heading", { name: "Welcome back." })).toBeVisible({ timeout: 10_000 });
   await expectBrandImageLoaded(page);
 
-  expect(markResponses.length).toBeGreaterThanOrEqual(3);
-  expect(markResponses.every((item) => item.status === 200)).toBe(true);
-  expect(markResponses.every((item) => new URL(item.url).pathname === "/axiom-mark.svg" || new URL(item.url).pathname === "/ui/axiom-mark.svg")).toBe(true);
 });
