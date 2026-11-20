@@ -146,11 +146,13 @@ def read_checkpoint_state(checkpoint_dir: Path) -> dict[str, Any]:
             state = json.loads(stream.read().decode("utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         raise ValueError("Checkpoint state manifest is missing or invalid.") from None
-    if not isinstance(state, dict) or state.get("schema_version") != 1:
+    version = state.get("schema_version") if isinstance(state, dict) else None
+    if isinstance(version, bool) or not isinstance(version, int) or version != 1:
         raise ValueError("Checkpoint schema is unsupported.")
     step = state.get("completed_steps")
-    if isinstance(step, bool) or not isinstance(step, int) or not 1 <= step <= 1000:
-        raise ValueError("Checkpoint step count is invalid.")
+    folder_step = int(checkpoint.name.removeprefix("checkpoint-"))
+    if isinstance(step, bool) or not isinstance(step, int) or not 1 <= step <= 1000 or step != folder_step:
+        raise ValueError("Checkpoint step count does not match its directory name.")
     files = state.get("files")
     if not isinstance(files, dict):
         raise ValueError("Checkpoint file manifest is invalid.")
@@ -176,6 +178,26 @@ def latest_checkpoint(output_dir: Path) -> tuple[Path, dict[str, Any]]:
 
 def checkpoint_count(output_dir: Path) -> int:
     return len(_checkpoint_directories(Path(output_dir)))
+
+
+def _fsync_checkpoint_file(path: Path) -> None:
+    if os.name != "posix":
+        return
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _fsync_directory(path: Path) -> None:
+    if os.name != "posix":
+        return
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def save_checkpoint(
@@ -205,6 +227,8 @@ def save_checkpoint(
         model.save_pretrained(str(temporary), safe_serialization=True)
         torch_module.save(optimizer_payload, str(temporary / "optimizer_state.pt"))
         hashes = {name: file_sha256(temporary / name) for name in _REQUIRED_FILES}
+        for name in _REQUIRED_FILES:
+            _fsync_checkpoint_file(temporary / name)
         state = {
             "schema_version": 1,
             "completed_steps": completed_steps,
@@ -222,7 +246,9 @@ def save_checkpoint(
                 if _regular_file(entry):
                     os.chmod(entry, 0o600)
             os.chmod(temporary, 0o700)
+        _fsync_directory(temporary)
         temporary.rename(final_dir)
+        _fsync_directory(root)
         checkpoints = _checkpoint_directories(output)
         while len(checkpoints) > _MAX_RETAINED_CHECKPOINTS:
             oldest = checkpoints.pop(0)
