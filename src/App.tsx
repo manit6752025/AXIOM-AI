@@ -4197,6 +4197,17 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
     try {
       const result = await axiomApi.inspectMcpServer(name);
       setHandshakeResults((current) => ({ ...current, [name]: result }));
+      if (result.connection_state_persisted && result.connection_state) {
+        setServerInventory((current) => current ? {
+          ...current,
+          servers: current.servers.map((server) => server.name === name ? {
+            ...server,
+            connection_state: result.connection_state!,
+            last_inspected_at: result.last_inspected_at ?? null,
+            last_connection_error: result.last_connection_error ?? null,
+          } : server),
+        } : current);
+      }
       onNotify(
         result.status === "ok"
           ? `MCP handshake completed for ${name}.`
@@ -4255,6 +4266,17 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
     try {
       const result = await axiomApi.inspectMcpServerSchemas(name);
       setSchemaResults((current) => ({ ...current, [name]: result }));
+      if (result.connection_state_persisted && result.connection_state) {
+        setServerInventory((current) => current ? {
+          ...current,
+          servers: current.servers.map((server) => server.name === name ? {
+            ...server,
+            connection_state: result.connection_state!,
+            last_inspected_at: result.last_inspected_at ?? null,
+            last_connection_error: result.last_connection_error ?? null,
+          } : server),
+        } : current);
+      }
       onNotify(
         result.status === "ok"
           ? `Read-only schemas loaded for ${name}.`
