@@ -557,7 +557,7 @@ def inspect(root: Path) -> dict[str, Any]:
         ("native model and execution docs", native_engine_docs, (
             "stages downloads before publishing", "public Llama/Mistral/Qwen2/Qwen3 safetensors",
             "CPU, NVIDIA CUDA, AMD ROCm, Apple Metal/MPS, and Intel XPU",
-            "remote model code", "does not call Transformers model.generate",
+            "remote model code", "does not silently route generation through another engine",
         )),
         ("native architecture regression tests", native_engine_tests, (
             "test_native_config_accepts_llama_mistral_qwen2_and_qwen3",
