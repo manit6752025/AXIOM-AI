@@ -1453,6 +1453,16 @@ def _run_transformers(
     else:
         device = torch.device("cpu")
 
+    if resume_state is None:
+        torch.manual_seed(AXIOM_TRAINING_SEED)
+        if device.type == "cuda":
+            torch.cuda.manual_seed_all(AXIOM_TRAINING_SEED)
+    elif resume_state.get("training", {}).get("device") != str(device):
+        raise FineTuningError(
+            "Resume requires the same compute device as the saved checkpoint; "
+            "select the original device or start a new training run."
+        )
+
     try:
         if cancel_check:
             cancel_check()
@@ -1500,11 +1510,13 @@ def _run_transformers(
             rng.setstate(python_rng_state)
             torch.set_rng_state(torch_rng_state.cpu())
             saved_cuda_states = resume_payload.get("torch_cuda_rng_states")
-            if (
-                device.type == "cuda"
-                and isinstance(saved_cuda_states, list)
-                and len(saved_cuda_states) == torch.cuda.device_count()
-            ):
+            if device.type == "cuda":
+                if (
+                    not isinstance(saved_cuda_states, list)
+                    or len(saved_cuda_states) != torch.cuda.device_count()
+                    or training.get("cuda_device_count") != torch.cuda.device_count()
+                ):
+                    raise ValueError("CUDA device count differs from the saved checkpoint")
                 torch.cuda.set_rng_state_all(saved_cuda_states)
             order = saved_order
             position = saved_position
@@ -1599,6 +1611,7 @@ def _run_transformers(
                 "target_modules": targets,
                 "max_steps_at_save": config["max_steps"],
                 "device": str(device),
+                "cuda_device_count": torch.cuda.device_count() if device.type == "cuda" else 0,
                 "dataset_rows": len(texts),
                 "last_loss": loss_value,
             }
