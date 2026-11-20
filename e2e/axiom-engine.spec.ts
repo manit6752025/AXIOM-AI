@@ -242,11 +242,11 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   const executionDevice = engine.getByLabel("Execution device", { exact: true });
   await expect(executionDevice).toHaveValue("auto");
   await expect(engine).toContainText("Recommended: cpu");
-  await expect(executionDevice.locator('option[value="cuda"]')).toBeDisabled();
-  await expect(executionDevice.locator('option[value="rocm"]')).toBeDisabled();
-  await expect(executionDevice.locator('option[value="mps"]')).toBeDisabled();
-  await expect(executionDevice.locator('option[value="xpu"]')).toBeDisabled();
-  await expect(executionDevice.locator('option[value="cpu"]')).toBeEnabled();
+  await expect(executionDevice.locator('option[value="cuda"]')).toHaveAttribute("disabled", "");
+  await expect(executionDevice.locator('option[value="rocm"]')).toHaveAttribute("disabled", "");
+  await expect(executionDevice.locator('option[value="mps"]')).toHaveAttribute("disabled", "");
+  await expect(executionDevice.locator('option[value="xpu"]')).toHaveAttribute("disabled", "");
+  await expect(executionDevice.locator('option[value="cpu"]')).not.toHaveAttribute("disabled");
   await executionDevice.selectOption("cpu");
 
   await engine.getByLabel("Select discovered native model").selectOption("/models/llama-test");
