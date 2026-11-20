@@ -535,6 +535,8 @@ def validate_config(
             existing = list(output_dir.iterdir())
         except OSError:
             raise ValueError("Resume output directory could not be inspected safely.") from None
+        if not existing:
+            raise ValueError("Resume policy requires at least one complete checkpoint.")
         if len(existing) != 1 or existing[0].name != CHECKPOINT_DIRECTORY or existing[0].is_symlink() or not existing[0].is_dir():
             raise ValueError("Resume policy only accepts an output directory containing AXIOM checkpoints and no final adapter files.")
         try:
