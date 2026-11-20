@@ -169,6 +169,7 @@ def test_native_benchmark_api_signals_worker_when_client_disconnects(tmp_path, m
 
     class DisconnectedRequest:
         async def is_disconnected(self) -> bool:
+            await asyncio.sleep(0)
             return True
 
     monkeypatch.setattr(engine_api, "benchmark_local", fake_benchmark)
