@@ -160,8 +160,13 @@ def resolve_workspace_input(raw: str, root: Path, label: str) -> Path:
     return target
 
 
-def resolve_workspace_output(raw: str, root: Path) -> Path:
-    """Resolve a new or empty adapter directory under an existing outputs folder."""
+def resolve_workspace_output(
+    raw: str,
+    root: Path,
+    *,
+    allow_checkpoints: bool = False,
+) -> Path:
+    """Resolve a new/empty output, or a checkpoint-only AXIOM resume folder."""
     if (
         not isinstance(raw, str)
         or not raw
@@ -203,11 +208,25 @@ def resolve_workspace_output(raw: str, root: Path) -> Path:
         if not target.is_dir():
             raise ValueError("Adapter output must be a directory.")
         try:
-            next(target.iterdir())
-        except StopIteration:
-            pass
-        else:
-            raise ValueError("Adapter output directory must be new or empty.")
+            entries = list(target.iterdir())
+        except OSError:
+            raise ValueError("Adapter output directory could not be inspected safely.") from None
+        if entries:
+            checkpoint_directory = target / ".axiom-checkpoints"
+            is_junction = getattr(checkpoint_directory, "is_junction", lambda: False)
+            if (
+                not allow_checkpoints
+                or len(entries) != 1
+                or entries[0].name != ".axiom-checkpoints"
+                or entries[0].is_symlink()
+                or getattr(entries[0], "is_junction", lambda: False)()
+                or not entries[0].is_dir()
+                or checkpoint_directory.is_symlink()
+                or is_junction()
+            ):
+                raise ValueError(
+                    "Adapter output directory must be new or empty; resume accepts only an AXIOM checkpoint directory."
+                )
 
     resolved = target.resolve(strict=target.exists())
     if not resolved.is_relative_to(workspace):
