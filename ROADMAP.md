@@ -140,7 +140,7 @@ feature exists or a delivery-date promise.
 - [R103 · Planned] Add per-server trust, ownership, and connection state.
 - [R104 · Planned] Add safe secret references and never render stored secret values.
 - [R105 · In progress; validation pending] Add read-only security audits for config and MCP policy permissions, active tool grants, API token scopes, CORS origins, and AXIOM's loopback/network-exposure contracts through the CLI, API, and Diagnostics page; never return credential values.
-- [R106 · Planned] Add path traversal and symlink threat-model regression coverage.
+- [R106 · In progress; validation pending] Harden workspace-relative path resolution against symlinked roots and parent-directory swaps on POSIX; add regression tests for traversal inputs, symlinked roots/parents/final files, and path-selection/open races.
 - [R107 · Planned] Add dependency, package, and release-artifact security checks.
 - [R108 · Planned] Add security event export and administrator review workflows.
 
