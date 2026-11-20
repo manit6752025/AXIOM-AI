@@ -342,6 +342,6 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await engine.getByRole("button", { name: "Run with AXIOM Engine" }).click();
   await expect(engine.getByRole("button", { name: "Stop generation" })).toBeVisible();
   await engine.getByRole("button", { name: "Stop generation" }).click();
-  await expect(engine.getByRole("alert")).toContainText("Generation cancelled after 0 token(s)");
+  await expect(engine.getByRole("alert").filter({ hasText: "Generation cancelled after 0 token(s)" })).toBeVisible();
   await expect(engine.getByTestId("axiom-engine-output")).toHaveCount(0);
 });
