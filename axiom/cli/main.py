@@ -1170,11 +1170,11 @@ def integration_handshake(
         typer.echo(json.dumps(result, ensure_ascii=False, sort_keys=True))
     elif result["status"] == "ok":
         console.print(Panel(
-            f"Server: {result['server_name'] or name}\\n"
-            f"Version: {result['server_version'] or 'Not reported'}\\n"
-            f"Protocol: {result['protocol_version'] or 'Not reported'}\\n"
-            f"Capabilities: {', '.join(key for key, enabled in result['capabilities'].items() if enabled) or 'none reported'}\\n"
-            f"Duration: {result['duration_ms']} ms\\n"
+            f"Server: {result['server_name'] or name}\n"
+            f"Version: {result['server_version'] or 'Not reported'}\n"
+            f"Protocol: {result['protocol_version'] or 'Not reported'}\n"
+            f"Capabilities: {', '.join(key for key, enabled in result['capabilities'].items() if enabled) or 'none reported'}\n"
+            f"Duration: {result['duration_ms']} ms\n"
             "Tools executed: no · Schemas enumerated: no",
             title="MCP protocol handshake",
         ))
