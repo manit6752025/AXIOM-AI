@@ -1232,6 +1232,43 @@ export type McpToolPolicy = {
   tools: McpTool[];
 };
 
+export type McpServerInventoryEntry = {
+  name: string;
+  transport: "stdio";
+  configured: boolean;
+  executable: string | null;
+  argument_count: number;
+  connection_state: "not_inspected";
+};
+
+export type McpServerInventory = {
+  schema_version: number;
+  total: number;
+  servers: McpServerInventoryEntry[];
+  inspection_note: string;
+};
+
+export type McpServerHandshake = {
+  name?: string;
+  transport?: "stdio";
+  status: "ok" | "timeout" | "error";
+  protocol_version?: string | null;
+  server_name?: string | null;
+  server_version?: string | null;
+  capabilities?: {
+    tools: boolean;
+    resources: boolean;
+    prompts: boolean;
+    logging: boolean;
+    completions: boolean;
+  };
+  duration_ms: number;
+  tool_execution_performed: false;
+  schemas_enumerated: false;
+  error_code?: string;
+  message?: string;
+};
+
 export type OptimizerProfile = {
   number: number;
   key: string;
@@ -2159,6 +2196,13 @@ export const axiomApi = {
   },
 
   mcpToolPolicy: () => requestJson<McpToolPolicy>("/api/security/tool-permissions"),
+  mcpServerInventory: () => requestJson<McpServerInventory>("/api/mcp/servers"),
+  inspectMcpServer: (name: string) =>
+    requestJson<McpServerHandshake>(
+      `/api/mcp/servers/${encodeURIComponent(name)}/handshake`,
+      { method: "POST" },
+      20_000,
+    ),
 
   saveMcpToolProfile: (name: string, allowedTools: string[]) =>
     requestJson<{ profile: McpToolProfile }>(
