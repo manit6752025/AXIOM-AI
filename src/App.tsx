@@ -46,6 +46,7 @@ import {
   type WorkspaceEvaluationRun,
   type WorkspaceEvent,
   type WorkspaceDiagnostics,
+  type SecurityAudit,
   type RoadmapAudit,
   type WorkspaceModel,
   type WorkspaceModelCompatibility,
@@ -4215,6 +4216,7 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
   const [modelCount, setModelCount] = useState<number | null>(null);
   const [datasetCount, setDatasetCount] = useState<number | null>(null);
   const [workspaceDiagnostics, setWorkspaceDiagnostics] = useState<WorkspaceDiagnostics | null>(null);
+  const [securityAudit, setSecurityAudit] = useState<SecurityAudit | null>(null);
   const [bundleBusy, setBundleBusy] = useState(false);
   const [frontendErrors, setFrontendErrors] = useState(() => getFrontendErrorReport().events);
   const [frontendReportBusy, setFrontendReportBusy] = useState(false);
@@ -4259,12 +4261,13 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
 
   const runScan = async () => {
     setScanState("scanning");
-    const [healthResult, hardwareResult, modelResult, datasetResult, workspaceDiagnosticsResult] = await Promise.allSettled([
+    const [healthResult, hardwareResult, modelResult, datasetResult, workspaceDiagnosticsResult, securityAuditResult] = await Promise.allSettled([
       axiomApi.health(),
       axiomApi.optimizationHardware(),
       axiomApi.models(),
       axiomApi.datasets(),
       axiomApi.workspaceDiagnostics(),
+      axiomApi.securityAudit(),
     ]);
     const failures: string[] = [];
     if (healthResult.status === "fulfilled") setHealth({ online: healthResult.value.status === "ok", version: healthResult.value.version });
@@ -4277,6 +4280,8 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
     else { setDatasetCount(null); failures.push("dataset inventory"); }
     if (workspaceDiagnosticsResult.status === "fulfilled") setWorkspaceDiagnostics(workspaceDiagnosticsResult.value);
     else { setWorkspaceDiagnostics(null); failures.push("workspace diagnostics"); }
+    if (securityAuditResult.status === "fulfilled") setSecurityAudit(securityAuditResult.value);
+    else { setSecurityAudit(null); failures.push("security audit"); }
     setScanState(failures.length ? "failed" : "idle");
     if (failures.length) onNotify(`Some diagnostics could not complete: ${failures.join(", ")}.`, "warning");
   };
@@ -4331,6 +4336,15 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
     {workspaceDiagnostics && <Surface title="Workspace checks" eyebrow="READ-ONLY BACKEND DIAGNOSTICS" action={<StatusPill tone={workspaceDiagnostics.status === "pass" ? "success" : workspaceDiagnostics.status === "fail" ? "danger" : "warning"}>{workspaceDiagnostics.status.toUpperCase()}</StatusPill>}>
       <p className="quiet-note">{workspaceDiagnostics.summary.passed} passed · {workspaceDiagnostics.summary.warnings} warning(s) · {workspaceDiagnostics.summary.failed} failed. Checks are read-only; no repair actions are run automatically.</p>
       <div className="diag-list">{workspaceDiagnostics.checks.map((check) => {
+        const tone: Tone = check.status === "pass" ? "success" : check.status === "fail" ? "danger" : check.status === "warn" ? "warning" : "neutral";
+        const Icon = check.status === "pass" ? CircleCheck : check.status === "fail" ? CircleAlert : TriangleAlert;
+        return <DiagnosticRow key={check.id} icon={Icon} title={check.title} detail={`${check.detail}${check.remediation ? ` Next: ${check.remediation}` : ""}`} state={check.status.toUpperCase()} tone={tone} />;
+      })}</div>
+    </Surface>}
+    {securityAudit && <Surface title="Security posture" eyebrow="READ-ONLY / CREDENTIAL VALUES WITHHELD" action={<StatusPill tone={securityAudit.status === "pass" ? "success" : securityAudit.status === "fail" ? "danger" : "warning"}>{securityAudit.status.toUpperCase()}</StatusPill>}>
+      <p className="quiet-note">{securityAudit.summary.passed} passed · {securityAudit.summary.warnings} warning(s) · {securityAudit.summary.failed} failed. API scope tokens {securityAudit.summary.api_scope_tokens_enabled ? "are configured" : "are not enabled"}. No credential values are returned.</p>
+      <p className="quiet-note">The audit checks AXIOM workspace permissions, MCP grants, API token configuration, CORS origins, and AXIOM launch defaults. It does not scan operating-system listeners or externally managed servers.</p>
+      <div className="diag-list">{securityAudit.checks.map((check) => {
         const tone: Tone = check.status === "pass" ? "success" : check.status === "fail" ? "danger" : check.status === "warn" ? "warning" : "neutral";
         const Icon = check.status === "pass" ? CircleCheck : check.status === "fail" ? CircleAlert : TriangleAlert;
         return <DiagnosticRow key={check.id} icon={Icon} title={check.title} detail={`${check.detail}${check.remediation ? ` Next: ${check.remediation}` : ""}`} state={check.status.toUpperCase()} tone={tone} />;
