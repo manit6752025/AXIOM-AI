@@ -16,11 +16,13 @@ import subprocess
 import sys
 import time
 import threading
+from contextvars import copy_context
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 from axiom.core.resource_ids import new_resource_id
+from axiom.core.workspace_context import active_workspace_id, active_workspace_root, workspace_metadata_dir
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
@@ -66,6 +68,9 @@ def _now() -> str:
 
 
 def studio_home() -> Path:
+    workspace_id = active_workspace_id()
+    if workspace_id and workspace_id.startswith("ws-"):
+        return (workspace_metadata_dir() / "model-studio").resolve()
     configured = os.environ.get("AXIOM_MODEL_STUDIO_HOME", "").strip()
     return (Path(configured).expanduser() if configured else Path.home() / ".local" / "share" / "axiom" / "model-studio").resolve()
 
@@ -553,7 +558,10 @@ def install_hf_gguf(repo_id: str, filename: str, model_name: str, register_ollam
 
 
 def native_model_root() -> Path:
-    """Return AXIOM's trusted root for downloaded native model checkpoints."""
+    """Return a workspace-local checkpoint root while preserving legacy downloads."""
+    workspace_id = active_workspace_id()
+    if workspace_id and workspace_id.startswith("ws-"):
+        return (active_workspace_root() / "models" / "native").resolve()
     return _NATIVE_MODEL_ROOT
 
 
@@ -1147,7 +1155,13 @@ def start_job(config: dict[str, Any]) -> dict[str, Any]:
         cancel_event = threading.Event()
         _write_job(job)
         _ACTIVE_CANCEL_EVENTS[job_id] = cancel_event
-        thread = threading.Thread(target=_worker, args=(job_id,), name=f"axiom-model-studio-{job_id[:8]}", daemon=True)
+        workspace_context = copy_context()
+        thread = threading.Thread(
+            target=workspace_context.run,
+            args=(_worker, job_id),
+            name=f"axiom-model-studio-{job_id[:8]}",
+            daemon=True,
+        )
         thread.start()
         return job
 

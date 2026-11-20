@@ -183,3 +183,19 @@ def test_workflow_deployment_rejects_same_workspace(tmp_path: Path, monkeypatch:
         json={"target_workspace_id": workspace_id},
     )
     assert response.status_code == 409
+
+
+
+def test_model_studio_storage_isolated_for_managed_workspaces(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from axiom.core.model_studio import native_model_root, studio_home
+    from axiom.core.workspace_context import reset_workspace_context, set_workspace_context
+
+    monkeypatch.delenv("AXIOM_MODEL_STUDIO_HOME", raising=False)
+    workspace_root = tmp_path / "managed-workspace"
+    workspace_root.mkdir()
+    token = set_workspace_context(workspace_root, "ws-" + "a" * 32)
+    try:
+        assert studio_home() == workspace_root / ".axiom" / "model-studio"
+        assert native_model_root() == workspace_root / "models" / "native"
+    finally:
+        reset_workspace_context(token)
