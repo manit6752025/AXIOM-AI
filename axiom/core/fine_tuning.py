@@ -32,6 +32,28 @@ from axiom.path_safety import open_regular_file
 
 _LOG = logging.getLogger(__name__)
 
+_JOB_ACTIVE_STATUSES = frozenset({"queued", "running", "cancelling", "finalizing"})
+_JOB_TERMINAL_STATUSES = frozenset({"completed", "cancelled", "failed"})
+_JOB_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
+    "queued": frozenset({"running", "cancelling", "failed"}),
+    "running": frozenset({"cancelling", "finalizing", "failed"}),
+    "cancelling": frozenset({"cancelled", "failed"}),
+    "finalizing": frozenset({"completed", "failed"}),
+    "completed": frozenset(),
+    "cancelled": frozenset(),
+    "failed": frozenset(),
+}
+
+
+def _validate_job_transition(current: Any, target: str) -> None:
+    """Reject lifecycle transitions that could misreport work or reopen cancellation."""
+    if current == target:
+        return
+    allowed = _JOB_ALLOWED_TRANSITIONS.get(current)
+    if allowed is None or target not in allowed:
+        raise FineTuningError(f"Invalid fine-tuning job transition: {current} -> {target}.")
+
+
 _MAX_DATASET_BYTES = 50 * 1024 * 1024
 _MAX_ROWS = 10_000
 _MAX_LINE_BYTES = 1_048_576
@@ -541,14 +563,35 @@ def _read_job(job_id: str) -> dict[str, Any] | None:
 
 
 def _public_training_job(job: dict[str, Any]) -> dict[str, Any]:
-    """Hide the training-input digest from ordinary job status responses."""
-    result = job.get("result")
-    if not isinstance(result, dict) or "training_dataset_sha256" not in result:
-        return job
+    """Return a safe job summary with an explicit cooperative-cancellation contract."""
     public_job = dict(job)
-    public_result = dict(result)
-    public_result.pop("training_dataset_sha256", None)
-    public_job["result"] = public_result
+    result = job.get("result")
+    if isinstance(result, dict) and "training_dataset_sha256" in result:
+        public_result = dict(result)
+        public_result.pop("training_dataset_sha256", None)
+        public_job["result"] = public_result
+
+    status = job.get("status")
+    requested = job.get("cancel_requested") is True
+    requestable = status in {"queued", "running"} and not requested
+    if requestable:
+        unavailable_reason = None
+    elif status == "cancelling":
+        unavailable_reason = "already_requested"
+    elif status == "finalizing":
+        unavailable_reason = "finalization_started"
+    elif status in _JOB_TERMINAL_STATUSES:
+        unavailable_reason = "job_terminal"
+    else:
+        unavailable_reason = "job_not_cancellable"
+    public_job["cancellation"] = {
+        "supported": True,
+        "requested": requested,
+        "requestable": requestable,
+        "mode": "cooperative",
+        "boundary": "before worker start or between training steps; adapter finalization is not interruptible",
+        "unavailable_reason": unavailable_reason,
+    }
     return public_job
 
 
@@ -565,6 +608,7 @@ def _recover_if_stale_locked(job: dict[str, Any]) -> dict[str, Any]:
         if runner_state == "exited":
             current = dict(current)
             reason = "The AXIOM process exited before this training job completed. Start a new job after checking resources."
+            _validate_job_transition(current.get("status"), "failed")
             current.update(status="failed", error=reason, finished_at=_now(), updated_at=_now())
             logs = current.get("logs")
             current["logs"] = [*(logs if isinstance(logs, list) else []), f"Failed: {reason}"][-80:]
@@ -661,6 +705,7 @@ def cancel_finetuning_job(job_id: str) -> dict[str, Any] | None:
         if job.get("status") not in {"queued", "running", "cancelling"}:
             return _public_training_job(job)
         if job.get("status") != "cancelling":
+            _validate_job_transition(job.get("status"), "cancelling")
             job["cancel_requested"] = True
             job["status"] = "cancelling"
             job["updated_at"] = _now()
@@ -1011,6 +1056,9 @@ def _update_job(job_id: str, **changes: Any) -> dict[str, Any]:
             raise FineTuningError("Fine-tuning job was not found.")
         if changes.get("status") == "running" and job.get("cancel_requested") is True:
             changes.pop("status")
+        requested_status = changes.get("status")
+        if isinstance(requested_status, str):
+            _validate_job_transition(job.get("status"), requested_status)
         job.update(changes)
         job["updated_at"] = _now()
         _write_job(job)
@@ -1025,6 +1073,7 @@ def _begin_finalizing(job_id: str) -> None:
             raise FineTuningError("Fine-tuning job was not found.")
         if job.get("cancel_requested") is True or job.get("status") == "cancelling":
             raise FineTuningCancelledError("Local fine-tuning stopped at a safe training boundary.")
+        _validate_job_transition(job.get("status"), "finalizing")
         job.update(status="finalizing", updated_at=_now())
         job["logs"] = [*job.get("logs", []), "Training steps finished; writing the local adapter."][-80:]
         _write_job(job)
