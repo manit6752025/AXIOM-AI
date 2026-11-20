@@ -176,3 +176,17 @@ def test_inspect_wheel_rejects_dist_info_directory_name_mismatch(tmp_path: Path)
 
     assert report["status"] == "fail"
     assert any(item["id"] == "artifact.wheel.dist_info_name" and item["status"] == "fail" for item in report["checks"])
+
+
+def test_inspect_rejects_symlinked_artifact_parent(tmp_path: Path):
+    target_dir = tmp_path / "real"
+    target_dir.mkdir()
+    artifact = _wheel(target_dir / "demo-1.2.3-py3-none-any.whl")
+    alias_dir = tmp_path / "alias"
+    try:
+        alias_dir.symlink_to(target_dir, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Directory symlinks are unavailable on this platform: {exc}")
+
+    with pytest.raises(ValueError, match="could not be opened safely"):
+        inspect_release_artifact(alias_dir / artifact.name)
