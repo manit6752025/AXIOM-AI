@@ -4503,6 +4503,13 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
         columns={[
           { key: "occurred_at", header: "Time", render: (event) => new Date(event.occurred_at).toLocaleString() },
           { key: "summary", header: "Action", render: (event) => event.summary },
+          { key: "decision", header: "Tool decision", render: (event) => event.event_type === "mcp.tool.decision"
+            ? `${event.decision?.toUpperCase()} · ${event.tool_name} · ${event.profile_name}`
+            : "—" },
+          { key: "arguments", header: "Redacted arguments", render: (event) => {
+            const names = Object.keys(event.arguments ?? {});
+            return names.length ? names.join(", ") : "—";
+          } },
           { key: "review", header: "Review", render: (event) => event.reviewed
             ? `Reviewed by ${event.reviewer_label} · self-attested`
             : <button type="button" className="button secondary-button" onClick={() => void reviewSecurityEvent(event.event_id)} disabled={securityEventsBusy || !reviewerLabel.trim()}>Mark reviewed</button> },
