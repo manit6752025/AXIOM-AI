@@ -623,6 +623,52 @@ def inspect(root: Path) -> dict[str, Any]:
             "Benchmark cancelled; AXIOM has been asked to stop the native generation loop.",
             "benchmarkAbortObserved = true",
         )),
+        ("native benchmark core metrics and bounded loop", engine_source, (
+            "def benchmark_local(",
+            '"warmup_runs_requested"',
+            '"median_time_to_first_token_ms"',
+            '"p95_elapsed_ms"',
+            '"generation_tokens_per_second"',
+            '"layer_weight_bytes_staged"',
+            '"disk_layer_weight_bytes_read"',
+            '"kv_cache_bytes_offloaded"',
+            "Native benchmark was cancelled.",
+        )),
+        ("native benchmark API bounds and disconnect cancellation", engine_api, (
+            '@router.post("/benchmark")',
+            "async def engine_benchmark(",
+            "cancel_event.set()",
+            "Native benchmark cancelled because the client disconnected.",
+        )),
+        ("native benchmark CLI surface", native_engine_cli, (
+            '@engine_app.command("benchmark")',
+            '"--warmup-runs"',
+            '"--iterations"',
+            '"--max-new-tokens"',
+            "benchmark_local(",
+        )),
+        ("native benchmark GUI telemetry and cancellation", native_engine_panel, (
+            "Benchmark native engine",
+            "Stop benchmark",
+            "Benchmark cancelled; AXIOM has been asked to stop the native generation loop.",
+            "median_time_to_first_token_ms",
+            "layer_weight_bytes_staged",
+            "disk_layer_weight_bytes_read",
+            "kv_cache_bytes_offloaded",
+        )),
+        ("native benchmark core regressions", native_engine_tests, (
+            "test_native_benchmark_excludes_warmups_and_never_returns_prompt_or_response",
+            "test_native_benchmark_cancellation_stops_before_next_measured_run",
+            "test_native_benchmark_rejects_unbounded_work_before_generation",
+        )),
+        ("native benchmark API regressions", native_engine_api_tests, (
+            "test_native_benchmark_api_forwards_bounded_local_options_without_response_payload",
+            "test_native_benchmark_api_rejects_iterations_or_output_over_the_limit",
+            "test_native_benchmark_api_signals_worker_when_client_disconnects",
+        )),
+        ("native benchmark CLI regression", native_engine_cli_tests, (
+            "test_native_engine_benchmark_cli_forwards_bounded_options_and_prints_no_text",
+        )),
     )
     for label, source, tokens in native_readiness_contracts:
         for token in tokens:
