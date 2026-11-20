@@ -139,7 +139,7 @@ feature exists or a delivery-date promise.
 - [R102 · Planned] Add tool/resource schema browsing without tool execution by default.
 - [R103 · Planned] Add per-server trust, ownership, and connection state.
 - [R104 · Planned] Add safe secret references and never render stored secret values.
-- [R105 · Planned] Add config, permissions, and exposed-network security audits.
+- [R105 · In progress; validation pending] Add read-only security audits for config and MCP policy permissions, active tool grants, API token scopes, CORS origins, and AXIOM's loopback/network-exposure contracts through the CLI, API, and Diagnostics page; never return credential values.
 - [R106 · Planned] Add path traversal and symlink threat-model regression coverage.
 - [R107 · Planned] Add dependency, package, and release-artifact security checks.
 - [R108 · Planned] Add security event export and administrator review workflows.
