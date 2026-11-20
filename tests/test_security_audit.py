@@ -19,7 +19,7 @@ WRITE_TOKEN = "write_" + "w" * 40
 def _project(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     config = path / "axiom.yaml"
-    config.write_text("project:\\n  name: secure-test\\n", encoding="utf-8")
+    config.write_text("project:\n  name: secure-test\n", encoding="utf-8")
     if os.name == "posix":
         config.chmod(0o600)
     return path
