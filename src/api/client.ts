@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 import { recordFrontendError } from "../diagnostics/frontendErrors";
+=======
+import { redactErrorText, reportFrontendError } from "../utils/errorReporting";
+>>>>>>> 0150185 (feat(gui): add redacted frontend error reports)
 
 const API_BASE = import.meta.env.VITE_AXIOM_API_URL || "";
 
@@ -1273,7 +1277,9 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
     succeeded = true;
     return payload as T;
   } catch (error) {
+    let safeError: Error;
     if (error instanceof DOMException && error.name === "AbortError") {
+<<<<<<< HEAD
       recordFrontendError({ source: "api.request", category: "api_timeout", errorName: "AbortError" });
       throw new Error(`AXIOM backend did not respond within 15 seconds (request ID ${requestId}).`, { cause: error });
     }
@@ -1282,6 +1288,16 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
       throw new Error(`AXIOM backend is unavailable. Start the local API and try again (request ID ${requestId}).`, { cause: error });
     }
     throw error;
+=======
+      safeError = new Error(`AXIOM backend did not respond within ${Math.round(timeoutMs / 1000)} seconds (request ID ${requestId}).`);
+    } else if (error instanceof TypeError) {
+      safeError = new Error(`AXIOM backend is unavailable. Start the local API and try again (request ID ${requestId}).`);
+    } else {
+      safeError = new Error(redactErrorText(error));
+    }
+    reportFrontendError("api", safeError);
+    throw safeError;
+>>>>>>> 0150185 (feat(gui): add redacted frontend error reports)
   } finally {
     window.clearTimeout(timeout);
     window.dispatchEvent(new CustomEvent("axiom:api-request-end", {

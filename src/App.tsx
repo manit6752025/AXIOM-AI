@@ -12,6 +12,7 @@ import AgentProfiles from "./components/AgentProfiles";
 import ModelStudioPanel from "./components/ModelStudioPanel";
 import LocalFineTuningPanel from "./components/LocalFineTuningPanel";
 import { downloadBlob } from "./utils/browserDownload";
+import { clearFrontendErrorRecords, frontendErrorRecords, reportFrontendError, type FrontendErrorRecord } from "./utils/errorReporting";
 import {
   clearFrontendErrorReport,
   FRONTEND_ERROR_EVENT,
@@ -894,6 +895,14 @@ function App() {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [authenticated, preferences.sessionTimeoutMinutes]);
+
+  useEffect(() => {
+    const onError = (event: ErrorEvent) => reportFrontendError("window", event.error ?? event.message);
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => reportFrontendError("promise", event.reason);
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    return () => { window.removeEventListener("error", onError); window.removeEventListener("unhandledrejection", onUnhandledRejection); };
+  }, []);
 
   useEffect(() => {
     if (!authenticated) {
@@ -4107,7 +4116,14 @@ function SettingsPage({
   const [pendingMetadataImport, setPendingMetadataImport] = useState<{ file: File; replace: boolean } | null>(null);
   const [metadataMessage, setMetadataMessage] = useState("");
   const [metadataError, setMetadataError] = useState("");
+  const [frontendErrors, setFrontendErrors] = useState<readonly FrontendErrorRecord[]>(() => [...frontendErrorRecords()]);
   const conflict = draft.lowPowerMode && draft.dashboardRefreshSeconds > 0;
+
+  useEffect(() => {
+    const refresh = () => setFrontendErrors([...frontendErrorRecords()]);
+    window.addEventListener("axiom:frontend-error", refresh);
+    return () => window.removeEventListener("axiom:frontend-error", refresh);
+  }, []);
 
   const update = <K extends keyof AppPreferences>(key: K, value: AppPreferences[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -4229,6 +4245,10 @@ function SettingsPage({
         <div className="surface-divider" />
         <p className="quiet-note">Deleting a registry entry or saved plan does not delete a checkpoint, dataset, or run output. Files at chosen output paths remain until you remove them yourself.</p>
         <a href="https://github.com/manit6752025/AXIOM-AI/blob/latest/development/docs/DATA-RETENTION.md" target="_blank" rel="noreferrer">Read the data retention and deletion guide</a>
+      </Surface>
+      <Surface title="Frontend error reports" eyebrow="LOCAL / REDACTED" action={<StatusPill tone={frontendErrors.length ? "warning" : "success"}>{frontendErrors.length} RETAINED</StatusPill>}>
+        <p className="quiet-note">AXIOM retains up to 25 recent browser errors for this open tab only. Before an error is displayed or retained, credential fields, authorization values, request tokens, prompts, and data values are replaced with <code>[REDACTED]</code>. Reports are never sent automatically.</p>
+        {frontendErrors.length ? <><div className="frontend-error-list" aria-label="Redacted frontend errors">{frontendErrors.map((entry) => <div className="frontend-error-row" key={entry.id}><b>{entry.source.toUpperCase()}</b><span>{entry.message}</span><small>{formatTimestamp(entry.occurredAt)}</small></div>)}</div><button type="button" className="button secondary-button" onClick={() => clearFrontendErrorRecords()}><Trash2 size={15} /> Clear local reports</button></> : <EmptyState icon={ShieldCheck} title="No frontend errors retained" description="New browser and API errors will appear here only after redaction; nothing is transmitted automatically." />}
       </Surface>
       <Surface title="Workspace metadata transfer" eyebrow="PORTABLE PROJECT METADATA">
         <p className="quiet-note">Export or import the local model registry, workflow designs, experiment plans, evaluation reports, and agent task profiles. Imports are validated and merged by default; conflicts stop the entire import before any records are written.</p>
