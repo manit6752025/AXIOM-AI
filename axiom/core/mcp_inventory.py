@@ -238,7 +238,7 @@ async def inspect_mcp_server(
             timeout=float(timeout_seconds),
         )
     except TimeoutError:
-        return {
+        result = {
             "status": "timeout",
             "error_code": "handshake_timeout",
             "message": "The MCP server did not complete protocol negotiation before the timeout.",
@@ -246,10 +246,12 @@ async def inspect_mcp_server(
             "tool_execution_performed": False,
             "schemas_enumerated": False,
         }
+        result.update(_record_connection_result(integration.name, result))
+        return result
     except Exception:
         # Do not return child stderr, command arguments, or exception details:
         # they may contain user paths, prompts, or credentials.
-        return {
+        result = {
             "status": "error",
             "error_code": "handshake_failed",
             "message": "The MCP server could not complete protocol negotiation.",
@@ -257,6 +259,8 @@ async def inspect_mcp_server(
             "tool_execution_performed": False,
             "schemas_enumerated": False,
         }
+        result.update(_record_connection_result(integration.name, result))
+        return result
 
     result.update(_record_connection_result(integration.name, result))
     return {
@@ -532,7 +536,7 @@ async def inspect_mcp_schemas(
             timeout=float(timeout_seconds),
         )
     except TimeoutError:
-        return {
+        result = {
             "status": "timeout",
             "error_code": "schema_inspection_timeout",
             "message": "MCP schema inspection did not complete before the timeout.",
@@ -541,8 +545,10 @@ async def inspect_mcp_schemas(
             "resource_read_performed": False,
             "prompt_execution_performed": False,
         }
+        result.update(_record_connection_result(integration.name, result))
+        return result
     except Exception:
-        return {
+        result = {
             "status": "error",
             "error_code": "schema_inspection_failed",
             "message": "MCP schema metadata could not be inspected safely.",
@@ -551,6 +557,8 @@ async def inspect_mcp_schemas(
             "resource_read_performed": False,
             "prompt_execution_performed": False,
         }
+        result.update(_record_connection_result(integration.name, result))
+        return result
     result["connection_state_persisted"] = _record_connection_result(integration.name, result)
     return {
         "name": _safe_text(integration.name) or "Unnamed MCP server",
