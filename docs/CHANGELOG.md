@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — bounded model and dataset inventory controls
+
+- Added server-side model metadata search, exact format/tag and favorite filters, stable sorting (including numeric parameter sizes), and bounded pagination; dataset inventory supports server-side path search, stable pagination, and an explicit 5,000-entry scan cap.
+- Added browser-local model filter presets (up to 20, metadata-only), typed API coverage, and GUI query/persistence regression tests.
+
 ## Unreleased — global API status and loading feedback
 
 - Added shared request lifecycle signals in the typed API client and a persistent top-bar backend status with stale-response detection, in-flight request count, manual retry, and preference-aware health polling.
