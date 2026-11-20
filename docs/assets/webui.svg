@@ -1,117 +1,112 @@
-<svg width="1000" height="620" viewBox="0 0 1000 620" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Animated AXIOM Web UI: Quantization Lab comparing FP16, INT8 and INT4 size estimates against detected memory, with an Optimizer recommendation" xmlns:c2pa="http://c2pa.org/manifest"><metadata><c2pa:manifest>AAAWgmp1bWIAAAAeanVtZGMycGEAEQAQgAAAqgA4m3EDYzJwYQAAABZcanVtYgAAAEdqdW1kYzJtYQARABCAAACqADibcQN1cm46YzJwYTo2ZGM4OThjMS1kMmU2LTQzYzktYmYyNC1jYzQ2YTM3MzNkNWYAAAADl2p1bWIAAAApanVtZGMyYXMAEQAQgAAAqgA4m3EDYzJwYS5hc3NlcnRpb25zAAAAALxqdW1iAAAARGp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuaW5ncmVkaWVudC52MwAAAAAYYzJzaPz3/90ns4xrwjvQh7NSsk8AAABwY2JvcqNpZGM6Zm9ybWF0bWltYWdlL3N2Zyt4bWxqaW5zdGFuY2VJRHgseG1wOmlpZDpmYWE4ZjFmMi1iZjE4LTQ2ZTUtYTI0Ny05MDJmZWRmZjVkNTNscmVsYXRpb25zaGlwaHBhcmVudE9mAAAB4mp1bWIAAABBanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5hY3Rpb25zLnYyAAAAABhjMnNowoAx9LV3K8XD4UVUWPMQXwAAAZljYm9yomdhY3Rpb25zgqJmYWN0aW9ua2MycGEub3BlbmVkanBhcmFtZXRlcnOha2luZ3JlZGllbnRzgaJjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFggweGTgWnTqlqm9NP6/RZFIhtvg+8OTktBeF2ZnvIHzUukZmFjdGlvbngdY29tLmFudGhyb3BpYy5jbGF1ZGUucHJvdmlkZWRqcGFyYW1ldGVyc6F4H2NvbS5hbnRocm9waWMub3JpZ2luLWNvbmZpZGVuY2VndW5rbm93bmtkZXNjcmlwdGlvbnhmQ2xhdWRlIHByb3ZpZGVkIHRoaXMgZmlsZSBhdCB0aGUgcmVxdWVzdCBvZiBhIHVzZXIgYW5kIG1heSBoYXZlIGNyZWF0ZWQgb3IgbW9kaWZpZWQgdGhlIGZpbGUgY29udGVudHMubXNvZnR3YXJlQWdlbnShZG5hbWVmQ2xhdWRlcmFsbEFjdGlvbnNJbmNsdWRlZPUAAADIanVtYgAAAEBqdW1kY2JvcgARABCAAACqADibcRNjMnBhLmhhc2guZGF0YQAAAAAYYzJzaETT3QxStNSCL3xL7+VcOIMAAACAY2JvcqVjYWxnZnNoYTI1NmNwYWRMAAAAAAAAAAAAAAAAZGhhc2hYIBLGQa3GSe/sEpvljLOvQRlDFt9olsoC+GxxZ5DJ/HePZG5hbWVuanVtYmYgbWFuaWZlc3RqZXhjbHVzaW9uc4GiZXN0YXJ0GQFLZmxlbmd0aBkeBAAAAj5qdW1iAAAAJ2p1bWRjMmNsABEAEIAAAKoAOJtxA2MycGEuY2xhaW0udjIAAAACD2Nib3KlY2FsZ2ZzaGEyNTZpc2lnbmF0dXJleE1zZWxmI2p1bWJmPS9jMnBhL3VybjpjMnBhOjZkYzg5OGMxLWQyZTYtNDNjOS1iZjI0LWNjNDZhMzczM2Q1Zi9jMnBhLnNpZ25hdHVyZWppbnN0YW5jZUlEeCx4bXA6aWlkOjRiMTY3ZWExLWI1M2ItNGMzMi1hOGFkLWE4ODJlMWIyZGY0NXJjcmVhdGVkX2Fzc2VydGlvbnODomN1cmx4LXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaW5ncmVkaWVudC52M2RoYXNoWCDB4ZOBadOqWqb00/r9FkUiG2+D7w5OS0F4XZme8gfNS6JjdXJseCpzZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmFjdGlvbnMudjJkaGFzaFggD2ZQt+dSSez7Cvz2u/6+wQflmSSBIwedbPCvnGTqvoWiY3VybHgpc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5oYXNoLmRhdGFkaGFzaFgg7WkMlR5CX1Oge1549uRuPsi9Rv0G022FOgo7ZnAH7ZB0Y2xhaW1fZ2VuZXJhdG9yX2luZm+jZG5hbWVvQW50aHJvcGljIEZpbGVzZ3ZlcnNpb25lMS4wLjBrc3BlY1ZlcnNpb25lMi40LjAAABA4anVtYgAAAChqdW1kYzJjcwARABCAAACqADibcQNjMnBhLnNpZ25hdHVyZQAAABAIY2JvctKEWQISogEmGCFZAgowggIGMIIBjaADAgECAhRA5aAK7sI50L64g/oGQgU9Z1UTADAKBggqhkjOPQQDAzBJMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEuMCwGA1UEAxMlQW50aHJvcGljIENvbnRlbnQgQ3JlZGVudGlhbHMgUm9vdCBDQTAeFw0yNjA4MDcxODQzNTZaFw0yODA4MDYxOTQzNTZaMEQxFzAVBgNVBAoTDkFudGhyb3BpYywgUEJDMSkwJwYDVQQDEyBBbnRocm9waWMgQ2xhdWRlIENvbnRlbnQgU2lnbmluZzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJh6CmvLUBgFFNU0vUKlOVtE6djd17L5SuwX0LemFisBM3dkd/3cyjxFA3Qo5S46fX0/ihY0VZ7mfb9KF703t5OjWDBWMA4GA1UdDwEB/wQEAwIHgDAVBgNVHSUEDjAMBgorBgEEAYPoXgIBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUzlHiBIFOZFsj+OPEz5o+nMHXXMIwCgYIKoZIzj0EAwMDZwAwZAIwMXMdFJ4BetLLVY7ORuE9noqbbAZOZn/aArXyTwFAZfKrPzxF2vPoJNf1+UCdg1XGAjBwX1zd9WGqYkqmL5SFqw1QySjr1zJfpJM9+1rdDwSPLMOPOjKuiXjoU/pUUeG9RwmhY3BhZFkNngAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPZYQE4BKS0PTTSxITDDBcx0zl3OtZBe0gk6JPyfabNDFysFo3/Q2T8jjsQeE0IcCLmXKc6nPvQ2ePaAe+vXb5KxGSA=</c2pa:manifest></metadata>
-  <defs>
-    <linearGradient id="chrome" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e293b"/><stop offset="1" stop-color="#0f172a"/></linearGradient>
-    <linearGradient id="tfg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#a78bfa"/></linearGradient>
-    <radialGradient id="glow" cx="70%" cy="0%" r="80%"><stop offset="0" stop-color="#0ea5e9" stop-opacity=".12"/><stop offset="1" stop-color="#0ea5e9" stop-opacity="0"/></radialGradient>
-  </defs>
-  <style>
-    .m{font-family:'SF Mono','JetBrains Mono',Menlo,Consolas,'Liberation Mono',monospace}
-    .s{font-family:-apple-system,'Segoe UI',Inter,Helvetica,Arial,sans-serif}
-    .live{animation:live 1.8s ease-in-out infinite}
-    .dash{stroke-dasharray:5 5;animation:march 1.2s linear infinite}
-    @keyframes live{0%,100%{opacity:1}50%{opacity:.3}}
-    @keyframes march{to{stroke-dashoffset:-20}}
-    @keyframes bar0{0.0%{width:102.0px;fill:#22c55e}30.0%{width:102.0px;fill:#22c55e}35.0%{width:238.0px;fill:#ef4444}63.333%{width:238.0px;fill:#ef4444}68.333%{width:442.0px;fill:#ef4444}96.667%{width:442.0px;fill:#ef4444}100.0%{width:102.0px;fill:#22c55e}}
-#bar0{animation:bar0 12.0s ease-in-out infinite}
-@keyframes bar1{0.0%{width:51.0px;fill:#22c55e}30.0%{width:51.0px;fill:#22c55e}35.0%{width:119.0px;fill:#22c55e}63.333%{width:119.0px;fill:#22c55e}68.333%{width:221.0px;fill:#ef4444}96.667%{width:221.0px;fill:#ef4444}100.0%{width:51.0px;fill:#22c55e}}
-#bar1{animation:bar1 12.0s ease-in-out infinite}
-@keyframes bar2{0.0%{width:25.5px;fill:#22c55e}30.0%{width:25.5px;fill:#22c55e}35.0%{width:59.5px;fill:#22c55e}63.333%{width:59.5px;fill:#22c55e}68.333%{width:110.5px;fill:#22c55e}96.667%{width:110.5px;fill:#22c55e}100.0%{width:25.5px;fill:#22c55e}}
-#bar2{animation:bar2 12.0s ease-in-out infinite}
-@keyframes thumb{0.0%{transform:translateX(0px)}30.0%{transform:translateX(0px)}35.0%{transform:translateX(133px)}63.333%{transform:translateX(133px)}68.333%{transform:translateX(333px)}96.667%{transform:translateX(333px)}100.0%{transform:translateX(0px)}}
-#thumb,#thumbfill{animation:thumb 12.0s ease-in-out infinite}
-@keyframes tfill{0.0%{width:67px}30.0%{width:67px}35.0%{width:200px}63.333%{width:200px}68.333%{width:400px}96.667%{width:400px}100.0%{width:67px}}
-#tfill{animation:tfill 12.0s ease-in-out infinite}
-@keyframes ph0{0.0%{opacity:1}28.333%{opacity:1}31.667%{opacity:0}98.333%{opacity:0}100.0%{opacity:1}}
-.ph0{animation:ph0 12.0s linear infinite}
-@keyframes ph1{0.0%{opacity:0}31.667%{opacity:0}35.833%{opacity:1}61.667%{opacity:1}65.833%{opacity:0}100.0%{opacity:0}}
-.ph1{animation:ph1 12.0s linear infinite}
-@keyframes ph2{0.0%{opacity:0}65.833%{opacity:0}70.0%{opacity:1}95.833%{opacity:1}99.167%{opacity:0}100.0%{opacity:0}}
-.ph2{animation:ph2 12.0s linear infinite}
-  </style>
-  <rect x="0.5" y="0.5" width="999" height="619" rx="14" fill="#0a0e1c" stroke="#1e3a5f"/>
-  <rect x="0.5" y="0.5" width="999" height="619" rx="14" fill="url(#glow)"/>
-  <path d="M0.5 14.5a14 14 0 0 1 14-14h971a14 14 0 0 1 14 14V44H0.5z" fill="url(#chrome)"/>
-  <circle cx="26" cy="23" r="6" fill="#ef4444"/><circle cx="48" cy="23" r="6" fill="#f59e0b"/><circle cx="70" cy="23" r="6" fill="#22c55e"/>
-  <rect x="300" y="11" width="400" height="24" rx="12" fill="#0b1224" stroke="#1e3a5f"/>
-  <text class="m" x="500" y="27" font-size="12" fill="#7dd3fc" text-anchor="middle">http://127.0.0.1:53142</text>
-  <rect x="0.5" y="44" width="190" height="575" fill="#080b17"/>
-  <path d="M190.5 44V619" stroke="#1e293b"/>
-  <text class="s" x="34" y="84" font-size="20" font-weight="800" fill="#e0f2fe" letter-spacing="4">AXIOM</text>
-  <text class="m" x="34" y="102" font-size="10" fill="#64748b">v0.3.0-beta.1</text>
-  <text class="s" x="34" y="130" font-size="14" fill="#94a3b8" font-weight="400">Summary</text>
-<text class="s" x="34" y="170" font-size="14" fill="#94a3b8" font-weight="400">Models</text>
-<text class="s" x="34" y="210" font-size="14" fill="#94a3b8" font-weight="400">Datasets</text>
-<text class="s" x="34" y="250" font-size="14" fill="#94a3b8" font-weight="400">Optimizer</text>
-<rect x="14" y="268" width="162" height="34" rx="8" fill="#0ea5e9" fill-opacity=".14" stroke="#0ea5e9" stroke-opacity=".4"/><rect id="navbar" x="14" y="268" width="3" height="34" rx="1.5" fill="#38bdf8"/>
-<text class="s" x="34" y="290" font-size="14" fill="#e0f2fe" font-weight="600">Quantization Lab</text>
-<text class="s" x="34" y="330" font-size="14" fill="#94a3b8" font-weight="400">Tools</text>
-  <circle class="live" cx="38" cy="590" r="4" fill="#22c55e"/>
-  <text class="m" x="50" y="594" font-size="11" fill="#64748b">daemon running</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 650" width="1280" height="650" role="img" aria-labelledby="t d" xmlns:c2pa="http://c2pa.org/manifest">
+<title id="t">AXIOM Control Center</title><desc id="d">The AXIOM Control Center dashboard with workspace status, hardware, model registry and event feed.</desc>
+<defs><style>
+.s{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Ubuntu,Inter,Roboto,Helvetica,Arial,sans-serif}.m{font-family:ui-monospace,SFMono-Regular,"Ubuntu Mono","JetBrains Mono",Menlo,Consolas,"Liberation Mono",monospace;white-space:pre}
+.b{font-weight:700}.u{text-transform:uppercase;letter-spacing:1.6px}
 
-  <text class="s" x="230" y="86" font-size="22" font-weight="700" fill="#f1f5f9">Quantization Lab</text>
-  <text class="s" x="230" y="108" font-size="13" fill="#94a3b8">Compare FP16, INT8 and INT4 size estimates against the memory AXIOM detects.</text>
-
-  <g class="m" font-size="12">
-    <rect x="230" y="124" width="132" height="26" rx="13" fill="#1e293b"/><text x="296" y="141" fill="#cbd5e1" text-anchor="middle">GPU · 12 GB VRAM</text>
-    <rect x="372" y="124" width="92" height="26" rx="13" fill="#1e293b"/><text x="418" y="141" fill="#cbd5e1" text-anchor="middle">RAM · 32 GB</text>
-    <rect x="474" y="124" width="104" height="26" rx="13" fill="#1e293b"/><text x="526" y="141" fill="#4ade80" text-anchor="middle">CUDA ready</text>
-    <rect x="588" y="124" width="104" height="26" rx="13" fill="#f59e0b" fill-opacity=".1" stroke="#f59e0b" stroke-opacity=".4"/><text x="640" y="141" fill="#fbbf24" text-anchor="middle">sample data</text>
-  </g>
-
-  <rect x="230" y="168" width="740" height="250" rx="14" fill="#0f172a" stroke="#1e293b"/>
-  <text class="s" x="252" y="198" font-size="13" fill="#94a3b8" letter-spacing="1">MODEL SIZE</text>
-  <rect x="300" y="222" width="400" height="6" rx="3" fill="#1e293b"/>
-  <rect id="tfill" x="300" y="222" width="67" height="6" rx="3" fill="url(#tfg)"/>
-  <circle id="thumb" cx="367" cy="225" r="9" fill="#e0f2fe" stroke="#38bdf8" stroke-width="3"/>
-  <g class="s" font-size="12" fill="#64748b" text-anchor="middle"><text x="367" y="250">3B</text><text x="500" y="250">7B</text><text x="700" y="250">13B</text></g>
-
-  <path class="dash" d="M504.0 262V404" stroke="#f59e0b" stroke-width="1.5"/>
-  <text class="m" x="512.0" y="270" font-size="11" fill="#fbbf24">detected 12 GB</text>
-  <g class="m" font-size="14" fill="#cbd5e1"><text x="252" y="289">FP16</text><text x="252" y="339">INT8</text><text x="252" y="389">INT4</text></g>
-  <rect x="300" y="272" width="442" height="24" rx="6" fill="#111a2e"/>
-  <rect x="300" y="322" width="442" height="24" rx="6" fill="#111a2e"/>
-  <rect x="300" y="372" width="442" height="24" rx="6" fill="#111a2e"/>
-  <rect id="bar0" x="300" y="272" width="102" height="24" rx="6" fill="#22c55e"/>
-  <rect id="bar1" x="300" y="322" width="51" height="24" rx="6" fill="#22c55e"/>
-  <rect id="bar2" x="300" y="372" width="25.5" height="24" rx="6" fill="#22c55e"/>
-
-  <rect x="230" y="434" width="740" height="150" rx="14" fill="#0f172a" stroke="#1e293b"/>
-  <text class="s" x="252" y="462" font-size="13" fill="#94a3b8" letter-spacing="1">OPTIMIZER</text>
-  <rect x="860" y="448" width="94" height="22" rx="11" fill="#a78bfa" fill-opacity=".12" stroke="#a78bfa" stroke-opacity=".4"/>
-  <text class="m" x="907" y="463" font-size="11" fill="#c4b5fd" text-anchor="middle">estimate only</text>
-  <g class="ph0">
-<text class="m" x="367" y="209" font-size="12" fill="#e2e8f0" text-anchor="middle" font-weight="700">3B params</text>
-<text class="m" x="945" y="288" font-size="13" text-anchor="end" fill="#e2e8f0">6.0 GB  <tspan fill="#4ade80" font-weight="700">fits</tspan></text>
-<text class="m" x="945" y="338" font-size="13" text-anchor="end" fill="#e2e8f0">3.0 GB  <tspan fill="#4ade80" font-weight="700">fits</tspan></text>
-<text class="m" x="945" y="388" font-size="13" text-anchor="end" fill="#e2e8f0">1.5 GB  <tspan fill="#4ade80" font-weight="700">fits</tspan></text>
-<text class="s" x="260" y="500" font-size="17" font-weight="600" fill="#f1f5f9">LoRA on FP16 weights looks comfortable</text>
-<rect x="260" y="522" width="56" height="26" rx="13" fill="#38bdf8" fill-opacity=".12" stroke="#38bdf8" stroke-opacity=".5"/>
-<text class="m" x="288.0" y="539" font-size="12" fill="#38bdf8" text-anchor="middle">LoRA</text>
-<rect x="326" y="522" width="96" height="26" rx="13" fill="#38bdf8" fill-opacity=".12" stroke="#38bdf8" stroke-opacity=".5"/>
-<text class="m" x="374.0" y="539" font-size="12" fill="#38bdf8" text-anchor="middle">FP16 base</text>
-</g>
-<g class="ph1">
-<text class="m" x="500" y="209" font-size="12" fill="#e2e8f0" text-anchor="middle" font-weight="700">7B params</text>
-<text class="m" x="945" y="288" font-size="13" text-anchor="end" fill="#e2e8f0">14.0 GB  <tspan fill="#f87171" font-weight="700">over</tspan></text>
-<text class="m" x="945" y="338" font-size="13" text-anchor="end" fill="#e2e8f0">7.0 GB  <tspan fill="#4ade80" font-weight="700">fits</tspan></text>
-<text class="m" x="945" y="388" font-size="13" text-anchor="end" fill="#e2e8f0">3.5 GB  <tspan fill="#4ade80" font-weight="700">fits</tspan></text>
-<text class="s" x="260" y="500" font-size="17" font-weight="600" fill="#f1f5f9">QLoRA with an INT4 base is the safest start</text>
-<rect x="260" y="522" width="64" height="26" rx="13" fill="#38bdf8" fill-opacity=".12" stroke="#38bdf8" stroke-opacity=".5"/>
-<text class="m" x="292.0" y="539" font-size="12" fill="#38bdf8" text-anchor="middle">QLoRA</text>
-<rect x="334" y="522" width="96" height="26" rx="13" fill="#38bdf8" fill-opacity=".12" stroke="#38bdf8" stroke-opacity=".5"/>
-<text class="m" x="382.0" y="539" font-size="12" fill="#38bdf8" text-anchor="middle">INT4 base</text>
-</g>
-<g class="ph2">
-<text class="m" x="700" y="209" font-size="12" fill="#e2e8f0" text-anchor="middle" font-weight="700">13B params</text>
-<text class="m" x="945" y="288" font-size="13" text-anchor="end" fill="#e2e8f0">26.0 GB  <tspan fill="#f87171" font-weight="700">over</tspan></text>
-<text class="m" x="945" y="338" font-size="13" text-anchor="end" fill="#e2e8f0">13.0 GB  <tspan fill="#f87171" font-weight="700">over</tspan></text>
-<text class="m" x="945" y="388" font-size="13" text-anchor="end" fill="#e2e8f0">6.5 GB  <tspan fill="#4ade80" font-weight="700">fits</tspan></text>
-<text class="s" x="260" y="500" font-size="17" font-weight="600" fill="#f1f5f9">INT4 only, and expect tight headroom</text>
-<rect x="260" y="522" width="64" height="26" rx="13" fill="#38bdf8" fill-opacity=".12" stroke="#38bdf8" stroke-opacity=".5"/>
-<text class="m" x="292.0" y="539" font-size="12" fill="#38bdf8" text-anchor="middle">QLoRA</text>
-<rect x="334" y="522" width="96" height="26" rx="13" fill="#38bdf8" fill-opacity=".12" stroke="#38bdf8" stroke-opacity=".5"/>
-<text class="m" x="382.0" y="539" font-size="12" fill="#38bdf8" text-anchor="middle">INT4 base</text>
-<rect x="440" y="522" width="64" height="26" rx="13" fill="#f59e0b" fill-opacity=".12" stroke="#f59e0b" stroke-opacity=".5"/>
-<text class="m" x="472.0" y="539" font-size="12" fill="#f59e0b" text-anchor="middle">tight</text>
-</g>
-</svg>
+</style></defs>
+<rect width="1280" height="650" fill="#111111"/>
+<rect x="0" y="0" width="178" height="650" fill="#101010"/><rect x="178" y="0" width="1" height="720" fill="#2a2a2a"/>
+<rect x="0" y="49" width="1280" height="1" fill="#2a2a2a"/>
+<rect x="16" y="16" width="30" height="30" fill="#d9f542"/><path d="M22 40L31 22L40 40M25.5 34H36.5" stroke="#111" stroke-width="3" fill="none"/>
+<text x="54" y="29" class="s b u" font-size="14" fill="#f2f2f2" style="letter-spacing:3px">AXIOM</text>
+<text x="54" y="43" class="s b u" font-size="7.5" fill="#8c8c8c" style="letter-spacing:0.9px">AI ENGINEERING PLATFORM</text>
+<rect x="12" y="69" width="154" height="47" fill="#161616" stroke="#2a2a2a"/><circle cx="22" cy="92" r="9" fill="#d9f542"/><text x="22" y="96.5" class="s b" font-size="12" text-anchor="middle" fill="#111">D</text>
+<text x="39" y="89" class="s b" font-size="13" fill="#f2f2f2">Development</text><text x="39" y="105" class="s" font-size="12" fill="#8c8c8c">Default workspace</text>
+<text x="18" y="146" class="s b u" font-size="11" fill="#8c8c8c" style="letter-spacing:2.2px">OPTIMIZATION</text>
+<rect x="12" y="157" width="154" height="27" fill="#161616" stroke="#222222"/>
+<rect x="24" y="166" width="10" height="10" fill="none" stroke="#8c8c8c" stroke-width="1.3"/>
+<text x="42" y="175" class="s b" font-size="13" fill="#f2f2f2">Agent Optimizer</text>
+<rect x="12" y="185.5" width="154" height="27" fill="#161616" stroke="#222222"/>
+<rect x="24" y="194.5" width="10" height="10" fill="none" stroke="#8c8c8c" stroke-width="1.3"/>
+<text x="42" y="203.5" class="s b" font-size="13" fill="#f2f2f2">Quantization Lab</text>
+<text x="18" y="228.0" class="s b u" font-size="11" fill="#8c8c8c" style="letter-spacing:2.2px">WORKSPACE</text>
+<rect x="12" y="239.0" width="154" height="27" fill="#1a1c10" stroke="#d9f542"/>
+<rect x="12" y="239.0" width="2" height="27" fill="#d9f542"/>
+<rect x="24" y="248.0" width="10" height="10" fill="none" stroke="#d9f542" stroke-width="1.3"/>
+<text x="42" y="257.0" class="s b" font-size="13" fill="#f2f2f2">Control center</text>
+<rect x="12" y="267.5" width="154" height="27" fill="#161616" stroke="#222222"/>
+<rect x="24" y="276.5" width="10" height="10" fill="none" stroke="#8c8c8c" stroke-width="1.3"/>
+<text x="42" y="285.5" class="s b" font-size="13" fill="#f2f2f2">Models</text>
+<rect x="12" y="296.0" width="154" height="27" fill="#161616" stroke="#222222"/>
+<rect x="24" y="305.0" width="10" height="10" fill="none" stroke="#8c8c8c" stroke-width="1.3"/>
+<text x="42" y="314.0" class="s b" font-size="13" fill="#f2f2f2">Datasets</text>
+<rect x="12" y="324.5" width="154" height="27" fill="#161616" stroke="#222222"/>
+<rect x="24" y="333.5" width="10" height="10" fill="none" stroke="#8c8c8c" stroke-width="1.3"/>
+<text x="42" y="342.5" class="s b" font-size="13" fill="#f2f2f2">Training</text>
+<rect x="12" y="353.0" width="154" height="27" fill="#161616" stroke="#222222"/>
+<rect x="24" y="362.0" width="10" height="10" fill="none" stroke="#8c8c8c" stroke-width="1.3"/>
+<text x="42" y="371.0" class="s b" font-size="13" fill="#f2f2f2">Workflows</text>
+<rect x="12" y="381.5" width="154" height="27" fill="#161616" stroke="#222222"/>
+<rect x="24" y="390.5" width="10" height="10" fill="none" stroke="#8c8c8c" stroke-width="1.3"/>
+<text x="42" y="399.5" class="s b" font-size="13" fill="#f2f2f2">Evaluation</text>
+<text x="18" y="424.0" class="s b u" font-size="11" fill="#8c8c8c" style="letter-spacing:2.2px">OPERATIONS</text>
+<rect x="12" y="435.0" width="154" height="27" fill="#161616" stroke="#222222"/>
+<rect x="24" y="444.0" width="10" height="10" fill="none" stroke="#8c8c8c" stroke-width="1.3"/>
+<text x="42" y="453.0" class="s b" font-size="13" fill="#f2f2f2">Runtime</text>
+<rect x="12" y="463.5" width="154" height="27" fill="#161616" stroke="#222222"/>
+<rect x="24" y="472.5" width="10" height="10" fill="none" stroke="#8c8c8c" stroke-width="1.3"/>
+<text x="42" y="481.5" class="s b" font-size="13" fill="#f2f2f2">MCP inspector</text>
+<rect x="12" y="492.0" width="154" height="27" fill="#161616" stroke="#222222"/>
+<rect x="24" y="501.0" width="10" height="10" fill="none" stroke="#8c8c8c" stroke-width="1.3"/>
+<text x="42" y="510.0" class="s b" font-size="13" fill="#f2f2f2">Diagnostics</text>
+<rect x="12" y="520.5" width="154" height="27" fill="#161616" stroke="#222222"/>
+<rect x="24" y="529.5" width="10" height="10" fill="none" stroke="#8c8c8c" stroke-width="1.3"/>
+<text x="42" y="538.5" class="s b" font-size="13" fill="#f2f2f2">API Playground</text>
+<rect x="12" y="549.0" width="154" height="27" fill="#161616" stroke="#222222"/>
+<rect x="24" y="558.0" width="10" height="10" fill="none" stroke="#8c8c8c" stroke-width="1.3"/>
+<text x="42" y="567.0" class="s b" font-size="13" fill="#f2f2f2">Agent Profiles</text>
+<rect x="12" y="577.5" width="154" height="27" fill="#161616" stroke="#222222"/>
+<rect x="24" y="586.5" width="10" height="10" fill="none" stroke="#8c8c8c" stroke-width="1.3"/>
+<text x="42" y="595.5" class="s b" font-size="13" fill="#f2f2f2">Roadmap</text>
+<rect x="12" y="606.0" width="154" height="27" fill="#161616" stroke="#222222"/>
+<rect x="24" y="615.0" width="10" height="10" fill="none" stroke="#8c8c8c" stroke-width="1.3"/>
+<text x="42" y="624.0" class="s b" font-size="13" fill="#f2f2f2">Module Explorer</text>
+<text x="210" y="30" class="s b u" font-size="13" fill="#f2f2f2" style="letter-spacing:2px">AXIOM</text><text x="276" y="30" class="s" font-size="13" fill="#8c8c8c">›   Control center</text>
+<rect x="668" y="11" width="232" height="27" fill="#161616" stroke="#2a2a2a"/><text x="694" y="29" class="s" font-size="13" fill="#8c8c8c">Search pages and actions</text><text x="875" y="29" class="s" font-size="11" fill="#8c8c8c">⌘K</text>
+<rect x="914" y="15" width="72" height="20" fill="#d9f542" fill-opacity="0.08" stroke="#d9f542"/><text x="922" y="29" class="s b u" font-size="12" fill="#d9f542" style="letter-spacing:1.2px">• ONLINE</text>
+<text x="992" y="29" class="s" font-size="12" fill="#8c8c8c">Local API co…</text>
+<circle cx="1161" cy="24" r="10" fill="#d9f542"/><text x="1161" y="28.5" class="s b" font-size="12" text-anchor="middle" fill="#111">M</text><text x="1178" y="29" class="s" font-size="13" fill="#f2f2f2">Manit ⌄</text>
+<text x="228" y="102" class="s b u" font-size="14" fill="#8c8c8c" style="letter-spacing:2.2px">CONTROL CENTER / LOCAL WORKSPACE</text>
+<text x="228" y="142" class="s b" font-size="36" fill="#f2f2f2" style="letter-spacing:-1.5px">Good evening, Manit.</text>
+<text x="228" y="172" class="s" font-size="14" fill="#8c8c8c">A live view of the local model registry, datasets, hardware, and recent workspace</text><text x="228" y="194" class="s" font-size="14" fill="#8c8c8c">activity.</text>
+<rect x="938" y="173" width="158" height="27" fill="#161616" stroke="#2a2a2a"/><text x="1017" y="191" class="s b" font-size="13" text-anchor="middle" fill="#f2f2f2">↻  Refresh workspace</text>
+<rect x="1103" y="173" width="112" height="27" fill="#161616" stroke="#2a2a2a"/><text x="1159" y="191" class="s b" font-size="13" text-anchor="middle" fill="#f2f2f2">◉  Diagnostics</text>
+<rect x="228" y="226" width="987" height="53" fill="#161616" stroke="#2a2a2a"/>
+<rect x="240.0" y="243" width="55" height="20" fill="#d9f542" fill-opacity="0.08" stroke="#d9f542"/><text x="249.0" y="257" class="s b u" font-size="10.5" fill="#d9f542" style="letter-spacing:1.2px">READY</text>
+<text x="307" y="248" class="s b" font-size="13" fill="#f2f2f2">Local workspace</text><text x="307" y="265" class="s" font-size="13" fill="#8c8c8c">Control Center loaded</text>
+<rect x="557" y="226" width="1" height="53" fill="#2a2a2a"/>
+<rect x="569.0" y="243" width="62" height="20" fill="#d9f542" fill-opacity="0.08" stroke="#d9f542"/><text x="578.0" y="257" class="s b u" font-size="10.5" fill="#d9f542" style="letter-spacing:1.2px">ONLINE</text>
+<text x="643" y="248" class="s b" font-size="13" fill="#f2f2f2">AXIOM backend</text><text x="643" y="265" class="s" font-size="13" fill="#8c8c8c">Backend connected</text>
+<rect x="886" y="226" width="1" height="53" fill="#2a2a2a"/>
+<rect x="898.0" y="243" width="55" height="20" fill="#8c8c8c" fill-opacity="0.08" stroke="#8c8c8c"/><text x="907.0" y="257" class="s b u" font-size="10.5" fill="#8c8c8c" style="letter-spacing:1.2px">LOCAL</text>
+<text x="965" y="248" class="s b" font-size="13" fill="#f2f2f2">Session security</text><text x="965" y="265" class="s" font-size="13" fill="#8c8c8c">Administrator session active</text>
+<rect x="228" y="300" width="987" height="105" fill="#161616" stroke="#2a2a2a"/>
+<text x="240" y="326" class="s" font-size="14" fill="#f2f2f2">Model registry</text><rect x="445" y="314" width="12" height="12" fill="none" stroke="#d9f542" stroke-width="1.4"/>
+<text x="240" y="360" class="s b" font-size="17" fill="#f2f2f2">3</text>
+<rect x="240.0" y="372" width="153" height="20" fill="#d9f542" fill-opacity="0.08" stroke="#d9f542"/><text x="249.0" y="386" class="s b " font-size="10.5" fill="#d9f542" style="letter-spacing:1.2px">3 models registered</text>
+<rect x="475" y="300" width="1" height="105" fill="#2a2a2a"/>
+<text x="487" y="326" class="s" font-size="14" fill="#f2f2f2">Datasets</text><rect x="692" y="314" width="12" height="12" fill="none" stroke="#d9f542" stroke-width="1.4"/>
+<text x="487" y="360" class="s b" font-size="17" fill="#f2f2f2">2</text>
+<rect x="486.75" y="372" width="187" height="20" fill="#8c8c8c" fill-opacity="0.08" stroke="#8c8c8c"/><text x="495.75" y="386" class="s b " font-size="10.5" fill="#8c8c8c" style="letter-spacing:1.2px">JSONL files in workspace</text>
+<rect x="722" y="300" width="1" height="105" fill="#2a2a2a"/>
+<text x="734" y="326" class="s" font-size="14" fill="#f2f2f2">Hardware</text><rect x="938" y="314" width="12" height="12" fill="none" stroke="#d9f542" stroke-width="1.4"/>
+<text x="734" y="360" class="s b" font-size="17" fill="#f2f2f2">CPU</text>
+<rect x="733.5" y="372" width="160" height="20" fill="#d9f542" fill-opacity="0.08" stroke="#d9f542"/><text x="742.5" y="386" class="s b " font-size="10.5" fill="#d9f542" style="letter-spacing:1.2px">7.7 GB RAM · 4 cores</text>
+<rect x="968" y="300" width="1" height="105" fill="#2a2a2a"/>
+<text x="980" y="326" class="s" font-size="14" fill="#f2f2f2">Inference runtime</text><rect x="1185" y="314" width="12" height="12" fill="none" stroke="#d9f542" stroke-width="1.4"/>
+<text x="980" y="360" class="s b" font-size="17" fill="#f2f2f2">Ollama</text>
+<rect x="980.25" y="372" width="194" height="20" fill="#d9f542" fill-opacity="0.08" stroke="#d9f542"/><text x="989.25" y="386" class="s b " font-size="10.5" fill="#d9f542" style="letter-spacing:1.2px">Local inference reachable</text>
+<text x="228" y="440" class="s b u" font-size="14" fill="#8c8c8c" style="letter-spacing:2.2px">LOCAL EVENT FEED</text><text x="228" y="462" class="s b" font-size="14" fill="#f2f2f2">Recent workspace activity</text>
+<rect x="722" y="426" width="92" height="20" fill="#8c8c8c" fill-opacity="0.08" stroke="#8c8c8c"/><text x="731" y="440" class="s b u" font-size="10.5" fill="#8c8c8c" style="letter-spacing:1.2px">• 3 EVENTS</text>
+<rect x="228" y="482" width="580" height="42" fill="#161616" stroke="#2a2a2a"/><rect x="228" y="482" width="2" height="42" fill="#d9f542"/>
+<text x="244" y="500" class="m b" font-size="13" fill="#d9f542">model.inspect</text><text x="244" y="516" class="s" font-size="12" fill="#8c8c8c">qwen2.5-0.5b-instruct</text><text x="792" y="500" class="s" font-size="11" text-anchor="end" fill="#8c8c8c">just now</text>
+<rect x="228" y="532" width="580" height="42" fill="#161616" stroke="#2a2a2a"/><rect x="228" y="532" width="2" height="42" fill="#d9f542"/>
+<text x="244" y="550" class="m b" font-size="13" fill="#d9f542">dataset.validate</text><text x="244" y="566" class="s" font-size="12" fill="#8c8c8c">train.jsonl · 0 invalid rows</text><text x="792" y="550" class="s" font-size="11" text-anchor="end" fill="#8c8c8c">2 min ago</text>
+<rect x="228" y="582" width="580" height="42" fill="#161616" stroke="#2a2a2a"/><rect x="228" y="582" width="2" height="42" fill="#f5a623"/>
+<text x="244" y="600" class="m b" font-size="13" fill="#f5a623">train.plan</text><text x="244" y="616" class="s" font-size="12" fill="#8c8c8c">3B qlora · estimated to fit</text><text x="792" y="600" class="s" font-size="11" text-anchor="end" fill="#8c8c8c">5 min ago</text>
+<text x="830" y="452" class="s b u" font-size="14" fill="#8c8c8c" style="letter-spacing:2.2px">ORIENTATION</text><text x="830" y="474" class="s b" font-size="14" fill="#f2f2f2">Next useful step</text>
+<text x="830" y="510" class="m b" font-size="16" fill="#d9f542">01</text><text x="859" y="510" class="s b" font-size="15" fill="#f2f2f2">Plan a training run</text>
+<text x="859" y="536" class="s" font-size="14" fill="#8c8c8c">Pick a registered model and let AXIOM check</text><text x="859" y="558" class="s" font-size="14" fill="#8c8c8c">what fits your RAM and VRAM first.</text>
+<rect x="859" y="580" width="116" height="29" fill="#d9f542"/><text x="917" y="599" class="s b" font-size="13.5" text-anchor="middle" fill="#111">→  Open training</text>
+<metadata><c2pa:manifest>AAAWgmp1bWIAAAAeanVtZGMycGEAEQAQgAAAqgA4m3EDYzJwYQAAABZcanVtYgAAAEdqdW1kYzJtYQARABCAAACqADibcQN1cm46YzJwYTphNTYyOGMyOS1mY2U2LTQzZTAtYTExNy00MzM4YzM1NGY5MTgAAAADl2p1bWIAAAApanVtZGMyYXMAEQAQgAAAqgA4m3EDYzJwYS5hc3NlcnRpb25zAAAAALxqdW1iAAAARGp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuaW5ncmVkaWVudC52MwAAAAAYYzJzaI/mIFan3gB15CVVd12bOokAAABwY2JvcqNpZGM6Zm9ybWF0bWltYWdlL3N2Zyt4bWxqaW5zdGFuY2VJRHgseG1wOmlpZDo4NjVmOGM5Mi1lMTUwLTQzNzYtOGE0OS0zMTY2YTRhNDEzNzRscmVsYXRpb25zaGlwaHBhcmVudE9mAAAB4mp1bWIAAABBanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5hY3Rpb25zLnYyAAAAABhjMnNoXMOLR03xIjRVDey+VTRaLgAAAZljYm9yomdhY3Rpb25zgqJmYWN0aW9ua2MycGEub3BlbmVkanBhcmFtZXRlcnOha2luZ3JlZGllbnRzgaJjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFggs8F55gwFjqwLVzY+jwiGnIgzUgO9Yj3xX/zgwvZ2xcKkZmFjdGlvbngdY29tLmFudGhyb3BpYy5jbGF1ZGUucHJvdmlkZWRqcGFyYW1ldGVyc6F4H2NvbS5hbnRocm9waWMub3JpZ2luLWNvbmZpZGVuY2VndW5rbm93bmtkZXNjcmlwdGlvbnhmQ2xhdWRlIHByb3ZpZGVkIHRoaXMgZmlsZSBhdCB0aGUgcmVxdWVzdCBvZiBhIHVzZXIgYW5kIG1heSBoYXZlIGNyZWF0ZWQgb3IgbW9kaWZpZWQgdGhlIGZpbGUgY29udGVudHMubXNvZnR3YXJlQWdlbnShZG5hbWVmQ2xhdWRlcmFsbEFjdGlvbnNJbmNsdWRlZPUAAADIanVtYgAAAEBqdW1kY2JvcgARABCAAACqADibcRNjMnBhLmhhc2guZGF0YQAAAAAYYzJzaD5Rb/9/8jyuQvw2zUn+QJgAAACAY2JvcqVjYWxnZnNoYTI1NmNwYWRMAAAAAAAAAAAAAAAAZGhhc2hYIKFGZrPUZlEqRrzn28qio9KeAhUNa/vHaeOsjen+/HtdZG5hbWVuanVtYmYgbWFuaWZlc3RqZXhjbHVzaW9uc4GiZXN0YXJ0GTXlZmxlbmd0aBkeBAAAAj5qdW1iAAAAJ2p1bWRjMmNsABEAEIAAAKoAOJtxA2MycGEuY2xhaW0udjIAAAACD2Nib3KlY2FsZ2ZzaGEyNTZpc2lnbmF0dXJleE1zZWxmI2p1bWJmPS9jMnBhL3VybjpjMnBhOmE1NjI4YzI5LWZjZTYtNDNlMC1hMTE3LTQzMzhjMzU0ZjkxOC9jMnBhLnNpZ25hdHVyZWppbnN0YW5jZUlEeCx4bXA6aWlkOmYxNjhmOWIwLTRiMjgtNDcyZS04YmZjLTRhNjU3ZGFkNDI5ZHJjcmVhdGVkX2Fzc2VydGlvbnODomN1cmx4LXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaW5ncmVkaWVudC52M2RoYXNoWCCzwXnmDAWOrAtXNj6PCIaciDNSA71iPfFf/ODC9nbFwqJjdXJseCpzZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmFjdGlvbnMudjJkaGFzaFggF3mnCnBadXqN1ft2f3xBLOqbtDQlTcQbrI/PKinjZ26iY3VybHgpc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5oYXNoLmRhdGFkaGFzaFggibjgCVtbAjvksM2O2/bjU2co2bAVLNzqr9olFOTJUJ50Y2xhaW1fZ2VuZXJhdG9yX2luZm+jZG5hbWVvQW50aHJvcGljIEZpbGVzZ3ZlcnNpb25lMS4wLjBrc3BlY1ZlcnNpb25lMi40LjAAABA4anVtYgAAAChqdW1kYzJjcwARABCAAACqADibcQNjMnBhLnNpZ25hdHVyZQAAABAIY2JvctKEWQISogEmGCFZAgowggIGMIIBjaADAgECAhRA5aAK7sI50L64g/oGQgU9Z1UTADAKBggqhkjOPQQDAzBJMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEuMCwGA1UEAxMlQW50aHJvcGljIENvbnRlbnQgQ3JlZGVudGlhbHMgUm9vdCBDQTAeFw0yNjA4MDcxODQzNTZaFw0yODA4MDYxOTQzNTZaMEQxFzAVBgNVBAoTDkFudGhyb3BpYywgUEJDMSkwJwYDVQQDEyBBbnRocm9waWMgQ2xhdWRlIENvbnRlbnQgU2lnbmluZzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJh6CmvLUBgFFNU0vUKlOVtE6djd17L5SuwX0LemFisBM3dkd/3cyjxFA3Qo5S46fX0/ihY0VZ7mfb9KF703t5OjWDBWMA4GA1UdDwEB/wQEAwIHgDAVBgNVHSUEDjAMBgorBgEEAYPoXgIBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUzlHiBIFOZFsj+OPEz5o+nMHXXMIwCgYIKoZIzj0EAwMDZwAwZAIwMXMdFJ4BetLLVY7ORuE9noqbbAZOZn/aArXyTwFAZfKrPzxF2vPoJNf1+UCdg1XGAjBwX1zd9WGqYkqmL5SFqw1QySjr1zJfpJM9+1rdDwSPLMOPOjKuiXjoU/pUUeG9RwmhY3BhZFkNngAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPZYQJwoaFq+PQQfCOHQNFI660r0oqOqzmX9Fvx+URMbTdlcYTrmk/MT3uuSI5kZBmA7JBHD4ah9QxzejFBJgjHprOg=</c2pa:manifest></metadata></svg>
