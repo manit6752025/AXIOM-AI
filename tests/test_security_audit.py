@@ -173,7 +173,7 @@ def test_installed_package_audit_verifies_record_hashes(tmp_path: Path, monkeypa
     assert good["status"] == "pass"
     assert "verified 1 installed file hash" in good["detail"]
 
-    package_file.write_bytes(b"TAMPERED_PACKAGE_CONTENT\\n")
+    package_file.write_bytes(b"EVIL_PACKAGE_CONTENT = True\\n")
     bad = _package_integrity_check(root, "typer", "typer")
     assert bad["status"] == "fail"
     assert "does not match its RECORD hash" in bad["detail"]
