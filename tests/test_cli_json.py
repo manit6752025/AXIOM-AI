@@ -119,8 +119,6 @@ def test_integration_list_json_returns_empty_or_registered_records(tmp_path: Pat
 
 
 def test_integration_handshake_json_reports_protocol_metadata(tmp_path: Path, monkeypatch) -> None:
-    import asyncio
-
     from axiom.core.integrations import AgentIntegration, IntegrationRegistry, IntegrationType
     from axiom.core import mcp_inventory
 
