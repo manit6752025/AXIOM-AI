@@ -233,6 +233,8 @@ class IntegrationRegistry:
             "owner_type": owner_type,
             "owner_label": owner_label,
         }
+        if not self.path.exists():
+            raise LookupError(f"MCP server not found: {name}")
         with file_lock(self.lock_file):
             integrations = self._read()
             updated: AgentIntegration | None = None
