@@ -1,6 +1,8 @@
 """Tests for safe release discovery, wheel verification and package installation."""
 from __future__ import annotations
 
+import base64
+import csv
 import hashlib
 import io
 import json
@@ -12,16 +14,33 @@ import pytest
 from axiom.core import updater
 
 
-def _wheel(version: str = "9.9.9") -> bytes:
+def _wheel(version: str = "9.9.9", *, tamper_record: bool = False, unsafe_member: bool = False) -> bytes:
     stream = io.BytesIO()
-    with zipfile.ZipFile(stream, "w") as archive:
-        archive.writestr(
-            "axiom_all-9.9.9.dist-info/METADATA",
-            f"Metadata-Version: 2.1\nName: axiom-all\nVersion: {version}\n\n",
-        )
-        archive.writestr("axiom/webui/index.html", "<main>AXIOM</main>")
+    dist_info = f"axiom_all-{version}.dist-info"
+    files = {
+        f"{dist_info}/METADATA": (
+            f"Metadata-Version: 2.1\nName: axiom-all\nVersion: {version}\n\n"
+        ).encode("utf-8"),
+        f"{dist_info}/WHEEL": b"Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        "axiom/__init__.py": b'"""AXIOM test wheel."""\n',
+        "axiom/webui/index.html": b"<main>AXIOM</main>",
+    }
+    if unsafe_member:
+        files["../outside.txt"] = b"must not be installed"
+    rows = []
+    for name, payload in files.items():
+        digest = base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).rstrip(b"=").decode("ascii")
+        rows.append([name, f"sha256={digest}", str(len(payload))])
+    rows.append([f"{dist_info}/RECORD", "", ""])
+    record = io.StringIO(newline="")
+    csv.writer(record, lineterminator="\n").writerows(rows)
+    files[f"{dist_info}/RECORD"] = record.getvalue().encode("utf-8")
+    if tamper_record:
+        files["axiom/__init__.py"] = b"tampered after RECORD creation\n"
+    with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, payload in files.items():
+            archive.writestr(name, payload)
     return stream.getvalue()
-
 
 def test_semantic_release_comparison_handles_numeric_beta_tags_and_stable_releases():
     assert updater.compare_versions("0.3.0-beta.10", "0.3.0-beta.9") > 0
@@ -127,3 +146,77 @@ def test_wheel_rejects_wrong_package_or_missing_webui():
         archive.writestr("other.dist-info/METADATA", "Name: other\nVersion: 9.9.9\n\n")
     with pytest.raises(updater.UpdateError, match="does not match"):
         updater._validate_wheel(invalid.getvalue(), "9.9.9")
+
+
+def test_download_rejects_wheel_record_tampering_before_invoking_pip(monkeypatch):
+    wheel = _wheel(tamper_record=True)
+    digest = hashlib.sha256(wheel).hexdigest()
+    pypi = {
+        "info": {"name": "axiom-all", "version": "9.9.9"},
+        "urls": [{
+            "packagetype": "bdist_wheel",
+            "filename": "axiom_all-9.9.9-py3-none-any.whl",
+            "url": "https://files.pythonhosted.org/axiom.whl",
+            "digests": {"sha256": digest},
+            "yanked": False,
+        }],
+    }
+
+    def fake_urlopen(request, timeout=20):
+        if "pypi.org" in request.full_url:
+            return io.BytesIO(json.dumps(pypi).encode("utf-8"))
+        return io.BytesIO(wheel)
+
+    monkeypatch.setattr(updater, "urlopen", fake_urlopen)
+    monkeypatch.setattr(updater.subprocess, "run", lambda *args, **kwargs: pytest.fail("pip must not run"))
+    with pytest.raises(updater.UpdateError, match="RECORD/archive inspection"):
+        updater.download_and_install("9.9.9")
+
+
+def test_download_rejects_wheel_archive_traversal_before_invoking_pip(monkeypatch):
+    wheel = _wheel(unsafe_member=True)
+    digest = hashlib.sha256(wheel).hexdigest()
+    pypi = {
+        "info": {"name": "axiom-all", "version": "9.9.9"},
+        "urls": [{
+            "packagetype": "bdist_wheel",
+            "filename": "axiom_all-9.9.9-py3-none-any.whl",
+            "url": "https://files.pythonhosted.org/axiom.whl",
+            "digests": {"sha256": digest},
+            "yanked": False,
+        }],
+    }
+
+    def fake_urlopen(request, timeout=20):
+        if "pypi.org" in request.full_url:
+            return io.BytesIO(json.dumps(pypi).encode("utf-8"))
+        return io.BytesIO(wheel)
+
+    monkeypatch.setattr(updater, "urlopen", fake_urlopen)
+    monkeypatch.setattr(updater.subprocess, "run", lambda *args, **kwargs: pytest.fail("pip must not run"))
+    with pytest.raises(updater.UpdateError, match="RECORD/archive inspection"):
+        updater.download_and_install("9.9.9")
+
+
+def test_download_rejects_non_pypi_wheel_host_before_fetching(monkeypatch):
+    pypi = {
+        "info": {"name": "axiom-all", "version": "9.9.9"},
+        "urls": [{
+            "packagetype": "bdist_wheel",
+            "filename": "axiom_all-9.9.9-py3-none-any.whl",
+            "url": "https://attacker.example/axiom.whl",
+            "digests": {"sha256": "a" * 64},
+            "yanked": False,
+        }],
+    }
+    calls = []
+
+    def fake_urlopen(request, timeout=20):
+        calls.append(request.full_url)
+        return io.BytesIO(json.dumps(pypi).encode("utf-8"))
+
+    monkeypatch.setattr(updater, "urlopen", fake_urlopen)
+    monkeypatch.setattr(updater.subprocess, "run", lambda *args, **kwargs: pytest.fail("pip must not run"))
+    with pytest.raises(updater.UpdateError, match="trusted HTTPS package-file host"):
+        updater.download_and_install("9.9.9")
+    assert len(calls) == 1 and "pypi.org" in calls[0]

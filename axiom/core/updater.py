@@ -18,7 +18,7 @@ from email.parser import BytesParser
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 GITHUB_RELEASES_URL = "https://api.github.com/repos/manit6752025/AXIOM-AI/releases?per_page=30"
@@ -187,7 +187,11 @@ def _wheel_for_version(version: str) -> tuple[bytes, str]:
     if not wheels:
         raise UpdateError("No non-yanked, SHA-256-verifiable Python wheel is published for this release.")
     wheel = next((item for item in wheels if item.get("filename", "").endswith("py3-none-any.whl")), wheels[0])
-    wheel_bytes = _read_url(wheel["url"], max_bytes=MAX_WHEEL_BYTES, timeout=60.0)
+    download_url = wheel["url"]
+    parsed_url = urlsplit(download_url)
+    if parsed_url.scheme != "https" or parsed_url.hostname != "files.pythonhosted.org" or parsed_url.username or parsed_url.password:
+        raise UpdateError("PyPI supplied a wheel URL outside the trusted HTTPS package-file host.")
+    wheel_bytes = _read_url(download_url, max_bytes=MAX_WHEEL_BYTES, timeout=60.0)
     actual = hashlib.sha256(wheel_bytes).hexdigest()
     if not hmac.compare_digest(actual, wheel["digests"]["sha256"]):
         raise UpdateError("Downloaded AXIOM wheel failed its PyPI SHA-256 verification.")
@@ -202,6 +206,15 @@ def download_and_install(version: str) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="axiom-update-") as temporary:
         wheel_path = Path(temporary) / Path(filename).name
         wheel_path.write_bytes(wheel_bytes)
+        from axiom.core.artifact_security import inspect_release_artifact
+
+        inspection = inspect_release_artifact(wheel_path)
+        if inspection.get("artifact", {}).get("format") != "wheel" or inspection.get("status") != "pass":
+            summary = inspection.get("summary", {})
+            raise UpdateError(
+                "Downloaded AXIOM wheel failed full RECORD/archive inspection "
+                f"(failed checks: {summary.get('failed', 'unknown')}; warnings: {summary.get('warnings', 'unknown')})."
+            )
         command = [
             sys.executable, "-m", "pip", "install", "--upgrade", "--no-input",
             "--disable-pip-version-check", str(wheel_path),
