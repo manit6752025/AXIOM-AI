@@ -84,7 +84,7 @@ class SecurityEventStore:
     def _locked(self) -> Iterator[None]:
         self._check_paths(create=True)
         try:
-            with self._locked():
+            with file_lock(self.lock_path):
                 self._check_paths()
                 if os.name == "posix":
                     os.chmod(self.lock_path, stat.S_IRUSR | stat.S_IWUSR)
