@@ -335,7 +335,10 @@ async def _collect_schema_pages(client: Any, method_name: str, collection_name: 
     for page_number in range(MAX_SCHEMA_PAGES):
         method = getattr(client, method_name)
         page = await method(cursor=cursor)
-        entries = getattr(page, collection_name, None) or []
+        entries = getattr(page, collection_name, None)
+        if entries is None and collection_name == "resourceTemplates":
+            entries = getattr(page, "resource_templates", None)
+        entries = entries or []
         for entry in entries:
             if len(collected) >= MAX_SCHEMA_ITEMS:
                 truncated = True
