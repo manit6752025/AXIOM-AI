@@ -47,6 +47,20 @@ def test_mcp_inventory_api_maps_missing_server_to_not_found(monkeypatch):
     assert response.value.status_code == 404
 
 
+def test_mcp_schema_api_maps_unknown_server_to_not_found(monkeypatch):
+    from fastapi import HTTPException
+    from axiom.api import mcp_inventory as api_module
+
+    async def missing(_name: str):
+        raise mcp_inventory.McpInventoryError("not found", code="not_found")
+
+    monkeypatch.setattr(mcp_inventory, "inspect_mcp_schemas", missing)
+    with pytest.raises(HTTPException) as response:
+        asyncio.run(api_module.inspect_mcp_server_schemas("missing"))
+
+    assert response.value.status_code == 404
+
+
 def test_inventory_is_passive_bounded_and_only_lists_mcp_servers(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     registry = IntegrationRegistry()
