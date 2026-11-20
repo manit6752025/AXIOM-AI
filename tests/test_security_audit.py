@@ -291,7 +291,7 @@ def test_security_api_records_mcp_permission_changes_in_journal(tmp_path: Path, 
     monkeypatch.chdir(tmp_path)
     app = FastAPI()
     app.include_router(security_router)
-    response = TestClient(app).post("/api/security/tool-profiles", json={"name": "review-profile"})
+    response = TestClient(app).post("/api/security/tool-profiles/review-profile")
 
     assert response.status_code in {200, 201}
     events = SecurityEventStore(tmp_path).list_page()["events"]
