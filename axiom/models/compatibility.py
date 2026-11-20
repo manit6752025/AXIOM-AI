@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from axiom.core.hardware import HardwareInfo
@@ -82,6 +83,33 @@ def _range(low: float, high: float) -> dict[str, float]:
     return {"low": round(low, 2), "high": round(high, 2)}
 
 
+def _installed_version(package: str) -> str | None:
+    try:
+        return version(package)
+    except PackageNotFoundError:
+        return None
+
+
+def _runtime_matrix(model_format: str, architecture: str | None) -> list[dict[str, str | None]]:
+    """Return evidence, not an assertion that an external runtime can load a model."""
+    normalized_architecture = (architecture or "").casefold()
+    if "gguf" in model_format:
+        return [
+            {"runtime": "Ollama", "status": "unverified", "version_evidence": None, "reason": "Local service/version was not contacted by this metadata check."},
+            {"runtime": "llama.cpp", "status": "unverified", "version_evidence": None, "reason": "Local executable/version was not invoked by this metadata check."},
+        ]
+    supported = any(name in normalized_architecture for name in ("llama", "mistral", "qwen2", "qwen3"))
+    return [{
+        "runtime": "AXIOM Engine", "status": "candidate" if supported else "architecture_unverified",
+        "version_evidence": f"axiom-all {_installed_version('axiom-all') or 'source checkout'}",
+        "reason": "Architecture metadata matches the native supported family." if supported else "Architecture metadata is absent or outside the native supported family.",
+    }, {
+        "runtime": "Transformers", "status": "unverified",
+        "version_evidence": f"transformers {_installed_version('transformers') or 'not installed'}",
+        "reason": "Package version is evidence only; checkpoint config and tokenizer are not loaded.",
+    }]
+
+
 def estimate_model_compatibility(model: Model, hardware: HardwareInfo) -> dict[str, Any]:
     """Return evidence-labelled memory estimates and compatibility warnings.
 
@@ -123,6 +151,7 @@ def estimate_model_compatibility(model: Model, hardware: HardwareInfo) -> dict[s
             "likely_runtimes": [],
             "guidance": "The registered format does not identify a supported runtime family. Inspect the local files and format metadata.",
         }
+    format_compatibility["matrix"] = _runtime_matrix(model_format, model.architecture)
 
     warnings: list[str] = [
         "This is a metadata-based screening estimate, not a benchmark or a guarantee that model loading will succeed.",

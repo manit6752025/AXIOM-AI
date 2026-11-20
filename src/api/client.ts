@@ -602,7 +602,7 @@ export type WorkspaceModelCompatibility = {
   estimated_runtime_memory_gb: ModelMemoryRange | null;
   system_ram_fit: WorkspaceMemoryFit;
   gpu_memory_fit: WorkspaceMemoryFit;
-  format_compatibility: { status: "candidate_not_verified" | "unknown"; likely_runtimes: string[]; guidance: string };
+  format_compatibility: { status: "candidate_not_verified" | "unknown"; likely_runtimes: string[]; guidance: string; matrix: Array<{ runtime: string; status: string; version_evidence: string | null; reason: string }> };
   warnings: string[];
   scope_note: string;
 };
