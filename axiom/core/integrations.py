@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 
@@ -16,6 +17,17 @@ class IntegrationType(str, Enum):
     A2A = "a2a"
 
 
+MCP_TRUST_STATES = frozenset({"unverified", "trusted", "blocked"})
+MCP_OWNER_TYPES = frozenset({"unknown", "workspace", "external"})
+MCP_CONNECTION_STATES = frozenset({"not_inspected", "connected", "failed", "timeout"})
+MCP_CONNECTION_ERRORS = frozenset({
+    "handshake_failed",
+    "handshake_timeout",
+    "schema_inspection_failed",
+    "schema_inspection_timeout",
+})
+
+
 @dataclass
 class AgentIntegration:
     name: str
@@ -23,6 +35,12 @@ class AgentIntegration:
     command: str | None = None
     url: str | None = None
     description: str = ""
+    trust_status: str = "unverified"
+    owner_type: str = "unknown"
+    owner_label: str | None = None
+    connection_status: str = "not_inspected"
+    last_inspected_at: str | None = None
+    last_connection_error: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -31,6 +49,12 @@ class AgentIntegration:
             "command": self.command,
             "url": self.url,
             "description": self.description,
+            "trust_status": self.trust_status,
+            "owner_type": self.owner_type,
+            "owner_label": self.owner_label,
+            "connection_status": self.connection_status,
+            "last_inspected_at": self.last_inspected_at,
+            "last_connection_error": self.last_connection_error,
         }
 
     @classmethod
@@ -58,12 +82,53 @@ class AgentIntegration:
         if not isinstance(description, str):
             raise TypeError("Integration description must be a string.")
 
+        trust_status = data.get("trust_status", "unverified")
+        owner_type = data.get("owner_type", "unknown")
+        owner_label = data.get("owner_label")
+        connection_status = data.get("connection_status", "not_inspected")
+        last_inspected_at = data.get("last_inspected_at")
+        last_connection_error = data.get("last_connection_error")
+
+        if trust_status not in MCP_TRUST_STATES:
+            raise ValueError("Integration trust status is invalid.")
+        if owner_type not in MCP_OWNER_TYPES:
+            raise ValueError("Integration owner type is invalid.")
+        if owner_label is not None:
+            if not isinstance(owner_label, str):
+                raise TypeError("Integration owner label must be a string or null.")
+            owner_label = owner_label.strip()
+            if not owner_label:
+                owner_label = None
+            elif len(owner_label) > 96 or any(not character.isprintable() for character in owner_label):
+                raise ValueError("Integration owner label must be at most 96 printable characters.")
+        if connection_status not in MCP_CONNECTION_STATES:
+            raise ValueError("Integration connection status is invalid.")
+        if last_inspected_at is not None:
+            if not isinstance(last_inspected_at, str) or len(last_inspected_at) > 64:
+                raise ValueError("Integration inspection timestamp is invalid.")
+            try:
+                datetime.fromisoformat(last_inspected_at.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("Integration inspection timestamp is invalid.") from exc
+        if last_connection_error is not None and last_connection_error not in MCP_CONNECTION_ERRORS:
+            raise ValueError("Integration connection error is invalid.")
+        if connection_status == "not_inspected" and (
+            last_inspected_at is not None or last_connection_error is not None
+        ):
+            raise ValueError("Uninspected integration cannot have connection result metadata.")
+
         return cls(
             name=name,
             type=integration_type,
             command=command,
             url=url,
             description=description,
+            trust_status=trust_status,
+            owner_type=owner_type,
+            owner_label=owner_label,
+            connection_status=connection_status,
+            last_inspected_at=last_inspected_at,
+            last_connection_error=last_connection_error,
         )
 
 
@@ -144,6 +209,83 @@ class IntegrationRegistry:
                 )
                 + "\n",
             )
+
+
+    def update_mcp_trust(
+        self,
+        name: str,
+        *,
+        trust_status: str,
+        owner_type: str = "unknown",
+        owner_label: str | None = None,
+    ) -> AgentIntegration:
+        """Persist explicit trust and user-declared ownership for one MCP server."""
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("MCP server name cannot be empty.")
+        if trust_status not in MCP_TRUST_STATES:
+            raise ValueError("Trust status must be unverified, trusted, or blocked.")
+        if owner_type not in MCP_OWNER_TYPES:
+            raise ValueError("Owner type must be unknown, workspace, or external.")
+        if owner_label is not None and not isinstance(owner_label, str):
+            raise ValueError("Owner label must be a string or null.")
+        changes = {
+            "trust_status": trust_status,
+            "owner_type": owner_type,
+            "owner_label": owner_label,
+        }
+        with file_lock(self.lock_file):
+            integrations = self._read()
+            updated: AgentIntegration | None = None
+            remaining: list[AgentIntegration] = []
+            for item in integrations:
+                if item.type is IntegrationType.MCP and item.name.casefold() == name.strip().casefold():
+                    updated = AgentIntegration.from_dict({**item.to_dict(), **changes})
+                    remaining.append(updated)
+                else:
+                    remaining.append(item)
+            if updated is None:
+                raise LookupError(f"MCP server not found: {name}")
+            atomic_write_text(
+                self.path,
+                json.dumps([item.to_dict() for item in remaining], indent=2, ensure_ascii=False) + "\n",
+            )
+            return updated
+
+    def record_mcp_connection(
+        self,
+        name: str,
+        *,
+        connection_status: str,
+        last_inspected_at: str | None = None,
+        last_connection_error: str | None = None,
+    ) -> AgentIntegration:
+        """Persist the latest metadata-only connection inspection result."""
+        if connection_status not in {"connected", "failed", "timeout"}:
+            raise ValueError("Connection status must be connected, failed, or timeout.")
+        if last_inspected_at is None:
+            last_inspected_at = datetime.now(UTC).isoformat()
+        changes = {
+            "connection_status": connection_status,
+            "last_inspected_at": last_inspected_at,
+            "last_connection_error": last_connection_error,
+        }
+        with file_lock(self.lock_file):
+            integrations = self._read()
+            updated: AgentIntegration | None = None
+            remaining: list[AgentIntegration] = []
+            for item in integrations:
+                if item.type is IntegrationType.MCP and item.name.casefold() == name.casefold():
+                    updated = AgentIntegration.from_dict({**item.to_dict(), **changes})
+                    remaining.append(updated)
+                else:
+                    remaining.append(item)
+            if updated is None:
+                raise LookupError(f"MCP server not found: {name}")
+            atomic_write_text(
+                self.path,
+                json.dumps([item.to_dict() for item in remaining], indent=2, ensure_ascii=False) + "\n",
+            )
+            return updated
 
     def remove(self, name: str) -> bool:
         if not isinstance(name, str) or not name.strip():
