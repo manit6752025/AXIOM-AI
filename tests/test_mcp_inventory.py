@@ -168,6 +168,19 @@ def test_handshake_failures_do_not_disclose_command_or_exception_details(tmp_pat
     assert "private path.json" not in str(result)
 
 
+def test_inventory_rejects_nul_and_oversized_commands(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    registry = IntegrationRegistry()
+    registry.add(AgentIntegration("NUL command", IntegrationType.MCP, command="python\\x00secret"))
+    registry.add(AgentIntegration("Large command", IntegrationType.MCP, command="x" * (mcp_inventory.MAX_COMMAND_CHARS + 1)))
+
+    result = mcp_inventory.list_mcp_servers()
+
+    assert result["total"] == 2
+    assert all(server["configured"] is False for server in result["servers"])
+    assert "secret" not in str(result)
+
+
 def test_handshake_rejects_unknown_server_and_invalid_timeout(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _add_server()
