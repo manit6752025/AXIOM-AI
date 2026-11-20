@@ -595,3 +595,6 @@ and other unneeded values are omitted. Resource URIs omit local directories,
 credentials, query values, and fragments. The subprocess environment remains
 the MCP SDK's minimal allow-listed environment and the process is time-limited.
 Failed checks return generic errors without child stderr or exception details.
+
+
+Some MCP servers expose resources but do not implement the optional resource-template listing method. In that case AXIOM preserves the tool and fixed-resource results and marks resource templates as unsupported instead of failing the entire schema inspection.
