@@ -3715,7 +3715,7 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
           <button type="button" className="button secondary-button" onClick={loadTemplate} disabled={!templateId}><FileCode2 size={15} /> Load template</button>
         </div>
         {templateId && <p className="quiet-note">{templates.find((template) => template.id === templateId)?.description}</p>}
-        <label className="field"><span className="field-label-row"><span>Workflow name</span></span><input value={name} maxLength={120} onChange={(event) => { setName(event.target.value); setValidation(""); setDryRun(null); }} /></label>
+        <label className="field"><span className="field-label-row"><span>Workflow name</span></span><input value={name} maxLength={120} onChange={(event) => { setName(event.target.value); setValidation(""); setValidationWarnings([]); setDryRun(null); }} /></label>
         <div className="workflow-builder-controls">
           <label className="field"><span className="field-label-row"><span>Add step</span></span><select value={nodeType} onChange={(event) => setNodeType(event.target.value as WorkflowNodeType)}>{Object.entries(workflowNodeLabels).map(([type, label]) => <option key={type} value={type}>{label}</option>)}</select></label>
           <button type="button" className="button secondary-button" onClick={addNode} disabled={nodes.length >= 64}><Plus size={15} /> {nodes.length >= 64 ? "Step limit reached" : "Add step"}</button>
