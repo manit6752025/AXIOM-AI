@@ -27,6 +27,14 @@ from pathlib import Path
 from typing import Any, BinaryIO, Callable
 
 from axiom.core.resource_ids import new_resource_id
+from axiom.core.fine_tuning_checkpoints import (
+    CHECKPOINT_DIRECTORY,
+    checkpoint_count,
+    latest_checkpoint,
+    load_checkpoint_payload,
+    model_tree_fingerprint,
+    save_checkpoint,
+)
 from axiom.core.storage import file_lock
 from axiom.path_safety import open_regular_file
 
@@ -63,6 +71,7 @@ TRAINING_MAX_LINE_BYTES = _MAX_LINE_BYTES
 TRAINING_MAX_TEXT_CHARS = _MAX_TEXT_CHARS
 _MAX_MODEL_ENTRIES = 50_000
 _MAX_STEPS = 1_000
+_MAX_CHECKPOINT_INTERVAL = 1_000
 _MAX_LOSS_SAMPLES = 64
 _MAX_SEQUENCE_LENGTH = 2_048
 _TEXT_FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
@@ -396,12 +405,68 @@ def _load_texts(
     return texts
 
 
+def _validate_resume_metadata(
+    state: dict[str, Any],
+    config: dict[str, Any],
+    *,
+    dataset_sha256: str,
+    base_model_fingerprint: str,
+) -> None:
+    training = state.get("training")
+    if not isinstance(training, dict):
+        raise ValueError("Resume checkpoint has no valid training metadata.")
+    expected = {
+        "model_path": config["model_path"],
+        "model_fingerprint": base_model_fingerprint,
+        "dataset_path": config["dataset_path"],
+        "dataset_sha256": dataset_sha256,
+        "text_field": config["text_field"],
+        "sequence_length": config["sequence_length"],
+        "learning_rate": config["learning_rate"],
+        "lora_rank": config["lora_rank"],
+        "output_dir": config["output_dir"],
+        "seed": AXIOM_TRAINING_SEED,
+    }
+    for key, value in expected.items():
+        if training.get(key) != value:
+            labels = {
+                "model_path": "base-model path",
+                "model_fingerprint": "base-model files",
+                "dataset_path": "dataset path",
+                "dataset_sha256": "dataset contents",
+                "text_field": "dataset text field",
+                "sequence_length": "sequence length",
+                "learning_rate": "learning rate",
+                "lora_rank": "LoRA rank",
+                "output_dir": "output directory",
+                "seed": "training seed",
+            }
+            raise ValueError(
+                f"Resume checkpoint does not match the current {labels[key]}; "
+                "use the same inputs and training settings."
+            )
+    completed_steps = state.get("completed_steps")
+    if (
+        isinstance(completed_steps, bool)
+        or not isinstance(completed_steps, int)
+        or not 1 <= completed_steps <= config["max_steps"]
+    ):
+        raise ValueError("Resume checkpoint step count must not exceed the requested maximum steps.")
+    targets = training.get("target_modules")
+    if (
+        not isinstance(targets, list)
+        or not targets
+        or any(not isinstance(target, str) or not target for target in targets)
+    ):
+        raise ValueError("Resume checkpoint has invalid LoRA target-module metadata.")
+
+
 def validate_config(
     config: dict[str, Any],
     *,
     workspace_guard: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Validate user-supplied paths and conservative LoRA controls before creating a job."""
+    """Validate local training inputs, checkpoint compatibility, and output policy."""
     if not isinstance(config, dict):
         raise ValueError("Fine-tuning configuration must be a mapping.")
     model_path = _resolve_existing(config.get("model_path", ""), "Base model directory")
@@ -413,8 +478,11 @@ def validate_config(
     output_raw = config.get("output_dir", "")
     if not isinstance(output_raw, str) or not output_raw.strip():
         raise ValueError("Adapter output directory is required.")
+    raw_output_path = Path(output_raw).expanduser()
+    if raw_output_path.exists() and raw_output_path.is_symlink():
+        raise ValueError("Adapter output directory cannot be a symbolic link.")
     try:
-        output_dir = Path(output_raw).expanduser().resolve(strict=False)
+        output_dir = raw_output_path.resolve(strict=False)
         parent = output_dir.parent.resolve(strict=True)
     except (OSError, RuntimeError):
         raise ValueError("The parent of the adapter output directory must already exist locally.") from None
@@ -424,22 +492,15 @@ def validate_config(
         raise ValueError("Adapter output and base model directories must not overlap.")
     if output_dir == dataset_path or output_dir == dataset_path.parent:
         raise ValueError("Adapter output must not overwrite the training dataset or its directory.")
-    if output_dir.exists():
-        if not output_dir.is_dir() or any(output_dir.iterdir()):
-            raise ValueError("Adapter output must be a new directory or an existing empty directory.")
-    if workspace_guard is not None:
-        _validate_workspace_guard({
-            "model_path": str(model_path),
-            "dataset_path": str(dataset_path),
-            "output_dir": str(output_dir),
-        }, workspace_guard)
-    validate_local_model_tree(model_path)
+
     text_field = config.get("text_field", "text")
     validate_training_text_field(text_field)
     max_steps = config.get("max_steps", 20)
     sequence_length = config.get("sequence_length", 512)
     lora_rank = config.get("lora_rank", 8)
     learning_rate = config.get("learning_rate", 0.0001)
+    checkpoint_interval = config.get("checkpoint_interval", 0)
+    output_policy = config.get("output_policy", "empty")
     if isinstance(max_steps, bool) or not isinstance(max_steps, int) or not 1 <= max_steps <= _MAX_STEPS:
         raise ValueError(f"Maximum training steps must be between 1 and {_MAX_STEPS}.")
     if isinstance(sequence_length, bool) or not isinstance(sequence_length, int) or not 32 <= sequence_length <= _MAX_SEQUENCE_LENGTH:
@@ -448,6 +509,41 @@ def validate_config(
         raise ValueError("LoRA rank must be an integer between 1 and 64.")
     if isinstance(learning_rate, bool) or not isinstance(learning_rate, (int, float)) or not 0.000001 <= float(learning_rate) <= 0.01:
         raise ValueError("Learning rate must be between 0.000001 and 0.01.")
+    if (
+        isinstance(checkpoint_interval, bool)
+        or not isinstance(checkpoint_interval, int)
+        or not 0 <= checkpoint_interval <= _MAX_CHECKPOINT_INTERVAL
+    ):
+        raise ValueError(f"Checkpoint interval must be between 0 and {_MAX_CHECKPOINT_INTERVAL} steps.")
+    if output_policy not in {"new", "empty", "resume"}:
+        raise ValueError("Output policy must be 'new', 'empty', or 'resume'.")
+
+    resume_state: dict[str, Any] | None = None
+    if output_policy == "new":
+        if output_dir.exists():
+            raise ValueError("The 'new' output policy requires a directory that does not already exist.")
+    elif output_policy == "empty":
+        if output_dir.exists():
+            if output_dir.is_symlink() or not output_dir.is_dir() or any(output_dir.iterdir()):
+                raise ValueError("The 'empty' output policy requires a new or existing empty directory.")
+    else:
+        if checkpoint_interval < 1:
+            raise ValueError("Resume policy requires checkpointing to remain enabled (interval 1–1000).")
+        if not output_dir.exists() or output_dir.is_symlink() or not output_dir.is_dir():
+            raise ValueError("Resume policy requires an existing AXIOM training output directory.")
+        try:
+            existing = list(output_dir.iterdir())
+        except OSError:
+            raise ValueError("Resume output directory could not be inspected safely.") from None
+        if len(existing) != 1 or existing[0].name != CHECKPOINT_DIRECTORY or existing[0].is_symlink() or not existing[0].is_dir():
+            raise ValueError("Resume policy only accepts an output directory containing AXIOM checkpoints and no final adapter files.")
+        try:
+            _, resume_state = latest_checkpoint(output_dir)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from None
+        if resume_state.get("completed_steps", 0) > max_steps:
+            raise ValueError("Maximum training steps cannot be lower than the latest checkpoint step.")
+
     result = {
         "model_path": str(model_path),
         "dataset_path": str(dataset_path),
@@ -457,13 +553,30 @@ def validate_config(
         "sequence_length": sequence_length,
         "learning_rate": float(learning_rate),
         "lora_rank": lora_rank,
+        "checkpoint_interval": checkpoint_interval,
+        "output_policy": output_policy,
     }
-    _load_training_texts(
+    if workspace_guard is not None:
+        _validate_workspace_guard(result, workspace_guard)
+    validate_local_model_tree(model_path)
+
+    _, dataset_sha256 = _load_training_texts(
         {"dataset_path": str(dataset_path), "text_field": text_field},
         workspace_guard,
+        include_fingerprint=True,
     )
+    if resume_state is not None:
+        try:
+            base_model_fingerprint = model_tree_fingerprint(model_path)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from None
+        _validate_resume_metadata(
+            resume_state,
+            result,
+            dataset_sha256=dataset_sha256,
+            base_model_fingerprint=base_model_fingerprint,
+        )
     return result
-
 
 def _validate_workspace_guard(config: dict[str, Any], guard: dict[str, Any] | None) -> None:
     if guard is None:
