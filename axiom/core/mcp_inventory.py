@@ -10,8 +10,8 @@ import asyncio
 import os
 import shlex
 import time
-from pathlib import Path
 from itertools import islice
+from pathlib import Path
 from typing import Any
 
 from mcp import Client, StdioServerParameters
@@ -330,7 +330,7 @@ def _safe_resource_uri(value: object) -> str | None:
             return "[REDACTED URI]"
         port = f":{parsed_port}" if parsed_port is not None else ""
         return f"{scheme}://{host}{port}/…"
-    return f"{scheme}:…" 
+    return f"{scheme}:…"
 
 
 async def _collect_schema_pages(client: Any, method_name: str, collection_name: str) -> tuple[list[Any], bool]:
