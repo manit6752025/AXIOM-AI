@@ -263,6 +263,7 @@ def _verify_wheel(archive: zipfile.ZipFile, filename: str) -> dict[str, Any]:
     metadata = BytesParser().parsebytes(_zip_read_bounded(archive, by_name[metadata_name], 1024 * 1024))
     wheel_metadata = BytesParser().parsebytes(_zip_read_bounded(archive, by_name[wheel_name], 64 * 1024))
     package_name = metadata.get("Name", "").strip()
+    parts = Path(filename).name[:-4].split("-")
     package_version = metadata.get("Version", "").strip()
     wheel_version = wheel_metadata.get("Wheel-Version", "").strip()
     tags = wheel_metadata.get_all("Tag", [])
@@ -312,7 +313,6 @@ def _verify_wheel(archive: zipfile.ZipFile, filename: str) -> dict[str, Any]:
             "The .dist-info directory name matches the embedded distribution Name and Version.",
         ))
 
-    parts = Path(filename).name[:-4].split("-")
     if len(parts) not in {5, 6}:
         checks.append(_check(
             "artifact.wheel.filename", "Wheel filename", "fail",
