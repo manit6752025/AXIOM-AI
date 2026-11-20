@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — refresh cadence and reduced-motion settings
+
+- Honor the selected 5–120 second Control Center health polling interval instead of clamping short user-selected intervals to 15 seconds.
+- Added Playwright fake-clock coverage for 5-second polling, reduced-motion CSS persistence, and low-power mode disabling periodic health checks.
+
 ## Unreleased — responsive phone and tablet layouts
 
 - Added Playwright coverage for narrow phone and tablet widths, no horizontal page overflow, compact settings layout, and off-canvas sidebar interaction at 320px.

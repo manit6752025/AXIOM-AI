@@ -30,12 +30,23 @@ JSON API client contribute to a shared in-flight loading count so users can
 see when workspace data is being refreshed.
 
 Health checks run when the authenticated shell opens and then follow the
-Dashboard refresh preference; low-power mode disables periodic checks.
-Manual retry remains available. A successful response from any typed JSON
+Dashboard health refresh preference (Off, 5, 10, 15, 30, 60, or 120 seconds).
+The selected interval is honored as configured; low-power mode disables
+periodic checks. Manual retry remains available. A successful response from any typed JSON
 request refreshes the last-success timestamp. The stale label means no
 successful response has been observed for more than one minute; it is a
 connectivity freshness hint, not a claim that individual cached records have
 expired. Streaming requests are not included in the shared request counter.
+
+## Refresh and motion preferences
+
+Settings lets the user choose a Dashboard health refresh interval from Off to
+two minutes. The authenticated shell applies the selected interval directly;
+the low-power mode disables recurring health checks and combines with reduced
+motion. The separate Reduce motion preference applies a CSS motion override
+without changing the underlying interface layout. Preferences are stored in
+the current browser profile and restored after reload. These settings do not
+change server-side task scheduling or streaming request behavior.
 
 ## Responsive phone and tablet layouts
 

@@ -792,7 +792,7 @@ function App() {
     void checkBackend();
     const intervalSeconds = preferences.lowPowerMode ? 0 : preferences.dashboardRefreshSeconds;
     const timer = intervalSeconds > 0
-      ? window.setInterval(() => void checkBackend(), Math.max(15, intervalSeconds) * 1000)
+      ? window.setInterval(() => void checkBackend(), intervalSeconds * 1000)
       : undefined;
     return () => {
       if (timer !== undefined) window.clearInterval(timer);

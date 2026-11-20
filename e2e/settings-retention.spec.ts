@@ -86,3 +86,54 @@ test("Settings exports and imports a workspace metadata archive", async ({ page 
   await expect(page.locator(".inline-alert.success[role=\"status\"]")).toContainText("Metadata replace completed");
   expect(uploadedBody?.toString()).toBe("PK\\u0003\\u0004AXIOM-IMPORT");
 });
+
+
+test("Settings honors health refresh cadence, persists reduced motion, and disables polling in low-power mode", async ({ page }) => {
+  await page.clock.install();
+  let healthCalls = 0;
+  await page.route("**/api/health", async (route) => {
+    healthCalls += 1;
+    await route.fulfill({ json: { status: "ok", version: "test" } });
+  });
+
+  await ensureAuthenticated(page);
+  await page.goto("/?page=settings");
+
+  await page.getByLabel("Dashboard health refresh").selectOption("5");
+  await page.getByLabel("Reduce motion").check();
+  await page.getByRole("button", { name: "Save preferences" }).click();
+  await expect(page.getByText("Preferences saved for this browser profile.")).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-reduced-motion", "true");
+
+  const transitionDuration = await page.locator(".sidebar").evaluate((element) =>
+    getComputedStyle(element).transitionDuration,
+  );
+  const transitionSeconds = transitionDuration.endsWith("ms")
+    ? Number.parseFloat(transitionDuration) / 1000
+    : Number.parseFloat(transitionDuration);
+  expect(transitionSeconds).toBeLessThanOrEqual(0.00001);
+
+  const beforeFiveSecondTick = healthCalls;
+  await page.clock.runFor(5_100);
+  expect(healthCalls).toBeGreaterThan(beforeFiveSecondTick);
+
+  await page.reload();
+  await expect(page.getByLabel("Dashboard health refresh")).toHaveValue("5");
+  await expect(page.getByLabel("Reduce motion")).toBeChecked();
+  await expect(page.locator("html")).toHaveAttribute("data-reduced-motion", "true");
+
+  await page.getByLabel("Dashboard health refresh").selectOption("0");
+  await page.getByLabel("Low-power mode").check();
+  await page.getByRole("button", { name: "Save preferences" }).click();
+  await expect(page.getByText("Preferences saved for this browser profile.")).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-reduced-motion", "true");
+
+  const beforeLowPowerWindow = healthCalls;
+  await page.clock.runFor(30_000);
+  expect(healthCalls).toBe(beforeLowPowerWindow);
+
+  await page.reload();
+  await expect(page.getByLabel("Dashboard health refresh")).toHaveValue("0");
+  await expect(page.getByLabel("Low-power mode")).toBeChecked();
+  await expect(page.locator("html")).toHaveAttribute("data-reduced-motion", "true");
+});
