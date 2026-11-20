@@ -53,6 +53,7 @@ import {
   type WorkflowTemplate,
   type WorkspaceModelCandidate,
   type WorkspaceModelInspection,
+  type WorkspaceRuntimeMatrix,
 } from "./api/client";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode } from "react";
@@ -2054,6 +2055,9 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
   const [compatibilityReport, setCompatibilityReport] = useState<WorkspaceModelCompatibility | null>(null);
   const [compatibilityBusyId, setCompatibilityBusyId] = useState<string | null>(null);
   const [compatibilityError, setCompatibilityError] = useState("");
+  const [runtimeMatrix, setRuntimeMatrix] = useState<WorkspaceRuntimeMatrix | null>(null);
+  const [runtimeMatrixBusy, setRuntimeMatrixBusy] = useState(false);
+  const [runtimeMatrixError, setRuntimeMatrixError] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -2201,6 +2205,19 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
     }
   };
 
+  const loadRuntimeMatrix = async (forceRefresh = false) => {
+    setRuntimeMatrixBusy(true);
+    setRuntimeMatrixError("");
+    try {
+      const result = await axiomApi.modelRuntimeMatrix(forceRefresh);
+      setRuntimeMatrix(result.matrix);
+    } catch (cause) {
+      setRuntimeMatrixError(cause instanceof Error ? cause.message : "Local runtime evidence could not be collected.");
+    } finally {
+      setRuntimeMatrixBusy(false);
+    }
+  };
+
   const useCandidateMetadata = async (candidate: WorkspaceModelCandidate) => {
     const result = await inspectCandidate(candidate);
     if (!result) return;
@@ -2337,8 +2354,23 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
   const validSizeBytes = !sizeBytes.trim() || (/^\d+$/.test(sizeBytes.trim()) && Number.isSafeInteger(Number(sizeBytes)));
   const validContentSha256 = !contentSha256.trim() || /^[a-f0-9]{64}$/i.test(contentSha256.trim());
 
-  return <FeaturePage page="models" actions={<><button type="button" className="button secondary-button" onClick={() => void refresh()} disabled={loading}><RefreshCcw size={16} /> Refresh</button><button type="button" className="button secondary-button" onClick={() => void discoverLocalModels()} disabled={discoveryBusy}><Search size={15} /> {discoveryBusy ? "Discovering…" : "Discover local"}</button><button type="button" className="button secondary-button" onClick={() => void exportModels()}><ArrowDownToLine size={15} /> Export</button><button type="button" className="button secondary-button" onClick={() => importRef.current?.click()}><Upload size={15} /> Import</button><input ref={importRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importModels(event)} /><button type="button" className="button primary-button" onClick={() => setFormOpen((open) => !open)}><Plus size={16} /> Register model</button></>}>
+  return <FeaturePage page="models" actions={<><button type="button" className="button secondary-button" onClick={() => void refresh()} disabled={loading}><RefreshCcw size={16} /> Refresh</button><button type="button" className="button secondary-button" onClick={() => void discoverLocalModels()} disabled={discoveryBusy}><Search size={15} /> {discoveryBusy ? "Discovering…" : "Discover local"}</button><button type="button" className="button secondary-button" onClick={() => void loadRuntimeMatrix()} disabled={runtimeMatrixBusy}><Network size={15} /> {runtimeMatrixBusy ? "Checking runtimes…" : "Compatibility matrix"}</button><button type="button" className="button secondary-button" onClick={() => void exportModels()}><ArrowDownToLine size={15} /> Export</button><button type="button" className="button secondary-button" onClick={() => importRef.current?.click()}><Upload size={15} /> Import</button><input ref={importRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importModels(event)} /><button type="button" className="button primary-button" onClick={() => setFormOpen((open) => !open)}><Plus size={16} /> Register model</button></>}>
     <div className="info-grid"><InfoCard icon={BrainCircuit} label="Matching models" value={loading ? "—" : String(modelTotal)} detail={loading ? "Loading inventory" : `${models.filter((model) => model.favorite).length} favorites on this page`} tone={modelTotal ? "success" : "neutral"} /><InfoCard icon={HardDrive} label="Storage" value="Local" detail="Registry metadata only" tone="neutral" /><InfoCard icon={SlidersHorizontal} label="Inventory" value={loading ? "—" : String(models.length)} detail={hasMore ? `Showing ${models.length} of ${modelTotal} matches` : "All matching entries loaded"} tone="info" /></div>
+    {runtimeMatrixError && <InlineAlert tone="warning" role="alert">{runtimeMatrixError}</InlineAlert>}
+    {runtimeMatrix && <Surface title="Format/runtime compatibility" eyebrow="LOCAL VERSION EVIDENCE" action={<button type="button" className="icon-text-button" onClick={() => void loadRuntimeMatrix(true)} disabled={runtimeMatrixBusy}>{runtimeMatrixBusy ? "Refreshing…" : "Refresh evidence"}</button>}>
+      <p className="quiet-note">{runtimeMatrix.scope_note} Probed {new Date(runtimeMatrix.probed_at).toLocaleString()}. Results are cached for {runtimeMatrix.cache_ttl_seconds} seconds unless refreshed. No network requests or model loads are performed.</p>
+      <div className="module-list">
+        {runtimeMatrix.formats.map((formatEntry) => <div className="module-row" key={formatEntry.format}>
+          <span className="module-icon"><Network size={16} /></span>
+          <span className="module-copy">
+            <b>{formatEntry.format}</b>
+            <small>{formatEntry.candidates.map((candidate) => `${candidate.runtime_name}: ${candidate.availability.replaceAll("_", " ")}${candidate.version ? ` · ${candidate.version}` : ""}${candidate.version_evidence ? ` · evidence: ${candidate.version_evidence}` : ""} · candidate only`).join("  |  ")}</small>
+          </span>
+        </div>)}
+      </div>
+      <p className="quiet-note">Version evidence is taken from bounded local probes. Candidate status is not proof of model loadability or runtime support. {runtimeMatrix.limitations[3]}</p>
+    </Surface>}
+
     <Surface title="Find models" eyebrow="SERVER-SIDE SEARCH AND FILTERS">
       <div className="two-column-grid">
         <label className="field"><span className="field-label-row"><span>Search metadata</span></span><input aria-label="Search model registry" value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} maxLength={160} placeholder="Name, source, architecture, license, or tag" /></label>
