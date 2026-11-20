@@ -13,6 +13,7 @@ import io
 import json
 import os
 import platform
+import re
 import shutil
 import sys
 import zipfile
@@ -28,11 +29,26 @@ _SCHEMA_VERSION = 1
 _MAX_CONFIG_BYTES = 256 * 1024
 _MIN_FREE_BYTES = 1024 * 1024 * 1024
 _REQUIRED_MODULES = {
+    "click": "click",
     "typer": "typer",
-    "fastapi": "fastapi",
     "pydantic": "pydantic",
+    "rich": "rich",
+    "fastapi": "fastapi",
     "yaml": "PyYAML",
     "mcp": "mcp",
+    "huggingface_hub": "huggingface-hub",
+    "uvicorn": "uvicorn",
+}
+_MINIMUM_VERSIONS = {
+    "click": "8.5",
+    "typer": "0.12",
+    "pydantic": "2.7",
+    "rich": "13.7",
+    "fastapi": "0.115",
+    "PyYAML": "6.0",
+    "mcp": "2.0",
+    "huggingface-hub": "1.27",
+    "uvicorn": "0.30",
 }
 _PROJECT_DIRECTORIES = ("data", "models", "experiments", "evaluations", "outputs")
 _METADATA_DIRECTORIES = (".axiom",)
@@ -111,6 +127,33 @@ def _module_available(module_name: str) -> bool:
         return importlib.util.find_spec(module_name) is not None
     except (ImportError, ValueError, AttributeError):
         return False
+
+
+def _version_at_least(installed: str, minimum: str) -> bool:
+    """Compare the numeric release portions of ordinary PEP 440 versions.
+
+    Prereleases and development builds do not satisfy a stable minimum. This
+    intentionally uses the standard library so diagnostics work in a damaged
+    environment where optional packaging helpers may themselves be missing.
+    """
+    def release(value: str) -> tuple[int, ...] | None:
+        match = re.match(r"^\s*(\d+(?:\.\d+)*)(.*)$", value)
+        if not match:
+            return None
+        suffix = match.group(2).lower()
+        if re.match(r"^(?:a|b|rc|dev|\.dev|\.a|\.b|\.rc)", suffix):
+            return None
+        try:
+            return tuple(int(part) for part in match.group(1).split("."))
+        except ValueError:
+            return None
+
+    actual = release(installed)
+    required = release(minimum)
+    if actual is None or required is None:
+        return False
+    width = max(len(actual), len(required))
+    return actual + (0,) * (width - len(actual)) >= required + (0,) * (width - len(required))
 
 
 def diagnose_workspace(
@@ -206,6 +249,55 @@ def diagnose_workspace(
                 )
             )
 
+    if config_present and not config.is_symlink() and config.is_file():
+        try:
+            config_mode = config.stat().st_mode
+            config_readable = os.access(config, os.R_OK)
+        except OSError:
+            checks.append(
+                _check(
+                    "workspace.config.permissions",
+                    "Project configuration permissions",
+                    "warn",
+                    "warning",
+                    "Configuration file permissions could not be inspected safely.",
+                    "Review the configuration file's ownership and access controls.",
+                )
+            )
+        else:
+            if not config_readable:
+                checks.append(
+                    _check(
+                        "workspace.config.permissions",
+                        "Project configuration permissions",
+                        "fail",
+                        "error",
+                        "The current user cannot read axiom.yaml.",
+                        "Grant read access to the current user without making the file broadly writable.",
+                    )
+                )
+            elif os.name == "posix" and config_mode & 0o022:
+                checks.append(
+                    _check(
+                        "workspace.config.permissions",
+                        "Project configuration permissions",
+                        "fail",
+                        "error",
+                        "axiom.yaml is writable by group or other users and could be modified by another local account.",
+                        "Remove group/other write permission and keep configuration ownership restricted to trusted users.",
+                    )
+                )
+            else:
+                checks.append(
+                    _check(
+                        "workspace.config.permissions",
+                        "Project configuration permissions",
+                        "pass",
+                        "info",
+                        "The current user can read axiom.yaml and no group/other write permission was detected.",
+                    )
+                )
+
     for directory_name in (*_METADATA_DIRECTORIES, *_PROJECT_DIRECTORIES):
         directory = root / directory_name
         if directory.is_symlink():
@@ -299,18 +391,39 @@ def diagnose_workspace(
     )
 
     missing_modules: list[str] = []
+    outdated_modules: list[str] = []
     for module_name, distribution_name in _REQUIRED_MODULES.items():
         available = _module_available(module_name)
-        if not available:
+        try:
+            installed_version = importlib.metadata.version(distribution_name)
+        except importlib.metadata.PackageNotFoundError:
+            installed_version = None
+        minimum_version = _MINIMUM_VERSIONS[distribution_name]
+        version_ok = installed_version is not None and _version_at_least(installed_version, minimum_version)
+        dependency_ok = available and version_ok
+        if not available or installed_version is None:
             missing_modules.append(distribution_name)
+            detail = (
+                f"{distribution_name} is not importable in the active Python environment."
+                if not available
+                else f"{distribution_name} import is present, but installed distribution metadata is missing."
+            )
+            remediation = f"Install {distribution_name}>={minimum_version} in the active Python environment."
+        elif not version_ok:
+            outdated_modules.append(distribution_name)
+            detail = f"{distribution_name} {installed_version} is older than the supported minimum {minimum_version}."
+            remediation = f"Upgrade {distribution_name} to version {minimum_version} or newer in the active Python environment."
+        else:
+            detail = f"{distribution_name} {installed_version} is importable and meets the supported minimum {minimum_version}."
+            remediation = None
         checks.append(
             _check(
                 f"dependency.{module_name}",
                 f"Dependency: {distribution_name}",
-                "pass" if available else "fail",
-                "info" if available else "error",
-                f"{distribution_name} is {'available' if available else 'not importable'} in the active Python environment.",
-                None if available else f"Install project dependencies in the active environment (missing: {distribution_name}).",
+                "pass" if dependency_ok else "fail",
+                "info" if dependency_ok else "error",
+                detail,
+                remediation,
             )
         )
 
@@ -334,6 +447,7 @@ def diagnose_workspace(
             "failed": failed,
             "informational": informational,
             "missing_dependencies": missing_modules,
+            "outdated_dependencies": outdated_modules,
         },
         "checks": checks,
     }
