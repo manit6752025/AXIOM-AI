@@ -39,6 +39,7 @@ import {
   type McpServerInventory,
   type McpServerHandshake,
   type McpSchemaInspection,
+  type McpServerTrustUpdate,
   type RuntimeSnapshot,
   type TrainingPlan as TrainingPlanResult,
   type WorkspaceDataset,
@@ -4155,6 +4156,8 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
   const [inspectingServer, setInspectingServer] = useState("");
   const [schemaResults, setSchemaResults] = useState<Record<string, McpSchemaInspection>>({});
   const [inspectingSchemas, setInspectingSchemas] = useState("");
+  const [serverTrustDrafts, setServerTrustDrafts] = useState<Record<string, McpServerTrustUpdate>>({});
+  const [savingServerTrust, setSavingServerTrust] = useState("");
 
   const refresh = async () => {
     setLoading(true);
@@ -4175,6 +4178,11 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
     }
     if (inventoryResult.status === "fulfilled") {
       setServerInventory(inventoryResult.value);
+      setServerTrustDrafts(Object.fromEntries(inventoryResult.value.servers.map((server) => [server.name, {
+        trust_status: server.trust_status,
+        owner_type: server.owner_type,
+        owner_label: server.owner_label,
+      }])));
       setHandshakeResults({});
       setSchemaResults({});
     } else {
@@ -4199,6 +4207,45 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
       setServerInventoryError(cause instanceof Error ? cause.message : "MCP handshake could not be inspected.");
     } finally {
       setInspectingServer("");
+    }
+  };
+
+  const updateServerTrustDraft = (name: string, update: Partial<McpServerTrustUpdate>) => {
+    setServerTrustDrafts((current) => {
+      const server = serverInventory?.servers.find((item) => item.name === name);
+      const fallback: McpServerTrustUpdate = {
+        trust_status: server?.trust_status || "unverified",
+        owner_type: server?.owner_type || "unknown",
+        owner_label: server?.owner_label || null,
+      };
+      return { ...current, [name]: { ...(current[name] || fallback), ...update } };
+    });
+  };
+
+  const saveServerTrust = async (name: string) => {
+    const draft = serverTrustDrafts[name];
+    if (!draft) return;
+    setSavingServerTrust(name);
+    setServerInventoryError("");
+    try {
+      const result = await axiomApi.updateMcpServerTrust(name, draft);
+      setServerInventory((current) => current ? {
+        ...current,
+        servers: current.servers.map((server) => server.name === name ? {
+          ...server,
+          trust_status: result.trust_status,
+          owner_type: result.owner_type,
+          owner_label: result.owner_label,
+          ownership_verified: false,
+        } : server),
+      } : current);
+      setHandshakeResults((current) => ({ ...current, [name]: undefined as never }));
+      setSchemaResults((current) => ({ ...current, [name]: undefined as never }));
+      onNotify(`Saved trust and ownership for ${name}.`, "success");
+    } catch (cause) {
+      setServerInventoryError(cause instanceof Error ? cause.message : "MCP trust metadata could not be saved.");
+    } finally {
+      setSavingServerTrust("");
     }
   };
 
@@ -4308,21 +4355,61 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
       {serverInventory ? serverInventory.servers.length ? <div className="permission-list">
         {serverInventory.servers.map((server) => {
           const result = handshakeResults[server.name];
+          const trustDraft = serverTrustDrafts[server.name] || {
+            trust_status: server.trust_status,
+            owner_type: server.owner_type,
+            owner_label: server.owner_label,
+          };
           const busy = inspectingServer === server.name;
+          const trusted = server.trust_status === "trusted";
           return <div className="diag-list" key={server.name}>
             <div className="permission-row">
               <span>
                 <b>{server.name}</b>
-                <small>{server.transport.toUpperCase()} · {server.executable || "No command configured"} · {server.argument_count} arguments · {result ? result.status === "ok" ? "Handshake inspected" : `Handshake ${result.status}` : "Not inspected"}</small>
+                <small>{server.transport.toUpperCase()} · {server.executable || "No command configured"} · {server.argument_count} arguments · {server.connection_state.replace("_", " ")}</small>
               </span>
               <div className="integration-form-actions">
-                <button type="button" className="button secondary-button" onClick={() => void inspectServerHandshake(server.name)} disabled={!server.configured || Boolean(inspectingServer) || Boolean(inspectingSchemas)}>
+                <button type="button" className="button secondary-button" onClick={() => void inspectServerHandshake(server.name)} disabled={!server.configured || !trusted || Boolean(inspectingServer) || Boolean(inspectingSchemas) || Boolean(savingServerTrust)}>
                   {busy ? "Negotiating…" : "Inspect handshake"}
                 </button>
                 <button type="button" className="button secondary-button" onClick={() => void inspectServerSchemas(server.name)} disabled={!server.configured || Boolean(inspectingServer) || Boolean(inspectingSchemas)}>
                   {inspectingSchemas === server.name ? "Browsing…" : "Browse schemas"}
                 </button>
               </div>
+            </div>
+            <div className="mcp-server-trust">
+              <div className="field-label-row">
+                <StatusPill tone={server.trust_status === "trusted" ? "success" : server.trust_status === "blocked" ? "danger" : "warning"}>{server.trust_status.toUpperCase()}</StatusPill>
+                <span className="quiet-note">{server.connection_state.replace("_", " ")}{server.last_inspected_at ? ` · checked ${new Date(server.last_inspected_at).toLocaleString()}` : ""}</span>
+              </div>
+              <div className="mcp-server-trust-fields">
+                <label className="field">
+                  <span className="field-label-row"><span>Trust</span></span>
+                  <select aria-label={`Trust status for ${server.name}`} value={trustDraft.trust_status} onChange={(event) => updateServerTrustDraft(server.name, { trust_status: event.target.value as McpServerTrustUpdate["trust_status"] })}>
+                    <option value="unverified">Unverified</option>
+                    <option value="trusted">Trusted</option>
+                    <option value="blocked">Blocked</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span className="field-label-row"><span>Owner type</span></span>
+                  <select aria-label={`Owner type for ${server.name}`} value={trustDraft.owner_type} onChange={(event) => updateServerTrustDraft(server.name, { owner_type: event.target.value as McpServerTrustUpdate["owner_type"] })}>
+                    <option value="unknown">Unknown</option>
+                    <option value="workspace">Workspace</option>
+                    <option value="external">External</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span className="field-label-row"><span>Owner label</span></span>
+                  <input aria-label={`Owner label for ${server.name}`} maxLength={96} value={trustDraft.owner_label || ""} onChange={(event) => updateServerTrustDraft(server.name, { owner_label: event.target.value || null })} placeholder="Optional, user-declared label" />
+                </label>
+                <button type="button" className="button secondary-button" onClick={() => void saveServerTrust(server.name)} disabled={Boolean(savingServerTrust)}>
+                  {savingServerTrust === server.name ? "Saving…" : "Save trust"}
+                </button>
+              </div>
+              <p className="quiet-note">
+                Ownership is user-declared and not verified. {trusted ? "This server may be explicitly inspected." : server.trust_status === "blocked" ? "Blocked servers cannot be started by inspection." : "Mark the server trusted before handshake or schema inspection."}
+              </p>
             </div>
             {result && <div className="quiet-note" role="status">
               <StatusPill tone={result.status === "ok" ? "success" : "warning"}>{result.status === "ok" ? "HANDSHAKE OK" : result.status.toUpperCase()}</StatusPill>
