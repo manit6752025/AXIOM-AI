@@ -15,6 +15,86 @@ const providerFallback: LLMProviderInfo[] = [
   { id: "openai-compatible", label: "Custom OpenAI-compatible", kind: "cloud", requires_api_key: true, supports_model_listing: true, privacy: "remote-consent-required", note: "Public HTTPS /v1 endpoints only." },
 ];
 
+type SavedLLMProfile = {
+  id: string;
+  name: string;
+  provider: LLMProvider;
+  model: string;
+  base_url: string;
+  updated_at: string;
+};
+
+const SAVED_PROFILE_STORAGE_KEY = "axiom-llm-provider-profiles-v1";
+const MAX_SAVED_PROFILES = 25;
+const MAX_PROFILE_STORE_CHARS = 32_768;
+
+function safeProfileBaseUrl(provider: LLMProvider, raw: string): string | null {
+  if (provider !== "openai-compatible") return "";
+  try {
+    const url = new URL(raw);
+    let pathname = url.pathname;
+    while (pathname.endsWith("/")) pathname = pathname.slice(0, -1);
+    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || !pathname.endsWith("/v1")) return null;
+    return url.origin + pathname;
+  } catch {
+    return null;
+  }
+}
+
+function readSavedProfiles(): SavedLLMProfile[] {
+  try {
+    const raw = window.localStorage.getItem(SAVED_PROFILE_STORAGE_KEY);
+    if (!raw || raw.length > MAX_PROFILE_STORE_CHARS) return [];
+    const parsed = JSON.parse(raw) as { schema_version?: unknown; profiles?: unknown };
+    if (parsed.schema_version !== 1 || !Array.isArray(parsed.profiles)) return [];
+    const names = new Set<string>();
+    const ids = new Set<string>();
+    const profiles: SavedLLMProfile[] = [];
+    for (const item of parsed.profiles.slice(0, MAX_SAVED_PROFILES)) {
+      if (!item || typeof item !== "object") continue;
+      const record = item as Record<string, unknown>;
+      const provider = record.provider;
+      const name = record.name;
+      const id = record.id;
+      const model = record.model;
+      const baseUrl = record.base_url;
+      const updatedAt = record.updated_at;
+      if (
+        typeof id !== "string" || !/^[A-Za-z0-9-]{8,80}$/.test(id) ||
+        typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,47}$/.test(name) ||
+        typeof provider !== "string" || !providerFallback.some((entry) => entry.id === provider) ||
+        typeof model !== "string" || !model.trim() || model.length > 256 ||
+        typeof baseUrl !== "string" || baseUrl.length > 512 ||
+        typeof updatedAt !== "string" || updatedAt.length > 40
+      ) continue;
+      const normalizedName = name.toLowerCase();
+      if (names.has(normalizedName) || ids.has(id)) continue;
+      const normalizedBaseUrl = safeProfileBaseUrl(provider as LLMProvider, baseUrl);
+      if (normalizedBaseUrl === null) continue;
+      names.add(normalizedName);
+      ids.add(id);
+      profiles.push({ id, name, provider: provider as LLMProvider, model: model.trim(), base_url: normalizedBaseUrl, updated_at: updatedAt });
+    }
+    return profiles;
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedProfiles(profiles: SavedLLMProfile[]): boolean {
+  try {
+    const safeProfiles = profiles.slice(0, MAX_SAVED_PROFILES).map(({ id, name, provider, model, base_url, updated_at }) => ({
+      id, name, provider, model, base_url, updated_at,
+    }));
+    const serialized = JSON.stringify({ schema_version: 1, profiles: safeProfiles });
+    if (serialized.length > MAX_PROFILE_STORE_CHARS) return false;
+    window.localStorage.setItem(SAVED_PROFILE_STORAGE_KEY, serialized);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export default function LLMClientPanel() {
   const [providers, setProviders] = useState<LLMProviderInfo[]>(providerFallback);
   const [provider, setProvider] = useState<LLMProvider>("axiom-local");
@@ -39,11 +119,16 @@ export default function LLMClientPanel() {
   const [error, setError] = useState("");
   const [result, setResult] = useState<LLMChatResult | null>(null);
   const [conversation, setConversation] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const [savedProfiles, setSavedProfiles] = useState<SavedLLMProfile[]>([]);
+  const [profileName, setProfileName] = useState("");
+  const [selectedProfileId, setSelectedProfileId] = useState("");
+  const [connectionVerified, setConnectionVerified] = useState(false);
 
   const local = provider === "axiom-local" || provider === "ollama-local";
   const selected = providers.find((item) => item.id === provider);
   const loadModels = async (targetProvider = provider) => {
     setLoadingModels(true);
+    setConnectionVerified(false);
     setError("");
     try {
       const next = await axiomApi.llmModels({
@@ -51,10 +136,12 @@ export default function LLMClientPanel() {
         api_key: targetProvider === "axiom-local" || targetProvider === "ollama-local" ? undefined : apiKey,
         base_url: targetProvider === "openai-compatible" ? baseUrl : undefined,
       });
+      setConnectionVerified(true);
       setModels(next.models);
       setModel((current) => current && next.models.includes(current) ? current : next.models[0] || current);
       if (next.models.length === 0) setError(next.note || "No models were returned. Check provider access or enter a model ID manually.");
     } catch (cause) {
+      setConnectionVerified(false);
       setModels([]);
       setError(cause instanceof Error ? cause.message : "The model catalogue could not be loaded.");
     } finally {
@@ -63,6 +150,7 @@ export default function LLMClientPanel() {
   };
 
   useEffect(() => {
+    setSavedProfiles(readSavedProfiles());
     axiomApi.llmProviders().then((value) => setProviders(value.providers)).catch(() => setProviders(providerFallback));
     void axiomApi.llmModels({ provider: "axiom-local" }).then((next) => {
       setModels(next.models);
@@ -76,10 +164,86 @@ export default function LLMClientPanel() {
     setProvider(value as LLMProvider);
     setApiKey("");
     setConsent(false);
+    setConnectionVerified(false);
+    setSelectedProfileId("");
+    if (value !== "openai-compatible") setBaseUrl("");
     setModels([]);
     setModel("");
     setResult(null);
     setConversation([]);
+    setPrompt("");
+    setError("");
+  };
+
+  const saveProfile = () => {
+    const name = profileName.trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,47}$/.test(name)) {
+      setError("Profile names must be 1–48 safe characters and start with a letter or number.");
+      return;
+    }
+    const normalizedBaseUrl = safeProfileBaseUrl(provider, baseUrl.trim());
+    if (normalizedBaseUrl === null) {
+      setError("Custom provider profiles require a public HTTPS /v1 URL without embedded credentials, query strings, or fragments.");
+      return;
+    }
+    if (!model.trim() || model.trim().length > 256) {
+      setError("Choose or enter a model ID before saving this profile.");
+      return;
+    }
+    const existing = savedProfiles.find((item) => item.name.toLowerCase() === name.toLowerCase());
+    if (!existing && savedProfiles.length >= MAX_SAVED_PROFILES) {
+      setError("The browser profile limit of 25 has been reached. Delete an unused profile first.");
+      return;
+    }
+    const profile: SavedLLMProfile = {
+      id: existing?.id || `profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+      name,
+      provider,
+      model: model.trim(),
+      base_url: normalizedBaseUrl,
+      updated_at: new Date().toISOString(),
+    };
+    const next = [profile, ...savedProfiles.filter((item) => item.id !== profile.id)];
+    if (!writeSavedProfiles(next)) {
+      setError("The browser could not save provider-profile metadata. Check local storage availability and quota.");
+      return;
+    }
+    setSavedProfiles(next);
+    setSelectedProfileId(profile.id);
+    setError("");
+  };
+
+  const applyProfile = () => {
+    const profile = savedProfiles.find((item) => item.id === selectedProfileId);
+    if (!profile) return;
+    changeProvider(profile.provider);
+    setBaseUrl(profile.base_url);
+    setModel(profile.model);
+    setProfileName(profile.name);
+    setSelectedProfileId(profile.id);
+    setConnectionVerified(false);
+    setError(profile.provider === "openai-compatible" ? "Profile loaded. Enter the API key and explicitly connect; credentials are never stored in a profile." : "Profile loaded. Connect to verify the selected provider.");
+  };
+
+  const deleteProfile = () => {
+    const next = savedProfiles.filter((item) => item.id !== selectedProfileId);
+    if (next.length === savedProfiles.length) return;
+    if (!writeSavedProfiles(next)) {
+      setError("The browser could not update provider profiles.");
+      return;
+    }
+    setSavedProfiles(next);
+    setSelectedProfileId("");
+    setProfileName("");
+    setError("");
+  };
+
+  const disconnect = () => {
+    setConnectionVerified(false);
+    setApiKey("");
+    setConsent(false);
+    setConversation([]);
+    setResult(null);
     setPrompt("");
     setError("");
   };
@@ -158,17 +322,48 @@ export default function LLMClientPanel() {
         <p className="surface-eyebrow">ONE CLIENT · LOCAL OR CLOUD</p>
         <h2>Unified LLM client</h2>
       </div>
-      <button type="button" className="button secondary-button" onClick={() => void loadModels()} disabled={loadingModels || running}>
-        <RefreshCcw size={14} /> {loadingModels ? "Loading" : "Load models"}
-      </button>
+      <div className="integration-form-actions">
+        <button type="button" className="button secondary-button" onClick={() => void loadModels()} disabled={loadingModels || running || (!local && (!apiKey.trim() || (provider === "openai-compatible" && !baseUrl.trim())))}>
+          <RefreshCcw size={14} /> {loadingModels ? "Connecting…" : connectionVerified ? "Refresh connection" : "Connect"}
+        </button>
+        <button type="button" className="button secondary-button" onClick={disconnect} disabled={!connectionVerified && !apiKey && conversation.length === 0 && !result}>
+          Disconnect
+        </button>
+      </div>
     </div>
     <p>Use AXIOM Native Engine or local Ollama models (including GGUF via Ollama), or connect to OpenAI, Anthropic, Google Gemini, DeepSeek, Moonshot/Kimi, OpenRouter, or a public OpenAI-compatible endpoint. Local prompts stay on this computer; cloud requests are sent only after confirmation.</p>
     <div className="status-strip" aria-label="Unified LLM client status">
       <div className="status-strip-item">
-        <span className={"status-pill " + (local ? "success" : "warning")}><i />{local ? "LOCAL EXECUTION" : "CLOUD PROVIDER"}</span>
-        <div><b>{selected?.label || provider}</b><span>{local ? "No API key or cloud service required for local models." : "The provider receives your prompt after you confirm consent."}</span></div>
+        <span className={"status-pill " + (connectionVerified ? "success" : "warning")}><i />{connectionVerified ? "CONNECTED · VERIFIED" : local ? "LOCAL · NOT VERIFIED" : "CLOUD · NOT CONNECTED"}</span>
+        <div><b>{selected?.label || provider}</b><span>{connectionVerified ? "The latest model-catalogue request succeeded; AXIOM does not keep a provider socket open." : local ? "Local execution needs no API key. Connect to verify the model inventory." : "Enter a request-only key and connect. Cloud chat still requires separate per-request consent."}</span></div>
       </div>
     </div>
+    <section className="panel-surface" aria-label="Saved provider profiles" style={{ padding: 14, marginBottom: 16 }}>
+      <p className="surface-eyebrow">PROVIDER PROFILES · METADATA ONLY</p>
+      <div className="two-column-grid">
+        <label className="field">
+          <span className="field-label-row"><span>Saved provider profile</span></span>
+          <select aria-label="Saved provider profile" value={selectedProfileId} onChange={(event) => setSelectedProfileId(event.target.value)}>
+            <option value="">Choose a saved profile</option>
+            {savedProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.provider}</option>)}
+          </select>
+        </label>
+        <div className="integration-form-actions">
+          <button type="button" className="button secondary-button" onClick={applyProfile} disabled={!selectedProfileId}>Apply profile</button>
+          <button type="button" className="button secondary-button" onClick={deleteProfile} disabled={!selectedProfileId}>Delete profile</button>
+        </div>
+      </div>
+      <div className="two-column-grid">
+        <label className="field">
+          <span className="field-label-row"><span>Provider profile name</span></span>
+          <input aria-label="Provider profile name" value={profileName} onChange={(event) => setProfileName(event.target.value)} maxLength={48} placeholder="e.g. Local Qwen, Team DeepSeek" />
+        </label>
+        <div className="integration-form-actions">
+          <button type="button" className="button secondary-button" onClick={saveProfile} disabled={!profileName.trim() || !model.trim()}>Save profile</button>
+        </div>
+      </div>
+      <p className="quiet-note">Profiles persist in this browser and store only the provider, model ID, profile name and public custom endpoint. API keys, prompts and conversation history are never saved. Cloud keys must be entered again after reload.</p>
+    </section>
     <form onSubmit={(event) => void run(event)}>
       <div className="two-column-grid">
         <label className="field">
