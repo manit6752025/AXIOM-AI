@@ -640,6 +640,13 @@ def inspect(root: Path) -> dict[str, Any]:
             "cancel_event.set()",
             "Native benchmark cancelled because the client disconnected.",
         )),
+        ("shared API client caller-cancellation propagation", client, (
+            "const externalSignal = init.signal;",
+            "const abortFromCaller = () => controller.abort(externalSignal?.reason);",
+            'externalSignal?.addEventListener("abort", abortFromCaller, { once: true });',
+            'externalSignal?.removeEventListener("abort", abortFromCaller);',
+            "if (externalSignal?.aborted) throw error;",
+        )),
         ("native benchmark CLI surface", native_engine_cli, (
             '@engine_app.command("benchmark")',
             '"--warmup-runs"',
