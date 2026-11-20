@@ -1225,7 +1225,7 @@ export type WorkspaceDiagnostics = {
   generated_at: string;
   status: "pass" | "warn" | "fail";
   workspace: { name: string; project_config_present: boolean; is_project: boolean };
-  summary: { passed: number; warnings: number; failed: number; informational: number; missing_dependencies: string[] };
+  summary: { passed: number; warnings: number; failed: number; informational: number; missing_dependencies: string[]; outdated_dependencies: string[] };
   checks: WorkspaceDiagnosticCheck[];
 };
 
