@@ -208,3 +208,31 @@ def test_inspect_wheel_rejects_non_ascii_record_digest(tmp_path: Path):
 
     assert report["status"] == "fail"
     assert any(item["id"] == "artifact.wheel.record_hashes" and item["status"] == "fail" for item in report["checks"])
+
+
+def test_inspect_wheel_rejects_embedded_tag_mismatch(tmp_path: Path):
+    source = _wheel(tmp_path / "demo-1.2.3-py3-none-any.whl")
+    artifact = tmp_path / "demo-1.2.3-py3-none-any.whl"
+    with zipfile.ZipFile(source, "r") as original, zipfile.ZipFile(artifact, "w") as rewritten:
+        for info in original.infolist():
+            payload = original.read(info.filename)
+            if info.filename.endswith("/WHEEL"):
+                payload = payload.replace(b"Tag: py3-none-any", b"Tag: py2-none-any")
+            rewritten.writestr(info, payload)
+
+    report = inspect_release_artifact(artifact)
+
+    assert report["status"] == "fail"
+    assert any(item["id"] == "artifact.wheel.tags" and item["status"] == "fail" for item in report["checks"])
+
+
+def test_inspect_wheel_rejects_duplicate_archive_paths(tmp_path: Path):
+    artifact = _wheel(tmp_path / "demo-1.2.3-py3-none-any.whl")
+    with zipfile.ZipFile(artifact, "a") as archive:
+        archive.writestr("demo/duplicate.py", b"one")
+        archive.writestr("demo/duplicate.py", b"two")
+
+    report = inspect_release_artifact(artifact)
+
+    assert report["status"] == "fail"
+    assert any(item["id"] == "artifact.archive.duplicates" for item in report["checks"])
