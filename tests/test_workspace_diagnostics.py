@@ -129,7 +129,7 @@ def test_config_diagnostics_reject_group_or_other_writable_file(tmp_path: Path):
 
     if os.name != "posix":
         pytest.skip("POSIX permission bits are not available on this platform")
-    root = _project(tmp_path / "project", "project:\\n  name: demo\\n")
+    root = _project(tmp_path / "project", "project:\n  name: demo\n")
     config = root / "axiom.yaml"
     config.chmod(0o666)
 
@@ -138,3 +138,11 @@ def test_config_diagnostics_reject_group_or_other_writable_file(tmp_path: Path):
 
     assert check["status"] == "fail"
     assert "group or other users" in check["detail"]
+
+
+def test_dependency_version_comparison_handles_release_suffixes():
+    assert diagnostics_module._version_at_least("8.5.0", "8.5")
+    assert diagnostics_module._version_at_least("1.27.2.post1", "1.27")
+    assert not diagnostics_module._version_at_least("8.4.99", "8.5")
+    assert not diagnostics_module._version_at_least("8.5.0rc1", "8.5")
+    assert not diagnostics_module._version_at_least("8.5.0.dev1", "8.5")
