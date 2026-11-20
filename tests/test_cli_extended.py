@@ -266,7 +266,7 @@ def test_security_artifact_inspect_emits_machine_readable_results(tmp_path: Path
 
     artifact = tmp_path / "demo-1.0.zip"
     with zipfile.ZipFile(artifact, "w") as archive:
-        archive.writestr("demo-1.0/pyproject.toml", "[build-system]\\n")
+        archive.writestr("demo-1.0/pyproject.toml", "[build-system]\n")
 
     result = runner.invoke(
         app,
