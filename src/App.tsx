@@ -4402,7 +4402,7 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
             <div className="mcp-server-trust">
               <div className="field-label-row">
                 <StatusPill tone={server.trust_status === "trusted" ? "success" : server.trust_status === "blocked" ? "danger" : "warning"}>{server.trust_status.toUpperCase()}</StatusPill>
-                <span className="quiet-note">{server.connection_state.replace("_", " ")}{server.last_inspected_at ? ` · checked ${new Date(server.last_inspected_at).toLocaleString()}` : ""}{server.last_connection_error ? ` · ${server.last_connection_error}` : ""}</span>
+                <span className="quiet-note">{server.connection_state === "not_inspected" ? "Not inspected" : `Last check: ${server.connection_state}`}{server.last_inspected_at ? ` · ${new Date(server.last_inspected_at).toLocaleString()}` : ""}{server.last_connection_error ? ` · ${server.last_connection_error}` : ""}</span>
               </div>
               <div className="mcp-server-trust-fields">
                 <label className="field">
