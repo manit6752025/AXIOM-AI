@@ -1,10 +1,12 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Request } from "@playwright/test";
 import { ensureAuthenticated } from "./helpers/auth";
 
 test("Runtime page exposes direct AXIOM Engine inference with local model and adapter paths, then unloads it", async ({ page }) => {
   await ensureAuthenticated(page);
   let engineLoaded = false;
   let unloadCalls = 0;
+  let benchmarkCalls = 0;
+  let benchmarkAbortObserved = false;
 
   await page.route("**/api/workspace/runtime", (route) => route.fulfill({
     json: {
@@ -99,6 +101,26 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
     } });
   });
   await page.route("**/api/engine/benchmark", async (route) => {
+    benchmarkCalls += 1;
+    if (benchmarkCalls > 1) {
+      const requestUrl = route.request().url();
+      await new Promise<void>((resolve) => {
+        const listener = (request: Request) => {
+          if (request.url() === requestUrl) {
+            benchmarkAbortObserved = true;
+            page.off("requestfailed", listener);
+            clearTimeout(timeout);
+            resolve();
+          }
+        };
+        const timeout = setTimeout(() => {
+          page.off("requestfailed", listener);
+          resolve();
+        }, 5000);
+        page.on("requestfailed", listener);
+      });
+      return;
+    }
     const requestBody = route.request().postDataJSON() as Record<string, unknown>;
     expect(requestBody.prompt).toBe("Say hello.");
     expect(requestBody.warmup_runs).toBe(1);
@@ -272,6 +294,12 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(transferTelemetry).toContainText("KV cache offloaded");
   await expect(transferTelemetry).toContainText("3.0 MiB");
   await expect(nativeBenchmark).not.toContainText("Say hello.");
+
+  await engine.getByRole("button", { name: "Benchmark native engine" }).click();
+  await expect(engine.getByRole("button", { name: "Stop benchmark" })).toBeVisible();
+  await engine.getByRole("button", { name: "Stop benchmark" }).click();
+  await expect(engine.getByRole("alert")).toContainText("Benchmark cancelled; AXIOM has been asked to stop the native generation loop.");
+  expect(benchmarkAbortObserved).toBe(true);
 
   await engine.getByLabel("AXIOM Native batch prompts").fill("First batch prompt\nSecond batch prompt");
   await engine.getByRole("button", { name: "Run native batch" }).click();
