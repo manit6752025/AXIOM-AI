@@ -1008,9 +1008,10 @@ def integration_trust(
 ) -> None:
     """Set explicit MCP server trust and user-declared ownership metadata."""
     from axiom.core.integrations import IntegrationRegistry
+    from axiom.core.mcp_inventory import _registry
 
     try:
-        registry = IntegrationRegistry(create=False)
+        registry = _registry()
         existing = next(
             (item for item in registry.list() if item.type is IntegrationType.MCP and item.name.casefold() == name.casefold()),
             None,
