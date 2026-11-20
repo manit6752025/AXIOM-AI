@@ -191,7 +191,7 @@ def test_benchmark_adapter_requirements_declare_runtime_model_and_budgets():
     ollama = engine_fabric.benchmark_adapter_requirements("ollama")
     cpp = engine_fabric.benchmark_adapter_requirements("llama-cpp")
     assert native["runtime"]["kind"] == "in_process"
-    assert "safetensors" in native["model"]["supported_formats"]
+    assert native["model"]["supported_formats"] == ["Floating-point safetensors"]
     assert ollama["runtime"]["endpoint"] == "http://127.0.0.1:11434"
     assert ollama["runtime"]["inventory_route"] == "/api/tags"
     assert ollama["model"]["selection"] == "exact_model_id"
