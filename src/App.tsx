@@ -4330,7 +4330,7 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
                 : ` ${result.message || "Protocol negotiation did not complete."}`}
               <span> · no tools executed · no schemas enumerated</span>
             </div>}
-            {schemaResults[server.name] && <div className="surface-subsection" aria-label={`Schemas for ${server.name}`}>
+            {schemaResults[server.name] && <div className="mcp-schema-results" aria-label={`Schemas for ${server.name}`}>
               {schemaResults[server.name].status === "ok" ? <>
                 <div className="field-label-row">
                   <b>Advertised schemas</b>
@@ -4340,9 +4340,9 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
                   {schemaResults[server.name].tools?.length || 0} tools · {schemaResults[server.name].resources?.length || 0} resources · {schemaResults[server.name].resource_templates?.length || 0} templates · {schemaResults[server.name].duration_ms} ms
                   {Object.values(schemaResults[server.name].truncated || {}).some(Boolean) ? " · list truncated at the safety limit" : ""}
                 </p>
-                {(schemaResults[server.name].tools || []).map((tool) => <details className="surface-divider" key={tool.name}>
+                {(schemaResults[server.name].tools || []).map((tool) => <details className="mcp-schema-detail" key={tool.name}>
                   <summary><b>{tool.name}</b>{tool.description ? ` · ${tool.description}` : ""}</summary>
-                  <pre className="code-preview">{JSON.stringify(tool.input_schema, null, 2)}</pre>
+                  <pre className="plan-reproducible-json mcp-schema-preview">{JSON.stringify(tool.input_schema, null, 2)}</pre>
                   {tool.output_schema && <pre className="code-preview">{JSON.stringify(tool.output_schema, null, 2)}</pre>}
                 </details>)}
                 {[...(schemaResults[server.name].resources || []).map((resource) => ({ kind: "Resource", name: resource.name, uri: resource.uri, mime: resource.mime_type })),
