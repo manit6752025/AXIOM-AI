@@ -13,6 +13,7 @@ from rich.table import Table
 from axiom.core.fine_tuning import (
     ActiveFineTuningJobError,
     FineTuningError,
+    cancel_finetuning_job,
     get_job,
     list_jobs,
     list_jobs_page,
@@ -105,6 +106,28 @@ def register(train_app: typer.Typer) -> None:
         if page["has_more"]:
             next_offset = offset + len(jobs)
             console.print(f"Next page: axiom train jobs --limit {limit} --offset {next_offset}")
+
+    @train_app.command("cancel")
+    def train_cancel(
+        job_id: str = typer.Argument(..., help="Full ID of the local fine-tuning job."),
+        json_output: bool = typer.Option(False, "--json", help="Print the updated job and cancellation contract as JSON."),
+    ) -> None:
+        """Request cooperative cancellation before adapter finalization."""
+        try:
+            job = cancel_finetuning_job(job_id)
+        except (ValueError, FineTuningError) as exc:
+            _fail(str(exc))
+        if job is None:
+            _fail("Fine-tuning job was not found.")
+        if json_output:
+            console.print_json(json.dumps(job, ensure_ascii=False))
+            return
+        status = job.get("status")
+        if status == "cancelling":
+            console.print("Cancellation requested; the worker will stop at its next safe training boundary.")
+        else:
+            reason = (job.get("cancellation") or {}).get("unavailable_reason") or "not_cancellable"
+            console.print(f"Cancellation was not started: job status is {status} ({reason}).")
 
     @train_app.command("status")
     def train_status(
