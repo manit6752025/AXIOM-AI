@@ -211,3 +211,22 @@ def test_installed_package_audit_flags_workspace_module_shadowing(tmp_path: Path
 
     assert result["status"] == "fail"
     assert "resolves from the workspace" in result["detail"]
+
+
+def test_security_audit_includes_required_installed_package_integrity_checks(tmp_path: Path):
+    report = audit_security_posture(_project(tmp_path / "project"), environ={})
+    package_checks = [
+        item for item in report["checks"]
+        if item["id"].startswith("security.package.")
+    ]
+
+    assert len(package_checks) == 9
+    assert {item["id"] for item in package_checks} >= {
+        "security.package.click",
+        "security.package.typer",
+        "security.package.pydantic",
+        "security.package.fastapi",
+        "security.package.yaml",
+        "security.package.mcp",
+    }
+    assert all(item["status"] in {"pass", "warn", "fail"} for item in package_checks)
