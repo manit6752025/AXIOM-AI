@@ -30,6 +30,7 @@ MAX_PAGE_SIZE = 100
 _GENESIS_HASH = "0" * 64
 _EVENT_ID = re.compile(r"^[a-f0-9]{32}$")
 _REVIEWER_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{1,47}$")
+_SHA256 = re.compile(r"^[a-f0-9]{64}$")
 
 _EVENT_SUMMARIES = {
     "mcp.profile.created": "Created a default-deny MCP profile",
@@ -188,15 +189,38 @@ class SecurityEventStore:
             allowed = required | {"reviewer_label", "target_event_id"}
             if not required.issubset(event) or not set(event).issubset(allowed):
                 raise SecurityEventError("Security event journal record fields are invalid.")
-            if event.get("seq") != expected_seq or not isinstance(event.get("event_id"), str):
+            sequence = event.get("seq")
+            if isinstance(sequence, bool) or sequence != expected_seq:
                 raise SecurityEventError("Security event sequence is invalid.")
-            event_id = event["event_id"]
-            if not _EVENT_ID.fullmatch(event_id) or event_id in seen_ids:
+            event_id = event.get("event_id")
+            if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id) or event_id in seen_ids:
                 raise SecurityEventError("Security event IDs are invalid or duplicated.")
-            if event.get("prev_hash") != previous or event.get("hash") != _event_digest(event):
+            occurred_at = event.get("occurred_at")
+            if not isinstance(occurred_at, str) or len(occurred_at) > 40:
+                raise SecurityEventError("Security event timestamp is invalid.")
+            try:
+                parsed_timestamp = datetime.fromisoformat(occurred_at)
+            except ValueError as exc:
+                raise SecurityEventError("Security event timestamp is invalid.") from exc
+            if parsed_timestamp.tzinfo is None:
+                raise SecurityEventError("Security event timestamp must include a timezone.")
+            event_type = event.get("event_type")
+            summary = event.get("summary")
+            if not isinstance(event_type, str) or not isinstance(summary, str):
+                raise SecurityEventError("Security event type and summary must be text.")
+            previous_hash = event.get("prev_hash")
+            current_hash = event.get("hash")
+            if (
+                not isinstance(previous_hash, str)
+                or not _SHA256.fullmatch(previous_hash)
+                or not isinstance(current_hash, str)
+                or not _SHA256.fullmatch(current_hash)
+                or previous_hash != previous
+                or current_hash != _event_digest(event)
+            ):
                 raise SecurityEventError("Security event hash chain verification failed.")
-            if event.get("event_type") == _REVIEW_EVENT:
-                if event.get("summary") != _REVIEW_SUMMARY:
+            if event_type == _REVIEW_EVENT:
+                if set(event) != required | {"reviewer_label", "target_event_id"} or summary != _REVIEW_SUMMARY:
                     raise SecurityEventError("Security review record is invalid.")
                 target = event.get("target_event_id")
                 reviewer = event.get("reviewer_label")
@@ -204,8 +228,9 @@ class SecurityEventStore:
                     raise SecurityEventError("Security review target is invalid.")
                 if not isinstance(reviewer, str) or not _REVIEWER_LABEL.fullmatch(reviewer):
                     raise SecurityEventError("Security reviewer label is invalid.")
-            elif event.get("event_type") not in _EVENT_SUMMARIES or event.get("summary") != _EVENT_SUMMARIES.get(event.get("event_type")):
-                raise SecurityEventError("Security event type or summary is not allowlisted.")
+            else:
+                if set(event) != required or event_type not in _EVENT_SUMMARIES or summary != _EVENT_SUMMARIES.get(event_type):
+                    raise SecurityEventError("Security event type or summary is not allowlisted.")
             seen_ids.add(event_id)
             previous = event["hash"]
         targets = {event["event_id"] for event in events if event["event_type"] != _REVIEW_EVENT}
