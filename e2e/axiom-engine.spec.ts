@@ -1,4 +1,4 @@
-import { expect, test, type Request } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { ensureAuthenticated } from "./helpers/auth";
 
 test("Runtime page exposes direct AXIOM Engine inference with local model and adapter paths, then unloads it", async ({ page }) => {
