@@ -211,7 +211,7 @@ def test_inspect_wheel_rejects_non_ascii_record_digest(tmp_path: Path):
 
 
 def test_inspect_wheel_rejects_embedded_tag_mismatch(tmp_path: Path):
-    source = _wheel(tmp_path / "demo-1.2.3-py3-none-any.whl")
+    source = _wheel(tmp_path / "original.whl")
     artifact = tmp_path / "demo-1.2.3-py3-none-any.whl"
     with zipfile.ZipFile(source, "r") as original, zipfile.ZipFile(artifact, "w") as rewritten:
         for info in original.infolist():
