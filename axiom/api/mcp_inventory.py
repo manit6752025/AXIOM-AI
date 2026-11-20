@@ -6,7 +6,6 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from axiom.core.integrations import IntegrationRegistry
 from axiom.core.mcp_inventory import McpInventoryError, _registry, inspect_mcp_server, list_mcp_servers
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp-inventory"])
