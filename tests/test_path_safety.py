@@ -120,3 +120,28 @@ def test_open_regular_file_rejects_parent_components(tmp_path):
     target.write_text("private", encoding="utf-8")
     with pytest.raises(SafePathError, match="parent-directory"):
         open_regular_file(target.parent / ".." / target.name)
+
+
+def test_rejects_parent_symlink_swapped_after_path_selection(tmp_path):
+    import os
+
+    if os.name != "posix" or not getattr(os, "O_DIRECTORY", 0) or not getattr(os, "O_NOFOLLOW", 0):
+        pytest.skip("POSIX O_DIRECTORY/O_NOFOLLOW traversal is unavailable")
+    root = tmp_path / "workspace"
+    data = root / "data"
+    data.mkdir(parents=True)
+    selected_file = data / "record.jsonl"
+    selected_file.write_text("workspace data", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "record.jsonl").write_text("outside secret", encoding="utf-8")
+
+    selected = find_existing_relative_path(root, "data/record.jsonl", allow_directories=False)
+    data.rename(root / "data-original")
+    try:
+        data.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Directory symlinks are not available: {exc}")
+
+    with pytest.raises(OSError):
+        open_regular_file(selected)
