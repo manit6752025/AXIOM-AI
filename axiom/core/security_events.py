@@ -34,6 +34,7 @@ _REVIEWER_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{1,47}$")
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
 _TOOL_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
 _ARGUMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+_PROFILE_NAME = re.compile(r"^[A-Za-z0-9_-]{1,48}$")
 _REDACTED_VALUE = "[REDACTED]"
 _TOOL_DECISION_EVENT = "mcp.tool.decision"
 _TOOL_DECISION_REASONS = {"explicit_grant", "not_granted", "unknown_tool", "invalid_policy"}
@@ -84,6 +85,7 @@ class SecurityEventStore:
             raise SecurityEventError("Workspace root is unavailable.") from exc
         if not self.root.is_dir():
             raise SecurityEventError("Workspace root must be a directory.")
+        self._loaded_schema_version = SCHEMA_VERSION
         self.directory = self.root / ".axiom"
         self.path = self.directory / "security-events.json"
         self.lock_path = self.directory / "security-events.lock"
@@ -247,13 +249,13 @@ class SecurityEventStore:
                 arguments = event.get("arguments")
                 if not isinstance(tool_name, str) or not _TOOL_NAME.fullmatch(tool_name):
                     raise SecurityEventError("MCP tool decision name is invalid.")
-                if decision not in {"allowed", "denied"}:
+                if not isinstance(decision, str) or decision not in {"allowed", "denied"}:
                     raise SecurityEventError("MCP tool decision outcome is invalid.")
                 if not isinstance(profile_name, str) or not (
                     _PROFILE_NAME.fullmatch(profile_name) or profile_name == "unavailable"
                 ):
                     raise SecurityEventError("MCP tool decision profile is invalid.")
-                if reason not in _TOOL_DECISION_REASONS:
+                if not isinstance(reason, str) or reason not in _TOOL_DECISION_REASONS:
                     raise SecurityEventError("MCP tool decision reason is invalid.")
                 if (
                     not isinstance(arguments, dict)
