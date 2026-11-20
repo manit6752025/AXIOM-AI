@@ -133,10 +133,10 @@ vulnerability-database lookup.
 
 The read-only security posture audit additionally checks each required runtime
 distribution's installed metadata and verifies hashed package files against
-its local `RECORD` manifest. Package inspection is bounded to 128 hashed files
-or 4 MiB per distribution; install-scheme files outside the package directory
-(such as generated console scripts) are not included in that hash pass. A
-missing or invalid RECORD inventory is reported as incomplete rather than
+its local `RECORD` manifest. Package inspection is bounded to 512 RECORD entries, 64 hashed files,
+or 2 MiB per distribution; install-scheme files outside the package directory
+(such as generated console scripts) are not included in that hash pass. A missing or invalid RECORD inventory, a skipped external install-scheme
+path, or a reached inspection limit is reported as incomplete rather than
 silently treated as verified.
 
 
