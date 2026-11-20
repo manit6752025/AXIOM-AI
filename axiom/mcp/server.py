@@ -120,7 +120,9 @@ mcp = MCPServer(
         "For a completed training run, axiom_training_job_eval_overlap_preflight derives the training dataset and text field from its job ID, then checks the selected evaluation file. It requires both the training-job status and overlap-preflight permissions. The trainer fingerprints the exact dataset bytes consumed during training; the overlap tool compares that saved digest with the bytes it scans and reports matches, changed_since_training, or unavailable without returning the digest. Changed or legacy snapshots are inconclusive and do not produce a job-aligned overlap result. A matching snapshot still does not prove held-out data. It returns saved workspace-relative base-model and adapter paths only; run axiom_engine_preflight before inference because their file contents are not verified here. "
         "For a base-versus-adapter evaluation plan before inference, use axiom_training_job_validation_preflight with two new data/ output filenames. Its overlap check compares prompts by default; set include_reference_in_overlap=true to compare reference answers too. The reference_field still configures prediction artifacts when references are omitted from overlap. Use actionability.status first: blocked means resolve findings and rerun; review_required means disclose findings and wait for the user's explicit decision; clear_for_user_approval means show both planned runs and get explicit approval before starting either sequentially. plan_only means only that a read-only plan was assembled, and clear_for_user_approval means no known blockers were detected; neither guarantees model load, fit, quality, held-out data, or approval. The actionability findings summarize blocked and review-required checks; retain the full checks for detail. The tool writes nothing and does not run inference; output paths are revalidated when a run starts. "
         "Use axiom_engine_preflight before local inference to check model/adapter structure, the selected device/precision, and advisory memory estimates; it does not load weights or run inference. Pass the same settings to axiom_engine_generate. "
-        "Run preflight and show the exact configuration before calling axiom_training_job_start; "
+        "Run preflight and show the exact configuration before calling axiom_training_job_start. " 
+        "The training start tool accepts checkpoint_interval (0 disables checkpoints) and output_policy (new, empty, or resume). " 
+        "Resume is allowed only for an AXIOM checkpoint-only outputs/ directory and requires matching model, exact dataset bytes, and training settings; "
         "call it only after the user explicitly requests that run. It uses compute and writes an adapter under outputs/. "
         "Use axiom_training_job_status to inspect a job or list recent jobs, axiom_training_job_wait to check persisted state for up to 30 seconds without repeated MCP status calls, and axiom_training_job_cancel to request cancellation. Wait uses the existing status permission. Outcomes include completed, cancelled, failed, timed_out, not_found, and state_unavailable; inspect status if state_unavailable, and call wait again if timed_out. If status reports state_unavailable or runner_state_available=false, the worker may still be active: do not treat it as stopped or start a replacement job; check status again later. A job-state file that cannot be read is distinct from not_found. "
         "Training status includes up to 64 evenly spaced loss samples; each point is one selected training record and may be noisy. Do not treat the trace as held-out validation or evidence of model quality/generalization; use held-out evaluation to assess quality. "
@@ -4239,14 +4241,20 @@ def axiom_training_job_start(
     sequence_length: int = 512,
     learning_rate: float = 0.0001,
     lora_rank: int = 8,
+    checkpoint_interval: int = 0,
+    output_policy: str = "empty",
 ) -> dict:
-    """Start a bounded local LoRA job using workspace inputs and an outputs/ destination."""
+    """Start a bounded local LoRA job or resume its latest verified checkpoint."""
     ToolPermissionStore().require("axiom_training_job_start")
     root = _mcp_workspace_root()
     try:
         model_target = resolve_workspace_input(model_path, root, "Model path")
         dataset_target = resolve_workspace_input(dataset_path, root, "Dataset path")
-        output_target = resolve_workspace_output(output_dir, root)
+        output_target = resolve_workspace_output(
+            output_dir,
+            root,
+            allow_checkpoints=output_policy == "resume",
+        )
         if not model_target.is_dir():
             raise ValueError("Model path must refer to a local model directory.")
         if not dataset_target.is_file() or dataset_target.suffix.lower() != ".jsonl":
@@ -4260,6 +4268,8 @@ def axiom_training_job_start(
             "sequence_length": sequence_length,
             "learning_rate": learning_rate,
             "lora_rank": lora_rank,
+            "checkpoint_interval": checkpoint_interval,
+            "output_policy": output_policy,
         }, workspace_guard={
             "root": str(root),
             "paths": {
