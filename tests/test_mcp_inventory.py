@@ -108,7 +108,7 @@ def test_mcp_trust_metadata_rejects_invalid_state_and_owner_label(tmp_path):
 
     with pytest.raises(ValueError, match="Trust status"):
         registry.update_mcp_trust("Local MCP", trust_status="auto-trust")
-    with pytest.raises(ValueError, match="Owner label"):
+    with pytest.raises(ValueError, match="owner label"):
         registry.update_mcp_trust("Local MCP", trust_status="trusted", owner_label="invalid\nowner")
 
 
@@ -267,7 +267,7 @@ def test_inventory_is_passive_bounded_and_only_lists_mcp_servers(tmp_path, monke
         "last_inspected_at": None,
         "last_connection_error": None,
     }]
-    assert "starts the registered process" in result["inspection_note"]
+    assert "Only servers explicitly marked trusted" in result["inspection_note"]
     assert registry.path.exists()
 
 
