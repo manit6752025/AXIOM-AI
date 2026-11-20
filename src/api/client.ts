@@ -603,6 +603,45 @@ export type WorkspaceModelCompatibility = {
   scope_note: string;
 };
 
+export type WorkspaceRuntimeAvailability =
+  | "installed"
+  | "not_detected"
+  | "installed_version_unavailable"
+  | "version_probe_timed_out"
+  | "version_probe_failed";
+
+export type WorkspaceRuntimeEvidence = {
+  id: string;
+  name: string;
+  availability: WorkspaceRuntimeAvailability;
+  version: string | null;
+  version_evidence: string | null;
+  evidence_method: string;
+  candidate_formats: string[];
+};
+
+export type WorkspaceRuntimeMatrix = {
+  schema_version: 1;
+  probed_at: string;
+  cache_ttl_seconds: number;
+  network_access: false;
+  model_load_tested: false;
+  runtimes: WorkspaceRuntimeEvidence[];
+  formats: Array<{
+    format: string;
+    candidates: Array<{
+      runtime_id: string;
+      runtime_name: string;
+      availability: WorkspaceRuntimeAvailability;
+      version: string | null;
+      version_evidence: string | null;
+      status: "candidate_not_verified";
+    }>;
+  }>;
+  limitations: string[];
+  scope_note: string;
+};
+
 export type WorkspaceDataset = {
   path: string;
   size_bytes: number;
@@ -1419,6 +1458,11 @@ export const axiomApi = {
 
   modelCompatibility: (id: string) =>
     requestJson<{ report: WorkspaceModelCompatibility }>(`/api/workspace/models/${encodeURIComponent(id)}/compatibility`),
+
+  modelRuntimeMatrix: (refresh = false) =>
+    requestJson<{ matrix: WorkspaceRuntimeMatrix }>(
+      `/api/workspace/models/runtime-matrix${refresh ? "?refresh=true" : ""}`,
+    ),
 
   addModel: (model: Omit<WorkspaceModel, "id">) =>
     requestJson<{ model: WorkspaceModel }>("/api/workspace/models", {
