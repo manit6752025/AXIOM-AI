@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 from starlette.responses import StreamingResponse
 from axiom.core import model_studio
-from axiom.core.engine_fabric import EngineFabricError, discover_engine_backends, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
+from axiom.core.engine_fabric import EngineFabricBenchmarkRequirementError, EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
 
 from axiom.core.engine import (
     AxiomEngineError,
@@ -656,6 +656,15 @@ class EngineFabricBenchmarkRequest(BaseModel):
         return value
 
 
+@router.get("/backends/benchmark-requirements")
+def engine_backend_benchmark_requirements(backend_id: str = "ollama", model: str | None = None) -> dict[str, Any]:
+    """Return declared adapter requirements and a live, generation-free preflight."""
+    try:
+        return inspect_engine_backend_benchmark_requirements(backend_id, model)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="The benchmark adapter or model ID is invalid.") from None
+
+
 @router.post("/backends/benchmark")
 def engine_backend_benchmark(request: EngineFabricBenchmarkRequest) -> dict[str, Any]:
     """Run a small real-workload benchmark and retain only timing/token metadata."""
@@ -677,5 +686,7 @@ def engine_backend_benchmark(request: EngineFabricBenchmarkRequest) -> dict[str,
         )
     except ValueError:
         raise HTTPException(status_code=422, detail="The benchmark request is invalid or unsupported.") from None
+    except EngineFabricBenchmarkRequirementError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     except EngineFabricError:
         raise HTTPException(status_code=503, detail="The selected local backend could not complete the benchmark.") from None

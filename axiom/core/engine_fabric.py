@@ -95,6 +95,10 @@ class EngineFabricError(RuntimeError):
     """A selected local backend cannot satisfy a bounded engine-fabric request."""
 
 
+class EngineFabricBenchmarkRequirementError(EngineFabricError):
+    """The selected runtime or exact model does not satisfy its benchmark contract."""
+
+
 def _public_failure_reason(exc: Exception) -> str:
     text = str(exc).lower()
     if "authentication" in text:
@@ -246,6 +250,59 @@ def _generation_capabilities(backend_id: str) -> dict[str, Any]:
     }
 
 
+def benchmark_adapter_requirements(backend_id: str) -> dict[str, Any]:
+    """Describe the exact runtime, model inventory and request contract for a benchmark adapter."""
+    if backend_id == "axiom-native":
+        runtime = {"kind": "in_process", "component": "AXIOM Native Engine", "readiness_evidence": "Native runtime dependencies are ready and a uniquely named trusted local model is discoverable.", "endpoint": None, "inventory_route": "AXIOM trusted model roots (native model discovery)"}
+        model = {"selection": "exact_model_id", "inventory_source": "AXIOM native model discovery under configured trusted roots", "supported_formats": ["safetensors", "supported dense GGUF"], "must_be_discoverable": True, "notes": "Model aliases must be unique; arbitrary filesystem paths are not accepted as model IDs."}
+        chat_route = "in-process native chat"
+    else:
+        definition = _BACKEND_BY_ID.get(backend_id)
+        if definition is None:
+            raise ValueError("Choose a supported local benchmark adapter.")
+        runtime = {"kind": "loopback_service", "component": definition["executable"] or definition["package"], "readiness_evidence": "The fixed loopback model-inventory endpoint responds with a valid model list.", "endpoint": definition["endpoint"], "inventory_route": definition["models_path"]}
+        model = {"selection": "exact_model_id", "inventory_source": f"{definition['endpoint']}{definition['models_path']}", "supported_formats": list(definition["formats"]), "must_be_discoverable": True, "notes": "The ID must be advertised by this exact runtime; similar names on different runtimes do not prove identical weights."}
+        chat_route = definition["chat_path"]
+    generation = _generation_capabilities(backend_id)
+    return {
+        "schema_version": 1, "adapter_id": f"axiom-engine-fabric-benchmark-v1:{backend_id}", "backend_id": backend_id,
+        "runtime": runtime, "model": model,
+        "request": {"route": chat_route, "transport": generation["transport"], "model_id_match": "exact",
+            "warmups": {"minimum": 0, "maximum": 1},
+            "measured_requests": {"minimum": 1, "maximum": 5, "concurrency": 1},
+            "output_tokens": {"minimum": 1, "maximum": 256},
+            "sampling": {"native": list(generation["native_sampling_controls"]), "extensions": list(generation["extension_sampling_controls"])}},
+        "privacy": {"prompt_returned": False, "responses_returned": False, "results_persisted": False, "cloud_provider_used": False},
+        "scope_note": "Requirements describe this adapter, not guaranteed model quality, memory fit, accelerator availability, or equal checkpoint weights across runtimes.",
+    }
+
+
+def inspect_engine_backend_benchmark_requirements(backend_id: str, model: str | None = None, *, report: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Evaluate live runtime readiness and exact model availability without generating tokens."""
+    requirements = benchmark_adapter_requirements(backend_id)
+    if model is not None:
+        model = validate_model_name(model)
+    current = report if report is not None else discover_engine_backends()
+    backends = current.get("backends", [])
+    selected = next((item for item in backends if isinstance(item, dict) and item.get("id") == backend_id), None)
+    runtime_status = selected.get("status") if selected else "unavailable"
+    runtime_ready = bool(selected and selected.get("status") == "ready" and selected.get("supports_chat") is True)
+    models = selected.get("models", []) if selected else []
+    available = model in models if model is not None and isinstance(models, list) else None
+    if not runtime_ready:
+        status = "runtime_unavailable"
+        reason = selected.get("error") if selected and isinstance(selected.get("error"), str) else "The selected local runtime is not ready or did not return a valid model inventory."
+    elif model is None:
+        status, reason = "model_required", "Supply an exact model ID from this adapter's discovered inventory before benchmarking."
+    elif available is not True:
+        status, reason = "model_not_found", "The exact model ID is not advertised by the selected runtime. Refresh discovery or select an installed model."
+    else:
+        status, reason = "ready", None
+    return {"schema_version": 1, "backend_id": backend_id, "adapter_id": requirements["adapter_id"], "requirements": requirements,
+        "preflight": {"status": status, "runtime_status": runtime_status, "runtime_ready": runtime_ready, "model_id": model, "model_available": available, "reason": reason},
+        "can_benchmark": status == "ready"}
+
+
 def _probe_backend(definition: dict[str, Any]) -> dict[str, Any]:
     backend_id = definition["id"]
     executable = definition["executable"]
@@ -277,6 +334,7 @@ def _probe_backend(definition: dict[str, Any]) -> dict[str, Any]:
         "error": error,
         "scope": "fixed_loopback_only",
         "generation": _generation_capabilities(backend_id),
+        "benchmark_requirements": benchmark_adapter_requirements(backend_id),
     }
 
 
@@ -336,6 +394,7 @@ def _native_backend() -> dict[str, Any]:
         "error": error,
         "scope": "in_process_native_engine",
         "generation": _generation_capabilities("axiom-native"),
+        "benchmark_requirements": benchmark_adapter_requirements("axiom-native"),
     }
 
 
@@ -755,9 +814,14 @@ def run_engine_backend_benchmark(
         raise ValueError("Benchmark temperature must be between 0 and 2.")
     if backend_id not in _BACKEND_BY_ID and backend_id != "axiom-native":
         raise ValueError("Choose a supported local backend.")
+    model = validate_model_name(model)
     top_p, top_k, min_p, repetition_penalty, seed, stops = _validate_sampling_options(
         top_p, top_k, min_p, repetition_penalty, seed, stop_sequences
     )
+
+    preflight = inspect_engine_backend_benchmark_requirements(backend_id, model)
+    if not preflight["can_benchmark"]:
+        raise EngineFabricBenchmarkRequirementError(preflight["preflight"]["reason"] or "Benchmark adapter requirements are not satisfied.")
 
     messages = [{"role": "user", "content": prompt}]
     for _ in range(warmup_runs):
@@ -833,4 +897,4 @@ def run_engine_backend_benchmark(
     }
 
 
-__all__ = ["EngineFabricError", "discover_engine_backends", "run_engine_backend_chat", "run_engine_backend_benchmark"]
+__all__ = ["EngineFabricError", "EngineFabricBenchmarkRequirementError", "benchmark_adapter_requirements", "inspect_engine_backend_benchmark_requirements", "discover_engine_backends", "run_engine_backend_chat", "run_engine_backend_benchmark"]

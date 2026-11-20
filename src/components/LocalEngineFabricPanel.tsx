@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Activity, BarChart3, Gauge, RefreshCcw, Rocket, Trash2 } from "lucide-react";
-import { axiomApi, type EngineFabricProfile, type EngineFabricReport, type EngineFabricChatResult, type EngineFabricBenchmarkResult } from "../api/client";
+import { axiomApi, type EngineFabricProfile, type EngineFabricReport, type EngineFabricChatResult, type EngineFabricBenchmarkPreflight, type EngineFabricBenchmarkResult } from "../api/client";
 
 const formatStatus = (status: string) => status.replaceAll("_", " ").toUpperCase();
 
@@ -28,6 +28,8 @@ export default function LocalEngineFabricPanel() {
   const [benchmarkIterations, setBenchmarkIterations] = useState("3");
   const [benchmarkTokens, setBenchmarkTokens] = useState("64");
   const [benchmarkResults, setBenchmarkResults] = useState<EngineFabricBenchmarkResult[]>([]);
+  const [benchmarkPreflight, setBenchmarkPreflight] = useState<EngineFabricBenchmarkPreflight | null>(null);
+  const [checkingRequirements, setCheckingRequirements] = useState(false);
 
   const refresh = async (nextProfile = profile) => {
     setLoading(true);
@@ -35,6 +37,7 @@ export default function LocalEngineFabricPanel() {
     try {
       const next = await axiomApi.engineBackends(nextProfile);
       setReport(next);
+      setBenchmarkPreflight(null);
       setSelectedBackend((current) => {
         const existing = next.backends.find((item) => item.id === current && item.supports_chat && item.status === "ready");
         if (existing) return current;
@@ -153,6 +156,20 @@ export default function LocalEngineFabricPanel() {
   };
 
 
+  const checkBenchmarkRequirements = async () => {
+    setError("");
+    if (!selected || !model.trim()) { setError("Select a local adapter and an exact discovered model ID first."); return; }
+    setCheckingRequirements(true);
+    try {
+      const checked = await axiomApi.engineBackendBenchmarkRequirements(selected.id, model.trim());
+      setBenchmarkPreflight(checked);
+      if (!checked.can_benchmark) setError(checked.preflight.reason ?? "Benchmark requirements are not satisfied.");
+    } catch (cause) {
+      setBenchmarkPreflight(null);
+      setError(cause instanceof Error ? cause.message : "Benchmark requirements could not be checked.");
+    } finally { setCheckingRequirements(false); }
+  };
+
   const benchmarkSelected = async () => {
     setError("");
     if (!selected || selected.status !== "ready") {
@@ -177,6 +194,9 @@ export default function LocalEngineFabricPanel() {
     }
     setBenchmarking(true);
     try {
+      const checked = await axiomApi.engineBackendBenchmarkRequirements(selected.id, model.trim());
+      setBenchmarkPreflight(checked);
+      if (!checked.can_benchmark) throw new Error(checked.preflight.reason ?? "The selected runtime/model does not meet benchmark requirements.");
       const measured = await axiomApi.engineBackendBenchmark({
         backend_id: selected.id as EngineFabricChatResult["backend_id"],
         model: model.trim(),
@@ -303,6 +323,14 @@ export default function LocalEngineFabricPanel() {
         </button>
       </div>
       <p className="quiet-note">Runs repeated requests against one selected local runtime, including AXIOM Native Engine when ready. Switch Execution strategy to “Choose a specific local runtime” before benchmarking; automatic failover is deliberately excluded so every sample measures the same backend. Generated text is discarded by the API, and samples stay in this screen session only.</p>
+      {selected?.benchmark_requirements && <div className="panel-surface" style={{ padding: 12, marginBottom: 12 }}>
+        <p className="surface-eyebrow">ADAPTER REQUIREMENTS · {selected.benchmark_requirements.adapter_id}</p>
+        <p className="quiet-note"><strong>Runtime:</strong> {selected.benchmark_requirements.runtime.component ?? "AXIOM Native Engine"} · {selected.benchmark_requirements.runtime.readiness_evidence}</p>
+        <p className="quiet-note"><strong>Model:</strong> exact advertised ID from {selected.benchmark_requirements.model.inventory_source}</p>
+        <p className="quiet-note"><strong>Formats:</strong> {selected.benchmark_requirements.model.supported_formats.join(", ")} · sequential requests, max 5 measured / 1 warm-up / 256 output tokens</p>
+        <button type="button" className="button secondary-button" onClick={() => void checkBenchmarkRequirements()} disabled={checkingRequirements || benchmarking || !model.trim()}>{checkingRequirements ? "Checking requirements…" : "Check benchmark requirements"}</button>
+        {benchmarkPreflight?.backend_id === selected.id && benchmarkPreflight.preflight.model_id === model.trim() && <p className="quiet-note" role="status">Preflight: {benchmarkPreflight.preflight.status.toUpperCase()}{benchmarkPreflight.preflight.reason ? " · " + benchmarkPreflight.preflight.reason : " · Runtime and exact model are ready."}</p>}
+      </div>}
       <div className="two-column-grid">
         <label className="field"><span className="field-label-row"><span>Warm-up requests</span></span><select value={benchmarkWarmups} onChange={(event) => setBenchmarkWarmups(event.target.value)} disabled={benchmarking}><option value="0">0</option><option value="1">1</option></select></label>
         <label className="field"><span className="field-label-row"><span>Measured requests</span></span><select value={benchmarkIterations} onChange={(event) => setBenchmarkIterations(event.target.value)} disabled={benchmarking}>{[1,2,3,4,5].map((count) => <option key={count} value={String(count)}>{count}</option>)}</select></label>

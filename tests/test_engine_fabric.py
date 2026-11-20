@@ -144,6 +144,7 @@ def test_benchmark_returns_measured_metadata_without_model_text(monkeypatch):
         }
 
     monkeypatch.setattr(engine_fabric, "run_engine_backend_chat", fake_chat)
+    monkeypatch.setattr(engine_fabric, "discover_engine_backends", lambda profile="balanced": {"backends": [{"id": "llama-cpp", "status": "ready", "supports_chat": True, "models": ["tiny-local"], "error": None}]})
     result = engine_fabric.run_engine_backend_benchmark(
         "llama-cpp", "tiny-local", "A representative prompt.",
         warmup_runs=1, iterations=3, max_new_tokens=16,
@@ -157,6 +158,55 @@ def test_benchmark_returns_measured_metadata_without_model_text(monkeypatch):
     assert "A representative prompt." not in str(result)
     assert result["privacy"]["responses_returned"] is False
     assert result["privacy"]["results_persisted"] is False
+
+
+def test_benchmark_preflight_rejects_offline_runtime_before_generation(monkeypatch):
+    calls = []
+    monkeypatch.setattr(engine_fabric, "run_engine_backend_chat", lambda *args, **kwargs: calls.append(args))
+    monkeypatch.setattr(engine_fabric, "discover_engine_backends", lambda profile="balanced": {"backends": [{"id": "llama-cpp", "status": "offline", "supports_chat": True, "models": [], "error": "server offline"}]})
+    try:
+        engine_fabric.run_engine_backend_benchmark("llama-cpp", "tiny-local", "Prompt", warmup_runs=0, iterations=1)
+    except engine_fabric.EngineFabricBenchmarkRequirementError as exc:
+        assert "server offline" in str(exc)
+    else:
+        raise AssertionError("offline adapter must fail preflight")
+    assert calls == []
+
+
+def test_benchmark_preflight_rejects_unknown_model_before_generation(monkeypatch):
+    calls = []
+    monkeypatch.setattr(engine_fabric, "run_engine_backend_chat", lambda *args, **kwargs: calls.append(args))
+    monkeypatch.setattr(engine_fabric, "discover_engine_backends", lambda profile="balanced": {"backends": [{"id": "ollama", "status": "ready", "supports_chat": True, "models": ["qwen:small"], "error": None}]})
+    try:
+        engine_fabric.run_engine_backend_benchmark("ollama", "qwen-large", "Prompt", warmup_runs=0, iterations=1)
+    except engine_fabric.EngineFabricBenchmarkRequirementError as exc:
+        assert "exact model ID" in str(exc)
+    else:
+        raise AssertionError("undiscovered model must fail preflight")
+    assert calls == []
+
+
+def test_benchmark_adapter_requirements_declare_runtime_model_and_budgets():
+    native = engine_fabric.benchmark_adapter_requirements("axiom-native")
+    ollama = engine_fabric.benchmark_adapter_requirements("ollama")
+    cpp = engine_fabric.benchmark_adapter_requirements("llama-cpp")
+    assert native["runtime"]["kind"] == "in_process"
+    assert "safetensors" in native["model"]["supported_formats"]
+    assert ollama["runtime"]["endpoint"] == "http://127.0.0.1:11434"
+    assert ollama["runtime"]["inventory_route"] == "/api/tags"
+    assert ollama["model"]["selection"] == "exact_model_id"
+    assert cpp["runtime"]["endpoint"] == "http://127.0.0.1:8080"
+    assert cpp["request"]["measured_requests"]["maximum"] == 5
+    assert cpp["request"]["measured_requests"]["concurrency"] == 1
+    assert cpp["privacy"]["results_persisted"] is False
+
+
+def test_benchmark_requirement_preflight_reports_ready_and_missing_model():
+    report = {"backends": [{"id": "ollama", "status": "ready", "supports_chat": True, "models": ["qwen:small"]}]}
+    ready = engine_fabric.inspect_engine_backend_benchmark_requirements("ollama", "qwen:small", report=report)
+    missing = engine_fabric.inspect_engine_backend_benchmark_requirements("ollama", "qwen:large", report=report)
+    assert ready["can_benchmark"] is True and ready["preflight"]["status"] == "ready"
+    assert missing["can_benchmark"] is False and missing["preflight"]["status"] == "model_not_found"
 
 
 def test_benchmark_rejects_unbounded_iterations_before_dispatch(monkeypatch):
@@ -387,6 +437,7 @@ def test_native_benchmark_uses_the_common_bounded_benchmark_contract(monkeypatch
         return {"response": "do not return", "eval_count": 5, "total_duration_ms": 2}
 
     monkeypatch.setattr(engine_fabric, "run_engine_backend_chat", fake_chat)
+    monkeypatch.setattr(engine_fabric, "discover_engine_backends", lambda profile="balanced": {"backends": [{"id": "axiom-native", "status": "ready", "supports_chat": True, "models": ["qwen-tiny"]}]})
     result = engine_fabric.run_engine_backend_benchmark(
         "axiom-native", "qwen-tiny", "representative prompt",
         warmup_runs=0, iterations=2, max_new_tokens=8,
