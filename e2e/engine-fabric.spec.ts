@@ -56,7 +56,60 @@ test("Engine Fabric compares local engines and routes chat to the chosen service
   await ensureAuthenticated(page);
   let chatRequestBody: Record<string, unknown> | undefined;
   let benchmarkRequestBody: Record<string, unknown> | undefined;
+  let workspaceProfile: Record<string, unknown> | null = null;
   await page.route("**/api/engine/backends**", async (route) => {
+    const requestUrl = new URL(route.request().url());
+    const requestPath = requestUrl.pathname;
+    const method = route.request().method();
+    if (requestPath === "/api/engine/backends/profiles" && method === "GET") {
+      await route.fulfill({ json: {
+        schema_version: 1,
+        profiles: workspaceProfile ? [workspaceProfile] : [],
+        total: workspaceProfile ? 1 : 0,
+        max_profiles: 25,
+        credentials_persisted: false,
+        custom_endpoints_persisted: false,
+      } });
+      return;
+    }
+    if (requestPath === "/api/engine/backends/profiles" && method === "POST") {
+      const input = route.request().postDataJSON() as { name: string; backend_id: string; model: string };
+      workspaceProfile = {
+        id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        name: input.name,
+        backend_id: input.backend_id,
+        model: input.model,
+        created_at: "2026-11-20T00:00:00Z",
+        updated_at: "2026-11-20T00:00:00Z",
+      };
+      await route.fulfill({ status: 201, json: {
+        profile: workspaceProfile,
+        credentials_persisted: false,
+        custom_endpoints_persisted: false,
+      } });
+      return;
+    }
+    if (requestPath.endsWith("/profiles/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/connect") && method === "POST") {
+      await route.fulfill({ json: {
+        profile_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        backend_id: "ollama",
+        model: "tiny-local",
+        status: "verified",
+        checked_at: "2026-11-20T00:00:00Z",
+        connection_scope: "one_shot_local_health_and_model_inventory_check",
+        persistent_connection: false,
+        credentials_persisted: false,
+        custom_endpoints_persisted: false,
+        processes_started: false,
+      } });
+      return;
+    }
+    if (requestPath.endsWith("/profiles/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") && method === "DELETE") {
+      const deleted = workspaceProfile;
+      workspaceProfile = null;
+      await route.fulfill({ json: { deleted, credentials_persisted: false } });
+      return;
+    }
     if (route.request().method() === "GET" && route.request().url().includes("/benchmark-requirements")) {
       await route.fulfill({ json: {
         schema_version: 1,
@@ -133,4 +186,21 @@ test("Engine Fabric compares local engines and routes chat to the chosen service
   await expect(engineFabricPanel.getByRole("table", { name: "Measured local engine comparison" })).toContainText("21 ms");
   await expect(engineFabricPanel.getByRole("table", { name: "Measured local engine comparison" })).toContainText("350 tokens/s");
   expect(benchmarkRequestBody?.min_p).toBe(0.2);
+
+  await engineFabricPanel.getByLabel("Engine Fabric profile name", { exact: true }).fill("Office local runtime");
+  await engineFabricPanel.getByRole("button", { name: "Save selected backend + model" }).click();
+  expect(workspaceProfile?.["backend_id"]).toBe("ollama");
+  expect(workspaceProfile?.["model"]).toBe("tiny-local");
+  const savedProfileSelect = engineFabricPanel.getByLabel("Saved Engine Fabric profile", { exact: true });
+  await expect(savedProfileSelect).toContainText("Office local runtime · ollama · tiny-local");
+  await savedProfileSelect.selectOption({ label: "Office local runtime · ollama · tiny-local" });
+  await engineFabricPanel.getByRole("button", { name: "Apply", exact: true }).click();
+  await engineFabricPanel.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(engineFabricPanel.getByText("VERIFIED THIS SESSION", { exact: true })).toBeVisible();
+  await engineFabricPanel.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await expect(engineFabricPanel.getByText("NOT CONNECTED", { exact: true })).toBeVisible();
+  await expect(page.locator("body")).toContainText("external runtime remains running");
+  await engineFabricPanel.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(savedProfileSelect).toHaveValue("");
+  expect(workspaceProfile).toBeNull();
 });
