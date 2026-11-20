@@ -220,8 +220,17 @@ def test_workspace_model_api_reports_source_and_digest_duplicates_as_conflicts(t
             "format": "safetensors",
             "content_sha256": "a" * 64,
             "size_bytes": 4096,
+            "workspace_labels": ["production", "team-a"],
         })
         assert created.status_code == 201
+        assert created.json()["model"]["workspace_labels"] == ["production", "team-a"]
+
+        patched_labels = client.patch(
+            f"/api/workspace/models/{created.json()['model']['id']}",
+            json={"workspace_labels": ["staging"]},
+        )
+        assert patched_labels.status_code == 200
+        assert patched_labels.json()["model"]["workspace_labels"] == ["staging"]
 
         duplicate_source = client.post("/api/workspace/models", json={
             "name": "Same source",
@@ -244,3 +253,31 @@ def test_workspace_model_api_reports_source_and_digest_duplicates_as_conflicts(t
         assert listing.status_code == 200
         assert listing.json()["total"] == 1
         assert listing.json()["models"][0]["size_bytes"] == 4096
+
+
+
+def test_model_registry_workspace_labels_persist_and_enforce_bounds(tmp_path):
+    registry = ModelRegistry(tmp_path / "registry")
+    model = Model(
+        name="Labelled model",
+        source="org/labelled",
+        workspace_labels=["production", "team-a"],
+    )
+    registry.add(model)
+    assert registry.get(model.id).workspace_labels == ["production", "team-a"]
+
+    updated = registry.update(model.id, {"workspace_labels": ["staging"]})
+    assert updated is not None
+    assert updated.workspace_labels == ["staging"]
+    persisted = json.loads((tmp_path / "registry" / "models.json").read_text(encoding="utf-8"))
+    assert persisted[0]["workspace_labels"] == ["staging"]
+
+    invalid_values = (
+        [""] ,
+        ["x" * 41],
+        [f"label-{index}" for index in range(33)],
+        "production",
+    )
+    for labels in invalid_values:
+        with pytest.raises(TypeError, match="workspace_labels"):
+            Model(name="Invalid labels", source=f"org/invalid-{len(str(labels))}", workspace_labels=labels)

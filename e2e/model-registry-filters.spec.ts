@@ -5,9 +5,9 @@ test("model registry filters and saved presets use the real typed API query cont
   const requests: URL[] = [];
   const createdPayloads: Record<string, unknown>[] = [];
   const models = [
-    { id: "a".repeat(32), name: "Qwen Seven", source: "models/qwen-seven", format: "gguf", parameters: "7B", quantization: "Q4_K_M", architecture: "QwenForCausalLM", license: "Apache-2.0", tags: ["local", "chat"], favorite: true, content_sha256: null, size_bytes: 7516192768 },
-    { id: "b".repeat(32), name: "Qwen Mini", source: "models/qwen-mini", format: "gguf", parameters: "1.5B", quantization: "Q4_K_M", architecture: "QwenForCausalLM", license: "Apache-2.0", tags: ["local", "chat"], favorite: false, content_sha256: null, size_bytes: 1610612736 },
-    { id: "c".repeat(32), name: "Llama Base", source: "models/llama", format: "safetensors", parameters: "8B", quantization: "", architecture: "LlamaForCausalLM", license: "Meta", tags: ["training"], favorite: false, content_sha256: null, size_bytes: null },
+    { id: "a".repeat(32), name: "Qwen Seven", source: "models/qwen-seven", format: "gguf", parameters: "7B", quantization: "Q4_K_M", architecture: "QwenForCausalLM", license: "Apache-2.0", tags: ["local", "chat"], favorite: true, content_sha256: null, size_bytes: 7516192768, workspace_labels: ["production", "team-a"] },
+    { id: "b".repeat(32), name: "Qwen Mini", source: "models/qwen-mini", format: "gguf", parameters: "1.5B", quantization: "Q4_K_M", architecture: "QwenForCausalLM", license: "Apache-2.0", tags: ["local", "chat"], favorite: false, content_sha256: null, size_bytes: 1610612736, workspace_labels: ["staging"] },
+    { id: "c".repeat(32), name: "Llama Base", source: "models/llama", format: "safetensors", parameters: "8B", quantization: "", architecture: "LlamaForCausalLM", license: "Meta", tags: ["training"], favorite: false, content_sha256: null, size_bytes: null, workspace_labels: [] },
   ];
   const fitReport = {
     schema_version: 1,
@@ -51,7 +51,7 @@ test("model registry filters and saved presets use the real typed API query cont
     const sortBy = url.searchParams.get("sort_by") ?? "name";
     const sortOrder = url.searchParams.get("sort_order") ?? "asc";
     const filtered = models.filter((model) =>
-      (!search || [model.name, model.source, model.format, model.parameters ?? "", model.architecture ?? "", model.license ?? "", ...model.tags].some((field) => field.toLowerCase().includes(search)))
+      (!search || [model.name, model.source, model.format, model.parameters ?? "", model.architecture ?? "", model.license ?? "", ...model.tags, ...model.workspace_labels].some((field) => field.toLowerCase().includes(search)))
       && (!format || format === "all" || model.format.toLowerCase() === format)
       && (!tag || model.tags.some((item) => item.toLowerCase() === tag))
       && (!favorites || model.favorite)
@@ -122,12 +122,19 @@ test("model registry filters and saved presets use the real typed API query cont
   await expect(page.getByText("Qwen Seven", { exact: true })).toBeVisible();
   await expect(page.getByText("Qwen Mini", { exact: true })).toHaveCount(0);
 
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await page.getByRole("textbox", { name: "Search model registry" }).fill("production");
+  await page.getByRole("button", { name: "Apply filters" }).click();
+  await expect(page.getByText("Qwen Seven", { exact: true })).toBeVisible();
+  await expect(page.getByText("Qwen Mini", { exact: true })).toHaveCount(0);
+
   await page.getByRole("button", { name: "Register model" }).click();
   await page.getByPlaceholder("Qwen 3 8B").fill("Qwen Test Size");
   await page.getByPlaceholder("./models/qwen3-8b").fill("models/qwen-test-size");
   await page.getByPlaceholder("safetensors, gguf, ...").fill("gguf");
   await page.getByLabel("Weight size in bytes").fill("7340032");
   await page.getByLabel("Content SHA-256").fill("a".repeat(64));
+  await page.getByLabel("Workspace labels").fill("production, reviewed");
   await page.getByRole("button", { name: "Save to registry" }).click();
 
   await expect.poll(() => createdPayloads.length).toBe(1);
@@ -137,5 +144,6 @@ test("model registry filters and saved presets use the real typed API query cont
     format: "gguf",
     size_bytes: 7340032,
     content_sha256: "a".repeat(64),
+    workspace_labels: ["production", "reviewed"],
   });
 });
