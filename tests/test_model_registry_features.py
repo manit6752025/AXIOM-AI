@@ -79,12 +79,14 @@ def test_workspace_model_api_paginates_imports_updates_and_removes_metadata_only
                 "parameters": "8B",
                 "license": "Apache-2.0",
                 "tags": ["local", "chat"],
+                "size_bytes": 4096,
             },
         )
         assert created.status_code == 201
         model = created.json()["model"]
         assert len(model["id"]) == 32
         assert model["architecture"] == "DemoForCausalLM"
+        assert model["size_bytes"] == 4096
 
         page = client.get("/api/workspace/models", params={"limit": 1, "offset": 0})
         assert page.status_code == 200
@@ -93,26 +95,38 @@ def test_workspace_model_api_paginates_imports_updates_and_removes_metadata_only
 
         updated = client.patch(
             f"/api/workspace/models/{model['id']}",
-            json={"favorite": True, "tags": ["local", "favorite"]},
+            json={"favorite": True, "tags": ["local", "favorite"], "size_bytes": 8192},
         )
         assert updated.status_code == 200
         assert updated.json()["model"]["id"] == model["id"]
         assert updated.json()["model"]["favorite"] is True
+        assert updated.json()["model"]["size_bytes"] == 8192
 
         exported = client.get("/api/workspace/models/export")
         assert exported.status_code == 200
         assert exported.json()["schema_version"] == 1
         assert exported.json()["models"][0]["id"] == model["id"]
+        assert exported.json()["models"][0]["size_bytes"] == 8192
 
         imported = client.post(
             "/api/workspace/models/import",
             json={
                 "schema_version": 1,
-                "models": [{"name": "Second", "source": "org/second", "format": "gguf"}],
+                "models": [{"name": "Second", "source": "org/second", "format": "gguf", "size_bytes": 64}],
             },
         )
         assert imported.status_code == 201
         assert imported.json()["imported"] == 1
+        assert imported.json()["models"][0]["size_bytes"] == 64
+
+        invalid_size = client.post("/api/workspace/models", json={
+            "name": "Invalid size", "source": "org/invalid-size", "size_bytes": -1,
+        })
+        assert invalid_size.status_code == 422
+        non_integer_size = client.post("/api/workspace/models", json={
+            "name": "Boolean size", "source": "org/boolean-size", "size_bytes": True,
+        })
+        assert non_integer_size.status_code == 422
 
         removed = client.delete(f"/api/workspace/models/{model['id']}")
         assert removed.status_code == 200
@@ -172,3 +186,21 @@ def test_workspace_model_discovery_and_inspection_use_trusted_paths(tmp_path, mo
 
         unsafe = client.post("/api/workspace/models/inspect", json={"path": "../../outside"})
         assert unsafe.status_code == 422
+
+
+
+def test_model_registry_size_bytes_is_strict_and_round_trips(tmp_path):
+    registry = ModelRegistry(tmp_path / "registry")
+    model = Model(name="Sized model", source="org/sized", size_bytes=4096)
+    registry.add(model)
+
+    assert registry.get(model.id).size_bytes == 4096
+    updated = registry.update(model.id, {"size_bytes": 8192})
+    assert updated is not None
+    assert updated.size_bytes == 8192
+    saved = json.loads((tmp_path / "registry" / "models.json").read_text(encoding="utf-8"))
+    assert saved[0]["size_bytes"] == 8192
+
+    for invalid in (-1, True, 9_007_199_254_740_992, 1.5):
+        with pytest.raises(TypeError, match="non-negative safe integer"):
+            Model(name="Invalid size", source=f"org/invalid-{invalid}", size_bytes=invalid)

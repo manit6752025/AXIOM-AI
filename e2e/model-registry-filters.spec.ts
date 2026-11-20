@@ -3,10 +3,11 @@ import { ensureAuthenticated } from "./helpers/auth";
 
 test("model registry filters and saved presets use the real typed API query contract", async ({ page }) => {
   const requests: URL[] = [];
+  const createdPayloads: Record<string, unknown>[] = [];
   const models = [
-    { id: "a".repeat(32), name: "Qwen Seven", source: "models/qwen-seven", format: "gguf", parameters: "7B", quantization: "Q4_K_M", architecture: "QwenForCausalLM", license: "Apache-2.0", tags: ["local", "chat"], favorite: true, content_sha256: null },
-    { id: "b".repeat(32), name: "Qwen Mini", source: "models/qwen-mini", format: "gguf", parameters: "1.5B", quantization: "Q4_K_M", architecture: "QwenForCausalLM", license: "Apache-2.0", tags: ["local", "chat"], favorite: false, content_sha256: null },
-    { id: "c".repeat(32), name: "Llama Base", source: "models/llama", format: "safetensors", parameters: "8B", quantization: "", architecture: "LlamaForCausalLM", license: "Meta", tags: ["training"], favorite: false, content_sha256: null },
+    { id: "a".repeat(32), name: "Qwen Seven", source: "models/qwen-seven", format: "gguf", parameters: "7B", quantization: "Q4_K_M", architecture: "QwenForCausalLM", license: "Apache-2.0", tags: ["local", "chat"], favorite: true, content_sha256: null, size_bytes: 7516192768 },
+    { id: "b".repeat(32), name: "Qwen Mini", source: "models/qwen-mini", format: "gguf", parameters: "1.5B", quantization: "Q4_K_M", architecture: "QwenForCausalLM", license: "Apache-2.0", tags: ["local", "chat"], favorite: false, content_sha256: null, size_bytes: 1610612736 },
+    { id: "c".repeat(32), name: "Llama Base", source: "models/llama", format: "safetensors", parameters: "8B", quantization: "", architecture: "LlamaForCausalLM", license: "Meta", tags: ["training"], favorite: false, content_sha256: null, size_bytes: null },
   ];
   const fitReport = {
     schema_version: 1,
@@ -27,6 +28,15 @@ test("model registry filters and saved presets use the real typed API query cont
     const url = new URL(request.url());
     if (url.pathname.endsWith("/compatibility") && request.method() === "GET") {
       await route.fulfill({ json: { report: fitReport } });
+      return;
+    }
+    if (url.pathname === "/api/workspace/models" && request.method() === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      createdPayloads.push(payload);
+      await route.fulfill({
+        status: 201,
+        json: { model: { ...payload, id: "d".repeat(32), favorite: false } },
+      });
       return;
     }
     if (url.pathname !== "/api/workspace/models" || request.method() !== "GET") {
@@ -111,4 +121,21 @@ test("model registry filters and saved presets use the real typed API query cont
   await page.getByRole("button", { name: "Apply", exact: true }).last().click();
   await expect(page.getByText("Qwen Seven", { exact: true })).toBeVisible();
   await expect(page.getByText("Qwen Mini", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Register model" }).click();
+  await page.getByPlaceholder("Qwen 3 8B").fill("Qwen Test Size");
+  await page.getByPlaceholder("./models/qwen3-8b").fill("models/qwen-test-size");
+  await page.getByPlaceholder("safetensors, gguf, ...").fill("gguf");
+  await page.getByLabel("Weight size in bytes").fill("7340032");
+  await page.getByLabel("Content SHA-256").fill("a".repeat(64));
+  await page.getByRole("button", { name: "Save to registry" }).click();
+
+  await expect.poll(() => createdPayloads.length).toBe(1);
+  expect(createdPayloads[0]).toMatchObject({
+    name: "Qwen Test Size",
+    source: "models/qwen-test-size",
+    format: "gguf",
+    size_bytes: 7340032,
+    content_sha256: "a".repeat(64),
+  });
 });
