@@ -1090,7 +1090,7 @@ function App() {
 }
 
 function AxiomMark({ small = false }: { small?: boolean }) {
-  return <span className={`axiom-mark ${small ? "small" : ""}`}>A</span>;
+  return <img className={`axiom-mark ${small ? "small" : ""}`} src="/axiom-mark.svg" alt="" aria-hidden="true" draggable={false} />;
 }
 
 function ThemeToggle({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => void }) {
@@ -1494,7 +1494,107 @@ function Sidebar({
   collapsed: boolean;
   toggleCollapsed: () => void;
 }) {
+  const [workspaceCatalog, setWorkspaceCatalog] = useState<WorkspaceCatalog | null>(null);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [workspaceDialog, setWorkspaceDialog] = useState<"create" | "rename" | null>(null);
+  const [workspaceNameInput, setWorkspaceNameInput] = useState("");
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState("");
+  const workspaceNameRef = useRef<HTMLInputElement>(null);
+  const workspaceMenuRef = useRef<HTMLDivElement>(null);
+
+  const activeWorkspace = workspaceCatalog?.workspaces.find(
+    (workspace) => workspace.id === workspaceCatalog.active_workspace_id,
+  ) ?? workspaceCatalog?.workspaces.find((workspace) => workspace.is_default);
+
+  useEffect(() => {
+    let active = true;
+    void axiomApi.workspaces().then((catalog) => {
+      if (!active) return;
+      setWorkspaceCatalog(catalog);
+      const rememberedId = localStorage.getItem("axiom-active-workspace");
+      if (!rememberedId || !catalog.workspaces.some((workspace) => workspace.id === rememberedId)) {
+        localStorage.setItem("axiom-active-workspace", catalog.active_workspace_id);
+      }
+    }).catch(() => {
+      if (!active) return;
+      // A removed workspace must not strand the shell on a permanently invalid header.
+      if (localStorage.getItem("axiom-active-workspace")) {
+        localStorage.removeItem("axiom-active-workspace");
+        window.location.reload();
+        return;
+      }
+      setWorkspaceError("Workspace catalog unavailable.");
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!workspaceMenuOpen) return;
+    const closeOnPointer = (event: PointerEvent) => {
+      if (event.target instanceof Node && !workspaceMenuRef.current?.contains(event.target)) {
+        setWorkspaceMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setWorkspaceMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnPointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [workspaceMenuOpen]);
+
+  const openWorkspaceDialog = (mode: "create" | "rename") => {
+    setWorkspaceNameInput(mode === "rename" ? activeWorkspace?.name ?? "" : "");
+    setWorkspaceError("");
+    setWorkspaceMenuOpen(false);
+    setWorkspaceDialog(mode);
+  };
+
+  const saveWorkspace = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalized = workspaceNameInput.trim();
+    if (!normalized) {
+      setWorkspaceError("Enter a workspace name.");
+      workspaceNameRef.current?.focus();
+      return;
+    }
+    setWorkspaceBusy(true);
+    setWorkspaceError("");
+    try {
+      if (workspaceDialog === "create") {
+        const result = await axiomApi.createWorkspace(normalized);
+        localStorage.setItem("axiom-active-workspace", result.workspace.id);
+        window.location.reload();
+      } else if (workspaceDialog === "rename" && activeWorkspace) {
+        const result = await axiomApi.renameWorkspace(activeWorkspace.id, normalized);
+        setWorkspaceCatalog((current) => current ? {
+          ...current,
+          workspaces: current.workspaces.map((workspace) =>
+            workspace.id === result.workspace.id ? result.workspace : workspace,
+          ),
+        } : current);
+        setWorkspaceDialog(null);
+      }
+    } catch (cause) {
+      setWorkspaceError(cause instanceof Error ? cause.message : "Workspace could not be saved.");
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const switchWorkspace = (workspaceId: string) => {
+    setWorkspaceMenuOpen(false);
+    if (workspaceId === workspaceCatalog?.active_workspace_id) return;
+    localStorage.setItem("axiom-active-workspace", workspaceId);
+    window.location.reload();
+  };
+
   return (
+    <>
     <aside className={`sidebar ${mobileOpen ? "is-open" : ""}`} aria-label="Primary navigation">
       <div className="sidebar-head">
         <button
@@ -1512,10 +1612,44 @@ function Sidebar({
         </button>
       </div>
 
-      <div className="workspace-switcher">
-        <span className="workspace-avatar">A</span>
-        <span><b>Local workspace</b><small>Development</small></span>
-        <ChevronDown size={15} aria-hidden="true" />
+      <div className="workspace-menu-wrap" ref={workspaceMenuRef}>
+        <button
+          type="button"
+          className="workspace-switcher"
+          aria-haspopup="menu"
+          aria-expanded={workspaceMenuOpen}
+          aria-label={`Switch workspace. Current workspace: ${activeWorkspace?.name ?? "Loading"}`}
+          onClick={() => setWorkspaceMenuOpen((open) => !open)}
+        >
+          <span className="workspace-avatar">{(activeWorkspace?.name ?? "A").trim().charAt(0).toUpperCase()}</span>
+          <span><b>{activeWorkspace?.name ?? "Loading workspace…"}</b><small>{activeWorkspace?.is_default ? "Default workspace" : "Local workspace"}</small></span>
+          <ChevronDown size={15} aria-hidden="true" />
+        </button>
+        {workspaceMenuOpen && (
+          <div className="workspace-dropdown" role="menu" aria-label="Workspaces">
+            <div className="workspace-dropdown-heading">YOUR WORKSPACES</div>
+            {workspaceCatalog?.workspaces.map((workspace) => (
+              <button
+                key={workspace.id}
+                type="button"
+                role="menuitemradio"
+                aria-checked={workspace.id === workspaceCatalog.active_workspace_id}
+                className={`workspace-option ${workspace.id === workspaceCatalog.active_workspace_id ? "active" : ""}`}
+                onClick={() => switchWorkspace(workspace.id)}
+                disabled={workspace.status !== "ready"}
+              >
+                <span className="workspace-option-avatar">{workspace.name.charAt(0).toUpperCase()}</span>
+                <span className="workspace-option-copy"><b>{workspace.name}</b><small>{workspace.is_default ? "Default · existing project data" : "Isolated local workspace"}</small></span>
+                {workspace.id === workspaceCatalog.active_workspace_id && <CircleCheck size={15} aria-label="Current workspace" />}
+              </button>
+            ))}
+            <div className="workspace-dropdown-actions">
+              <button type="button" role="menuitem" onClick={() => openWorkspaceDialog("create")}><Plus size={14} /> Create workspace</button>
+              <button type="button" role="menuitem" onClick={() => openWorkspaceDialog("rename")} disabled={!activeWorkspace}><Pencil size={14} /> Rename current</button>
+            </div>
+            {workspaceError && <p className="workspace-dropdown-error" role="status">{workspaceError}</p>}
+          </div>
+        )}
       </div>
 
       <nav className="sidebar-nav">
@@ -1543,6 +1677,49 @@ function Sidebar({
         <p>AXIOM / BUILD AI. OWN AI.</p>
       </div>
     </aside>
+    {workspaceDialog && (
+      <AccessibleDialog
+        titleId="workspace-dialog-title"
+        descriptionId="workspace-dialog-description"
+        onClose={() => { if (!workspaceBusy) setWorkspaceDialog(null); }}
+        closeDisabled={workspaceBusy}
+        initialFocusRef={workspaceNameRef}
+      >
+        <form onSubmit={saveWorkspace} className="workspace-dialog-form">
+          <div className="dialog-head">
+            <div>
+              <p className="eyebrow">WORKSPACE MANAGEMENT</p>
+              <h2 id="workspace-dialog-title">{workspaceDialog === "create" ? "Create workspace" : "Rename workspace"}</h2>
+            </div>
+          </div>
+          <p id="workspace-dialog-description" className="quiet-note">
+            {workspaceDialog === "create"
+              ? "Create an isolated local workspace with its own model registry, workflow history, datasets, evaluations and saved connector settings."
+              : "Rename this workspace without moving or changing any of its local data."}
+          </p>
+          <label className="field">
+            <span className="field-label-row"><span>Workspace name</span></span>
+            <input
+              ref={workspaceNameRef}
+              value={workspaceNameInput}
+              onChange={(event) => setWorkspaceNameInput(event.target.value)}
+              maxLength={64}
+              autoComplete="off"
+              placeholder="e.g. Production models"
+              required
+            />
+          </label>
+          {workspaceError && <InlineAlert tone="warning" role="alert">{workspaceError}</InlineAlert>}
+          <div className="integration-form-actions">
+            <button type="button" className="button secondary-button" onClick={() => setWorkspaceDialog(null)} disabled={workspaceBusy}>Cancel</button>
+            <button type="submit" className="button primary-button" disabled={workspaceBusy || !workspaceNameInput.trim()}>
+              {workspaceBusy ? "Saving…" : workspaceDialog === "create" ? "Create workspace" : "Save name"}
+            </button>
+          </div>
+        </form>
+      </AccessibleDialog>
+    )}
+    </>
   );
 }
 
@@ -3409,7 +3586,14 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
   const [dryRunMethod, setDryRunMethod] = useState("auto");
   const [dryRunSeed, setDryRunSeed] = useState("42");
   const [autosaveEnabled, setAutosaveEnabled] = useState(true);
+  const [workspaceCatalog, setWorkspaceCatalog] = useState<WorkspaceCatalog | null>(null);
+  const [deployTargetId, setDeployTargetId] = useState("");
+  const [deploymentBusy, setDeploymentBusy] = useState(false);
+  const [deploymentError, setDeploymentError] = useState("");
   const selectedWorkflow = workflows.find((workflow) => workflow.id === workflowId);
+  const deploymentTargets = workspaceCatalog?.workspaces.filter(
+    (workspace) => workspace.id !== workspaceCatalog.active_workspace_id && workspace.status === "ready",
+  ) ?? [];
   const workflowDirty = Boolean(selectedWorkflow && (
     name !== selectedWorkflow.name
     || JSON.stringify(nodes) !== JSON.stringify(selectedWorkflow.nodes)
@@ -3460,6 +3644,20 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
   };
 
   useEffect(() => { void refresh(); }, []);
+
+  useEffect(() => {
+    let active = true;
+    void axiomApi.workspaces().then((catalog) => {
+      if (!active) return;
+      setWorkspaceCatalog(catalog);
+      setDeployTargetId(catalog.workspaces.find(
+        (workspace) => workspace.id !== catalog.active_workspace_id && workspace.status === "ready",
+      )?.id ?? "");
+    }).catch((cause: unknown) => {
+      if (active) setDeploymentError(cause instanceof Error ? cause.message : "Workspace list unavailable.");
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (!autosaveEnabled || !workflowId || !workflowDirty || saving) return;
@@ -3702,12 +3900,50 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
     downloadBlob(blob, `workflow-${dryRun.workflow_id}-reproducibility.json`);
   };
 
+  const deployWorkflow = async () => {
+    if (!workflowId || workflowDirty || !deployTargetId || deploymentBusy) return;
+    setDeploymentBusy(true);
+    setDeploymentError("");
+    try {
+      const result = await axiomApi.deployWorkflow(workflowId, deployTargetId);
+      onNotify(
+        `Published a separate copy of “${result.workflow.name}” to ${result.deployment.target_workspace_name}. No workflow job was executed.`,
+        "success",
+      );
+    } catch (cause) {
+      setDeploymentError(cause instanceof Error ? cause.message : "Workflow could not be published.");
+    } finally {
+      setDeploymentBusy(false);
+    }
+  };
+
   return <FeaturePage page="workflows" actions={<><button type="button" className="button secondary-button" onClick={() => void duplicateWorkflow()} disabled={!workflowId || saving}><Copy size={15} /> Duplicate selected</button><button type="button" className="button secondary-button" onClick={startNew}><Plus size={16} /> New workflow</button></>}>
     <div className="info-grid">
       <InfoCard icon={GitBranch} label="Saved graphs" value={loading ? "—" : String(workflows.length)} detail="Persistent local workflows" tone={workflows.length ? "success" : "neutral"} />
       <InfoCard icon={CircleCheck} label="Validation" value={validation ? "Passed" : "On demand"} detail={validation || "Backend checks graph structure"} tone={validation ? "success" : "neutral"} />
       <InfoCard icon={TriangleAlert} label="Execution" value="Disabled" detail="No training runner is attached" tone="warning" />
     </div>
+    <Surface title="Workspace deployment" eyebrow="PUBLISH A WORKFLOW DESIGN" action={<StatusPill tone="neutral">COPY ONLY</StatusPill>}>
+      <div className="workflow-deploy-row">
+        <div className="workflow-deploy-copy">
+          <b>Publish to another workspace</b>
+          <small>Copy the saved graph into a workspace with its own models, datasets and workflow history. Publishing does not run training or evaluation.</small>
+        </div>
+        <label className="field workflow-deploy-target">
+          <span className="field-label-row"><span>Target workspace</span></span>
+          <select value={deployTargetId} onChange={(event) => setDeployTargetId(event.target.value)} disabled={!deploymentTargets.length}>
+            <option value="">{deploymentTargets.length ? "Choose a workspace" : "Create another workspace first"}</option>
+            {deploymentTargets.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
+          </select>
+        </label>
+        <button type="button" className="button primary-button" onClick={() => void deployWorkflow()} disabled={!workflowId || workflowDirty || !deployTargetId || deploymentBusy}>
+          {deploymentBusy ? "Publishing…" : "Publish workflow copy"}
+        </button>
+      </div>
+      {workflowDirty && workflowId && <p className="quiet-note">Save your unsaved graph changes before publishing.</p>}
+      {deploymentError && <InlineAlert tone="warning" role="alert">{deploymentError}</InlineAlert>}
+      {selectedWorkflow?.deployment && <div className="dataset-quality-check passed"><b>Published copy</b><small>Source: {selectedWorkflow.deployment.source_workspace_name} · published {formatTimestamp(selectedWorkflow.deployment.deployed_at)} · this design remains non-executable.</small></div>}
+    </Surface>
     <div className="two-column-grid workflow-layout">
       <Surface title="Workflow graph" eyebrow="DESIGN / VALIDATE / SAVE" action={<StatusPill tone="neutral">NOT EXECUTABLE</StatusPill>}>
         <div className="workflow-template-row">

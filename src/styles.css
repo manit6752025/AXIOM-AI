@@ -76,15 +76,45 @@ code, kbd { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospac
 .brand-button-copy b, .brand-button-copy small { display: block; }
 .brand-button-copy b { color: var(--ink-strong); font-size: 15px; font-weight: 780; letter-spacing: .16em; line-height: 1; }
 .brand-button-copy small { margin-top: 5px; color: var(--faint); font-size: 8px; font-weight: 650; letter-spacing: .12em; line-height: 1; white-space: nowrap; }
-.brand-button:hover .axiom-mark { background: var(--accent); color: var(--accent-ink); }
 .brand-lockup b { display: block; color: var(--ink-strong); font-size: 15px; font-weight: 780; letter-spacing: .16em; line-height: 1; }
 .brand-lockup span { display: block; margin-top: 5px; color: var(--faint); font-size: 8px; font-weight: 650; letter-spacing: .12em; line-height: 1; }
-.axiom-mark { width: 30px; height: 30px; display: grid; flex: 0 0 auto; place-items: center; border: 1px solid var(--accent); border-radius: 50%; color: var(--accent); font-size: 15px; font-weight: 800; letter-spacing: -.08em; }
-.axiom-mark.small { width: 24px; height: 24px; font-size: 12px; }
+.axiom-mark { width: 34px; height: 34px; display: block; flex: 0 0 auto; object-fit: contain; border: 0; border-radius: 9px; }
+.axiom-mark.small { width: 24px; height: 24px; border-radius: 6px; }
 .icon-button { width: 34px; height: 34px; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 2px; background: transparent; color: var(--muted); transition: border-color .16s ease, color .16s ease, background .16s ease; }
 .icon-button:hover { border-color: var(--line-strong); background: var(--surface); color: var(--ink-strong); }
 .sidebar-close, .mobile-menu-button { display: none; }
-.workspace-switcher { gap: 10px; min-height: 52px; margin: 0 0 26px; padding: 9px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); }
+.workspace-menu-wrap { position: relative; z-index: 30; margin: 0 0 26px; }
+.workspace-switcher { width: 100%; gap: 10px; min-height: 52px; margin: 0; padding: 9px 0; border: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: transparent; color: var(--muted); text-align: left; font: inherit; }
+.workspace-switcher:hover, .workspace-switcher[aria-expanded="true"] { color: var(--ink-strong); }
+.workspace-switcher > span:nth-child(2) { min-width: 0; flex: 1; }
+.workspace-switcher b, .workspace-switcher small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-switcher b { color: var(--ink); font-size: 11px; font-weight: 700; }
+.workspace-switcher small { margin-top: 4px; color: var(--faint); font-size: 9px; }
+.workspace-avatar, .profile-avatar { display: grid; place-items: center; flex: 0 0 auto; background: var(--accent); color: var(--accent-ink); font-size: 11px; font-weight: 800; }
+.workspace-avatar { width: 26px; height: 26px; border-radius: 50%; }
+.workspace-dropdown { position: absolute; top: calc(100% + 7px); left: 0; z-index: 70; width: min(300px, calc(100vw - 32px)); max-height: min(420px, 70vh); overflow: auto; padding: 7px; border: 1px solid var(--line-strong); border-radius: 3px; background: var(--surface-raised); box-shadow: var(--shadow); }
+.workspace-dropdown-heading { padding: 8px 9px 7px; color: var(--faint); font-size: 8px; font-weight: 800; letter-spacing: .16em; }
+.workspace-option { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px; border: 1px solid transparent; background: transparent; color: var(--ink); text-align: left; }
+.workspace-option:hover, .workspace-option.active { border-color: var(--line); background: var(--surface); }
+.workspace-option:disabled { opacity: .5; cursor: not-allowed; }
+.workspace-option-avatar { width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 11px; font-weight: 800; }
+.workspace-option-copy { min-width: 0; flex: 1; }
+.workspace-option-copy b, .workspace-option-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-option-copy b { font-size: 10px; }
+.workspace-option-copy small { margin-top: 3px; color: var(--faint); font-size: 8px; }
+.workspace-option > svg { color: var(--accent); flex: 0 0 auto; }
+.workspace-dropdown-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--line); }
+.workspace-dropdown-actions button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 5px 7px; border: 1px solid var(--line); background: transparent; color: var(--ink); font-size: 9px; }
+.workspace-dropdown-actions button:hover { border-color: var(--accent); }
+.workspace-dropdown-actions button:disabled { opacity: .5; cursor: not-allowed; }
+.workspace-dropdown-error { margin: 7px 8px 3px; color: var(--warning); font-size: 9px; }
+.workspace-dialog-form { display: grid; gap: 14px; }
+.workflow-deploy-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, .8fr) auto; align-items: end; gap: 16px; }
+.workflow-deploy-copy b, .workflow-deploy-copy small { display: block; }
+.workflow-deploy-copy b { color: var(--ink-strong); font-size: 12px; }
+.workflow-deploy-copy small { max-width: 520px; margin-top: 6px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.workflow-deploy-target { min-width: 0; }
+@media (max-width: 920px) { .workflow-deploy-row { grid-template-columns: 1fr 1fr; } .workflow-deploy-copy { grid-column: 1 / -1; } .workflow-deploy-row > .button { grid-column: 1 / -1; justify-self: start; } }
 .workspace-switcher > span:nth-child(2) { min-width: 0; flex: 1; }
 .workspace-switcher b, .workspace-switcher small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-switcher b { color: var(--ink); font-size: 11px; font-weight: 700; }
@@ -512,6 +542,7 @@ code, kbd { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospac
 .sidebar-collapsed .core-status b,
 .sidebar-collapsed .sidebar-bottom > p { display: none; }
 .sidebar-collapsed .workspace-switcher { justify-content: center; }
+.sidebar-collapsed .workspace-dropdown { left: calc(100% + 7px); top: 0; }
 .sidebar-collapsed .nav-item { justify-content: center; padding-inline: 0; }
 .sidebar-collapsed .nav-item.active::before { display: none; }
 .sidebar-collapsed .core-status { justify-content: center; }
