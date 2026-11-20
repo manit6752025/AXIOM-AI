@@ -1425,6 +1425,13 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
   const requestId = globalThis.crypto?.randomUUID?.()
     ?? `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
   const controller = new AbortController();
+  const externalSignal = init.signal;
+  const abortFromCaller = () => controller.abort(externalSignal?.reason);
+  if (externalSignal?.aborted) {
+    controller.abort(externalSignal.reason);
+  } else {
+    externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  }
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   const headers = withActiveWorkspace(init.headers);
   headers.set("Accept", "application/json");
@@ -1472,6 +1479,7 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
     return payload as T;
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
+      if (externalSignal?.aborted) throw error;
       recordFrontendError({ source: "api.request", category: "api_timeout", errorName: "AbortError" });
       throw new Error(`AXIOM backend did not respond within 15 seconds (request ID ${requestId}).`, { cause: error });
     }
@@ -1482,6 +1490,7 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
     throw error;
   } finally {
     window.clearTimeout(timeout);
+    externalSignal?.removeEventListener("abort", abortFromCaller);
     inFlightApiRequestCount = Math.max(0, inFlightApiRequestCount - 1);
     window.dispatchEvent(new CustomEvent("axiom:api-request-end", {
       detail: { path, ok: succeeded, at: Date.now() },
