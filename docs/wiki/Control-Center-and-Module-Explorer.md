@@ -37,6 +37,19 @@ successful response has been observed for more than one minute; it is a
 connectivity freshness hint, not a claim that individual cached records have
 expired. Streaming requests are not included in the shared request counter.
 
+## Responsive phone and tablet layouts
+
+The Control Center shell supports narrow phone widths down to 320 CSS pixels,
+uses a collapsible off-canvas navigation drawer at 780 pixels and below, and
+reflows page headers, forms, status strips, and settings grids for small
+screens. On phone layouts the top-bar search collapses to an icon until focused;
+the profile name and secondary backend status detail are compacted to keep the
+primary navigation and connection retry control reachable. The drawer closes
+after a page is selected. Automated browser checks exercise 320px, 360px,
+390px, 480px, and tablet widths, and check that the document does not introduce
+horizontal overflow. This is responsive regression coverage, not certification
+for every device or browser.
+
 ## Deep links and browser history
 
 Control Center pages support direct links using the `page` query parameter,

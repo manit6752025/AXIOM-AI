@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — responsive phone and tablet layouts
+
+- Added Playwright coverage for narrow phone and tablet widths, no horizontal page overflow, compact settings layout, and off-canvas sidebar interaction at 320px.
+
 ## Unreleased — keyboard and screen-reader command navigation
 
 - Added a combobox/listbox accessibility contract to the global command palette, including active-descendant tracking, result position metadata, Home/End navigation, and polite announcements for result counts, selected commands, and no matches.
