@@ -188,5 +188,23 @@ def test_inspect_rejects_symlinked_artifact_parent(tmp_path: Path):
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"Directory symlinks are unavailable on this platform: {exc}")
 
-    with pytest.raises(ValueError, match="could not be opened safely"):
+    with pytest.raises(ValueError, match="symbolic link|could not be opened safely"):
         inspect_release_artifact(alias_dir / artifact.name)
+
+
+def test_inspect_wheel_rejects_non_ascii_record_digest(tmp_path: Path):
+    artifact = _wheel(tmp_path / "demo-1.2.3-py3-none-any.whl")
+    rewritten = tmp_path / "rewritten.whl"
+    with zipfile.ZipFile(artifact, "r") as original, zipfile.ZipFile(rewritten, "w") as target:
+        for info in original.infolist():
+            payload = original.read(info.filename)
+            if info.filename.endswith("/RECORD"):
+                text = payload.decode("utf-8")
+                text = text.replace("sha256=", "sha256=é", 1)
+                payload = text.encode("utf-8")
+            target.writestr(info, payload)
+
+    report = inspect_release_artifact(rewritten)
+
+    assert report["status"] == "fail"
+    assert any(item["id"] == "artifact.wheel.record_hashes" and item["status"] == "fail" for item in report["checks"])
