@@ -204,3 +204,43 @@ def test_model_registry_size_bytes_is_strict_and_round_trips(tmp_path):
     for invalid in (-1, True, 9_007_199_254_740_992, 1.5):
         with pytest.raises(TypeError, match="non-negative safe integer"):
             Model(name="Invalid size", source=f"org/invalid-{invalid}", size_bytes=invalid)
+
+
+
+def test_workspace_model_api_reports_source_and_digest_duplicates_as_conflicts(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from axiom.api.server import create_app
+
+    monkeypatch.chdir(tmp_path)
+    with TestClient(create_app()) as client:
+        created = client.post("/api/workspace/models", json={
+            "name": "First model",
+            "source": "org/demo-model",
+            "format": "safetensors",
+            "content_sha256": "a" * 64,
+            "size_bytes": 4096,
+        })
+        assert created.status_code == 201
+
+        duplicate_source = client.post("/api/workspace/models", json={
+            "name": "Same source",
+            "source": "ORG/DEMO-MODEL",
+            "format": "gguf",
+        })
+        assert duplicate_source.status_code == 409
+        assert "source already registered" in duplicate_source.json()["detail"]
+
+        duplicate_content = client.post("/api/workspace/models", json={
+            "name": "Same content",
+            "source": "org/another-location",
+            "format": "gguf",
+            "content_sha256": "A" * 64,
+        })
+        assert duplicate_content.status_code == 409
+        assert "content already registered" in duplicate_content.json()["detail"]
+
+        listing = client.get("/api/workspace/models")
+        assert listing.status_code == 200
+        assert listing.json()["total"] == 1
+        assert listing.json()["models"][0]["size_bytes"] == 4096
