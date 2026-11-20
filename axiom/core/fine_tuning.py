@@ -675,13 +675,20 @@ def _read_job(job_id: str) -> dict[str, Any] | None:
 
 
 def _public_training_job(job: dict[str, Any]) -> dict[str, Any]:
-    """Return a safe job summary with an explicit cooperative-cancellation contract."""
+    """Return safe checkpoint and cooperative-cancellation metadata."""
     public_job = dict(job)
     result = job.get("result")
     if isinstance(result, dict) and "training_dataset_sha256" in result:
         public_result = dict(result)
         public_result.pop("training_dataset_sha256", None)
         public_job["result"] = public_result
+
+    checkpoint = job.get("checkpoint")
+    if isinstance(checkpoint, dict):
+        public_job["checkpoint"] = {
+            key: checkpoint.get(key)
+            for key in ("enabled", "interval", "latest_step", "retained", "last_saved_at", "resume_available")
+        }
 
     status = job.get("status")
     requested = job.get("cancel_requested") is True
@@ -1102,9 +1109,31 @@ def _new_job(
 ) -> dict[str, Any]:
     validated = validate_config(config, workspace_guard=workspace_guard)
     require_runtime()
+    resume_step = 0
+    checkpoint = {
+        "enabled": validated["checkpoint_interval"] > 0,
+        "interval": validated["checkpoint_interval"],
+        "latest_step": 0,
+        "retained": 0,
+        "last_saved_at": None,
+        "resume_available": False,
+    }
+    if validated["output_policy"] == "resume":
+        _, state = latest_checkpoint(Path(validated["output_dir"]))
+        training = state.get("training") if isinstance(state.get("training"), dict) else {}
+        resume_step = state["completed_steps"]
+        checkpoint.update(
+            latest_step=resume_step,
+            retained=checkpoint_count(Path(validated["output_dir"])),
+            last_saved_at=state.get("created_at"),
+            resume_available=True,
+        )
     job_id = new_resource_id()
     _acquire_lock(job_id)
     now = _now()
+    queue_message = "Job queued. The base model and dataset are local inputs; no weights will be downloaded."
+    if resume_step:
+        queue_message = f"Job queued to resume from the latest verified checkpoint at step {resume_step}."
     job: dict[str, Any] = {
         "schema_version": 1,
         "id": job_id,
@@ -1117,11 +1146,12 @@ def _new_job(
         "finished_at": None,
         "config": validated,
         "cancel_requested": False,
-        "completed_steps": 0,
-        "loss": None,
+        "completed_steps": resume_step,
+        "loss": training.get("last_loss") if resume_step and isinstance(training.get("last_loss"), (int, float)) else None,
+        "checkpoint": checkpoint,
         "loss_samples": [],
         "error": None,
-        "logs": ["Job queued. The base model and dataset are local inputs; no weights will be downloaded."],
+        "logs": [queue_message],
     }
     try:
         _write_job(job)
