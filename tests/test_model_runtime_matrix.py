@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -128,12 +127,14 @@ def test_runtime_matrix_cache_is_bounded_and_force_refresh_reprobes(monkeypatch)
     )
 
     first = runtime_matrix.probe_local_runtime_matrix()
+    first_probe_calls = calls
+    assert first_probe_calls > 0  # Each fixed executable candidate was checked once.
     second = runtime_matrix.probe_local_runtime_matrix()
-    assert calls == 0  # No command is present on PATH.
+    assert calls == first_probe_calls  # The second call uses the short cache.
     assert first == second
 
     runtime_matrix.probe_local_runtime_matrix(force_refresh=True)
-    assert calls > 0
+    assert calls > first_probe_calls
 
 
 def test_runtime_matrix_api_endpoint_supports_explicit_cache_refresh(monkeypatch) -> None:
