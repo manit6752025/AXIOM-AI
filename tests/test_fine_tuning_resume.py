@@ -222,7 +222,7 @@ def _install_training_stubs(monkeypatch):
 
 
 def test_local_training_resumes_verified_adapter_optimizer_and_sampling_state(tmp_path, monkeypatch):
-    torch = _install_training_stubs(monkeypatch)
+    _install_training_stubs(monkeypatch)
     model_dir = tmp_path / "base"
     model_dir.mkdir()
     (model_dir / "config.json").write_text('{"model_type":"llama"}', encoding="utf-8")
