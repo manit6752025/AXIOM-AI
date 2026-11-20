@@ -113,3 +113,73 @@ def test_workspace_api_rejects_unknown_workspace_header(tmp_path: Path, monkeypa
     response = client.get("/api/workspace/models", headers={"X-AXIOM-Workspace-ID": "ws-" + "0" * 32})
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "workspace_not_found"
+
+
+
+def test_workflow_deployment_publishes_a_separate_non_executable_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    default = tmp_path / "project"
+    default.mkdir()
+    monkeypatch.setenv("AXIOM_WORKSPACES_HOME", str(tmp_path / "catalog"))
+    monkeypatch.setenv("AXIOM_WORKSPACES_DIR", str(tmp_path / "managed"))
+    monkeypatch.chdir(default)
+
+    from axiom.api.server import create_app
+
+    client = TestClient(create_app())
+    source_workspace_id = client.get("/api/workspaces").json()["active_workspace_id"]
+    target = client.post("/api/workspaces", json={"name": "Deployment target"})
+    assert target.status_code == 201
+    target_workspace_id = target.json()["workspace"]["id"]
+
+    created = client.post(
+        "/api/workflows",
+        json={"name": "Dataset review", "nodes": [{"id": "dataset", "type": "dataset.profile"}], "edges": []},
+    )
+    assert created.status_code == 201
+    source_workflow = created.json()["workflow"]
+
+    deployed = client.post(
+        f"/api/workflows/{source_workflow['id']}/deploy",
+        json={"target_workspace_id": target_workspace_id},
+    )
+    assert deployed.status_code == 201
+    payload = deployed.json()
+    assert payload["deployment"] == {
+        "target_workspace_id": target_workspace_id,
+        "target_workspace_name": "Deployment target",
+        "status": "published_copy",
+        "executed": False,
+    }
+    assert payload["workflow"]["id"] != source_workflow["id"]
+    assert payload["workflow"]["execution_status"] == "not_executable"
+    assert payload["workflow"]["deployment"]["source_workspace_id"] == source_workspace_id
+    assert payload["workflow"]["deployment"]["source_workflow_id"] == source_workflow["id"]
+    assert payload["workflow"]["revision"] == 1
+    assert payload["workflow"]["versions"] == []
+
+    source_list = client.get("/api/workflows")
+    target_list = client.get("/api/workflows", headers={"X-AXIOM-Workspace-ID": target_workspace_id})
+    assert [item["id"] for item in source_list.json()["workflows"]] == [source_workflow["id"]]
+    assert [item["id"] for item in target_list.json()["workflows"]] == [payload["workflow"]["id"]]
+
+
+def test_workflow_deployment_rejects_same_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    default = tmp_path / "project"
+    default.mkdir()
+    monkeypatch.setenv("AXIOM_WORKSPACES_HOME", str(tmp_path / "catalog"))
+    monkeypatch.setenv("AXIOM_WORKSPACES_DIR", str(tmp_path / "managed"))
+    monkeypatch.chdir(default)
+
+    from axiom.api.server import create_app
+
+    client = TestClient(create_app())
+    workspace_id = client.get("/api/workspaces").json()["active_workspace_id"]
+    workflow = client.post(
+        "/api/workflows",
+        json={"name": "Local only", "nodes": [{"id": "dataset", "type": "dataset.profile"}], "edges": []},
+    ).json()["workflow"]
+    response = client.post(
+        f"/api/workflows/{workflow['id']}/deploy",
+        json={"target_workspace_id": workspace_id},
+    )
+    assert response.status_code == 409
