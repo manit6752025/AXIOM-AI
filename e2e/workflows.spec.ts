@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { ensureAuthenticated } from "./helpers/auth";
 
@@ -179,4 +180,8 @@ test("workflow autosave and dry-run stay planning-only", async ({ page }) => {
   ]);
   expect(download.suggestedFilename()).toBe("workflow-workflow-1-reproducibility.json");
   expect(createdJob).toBe(false);
+  const downloaded = await readFile((await download.path()) as string, "utf8");
+  const exportedManifest = JSON.parse(downloaded);
+  expect(exportedManifest).toMatchObject({ workflow_id: "workflow-1", seed: 42, seed_applied: false, execution_status: "not_executable" });
+  expect(downloaded).not.toContain("PRIVATE_WORKFLOW_ROW");
 });

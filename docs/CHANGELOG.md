@@ -2,6 +2,8 @@
 
 ## Unreleased — explicit export and local-file boundaries
 
+- Centralized browser Blob download handling with path-component stripping, platform-safe filenames, temporary anchor cleanup, and delayed object-URL revocation across model, dataset, evaluation, workflow, workspace metadata, and support-bundle exports.
+- Expanded browser checks to read generated registry, manifest, evaluation, and workflow files and verify their metadata-only/aggregate-only scope and safe filenames.
 - Added browser coverage for model registry JSON, dataset manifest JSON, evaluation report JSON, workflow reproducibility manifests, workspace metadata ZIP, and diagnostic support-bundle ZIP downloads.
 - Documented which exports contain metadata/aggregate reports, which artifacts are excluded, and why support bundles should be reviewed before sharing.
 

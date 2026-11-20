@@ -1,4 +1,6 @@
+import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
+import { sanitizeDownloadFilename } from "../src/utils/browserDownload";
 import { ensureAuthenticated } from "./helpers/auth";
 
 const model = {
@@ -50,6 +52,9 @@ test("model registry export downloads metadata rather than model weights", async
     page.getByRole("button", { name: "Export", exact: true }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("axiom-model-registry.json");
+  const exported = JSON.parse(await readFile((await download.path()) as string, "utf8"));
+  expect(exported).toMatchObject({ schema_version: 1, models: [{ id: model.id, name: model.name, content_sha256: null }] });
+  expect(JSON.stringify(exported)).not.toMatch(/weights_bytes|weight_contents|base64_weights/i);
   expect(exportCalls).toBe(1);
 });
 
@@ -89,6 +94,9 @@ test("dataset manifest export is a JSON provenance file, not a dataset copy", as
     page.getByRole("button", { name: "Export JSON", exact: true }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("train.jsonl.manifest.json");
+  const exported = JSON.parse(await readFile((await download.path()) as string, "utf8"));
+  expect(exported).toMatchObject({ path: "train.jsonl", file_name: "train.jsonl", sha256: "a".repeat(64) });
+  expect(JSON.stringify(exported)).not.toContain("dataset_row");
 });
 
 test("support bundle download is labelled for review before sharing", async ({ page }) => {
@@ -111,4 +119,12 @@ test("support bundle download is labelled for review before sharing", async ({ p
   expect(download.suggestedFilename()).toBe("axiom-support-bundle.zip");
   expect(requests).toBe(1);
   await expect(page.getByText("Privacy-safe support bundle downloaded. Review it before sharing.", { exact: true })).toBeVisible();
+});
+
+
+test("download filename normalization strips paths and platform-reserved names", () => {
+  expect(sanitizeDownloadFilename("../folder/report:one?.json")).toBe("report_one_.json");
+  expect(sanitizeDownloadFilename("..\\CON.txt")).toBe("_CON.txt");
+  expect(sanitizeDownloadFilename("../../")).toBe("axiom-export.bin");
+  expect(sanitizeDownloadFilename("safe-name.json")).toBe("safe-name.json");
 });

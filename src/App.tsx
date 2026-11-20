@@ -11,6 +11,7 @@ import LLMClientPanel from "./components/LLMClientPanel";
 import AgentProfiles from "./components/AgentProfiles";
 import ModelStudioPanel from "./components/ModelStudioPanel";
 import LocalFineTuningPanel from "./components/LocalFineTuningPanel";
+import { downloadBlob } from "./utils/browserDownload";
 import {
   AccessibleDialog,
   ConfirmationDialog,
@@ -2275,12 +2276,7 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
     try {
       const payload = await axiomApi.exportModels();
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = "axiom-model-registry.json";
-      anchor.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      downloadBlob(blob, "axiom-model-registry.json");
       onNotify("Model registry export downloaded.", "success");
     } catch (cause) {
       onNotify(cause instanceof Error ? cause.message : "Model registry export failed.", "warning");
@@ -2581,34 +2577,19 @@ function Datasets({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
   const exportQualityReport = () => {
     if (!qualityReport) return;
     const blob = new Blob([JSON.stringify({ generated_at: new Date().toISOString(), ...qualityReport }, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = "axiom-dataset-quality-report.json";
-    anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadBlob(blob, "axiom-dataset-quality-report.json");
   };
 
   const exportManifest = () => {
     if (!manifest) return;
     const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${manifest.file_name}.manifest.json`;
-    anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadBlob(blob, `${manifest.file_name}.manifest.json`);
   };
 
   const exportCleaningPreview = () => {
     if (!cleanPreview) return;
     const blob = new Blob([JSON.stringify(cleanPreview, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${cleanPreview.file_name}.cleaning-preview.json`;
-    anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadBlob(blob, `${cleanPreview.file_name}.cleaning-preview.json`);
   };
 
   const clearReports = () => {
@@ -3144,12 +3125,7 @@ function Evaluation({ onNotify }: { onNotify: (message: string, tone?: Tone) => 
 
   const exportEvaluationRun = (run: WorkspaceEvaluationRun) => {
     const blob = new Blob([JSON.stringify(run, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `axiom-evaluation-${run.id}.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `axiom-evaluation-${run.id}.json`);
   };
 
   return <FeaturePage page="evaluation" actions={<button type="button" className="button secondary-button" onClick={() => { void refresh(); void refreshEvaluationRuns(); }} disabled={loading}><RefreshCcw size={16} /> {loading ? "Refreshing" : "Refresh history"}</button>}>
@@ -3458,12 +3434,7 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
   const exportReproducibilityManifest = () => {
     if (!dryRun) return;
     const blob = new Blob([JSON.stringify(dryRun.reproducibility_manifest, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `workflow-${dryRun.workflow_id}-reproducibility.json`;
-    anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadBlob(blob, `workflow-${dryRun.workflow_id}-reproducibility.json`);
   };
 
   return <FeaturePage page="workflows" actions={<><button type="button" className="button secondary-button" onClick={() => void duplicateWorkflow()} disabled={!workflowId || saving}><Copy size={15} /> Duplicate selected</button><button type="button" className="button secondary-button" onClick={startNew}><Plus size={16} /> New workflow</button></>}>
@@ -3706,14 +3677,7 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
     setBundleBusy(true);
     try {
       const blob = await axiomApi.downloadSupportBundle();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "axiom-support-bundle.zip";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+      downloadBlob(blob, "axiom-support-bundle.zip");
       onNotify("Privacy-safe support bundle downloaded. Review it before sharing.", "success");
     } catch (cause) {
       onNotify(cause instanceof Error ? cause.message : "Could not download the support bundle.", "warning");
@@ -4040,14 +4004,7 @@ function SettingsPage({
     setMetadataMessage("");
     try {
       const blob = await axiomApi.exportWorkspaceMetadata();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "axiom-workspace-metadata.zip";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      downloadBlob(blob, "axiom-workspace-metadata.zip");
       setMetadataMessage("Workspace metadata archive exported.");
     } catch (error) {
       setMetadataError(error instanceof Error ? error.message : "Workspace metadata export failed.");

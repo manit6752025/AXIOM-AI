@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { ensureAuthenticated } from "./helpers/auth";
 
@@ -98,4 +99,10 @@ test("evaluation form submits selected fields and displays persisted aggregate r
     page.getByRole("button", { name: "Export evaluation offline evaluation report as JSON" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("axiom-evaluation-evaluation-1.json");
+  const exported = JSON.parse(await readFile((await download.path()) as string, "utf8"));
+  expect(exported).toMatchObject({
+    id: "evaluation-1",
+    report: { privacy: { raw_values_returned: false, raw_values_persisted: false } },
+  });
+  expect(JSON.stringify(exported)).not.toContain("PRIVATE_PREDICTION_TEXT");
 });
