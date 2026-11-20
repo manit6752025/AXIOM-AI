@@ -4372,7 +4372,7 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
                 <button type="button" className="button secondary-button" onClick={() => void inspectServerHandshake(server.name)} disabled={!server.configured || !trusted || Boolean(inspectingServer) || Boolean(inspectingSchemas) || Boolean(savingServerTrust)}>
                   {busy ? "Negotiating…" : "Inspect handshake"}
                 </button>
-                <button type="button" className="button secondary-button" onClick={() => void inspectServerSchemas(server.name)} disabled={!server.configured || Boolean(inspectingServer) || Boolean(inspectingSchemas)}>
+                <button type="button" className="button secondary-button" onClick={() => void inspectServerSchemas(server.name)} disabled={!server.configured || !trusted || Boolean(inspectingServer) || Boolean(inspectingSchemas) || Boolean(savingServerTrust)}>
                   {inspectingSchemas === server.name ? "Browsing…" : "Browse schemas"}
                 </button>
               </div>
