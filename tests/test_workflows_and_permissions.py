@@ -448,6 +448,59 @@ def test_every_registered_mcp_tool_has_a_default_deny_guard_at_entry():
     )
 
 
+def test_tool_permission_decisions_never_persist_argument_values(tmp_path):
+    store = ToolPermissionStore(tmp_path)
+    secrets = {
+        "prompt": "private prompt content",
+        "api_token": "secret-token-value",
+        "model_path": "/home/user/private/model",
+    }
+
+    try:
+        store.require("axiom_info", arguments=secrets)
+    except PermissionError as exc:
+        assert "denied" in str(exc)
+    else:
+        raise AssertionError("default-deny policy must reject the tool")
+
+    store.save_profile("approved", ["axiom_info"])
+    store.set_active("approved")
+    store.require("axiom_info", arguments=secrets)
+
+    journal_path = tmp_path / ".axiom" / "security-events.json"
+    raw = journal_path.read_text(encoding="utf-8")
+    assert "private prompt content" not in raw
+    assert "secret-token-value" not in raw
+    assert "/home/user/private/model" not in raw
+    decisions = [
+        event for event in json.loads(raw)["events"]
+        if event["event_type"] == "mcp.tool.decision"
+    ]
+    assert [event["decision"] for event in decisions] == ["denied", "allowed"]
+    expected = {name: "[REDACTED]" for name in secrets}
+    assert all(event["arguments"] == expected for event in decisions)
+
+
+def test_tool_permission_fails_closed_when_decision_cannot_be_audited(tmp_path, monkeypatch):
+    from axiom.core.security_events import SecurityEventError, SecurityEventStore
+
+    monkeypatch.chdir(tmp_path)
+    store = ToolPermissionStore()
+    store.save_profile("approved", ["axiom_info"])
+    store.set_active("approved")
+
+    def fail_audit(*_args, **_kwargs):
+        raise SecurityEventError("fixture journal failure")
+
+    monkeypatch.setattr(SecurityEventStore, "record_tool_decision", fail_audit)
+    try:
+        store.require("axiom_info", arguments={"prompt": "never persist"})
+    except PermissionError as exc:
+        assert "audited safely" in str(exc)
+    else:
+        raise AssertionError("tool execution must be blocked when its decision cannot be audited")
+
+
 def test_mcp_tool_invocation_is_denied_until_explicit_profile_grant(tmp_path, monkeypatch):
     from axiom.mcp.server import axiom_info
 
