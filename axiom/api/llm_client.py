@@ -1,12 +1,14 @@
 """Unified local/cloud model API for the AXIOM Control Center and CLI."""
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from axiom.core import llm_client
+from axiom.core.llm_profiles import LLMProfileError, LLMProfileStore
 
 router = APIRouter(prefix="/api/llm", tags=["llm-client"])
 ProviderName = Literal["axiom-local", "ollama-local", "openai", "anthropic", "gemini", "deepseek", "moonshot", "openrouter", "openai-compatible"]
@@ -17,6 +19,21 @@ class ProviderRequest(BaseModel):
     provider: ProviderName
     api_key: SecretStr | None = None
     base_url: str | None = Field(default=None, max_length=512)
+
+
+
+
+class LLMProfileInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=48)
+    provider: ProviderName
+    model: str = Field(min_length=1, max_length=256)
+    base_url: str | None = Field(default=None, max_length=512)
+
+
+class LLMProfileConnectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    api_key: SecretStr | None = None
 
 
 class ChatMessage(BaseModel):
@@ -79,6 +96,65 @@ def get_providers() -> dict[str, Any]:
 def get_models(request: ProviderRequest) -> dict[str, Any]:
     key = request.api_key.get_secret_value() if request.api_key is not None else None
     return _api_call(lambda: llm_client.list_models(request.provider, key, request.base_url))
+
+
+@router.get("/profiles")
+def list_profiles() -> dict[str, Any]:
+    try:
+        return LLMProfileStore().list()
+    except LLMProfileError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from None
+
+
+@router.post("/profiles", status_code=201)
+def save_profile(request: LLMProfileInput) -> dict[str, Any]:
+    try:
+        profile = LLMProfileStore().save(
+            name=request.name,
+            provider=request.provider,
+            model=request.model,
+            base_url=request.base_url,
+        )
+        return {"profile": profile, "credentials_persisted": False}
+    except LLMProfileError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@router.delete("/profiles/{profile_id}")
+def delete_profile(profile_id: str) -> dict[str, Any]:
+    try:
+        deleted = LLMProfileStore().delete(profile_id)
+    except LLMProfileError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    if deleted is None:
+        raise HTTPException(status_code=404, detail="Provider profile not found.")
+    return {"deleted": deleted, "credentials_persisted": False}
+
+
+@router.post("/profiles/{profile_id}/connect")
+def connect_profile(profile_id: str, request: LLMProfileConnectRequest) -> dict[str, Any]:
+    try:
+        profile = LLMProfileStore().get(profile_id)
+    except LLMProfileError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from None
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Provider profile not found.")
+    key = request.api_key.get_secret_value() if request.api_key is not None else None
+    result = _api_call(lambda: llm_client.list_models(
+        profile["provider"],
+        key,
+        profile["base_url"] or None,
+    ))
+    return {
+        "profile_id": profile["id"],
+        "provider": profile["provider"],
+        "status": "verified",
+        "models": result.get("models", []),
+        "checked_at": datetime.now(UTC).isoformat(),
+        "credential_storage": result.get("credential_storage", "not_saved" if key else "not_applicable"),
+        "connection_scope": "catalogue_check_only",
+        "persistent_connection": False,
+    }
 
 
 @router.post("/chat")
