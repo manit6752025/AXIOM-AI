@@ -32,7 +32,7 @@ def register(train_app: typer.Typer) -> None:
     def train_run(
         model_path: str = typer.Option(..., "--model-path", help="Existing local Transformers model directory."),
         dataset_path: str = typer.Option(..., "--dataset", help="Local JSONL file with training text."),
-        output_dir: str = typer.Option(..., "--output-dir", help="New or empty local adapter output directory."),
+        output_dir: str = typer.Option(..., "--output-dir", help="Local adapter output directory governed by --output-policy."),
         text_field: str = typer.Option("text", "--text-field", help="JSON string field to train on; defaults to text."),
         max_steps: int = typer.Option(20, min=1, max=1000, help="Maximum optimization steps (1–1000)."),
         sequence_length: int = typer.Option(512, min=32, max=2048, help="Maximum tokens per example (32–2048)."),
