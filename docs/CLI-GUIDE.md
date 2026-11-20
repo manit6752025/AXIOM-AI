@@ -60,15 +60,15 @@ staged model downloads and temporary dataset-cleaning output are removed; a
 cleaning operation never changes its original source. Model Studio jobs also
 retain their API/GUI cancellation endpoint and persistent status history.
 
-Local LoRA training jobs persist the states \`queued\`, \`running\`,
-\`cancelling\`, \`finalizing\`, \`completed\`, \`cancelled\`, and \`failed\`.
-Use \`axiom train status JOB_ID --json\` to inspect the current state and its
-cancellation contract, or \`axiom train cancel JOB_ID --json\` to request a
+Local LoRA training jobs persist the states `queued`, `running`,
+`cancelling`, `finalizing`, `completed`, `cancelled`, and `failed`.
+Use `axiom train status JOB_ID --json` to inspect the current state and its
+cancellation contract, or `axiom train cancel JOB_ID --json` to request a
 cooperative stop. A request is not a completed cancellation: poll status until
-the job reaches \`cancelled\`. Cancellation is accepted before adapter
+the job reaches `cancelled`. Cancellation is accepted before adapter
 finalization and is acted on before the worker starts or between training
-steps; once \`finalizing\` begins, adapter writing is not interrupted. The
-response's \`cancellation.requestable\` and \`unavailable_reason\` fields are
+steps; once `finalizing` begins, adapter writing is not interrupted. The
+response's `cancellation.requestable` and `unavailable_reason` fields are
 authoritative.
 
 ## Non-interactive execution
