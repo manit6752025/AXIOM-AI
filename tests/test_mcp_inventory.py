@@ -409,6 +409,49 @@ def test_schema_browse_respects_capability_flags_and_marks_pagination_truncation
     assert result["truncated"]["resources"] is False
 
 
+def test_schema_browse_tolerates_optional_resource_templates_method_failure(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _add_server()
+
+    class FakeClient:
+        protocol_version = "2025-11-25"
+        server_info = None
+        server_capabilities = SimpleNamespace(tools=object(), resources=object())
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def list_tools(self, *, cursor=None):
+            return SimpleNamespace(tools=[SimpleNamespace(
+                name="lookup", input_schema={"type": "object"},
+            )], next_cursor=None)
+
+        async def list_resources(self, *, cursor=None):
+            return SimpleNamespace(resources=[SimpleNamespace(
+                name="Catalog", uri="catalog://items",
+            )], next_cursor=None)
+
+        async def list_resource_templates(self, *, cursor=None):
+            raise RuntimeError("Method not found")
+
+    monkeypatch.setattr(mcp_inventory, "Client", FakeClient)
+    monkeypatch.setattr(mcp_inventory, "stdio_client", lambda *_args, **_kwargs: object())
+
+    result = asyncio.run(mcp_inventory.inspect_mcp_schemas("Local MCP"))
+
+    assert result["status"] == "ok"
+    assert [tool["name"] for tool in result["tools"]] == ["lookup"]
+    assert [resource["name"] for resource in result["resources"]] == ["Catalog"]
+    assert result["resource_templates"] == []
+    assert result["resource_templates_supported"] is False
+
+
 def test_schema_inspection_timeout_returns_no_child_output(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _add_server()
