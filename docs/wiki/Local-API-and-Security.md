@@ -14,6 +14,19 @@ Common read-only routes include `GET /health`, `GET /api/info`, `GET /api/summar
 
 The daemon rejects a non-loopback bind unless `--allow-network` is deliberately supplied. Do not enable network access casually: review host firewall rules, trust boundaries, and any authentication/access controls for your intended deployment before exposing a service to other machines.
 
+Run `axiom security audit --json` for a read-only review of project-config
+permissions, MCP policy file safety and active grants, API token-scope
+configuration, OpenAI-compatible bearer-token presence, and CORS origins. The
+audit never emits credential values. It confirms the built-in Control Center's
+loopback bind contract and explains that the standalone daemon's optional
+network mode has no authentication; it does not perform an OS port scan or
+inspect external server deployments.
+
+The optional `--daemon-host` and `--allow-network` arguments evaluate a
+proposed daemon bind profile only. They do not change a running service. A
+non-loopback profile is reported as unsafe because the lightweight daemon
+serves local status and workspace metadata over unauthenticated HTTP.
+
 The daemon is not an account service, hosted AXIOM backend, or general model-inference server.
 
 ## API Playground
