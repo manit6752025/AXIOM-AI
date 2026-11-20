@@ -281,9 +281,12 @@ class SecurityEventStore:
             raise SecurityEventError(f"Limit must be between 1 and {MAX_PAGE_SIZE}.")
         if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset < MAX_EVENTS:
             raise SecurityEventError(f"Offset must be between 0 and {MAX_EVENTS - 1}.")
-        with self._locked():
-            self._check_paths()
-            events = self._read_locked()
+        self._check_paths()
+        if self.path.exists():
+            with self._locked():
+                events = self._read_locked()
+        else:
+            events = []
         reviews = {
             event["target_event_id"]: event
             for event in events if event["event_type"] == _REVIEW_EVENT
@@ -301,6 +304,14 @@ class SecurityEventStore:
                 "reviewer_label": review.get("reviewer_label") if review else None,
                 "reviewer_identity_verified": False if review else None,
             })
+        integrity = {
+            "schema_version": SCHEMA_VERSION,
+            "valid": True,
+            "event_count": len(events),
+            "max_events": MAX_EVENTS,
+            "head_hash": events[-1]["hash"] if events else _GENESIS_HASH,
+            "capacity_reached": len(events) >= MAX_EVENTS,
+        }
         return {
             "schema_version": SCHEMA_VERSION,
             "events": projected,
@@ -308,7 +319,7 @@ class SecurityEventStore:
             "limit": limit,
             "offset": offset,
             "has_more": offset + len(page) < total,
-            "integrity": self.verify(),
+            "integrity": integrity,
             "privacy": {
                 "event_summaries_allowlisted": True,
                 "credential_values_stored": False,
@@ -319,9 +330,12 @@ class SecurityEventStore:
         }
 
     def export(self) -> dict[str, Any]:
-        with self._locked():
-            self._check_paths()
-            events = self._read_locked()
+        self._check_paths()
+        if self.path.exists():
+            with self._locked():
+                events = self._read_locked()
+        else:
+            events = []
         return {
             "schema_version": SCHEMA_VERSION,
             "exported_at": _utc_now(),
