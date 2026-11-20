@@ -181,9 +181,14 @@ class SecurityEventStore:
         except (OSError, UnicodeError, json.JSONDecodeError, SafePathError) as exc:
             raise SecurityEventError("Security event journal could not be read safely.") from exc
 
-        if not isinstance(document, dict) or document.get("schema_version") not in {LEGACY_SCHEMA_VERSION, SCHEMA_VERSION}:
+        schema_version = document.get("schema_version") if isinstance(document, dict) else None
+        if (
+            not isinstance(schema_version, int)
+            or isinstance(schema_version, bool)
+            or schema_version not in {LEGACY_SCHEMA_VERSION, SCHEMA_VERSION}
+        ):
             raise SecurityEventError("Unsupported security event journal schema.")
-        self._loaded_schema_version = int(document["schema_version"])
+        self._loaded_schema_version = schema_version
         events = document.get("events")
         if not isinstance(events, list) or len(events) > MAX_EVENTS:
             raise SecurityEventError("Security event journal has an invalid event collection.")
