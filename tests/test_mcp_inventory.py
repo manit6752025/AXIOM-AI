@@ -16,6 +16,7 @@ def _add_server(command: str = 'python -u -m example.server --config "private pa
             type=IntegrationType.MCP,
             command=command,
             description="Test MCP process",
+            trust_status="trusted",
         )
     )
 
@@ -254,6 +255,7 @@ def test_handshake_negotiates_with_real_mcp_stdio_server(tmp_path, monkeypatch):
             "Process Probe",
             IntegrationType.MCP,
             command=shlex.join([sys.executable, str(server_script)]),
+            trust_status="trusted",
         )
     )
 
@@ -514,6 +516,7 @@ def test_schema_browse_negotiates_real_stdio_tool_resource_and_template_metadata
             "Schema Probe",
             IntegrationType.MCP,
             command=shlex.join([sys.executable, str(server_script)]),
+            trust_status="trusted",
         )
     )
 
