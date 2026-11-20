@@ -2032,7 +2032,7 @@ export const axiomApi = {
       method: "POST", body: JSON.stringify({}),
     }),
   modelStudioStatus: () => requestJson<ModelStudioStatus>("/api/models/studio/status"),
-  modelStudioSearch: (q: string, limit = 12) => requestJson<{ provider: string; query: string; count: number; results: ModelStudioModel[]; note: string }>(`/api/models/studio/search?${new URLSearchParams({ q, limit: String(limit) })}`),
+  modelStudioSearch: (q: string, limit = 12, consent = false) => requestJson<{ provider: string; query: string; count: number; results: ModelStudioModel[]; note: string }>(`/api/models/studio/search?${new URLSearchParams({ q, limit: String(limit), consent: String(consent) })}`),
   modelStudioFiles: (repoId: string) => requestJson<{ repo_id: string; files: ModelStudioFile[]; count: number; url: string; note: string }>(`/api/models/studio/files?${new URLSearchParams({ repo_id: repoId })}`),
   llmProviders: () => requestJson<LLMProviderCatalog>("/api/llm/providers"),
   llmModels: (input: LLMModelRequest) => requestJson<LLMModelResult>("/api/llm/models", { method: "POST", body: JSON.stringify(input) }),

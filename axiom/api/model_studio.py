@@ -25,7 +25,9 @@ def status() -> dict[str, Any]:
     return studio.model_studio_status()
 
 @router.get("/search")
-def search(q: str = Query(min_length=1, max_length=120), limit: int = Query(default=12, ge=1, le=20)) -> dict[str, Any]:
+def search(q: str = Query(min_length=1, max_length=120), limit: int = Query(default=12, ge=1, le=20), consent: bool = False) -> dict[str, Any]:
+    if not consent:
+        raise HTTPException(status_code=403, detail="Confirm external Hugging Face metadata lookup before AXIOM contacts the public catalogue.")
     try:
         return studio.search_gguf_catalog(q, limit)
     except ValueError as exc:

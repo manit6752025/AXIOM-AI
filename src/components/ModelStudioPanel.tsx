@@ -24,6 +24,7 @@ export default function ModelStudioPanel() {
   const [task, setTask] = useState("general");
   const [ramBand, setRamBand] = useState("16 GB");
   const [query, setQuery] = useState("instruct GGUF");
+  const [catalogueConsent, setCatalogueConsent] = useState(false);
   const [results, setResults] = useState<ModelStudioModel[]>([]);
   const [repo, setRepo] = useState("");
   const [files, setFiles] = useState<ModelStudioFile[]>([]);
@@ -105,7 +106,7 @@ export default function ModelStudioPanel() {
   };
   const search = async () => {
     setSearching(true); setError(""); setRepo(""); setFiles([]); setFilename("");
-    try { setResults((await axiomApi.modelStudioSearch(query.trim(), 12)).results); }
+    try { setResults((await axiomApi.modelStudioSearch(query.trim(), 12, catalogueConsent)).results); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "GGUF catalogue search failed."); }
     finally { setSearching(false); }
   };
@@ -190,7 +191,7 @@ export default function ModelStudioPanel() {
         <label className="field"><span className="field-label-row"><span>Primary use</span></span><select aria-label="Primary use" value={task} onChange={(event) => selectTask(event.target.value)}>{tasks.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
         <label className="field"><span className="field-label-row"><span>Available system RAM</span></span><select aria-label="Available system RAM" value={ramBand} onChange={(event) => setRamBand(event.target.value)}><option>4 GB</option><option>8 GB</option><option>16 GB</option><option>32 GB</option><option>64 GB+</option></select><small>This guides the preferred quantization: small-memory systems prioritize smaller Q2/Q3/Q4 files, while larger systems can prefer Q5/Q6. It is not a guaranteed fit estimate.</small></label>
         <label className="field"><span className="field-label-row"><span>Search query</span></span><input aria-label="Model search" value={query} onChange={(event) => setQuery(event.target.value)} maxLength={120} placeholder="e.g. Qwen instruct GGUF" /></label>
-        <button type="button" className="button primary-button" onClick={() => void search()} disabled={searching || !query.trim()}><Search size={15} /> {searching ? "Searching public catalogue…" : "Search GGUF catalogue"}</button>
+        <label className="model-studio-checkbox"><input aria-label="Allow Hugging Face metadata lookup" type="checkbox" checked={catalogueConsent} onChange={(event) => setCatalogueConsent(event.target.checked)} /><span><b>Allow public metadata lookup</b><small>Sends only this search query to Hugging Face; no download starts.</small></span></label><button type="button" className="button primary-button" onClick={() => void search()} disabled={searching || !query.trim() || !catalogueConsent}><Search size={15} /> {searching ? "Searching public catalogue…" : "Search GGUF catalogue"}</button>
         {results.length > 0 && <div className="model-studio-results" aria-label="Model search results">{results.map((model) => <article className="model-studio-result" key={model.id}>
           <div className="model-studio-result-copy"><b>{model.id}</b><small>{model.downloads.toLocaleString()} downloads · {model.likes.toLocaleString()} likes{model.last_modified ? ` · updated ${model.last_modified.slice(0, 10)}` : ""}</small><small>{model.pipeline_tag}</small></div>
           <div className="model-studio-result-actions"><a href={model.url} target="_blank" rel="noreferrer"><BookOpen size={13} /> Model card <ExternalLink size={12} /></a><button type="button" className="button secondary-button small-button" onClick={() => void browseFiles(model)}>{repo === model.id && files.length ? "Files loaded" : "Choose GGUF file"}</button></div>

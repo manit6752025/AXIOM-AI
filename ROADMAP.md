@@ -77,7 +77,7 @@ feature exists or a delivery-date promise.
 - [R043 · In progress; validation pending] Add metadata-based RAM/VRAM fit ranges with explicit uncertainty bands and conservative memory reserves in the model registry.
 - [R044 · In progress; validation pending] Surface format and hardware-fit warnings in the existing Models page; runtime loadability and non-NVIDIA GPU measurement remain unverified.
 - [R045 · Implemented; tests passing] Preserve explicit model source attribution and add a validated license-review state (unreviewed, approved, restricted, or unknown) across registry persistence, API validation, and the Models GUI. Existing registry records migrate safely to unreviewed.
-- [R046 · Planned] Add optional Hugging Face metadata lookup with consent and timeout.
+- [R046 · Implemented; tests passing] Require explicit per-search consent before AXIOM contacts Hugging Face for public catalogue metadata; the GUI describes the external boundary and no download is initiated. The existing bounded catalogue timeout remains enforced.
 - [R047 · In progress; validation pending] Add safe model removal that never deletes weights implicitly.
 - [R048 · In progress; validation pending] Add registry import/export with schema validation and migration.
 
