@@ -24,6 +24,7 @@ class Model:
     tags: list[str] = field(default_factory=list)
     favorite: bool = False
     content_sha256: str | None = None
+    size_bytes: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
@@ -51,6 +52,11 @@ class Model:
             raise TypeError("Model favorite must be a boolean.")
         if self.content_sha256 is not None and not re.fullmatch(r"[a-fA-F0-9]{64}", self.content_sha256):
             raise TypeError("Model content_sha256 must be a 64-character hexadecimal SHA-256.")
+        if self.size_bytes is not None and (
+            type(self.size_bytes) is not int
+            or not 0 <= self.size_bytes <= 9_007_199_254_740_991
+        ):
+            raise TypeError("Model size_bytes must be a non-negative safe integer.")
 
     def to_dict(self) -> dict:
         return asdict(self)
