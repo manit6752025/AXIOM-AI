@@ -18,7 +18,15 @@ test("model registry filters and saved presets use the real typed API query cont
     estimated_runtime_memory_gb: { low: 3.85, high: 6.57 },
     system_ram_fit: { status: "likely", physical_gb: 16, budget_gb: 11.2, reserve_percent: 30, required_gb: { low: 3.85, high: 6.57 } },
     gpu_memory_fit: { status: "unlikely", physical_gb: 4, budget_gb: 3.4, reserve_percent: 15, required_gb: { low: 3.85, high: 6.57 } },
-    format_compatibility: { status: "candidate_not_verified", likely_runtimes: ["Ollama", "llama.cpp"], guidance: "GGUF is a runtime candidate, not a verified load." },
+    format_compatibility: {
+      status: "candidate_not_verified",
+      likely_runtimes: ["Ollama", "llama.cpp"],
+      guidance: "GGUF is a runtime candidate, not a verified load.",
+      matrix: [
+        { runtime: "Ollama", status: "candidate_not_verified", version_evidence: null, reason: "Local runtime version has not been checked by this fixture." },
+        { runtime: "llama.cpp", status: "candidate_not_verified", version_evidence: null, reason: "Local runtime version has not been checked by this fixture." },
+      ],
+    },
     warnings: ["This is a metadata-based screening estimate, not a benchmark.", "GPU memory measurement is limited."],
     scope_note: "Estimate only. Runtime compatibility and actual performance require loading and measuring this model with a specific local backend.",
   };

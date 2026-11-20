@@ -30,6 +30,7 @@ test("Model Studio searches GGUF files and submits a bounded local install job",
   await page.goto("/?page=models");
   await expect(page.getByRole("heading", { name: "Model Studio" })).toBeVisible();
   await page.getByLabel("Model search").fill("tiny GGUF");
+  await page.getByLabel("Allow Hugging Face metadata lookup").check();
   await page.getByRole("button", { name: "Search GGUF catalogue" }).click();
   await expect(page.getByText("example/tiny-gguf", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Choose GGUF file" }).click();
@@ -95,6 +96,7 @@ test("Model Studio installs GGUF directly into AXIOM Native Engine trusted stora
 
   await page.goto("/?page=models");
   await page.getByLabel("Model search").fill("tiny GGUF");
+  await page.getByLabel("Allow Hugging Face metadata lookup").check();
   await page.getByRole("button", { name: "Search GGUF catalogue" }).click();
   await page.getByRole("button", { name: "Choose GGUF file" }).click();
   await page.getByLabel("Local model name").fill("axiom-tiny");
