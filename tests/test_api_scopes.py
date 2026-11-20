@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import axiom.api.server as server_module
+import axiom.api.server as server_module
 from axiom.api.server import _required_api_scope, create_app
 
 
@@ -147,3 +148,20 @@ def test_ui_build_fingerprint_is_public_and_not_cacheable(tmp_path, monkeypatch)
     assert len(response.json()["fingerprint"]) == 64
     assert response.headers["cache-control"] == "no-store, max-age=0"
     assert response.headers["pragma"] == "no-cache"
+
+
+def test_ui_build_fingerprint_and_app_shell_are_safe_to_revalidate(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    webui = tmp_path / "axiom" / "webui"
+    webui.mkdir(parents=True)
+    (webui / "index.html").write_text("<html>AXIOM</html>", encoding="utf-8")
+    monkeypatch.setattr(server_module, "__file__", str(tmp_path / "axiom" / "api" / "server.py"))
+    with TestClient(create_app()) as client:
+        fingerprint = client.get("/api/ui/build")
+        app_shell = client.get("/ui/")
+    assert fingerprint.status_code == 200, fingerprint.text
+    assert len(fingerprint.json()["fingerprint"]) == 64
+    assert fingerprint.headers["cache-control"] == "no-store, max-age=0"
+    assert fingerprint.headers["pragma"] == "no-cache"
+    assert app_shell.status_code == 200, app_shell.text
+    assert app_shell.headers["cache-control"] == "no-cache, max-age=0"

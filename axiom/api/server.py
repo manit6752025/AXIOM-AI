@@ -218,6 +218,9 @@ def create_app() -> Any:
             response = await call_next(request)
             response.headers["X-Request-ID"] = request_id
             response.headers["X-AXIOM-Workspace-ID"] = selected_workspace.id
+            if path in {"/ui", "/ui/"}:
+                # Revalidate the app shell while hashed JS/CSS assets remain cacheable.
+                response.headers["Cache-Control"] = "no-cache, max-age=0"
             return response
         finally:
             if workspace_token is not None:
