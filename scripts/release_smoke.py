@@ -609,7 +609,7 @@ def inspect(root: Path) -> dict[str, Any]:
             "progress_bytes: 1024, total_bytes: 4096",
             'getByRole("button", { name: "Cancel operation" })',
         )),
-        ("native inference browser/local-only coverage", native_engine_e2e, (
+        ("native inference and benchmark browser lifecycle coverage", native_engine_e2e, (
             "local_only: true", "remote_code: false", "engineLoaded = true",
             'getByRole("button", { name: "Run with AXIOM Engine" })',
             'getByRole("button", { name: "Unload model" })',
@@ -619,6 +619,9 @@ def inspect(root: Path) -> dict[str, Any]:
             'option[value="mps"]',
             'option[value="xpu"]',
             'expect(requestBody.device).toBe("cpu")',
+            'getByRole("button", { name: "Stop benchmark" })',
+            "Benchmark cancelled; AXIOM has been asked to stop the native generation loop.",
+            "benchmarkAbortObserved = true",
         )),
     )
     for label, source, tokens in native_readiness_contracts:
