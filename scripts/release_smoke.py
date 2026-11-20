@@ -555,9 +555,10 @@ def inspect(root: Path) -> dict[str, Any]:
             'device: str = Field(default="auto", pattern="^(auto|cpu|cuda|rocm|mps|xpu)$")',
             "device_preference=request.device",
         )),
-        ("native API device regression", native_engine_api_tests, (
+        ("native API device and benchmark-cancellation regression", native_engine_api_tests, (
             "test_engine_stream_endpoint_yields_token_snapshots_and_final_metrics",
             'captured["device_preference"] == "cuda"',
+            "test_native_benchmark_api_signals_worker_when_client_disconnects",
         )),
         ("native CLI device/readiness regression", native_engine_cli_tests, (
             "test_engine_run_passes_explicit_device_to_native_stream",
