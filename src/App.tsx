@@ -4195,6 +4195,7 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
     if (inventoryResult.status === "fulfilled") {
       setServerInventory(inventoryResult.value);
       setHandshakeResults({});
+      setSchemaResults({});
     } else {
       setServerInventoryError(inventoryResult.reason instanceof Error ? inventoryResult.reason.message : "MCP server inventory unavailable.");
     }
@@ -4312,7 +4313,7 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
             <div className="permission-row">
               <span>
                 <b>{server.name}</b>
-                <small>{server.transport.toUpperCase()} · {server.executable || "No command configured"} · {server.argument_count} arguments · Not inspected</small>
+                <small>{server.transport.toUpperCase()} · {server.executable || "No command configured"} · {server.argument_count} arguments · {result ? result.status === "ok" ? "Handshake inspected" : `Handshake ${result.status}` : "Not inspected"}</small>
               </span>
               <div className="integration-form-actions">
                 <button type="button" className="button secondary-button" onClick={() => void inspectServerHandshake(server.name)} disabled={!server.configured || Boolean(inspectingServer) || Boolean(inspectingSchemas)}>
