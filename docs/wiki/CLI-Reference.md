@@ -64,7 +64,7 @@ control. The API remains bounded by its route schemas and permission policy.
 | Offline evaluation | `evaluation`, `experiment` | `/api/evaluation/runs`, `/api/workspace/experiments` | Evaluation |
 | Local inference and engine | `infer`, `engine`, `system`, `headroom` | `/api/inference/generate`, `/api/inference/status`, `/api/engine/status`, `/api/engine/telemetry` | Runtime |
 | LLM providers and optimization | `llm`, `ai`, `optimize`, `supercompress` | `/api/llm/providers`, `/api/llm/models`, `/api/llm/chat`, `/api/optimizer/plan` | Runtime, Model Studio |
-| Agents, permissions, and connectors | `agent-profile`, `mcp`, `integration`, `tools`, `session`, `mobile-bridge` | `/api/agent-profiles`, `/api/security/tool-permissions`, `/api/diagnostics/runtime-connectors` | Agent Profiles, Settings, API Playground |
+| Agents, permissions, and connectors | `agent-profile`, `mcp`, `security`, `integration`, `tools`, `session`, `mobile-bridge` | `/api/agent-profiles`, `/api/security/audit`, `/api/security/tool-permissions`, `/api/diagnostics/runtime-connectors` | Agent Profiles, Settings, API Playground |
 
 ## Commands without a one-to-one GUI/API action
 
