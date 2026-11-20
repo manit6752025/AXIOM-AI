@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 from fastapi import FastAPI
@@ -34,7 +35,8 @@ def test_profile_store_saves_only_non_secret_metadata_and_upserts_case_insensiti
     assert "api_key" not in serialized
     assert "secret" not in serialized.lower()
     assert set(json.loads(serialized)) == {"schema_version", "profiles"}
-    assert (store.path.stat().st_mode & 0o777) & 0o077 == 0 if __import__("os").name != "nt" else True
+    if os.name != "nt":
+        assert (store.path.stat().st_mode & 0o777) & 0o077 == 0
 
 
 def test_profile_store_validates_provider_url_limits_and_secret_fields(tmp_path) -> None:
