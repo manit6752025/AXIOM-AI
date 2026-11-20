@@ -17,6 +17,7 @@ from rich.text import Text
 from axiom.core.engine import AxiomEngineError, benchmark_local, discover_local_engine_assets, estimate_native_quantization, generate_local, generate_local_batch, generate_local_stream, runtime_status, runtime_telemetry
 from axiom.core import model_studio
 from axiom.core.engine_fabric import EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
+from axiom.core.engine_fabric_profiles import EngineFabricProfileError, EngineFabricProfileStore
 
 engine_app = typer.Typer(help="Run causal language models directly through AXIOM's local engine.", no_args_is_help=True)
 console = Console()
@@ -600,6 +601,10 @@ def engine_batch(
 __all__ = ["engine_app"]
 
 
+engine_profile_app = typer.Typer(help="Manage secret-free workspace profiles for fixed local Engine Fabric adapters.", no_args_is_help=True)
+engine_app.add_typer(engine_profile_app, name="profile")
+
+
 @engine_app.command("backends")
 def engine_backends_cli(
     profile: str = typer.Option("balanced", help="balanced, low-memory, throughput, easy-setup, portable, minimal-daemons"),
@@ -633,6 +638,111 @@ def engine_backends_cli(
     ))
     console.print(report["scope_note"])
 
+
+@engine_profile_app.command("list")
+def engine_profile_list(
+    json_output: bool = typer.Option(False, "--json", help="Print profile metadata as JSON."),
+) -> None:
+    """List workspace connector profiles without secrets or endpoint URLs."""
+    try:
+        report = EngineFabricProfileStore().list()
+    except EngineFabricProfileError as exc:
+        _fail(str(exc))
+        return
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
+        return
+    table = Table(title="Saved Engine Fabric connector profiles")
+    table.add_column("Name")
+    table.add_column("Backend")
+    table.add_column("Model")
+    table.add_column("Profile ID")
+    for item in report["profiles"]:
+        table.add_row(item["name"], item["backend_id"], item["model"], item["id"])
+    console.print(table)
+    console.print("Profiles store only a fixed backend ID and exact model ID; no credentials, endpoints or prompts.")
+
+
+@engine_profile_app.command("save")
+def engine_profile_save(
+    name: str = typer.Argument(..., help="Profile name (1–48 safe characters)."),
+    backend: str = typer.Option(..., "--backend", help="Fixed local backend ID."),
+    model: str = typer.Option(..., "--model", help="Exact model ID exposed by the backend."),
+    json_output: bool = typer.Option(False, "--json", help="Print the saved profile as JSON."),
+) -> None:
+    """Create or update a workspace-local connector profile."""
+    try:
+        profile = EngineFabricProfileStore().save(name=name, backend_id=backend, model=model)
+    except EngineFabricProfileError as exc:
+        _fail(str(exc))
+        return
+    if json_output:
+        typer.echo(json.dumps({"profile": profile, "credentials_persisted": False, "custom_endpoints_persisted": False}, ensure_ascii=False, indent=2))
+        return
+    console.print(f"Saved [cyan]{profile['name']}[/cyan] · {profile['backend_id']} · {profile['model']}.")
+    console.print("No credentials, endpoint URLs, prompts, or conversation history were stored.")
+
+
+@engine_profile_app.command("connect")
+def engine_profile_connect(
+    profile_id: str = typer.Argument(..., help="Exact profile ID from axiom engine profile list."),
+    json_output: bool = typer.Option(False, "--json", help="Print the verification result as JSON."),
+) -> None:
+    """Verify the local backend and exact model from a saved profile; no socket is retained."""
+    try:
+        profile = EngineFabricProfileStore().get(profile_id)
+    except EngineFabricProfileError as exc:
+        _fail(str(exc))
+        return
+    if profile is None:
+        _fail("Engine Fabric profile not found.")
+        return
+    try:
+        report = discover_engine_backends("balanced")
+    except (ValueError, EngineFabricError) as exc:
+        _fail(str(exc))
+        return
+    backend = next((item for item in report.get("backends", []) if item.get("id") == profile["backend_id"]), None)
+    if not isinstance(backend, dict) or backend.get("status") != "ready":
+        _fail("The saved local backend is not ready; no connection was established.")
+        return
+    models = backend.get("models")
+    if not isinstance(models, list) or profile["model"] not in models:
+        _fail("The exact saved model ID is not available on the local backend.")
+        return
+    verification = {
+        "profile_id": profile["id"], "backend_id": profile["backend_id"], "model": profile["model"],
+        "status": "verified", "connection_scope": "one_shot_local_health_and_model_inventory_check",
+        "persistent_connection": False, "credentials_persisted": False,
+    }
+    if json_output:
+        typer.echo(json.dumps(verification, ensure_ascii=False, indent=2))
+        return
+    console.print(f"Verified [green]{profile['backend_id']}[/green] · {profile['model']}.")
+    console.print("This is a one-shot loopback health/model check; AXIOM retains no socket or credentials.")
+
+
+@engine_profile_app.command("delete")
+def engine_profile_delete(
+    profile_id: str = typer.Argument(..., help="Exact profile ID from axiom engine profile list."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm deletion without an interactive prompt."),
+    json_output: bool = typer.Option(False, "--json", help="Print the deletion result as JSON."),
+) -> None:
+    """Delete one saved connector profile without stopping its runtime."""
+    if not yes and not typer.confirm("Delete this local Engine Fabric profile?"):
+        raise typer.Exit(0)
+    try:
+        deleted = EngineFabricProfileStore().delete(profile_id)
+    except EngineFabricProfileError as exc:
+        _fail(str(exc))
+        return
+    if deleted is None:
+        _fail("Engine Fabric profile not found.")
+        return
+    if json_output:
+        typer.echo(json.dumps({"deleted": deleted, "credentials_persisted": False}, ensure_ascii=False, indent=2))
+        return
+    console.print(f"Deleted connector profile [cyan]{deleted['name']}[/cyan].")
 
 @engine_app.command("route-chat")
 def engine_route_chat(
