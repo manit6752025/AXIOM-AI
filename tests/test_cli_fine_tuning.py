@@ -81,3 +81,13 @@ def test_train_cancel_reports_when_job_is_already_finalizing(monkeypatch):
     result = CliRunner().invoke(app, ["--no-banner", "train", "cancel", "b" * 32])
     assert result.exit_code == 0, result.output
     assert "finalization_started" in result.output
+
+
+def test_train_run_exposes_checkpoint_and_output_policy_options():
+    command = get_command(app).commands["train"].commands["run"]
+    options = {
+        option
+        for parameter in command.params
+        for option in getattr(parameter, "opts", ())
+    }
+    assert {"--checkpoint-interval", "--output-policy"} <= options
