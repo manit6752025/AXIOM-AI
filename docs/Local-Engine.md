@@ -67,9 +67,9 @@ The estimator is an analytical planning model derived from the checkpoint config
 
 Its reported formulas are:
 - **Parameters:** token embeddings + optional untied output head + per-layer attention projections + per-layer MLP projections + normalization parameters (plus configured attention/MLP biases when present).
-- **Weights:** estimated parameter count × bytes per parameter × format-specific storage overhead (15% for the INT4 sizing row, 5% for INT8, and no extra scale/metadata overhead for FP16/BF16/FP32 rows).
+- **Weights:** estimated parameter count × bytes per parameter × format-specific weight-storage overhead (15% for the INT4 sizing row, 5% for INT8, and no extra scale/metadata overhead for FP16/BF16/FP32 rows).
 - **Retained KV cache:** 2 × layers × KV heads × head dimension × retained cache context × batch × cache element bytes.
-- **Mistral prefill temporary:** for a context longer than `sliding_window`, 2 × KV heads × head dimension × full prefill context × batch × cache element bytes for the active layer. This is separate from the bounded retained cache.
+- **Mistral prefill temporary memory:** for a context longer than `sliding_window`, 2 × KV heads × head dimension × full prefill context × batch × cache element bytes for the active layer. This is separate from the bounded retained cache.
 - **Workspace:** the larger of batch × context × intermediate size × 4 bytes and batch × attention heads × context² × 4 bytes.
 - **Total:** (weights + retained KV cache + Mistral prefill temporary + workspace) × 1.20 safety factor. The reported uncertainty interval is 0.85× to 1.25× that total.
 
