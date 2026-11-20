@@ -514,6 +514,7 @@ def inspect(root: Path) -> dict[str, Any]:
     native_engine_tests = (root / "tests/test_native_engine.py").read_text(encoding="utf-8")
     native_engine_cli_tests = (root / "tests/test_axiom_engine_cli.py").read_text(encoding="utf-8")
     native_engine_e2e = (root / "e2e/axiom-engine.spec.ts").read_text(encoding="utf-8")
+    native_engine_cli = (root / "axiom/cli/engine.py").read_text(encoding="utf-8")
     native_model_studio_e2e = (root / "e2e/model-studio.spec.ts").read_text(encoding="utf-8")
 
     native_readiness_contracts = (
@@ -540,11 +541,14 @@ def inspect(root: Path) -> dict[str, Any]:
         )),
         ("Model Studio CLI", native_model_studio_cli, (
             '@studio_app.command("pull-native")', "studio.pull_native_model(",
-            "cancellable_byte_progress", "cancel_event=cancel_event", "progress=progress",
+            "cancellable_byte_progress", "cancel_event=cancel_event", "on_progress=progress",
         )),
         ("Model Studio GUI", native_model_studio_panel, (
             "Pull a model for AXIOM Native Engine", 'operation:"pull_native"',
             "Pull native checkpoint", "job.progress_bytes", "Cancel operation",
+        )),
+        ("native Engine CLI surface", native_engine_cli, (
+            'def engine_pull(', 'device: str = typer.Option("auto", "--device"',
         )),
         ("native Runtime GUI", native_engine_panel, (
             'aria-label="Execution device"', "status?.devices", "status?.recommended_device",
@@ -574,9 +578,15 @@ def inspect(root: Path) -> dict[str, Any]:
             "test_native_engine_pull_endpoint_starts_model_studio_job",
             "test_engine_pull_downloads_native_model_for_axiom_runtime",
         )),
-        ("native GUI/browser acquisition coverage", native_model_studio_e2e + native_engine_e2e, (
-            "Pull native checkpoint", "operation: \"pull_native\"",
-            "aria-label=\\\"Execution device\\\"",
+        ("native Model Studio browser acquisition coverage", native_model_studio_e2e, (
+            'config: { operation: "pull_native", repo_id: "Qwen/test" }',
+            "progress_bytes: 1024, total_bytes: 4096",
+            'getByRole("button", { name: "Cancel operation" })',
+        )),
+        ("native inference browser/local-only coverage", native_engine_e2e, (
+            "local_only: true", "remote_code: false", "engineLoaded = true",
+            'getByRole("button", { name: "Run with AXIOM Engine" })',
+            'getByRole("button", { name: "Unload model" })',
         )),
     )
     for label, source, tokens in native_readiness_contracts:
