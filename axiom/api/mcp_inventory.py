@@ -3,14 +3,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
-
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from axiom.core.integrations import IntegrationRegistry
 from axiom.core.mcp_inventory import McpInventoryError, inspect_mcp_server, list_mcp_servers
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp-inventory"])
+
 
 class McpServerTrustUpdate(BaseModel):
     trust_status: Literal["unverified", "trusted", "blocked"]
