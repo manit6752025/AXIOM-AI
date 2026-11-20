@@ -75,6 +75,60 @@ def test_runtime_status_only_reports_optional_package_presence(monkeypatch):
     assert result["model_loading"] == "local_files_only"
 
 
+
+
+def test_cancel_job_is_idempotent_and_does_not_interrupt_finalization(tmp_path, monkeypatch):
+    import os
+
+    jobs = tmp_path / "jobs"
+    jobs.mkdir(mode=0o700)
+    monkeypatch.setattr(fine_tuning, "jobs_directory", lambda: jobs)
+    job_id = "c" * 32
+    runner_pid = os.getpid()
+    runner_identity = fine_tuning._process_start_identity(runner_pid)
+    running_job = {
+        "schema_version": 1,
+        "id": job_id,
+        "runner_pid": runner_pid,
+        "runner_identity": runner_identity,
+        "status": "running",
+        "cancel_requested": False,
+        "logs": ["Training started."],
+    }
+    job_path = jobs / f"{job_id}.json"
+    job_path.write_text(json.dumps(running_job), encoding="utf-8")
+    job_path.chmod(0o600)
+
+    first = fine_tuning.cancel_finetuning_job(job_id)
+    assert first is not None
+    assert first["status"] == "cancelling"
+    assert first["cancel_requested"] is True
+    assert first["cancellation"]["requested"] is True
+    assert first["cancellation"]["requestable"] is False
+
+    second = fine_tuning.cancel_finetuning_job(job_id)
+    assert second is not None
+    assert second["status"] == "cancelling"
+    assert second["logs"] == first["logs"]
+
+    finalizing_id = "d" * 32
+    finalizing_job = {
+        **running_job,
+        "id": finalizing_id,
+        "status": "finalizing",
+        "cancel_requested": False,
+    }
+    finalizing_path = jobs / f"{finalizing_id}.json"
+    finalizing_path.write_text(json.dumps(finalizing_job), encoding="utf-8")
+    finalizing_path.chmod(0o600)
+    finalizing = fine_tuning.cancel_finetuning_job(finalizing_id)
+    assert finalizing is not None
+    assert finalizing["status"] == "finalizing"
+    assert finalizing["cancel_requested"] is False
+    assert finalizing["cancellation"]["requestable"] is False
+    assert finalizing["cancellation"]["unavailable_reason"] == "finalization_started"
+
+
 def test_job_list_limit_is_bounded():
     with pytest.raises(ValueError, match="between 1 and 100"):
         fine_tuning.list_jobs(101)
