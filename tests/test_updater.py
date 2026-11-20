@@ -220,3 +220,54 @@ def test_download_rejects_non_pypi_wheel_host_before_fetching(monkeypatch):
     with pytest.raises(updater.UpdateError, match="trusted HTTPS package-file host"):
         updater.download_and_install("9.9.9")
     assert len(calls) == 1 and "pypi.org" in calls[0]
+
+
+def test_release_tags_normalize_to_canonical_pypi_prerelease_versions():
+    assert updater.pypi_version_for_release("v0.3.0-beta.7") == "0.3.0b7"
+    assert updater.pypi_version_for_release("0.3.0-beta.10") == "0.3.0b10"
+    assert updater.pypi_version_for_release("0.3.0-alpha.2") == "0.3.0a2"
+    assert updater.pypi_version_for_release("0.3.0-rc.3") == "0.3.0rc3"
+    assert updater.pypi_version_for_release("0.3.0") == "0.3.0"
+
+
+def test_download_uses_pep440_version_for_pypi_and_wheel_metadata(monkeypatch):
+    version = "0.3.0-beta.7"
+    normalized = "0.3.0b7"
+    wheel = _wheel(normalized)
+    digest = hashlib.sha256(wheel).hexdigest()
+    pypi = {
+        "info": {"name": "axiom-all", "version": normalized},
+        "urls": [{
+            "packagetype": "bdist_wheel",
+            "filename": f"axiom_all-{normalized}-py3-none-any.whl",
+            "url": "https://files.pythonhosted.org/axiom.whl",
+            "digests": {"sha256": digest},
+            "yanked": False,
+        }],
+    }
+    requests = []
+
+    def fake_urlopen(request, timeout=20):
+        requests.append(request.full_url)
+        if "pypi.org" in request.full_url:
+            assert request.full_url.endswith(f"/{normalized}/json")
+            return io.BytesIO(json.dumps(pypi).encode("utf-8"))
+        return io.BytesIO(wheel)
+
+    monkeypatch.setattr(updater, "urlopen", fake_urlopen)
+    installed = []
+    monkeypatch.setattr(
+        updater.subprocess,
+        "run",
+        lambda command, *, check, timeout: installed.append(command) or SimpleNamespace(returncode=0),
+    )
+    result = updater.download_and_install(version)
+    assert result["installed_version"] == version
+    assert result["verified_sha256"] == digest
+    assert requests[0].endswith(f"/{normalized}/json")
+    assert installed and installed[0][-1].endswith(f"axiom_all-{normalized}-py3-none-any.whl")
+
+
+def test_release_version_normalization_rejects_unsupported_prerelease_forms():
+    with pytest.raises(updater.UpdateError, match="Unsupported AXIOM prerelease label"):
+        updater.pypi_version_for_release("0.3.0-preview.1")

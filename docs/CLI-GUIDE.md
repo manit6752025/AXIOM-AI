@@ -315,7 +315,7 @@ instead of `python -m axiom.cli.main gui --help`.
 
 `axiom update` checks GitHub releases (beta includes published prereleases;
 stable excludes them). `--auto` / `--yes` downloads the matching PyPI
-`axiom-all` wheel, verifies its SHA-256 and wheel metadata, and installs it
+`axiom-all` wheel, maps beta tags to canonical PEP 440 versions, verifies its PyPI SHA-256, wheel metadata, full RECORD hashes, and archive paths with AXIOM's non-executing artifact inspector, then installs it
 using the active Python interpreter. The updater only replaces the application
 distribution; it does not target model directories, workspaces, configuration,
 experiment history, account databases or browser storage. Restart AXIOM after

@@ -61,6 +61,23 @@ def compare_versions(left: str, right: str) -> int:
     return (a > b) - (a < b)
 
 
+def pypi_version_for_release(value: str) -> str:
+    """Map an AXIOM release tag to its canonical PEP 440 PyPI version."""
+    match = _VERSION_RE.fullmatch(value)
+    if not match:
+        raise UpdateError(f"Unsupported AXIOM release version: {value!r}.")
+    core = ".".join(str(int(match.group(key))) for key in ("major", "minor", "patch"))
+    prerelease = match.group("pre")
+    if prerelease is None:
+        return core
+    parsed = re.fullmatch(r"(alpha|a|beta|b|rc)(?:[.-]?)([0-9]+)", prerelease, re.IGNORECASE)
+    if parsed is None:
+        raise UpdateError(f"Unsupported AXIOM prerelease label for PyPI: {prerelease!r}.")
+    label = parsed.group(1).lower()
+    label = "a" if label in {"alpha", "a"} else "b" if label in {"beta", "b"} else "rc"
+    return f"{core}{label}{int(parsed.group(2))}"
+
+
 def _read_url(url: str, *, max_bytes: int, timeout: float = 20.0) -> bytes:
     request = Request(
         url,
@@ -161,7 +178,8 @@ def _validate_wheel(payload: bytes, expected_version: str) -> None:
 
 
 def _wheel_for_version(version: str) -> tuple[bytes, str]:
-    url = PYPI_JSON_URL.format(version=quote(version, safe=""))
+    pypi_version = pypi_version_for_release(version)
+    url = PYPI_JSON_URL.format(version=quote(pypi_version, safe=""))
     payload = _read_url(url, max_bytes=4 * 1024 * 1024)
     try:
         document = json.loads(payload)
@@ -169,8 +187,8 @@ def _wheel_for_version(version: str) -> tuple[bytes, str]:
         raise UpdateError("PyPI returned invalid package metadata.") from None
     info = document.get("info") if isinstance(document, dict) else None
     normalized_name = str(info.get("name", "")).lower().replace("_", "-") if isinstance(info, dict) else ""
-    if normalized_name != PACKAGE_NAME or info.get("version") != version:
-        raise UpdateError("PyPI package identity/version does not match the GitHub release.")
+    if not isinstance(info, dict) or normalized_name != PACKAGE_NAME or info.get("version") != pypi_version:
+        raise UpdateError("PyPI package identity/version does not match the normalized GitHub release tag.")
     distributions = document.get("urls")
     if not isinstance(distributions, list):
         raise UpdateError("PyPI did not publish a wheel for this release.")
@@ -195,7 +213,7 @@ def _wheel_for_version(version: str) -> tuple[bytes, str]:
     actual = hashlib.sha256(wheel_bytes).hexdigest()
     if not hmac.compare_digest(actual, wheel["digests"]["sha256"]):
         raise UpdateError("Downloaded AXIOM wheel failed its PyPI SHA-256 verification.")
-    _validate_wheel(wheel_bytes, version)
+    _validate_wheel(wheel_bytes, pypi_version)
     return wheel_bytes, str(wheel.get("filename") or f"axiom_all-{version}-py3-none-any.whl")
 
 
@@ -239,6 +257,6 @@ def download_and_install(version: str) -> dict[str, Any]:
 
 
 __all__ = [
-    "UpdateError", "compare_versions", "fetch_latest_release",
+    "UpdateError", "compare_versions", "pypi_version_for_release", "fetch_latest_release",
     "check_for_update", "download_and_install",
 ]
