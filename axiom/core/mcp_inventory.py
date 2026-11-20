@@ -49,7 +49,7 @@ def _registry() -> IntegrationRegistry:
 def _command_parts(command: str | None) -> list[str]:
     if not isinstance(command, str) or not command.strip():
         return []
-    if len(command) > MAX_COMMAND_CHARS or "\\x00" in command:
+    if len(command) > MAX_COMMAND_CHARS or "\x00" in command:
         raise McpInventoryError("Configured MCP command exceeds the supported limit.")
     try:
         parts = shlex.split(command, posix=True)
