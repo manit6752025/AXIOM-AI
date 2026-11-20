@@ -2080,6 +2080,7 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
   const [parameters, setParameters] = useState("");
   const [architecture, setArchitecture] = useState("");
   const [license, setLicense] = useState("");
+  const [licenseReview, setLicenseReview] = useState<"unreviewed" | "approved" | "restricted" | "unknown">("unreviewed");
   const [quantization, setQuantization] = useState("");
   const [sizeBytes, setSizeBytes] = useState("");
   const [contentSha256, setContentSha256] = useState("");
@@ -2277,6 +2278,7 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
         parameters: parameters.trim() || null,
         architecture: architecture.trim() || null,
         license: license.trim() || null,
+        license_review: licenseReview,
         quantization: quantization.trim() || null,
         size_bytes: parsedSizeBytes,
         content_sha256: digest || null,
@@ -2289,6 +2291,7 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
       setParameters("");
       setArchitecture("");
       setLicense("");
+      setLicenseReview("unreviewed");
       setQuantization("");
       setSizeBytes("");
       setContentSha256("");
@@ -2406,8 +2409,12 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
         <label className="field"><span className="field-label-row"><span>Parameters</span></span><input value={parameters} onChange={(event) => setParameters(event.target.value)} maxLength={80} placeholder="8B" /></label>
         <label className="field"><span className="field-label-row"><span>Quantization</span></span><input value={quantization} onChange={(event) => setQuantization(event.target.value)} maxLength={80} placeholder="Q4_K_M" /></label>
         <label className="field"><span className="field-label-row"><span>License</span></span><input value={license} onChange={(event) => setLicense(event.target.value)} maxLength={120} placeholder="Apache-2.0" /></label>
+<<<<<<< HEAD
         <label className="field"><span className="field-label-row"><span>Weight size (bytes)</span></span><input aria-label="Weight size in bytes" type="number" inputMode="numeric" min="0" step="1" value={sizeBytes} onChange={(event) => setSizeBytes(event.target.value)} placeholder="Known combined weight-file size" aria-invalid={!validSizeBytes} /></label>
         <label className="field"><span className="field-label-row"><span>Content SHA-256</span></span><input aria-label="Content SHA-256" value={contentSha256} onChange={(event) => setContentSha256(event.target.value)} maxLength={64} spellCheck={false} placeholder="Optional 64-character digest" aria-invalid={!validContentSha256} /></label>
+=======
+        <label className="field"><span className="field-label-row"><span>License review</span></span><select aria-label="License review state" value={licenseReview} onChange={(event) => setLicenseReview(event.target.value as typeof licenseReview)}><option value="unreviewed">Unreviewed</option><option value="approved">Approved</option><option value="restricted">Restricted</option><option value="unknown">Unknown</option></select></label>
+>>>>>>> dd7291b (feat(models): track license review state)
         <label className="field"><span className="field-label-row"><span>Tags, comma-separated</span></span><input value={tags} onChange={(event) => setTags(event.target.value)} maxLength={1200} placeholder="chat, local, favorite" /></label>
         <label className="field"><span className="field-label-row"><span>Workspace labels, comma-separated</span></span><input aria-label="Workspace labels" value={workspaceLabels} onChange={(event) => setWorkspaceLabels(event.target.value)} maxLength={1200} placeholder="production, reviewed, team-a" /></label>
         <div className="integration-form-actions"><button type="button" className="button secondary-button" onClick={() => setFormOpen(false)}>Cancel</button><button type="submit" className="button primary-button" disabled={saving || !name.trim() || !source.trim() || !format.trim() || !validSizeBytes || !validContentSha256}>{saving ? "Registering…" : "Save to registry"}</button></div>
@@ -2442,7 +2449,11 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
     </Surface>}
     <Surface title="Model registry" eyebrow="LOCAL INVENTORY">
       {error ? <InlineAlert tone="warning" role="alert">{error}</InlineAlert> : null}
+<<<<<<< HEAD
       {loading ? <div className="loading-state" role="status">Loading model registry…</div> : models.length ? <><div className="module-list">{models.map((model) => <div className="module-row model-registry-row" key={model.id}><span className="module-icon"><BrainCircuit size={17} /></span><span className="module-copy"><b>{model.name}</b><small>{model.source} · {model.format}{model.parameters ? ` · ${model.parameters}` : ""}{model.quantization ? ` · ${model.quantization}` : ""}{model.architecture ? ` · ${model.architecture}` : ""}{model.license ? ` · ${model.license}` : ""}{model.size_bytes !== null && model.size_bytes !== undefined ? ` · ${formatBytes(model.size_bytes)}` : ""}{model.tags?.length ? ` · ${model.tags.join(", ")}` : ""}{model.workspace_labels?.length ? ` · Workspace: ${model.workspace_labels.join(", ")}` : ""}</small></span><button type="button" className="icon-button" aria-label={`${model.favorite ? "Remove" : "Add"} ${model.name} ${model.favorite ? "favorite" : "to favorites"}`} title={model.favorite ? "Remove favorite" : "Add favorite"} onClick={() => void toggleFavorite(model)}><Star size={15} fill={model.favorite ? "currentColor" : "none"} /></button><button type="button" className="icon-button" aria-label={`Check hardware fit for ${model.name}`} title={compatibilityBusyId === model.id ? "Checking hardware fit…" : "Estimate hardware fit"} disabled={compatibilityBusyId === model.id} onClick={() => void inspectCompatibility(model)}><Gauge size={15} /></button><button type="button" className="icon-button danger-icon-button" aria-label={`Remove ${model.name} from registry`} title="Remove registry entry" onClick={() => setRemoving(model)}><Trash2 size={15} /></button></div>)}</div>{hasMore && <div className="pagination-actions"><button type="button" className="button secondary-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more models"}</button></div>}</> : <EmptyState icon={BrainCircuit} title="Registry is empty" description="Register model metadata here or use the CLI. Model files remain where they are." action={<CliReference command="axiom model add my-model local safetensors" />} />}
+=======
+      {loading ? <div className="loading-state" role="status">Loading model registry…</div> : models.length ? <><div className="module-list">{models.map((model) => <div className="module-row model-registry-row" key={model.id}><span className="module-icon"><BrainCircuit size={17} /></span><span className="module-copy"><b>{model.name}</b><small>Source: {model.source} · {model.format}{model.parameters ? ` · ${model.parameters}` : ""}{model.quantization ? ` · ${model.quantization}` : ""}{model.architecture ? ` · ${model.architecture}` : ""}{model.license ? ` · ${model.license}` : ""} · license {model.license_review ?? "unreviewed"}{model.tags?.length ? ` · ${model.tags.join(", ")}` : ""}</small></span><button type="button" className="icon-button" aria-label={`${model.favorite ? "Remove" : "Add"} ${model.name} ${model.favorite ? "favorite" : "to favorites"}`} title={model.favorite ? "Remove favorite" : "Add favorite"} onClick={() => void toggleFavorite(model)}><Star size={15} fill={model.favorite ? "currentColor" : "none"} /></button><button type="button" className="icon-button" aria-label={`Check hardware fit for ${model.name}`} title={compatibilityBusyId === model.id ? "Checking hardware fit…" : "Estimate hardware fit"} disabled={compatibilityBusyId === model.id} onClick={() => void inspectCompatibility(model)}><Gauge size={15} /></button><button type="button" className="icon-button danger-icon-button" aria-label={`Remove ${model.name} from registry`} title="Remove registry entry" onClick={() => setRemoving(model)}><Trash2 size={15} /></button></div>)}</div>{hasMore && <div className="pagination-actions"><button type="button" className="button secondary-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more models"}</button></div>}</> : <EmptyState icon={BrainCircuit} title="Registry is empty" description="Register model metadata here or use the CLI. Model files remain where they are." action={<CliReference command="axiom model add my-model local safetensors" />} />}
+>>>>>>> dd7291b (feat(models): track license review state)
     </Surface>
     {removing && <ConfirmationDialog titleId="remove-model-title" descriptionId="remove-model-description" eyebrow="CONFIRM REGISTRY CHANGE" title={`Remove ${removing.name}?`} description="This removes only its AXIOM registry metadata. Local model weights will not be deleted." confirmLabel="Remove registry entry" busyLabel="Removing…" busy={removingBusy} onCancel={() => setRemoving(null)} onConfirm={() => void removeModel()} />}
     <ModelStudioPanel />

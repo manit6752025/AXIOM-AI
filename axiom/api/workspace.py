@@ -94,6 +94,7 @@ class WorkspaceModelInput(BaseModel):
     quantization: str | None = Field(default=None, max_length=80)
     architecture: str | None = Field(default=None, max_length=160)
     license: str | None = Field(default=None, max_length=120)
+    license_review: Literal["unreviewed", "approved", "restricted", "unknown"] = "unreviewed"
     tags: list[str] = Field(default_factory=list, max_length=32)
     favorite: bool = False
     content_sha256: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
@@ -110,6 +111,7 @@ class WorkspaceModelPatch(BaseModel):
     quantization: str | None = Field(default=None, max_length=80)
     architecture: str | None = Field(default=None, max_length=160)
     license: str | None = Field(default=None, max_length=120)
+    license_review: Literal["unreviewed", "approved", "restricted", "unknown"] | None = None
     tags: list[str] | None = Field(default=None, max_length=32)
     favorite: bool | None = None
     content_sha256: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")

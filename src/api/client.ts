@@ -528,6 +528,7 @@ export type WorkspaceModel = {
   quantization?: string | null;
   architecture?: string | null;
   license?: string | null;
+  license_review?: "unreviewed" | "approved" | "restricted" | "unknown";
   tags?: string[];
   favorite?: boolean;
   content_sha256?: string | null;
