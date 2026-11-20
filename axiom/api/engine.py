@@ -9,10 +9,11 @@ from threading import Event, Thread
 from typing import Any, AsyncIterator, Iterator
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.responses import StreamingResponse
 from axiom.core import model_studio
 from axiom.core.engine_fabric import EngineFabricBenchmarkRequirementError, EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
+from axiom.core.engine_fabric_profiles import EngineFabricProfileError, EngineFabricProfileStore
 
 from axiom.core.engine import (
     AxiomEngineError,
@@ -571,7 +572,86 @@ class EngineFabricAutoChatRequest(BaseModel):
         return validate_model_name(value)
 
 
+class EngineFabricProfileInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=48)
+    backend_id: str = Field(pattern="^(axiom-native|ollama|llama-cpp|lm-studio|vllm|llama-cpp-python)$")
+    model: str = Field(min_length=1, max_length=120)
+
+    @field_validator("model")
+    @classmethod
+    def model_must_be_a_name_not_a_url(cls, value: str) -> str:
+        from axiom.core.inference import validate_model_name
+        return validate_model_name(value)
+
+
+@router.get("/backends/profiles")
+def engine_backend_profiles() -> dict[str, Any]:
+    """List secret-free workspace connector profiles."""
+    try:
+        return EngineFabricProfileStore().list()
+    except EngineFabricProfileError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from None
+
+
+@router.post("/backends/profiles", status_code=201)
+def save_engine_backend_profile(request: EngineFabricProfileInput) -> dict[str, Any]:
+    """Create or update metadata for one fixed local backend and exact model ID."""
+    try:
+        profile = EngineFabricProfileStore().save(name=request.name, backend_id=request.backend_id, model=request.model)
+        return {"profile": profile, "credentials_persisted": False, "custom_endpoints_persisted": False}
+    except EngineFabricProfileError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@router.delete("/backends/profiles/{profile_id}")
+def delete_engine_backend_profile(profile_id: str) -> dict[str, Any]:
+    """Delete profile metadata; do not stop an external runtime."""
+    try:
+        deleted = EngineFabricProfileStore().delete(profile_id)
+    except EngineFabricProfileError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    if deleted is None:
+        raise HTTPException(status_code=404, detail="Engine Fabric profile not found.")
+    return {"deleted": deleted, "credentials_persisted": False}
+
+
+@router.post("/backends/profiles/{profile_id}/connect")
+def connect_engine_backend_profile(profile_id: str) -> dict[str, Any]:
+    """Verify local health and exact model inventory without retaining a socket."""
+    try:
+        profile = EngineFabricProfileStore().get(profile_id)
+    except EngineFabricProfileError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Engine Fabric profile not found.")
+    try:
+        report = discover_engine_backends("balanced")
+    except (ValueError, EngineFabricError):
+        raise HTTPException(status_code=503, detail="Local Engine Fabric discovery failed.") from None
+    backend = next((item for item in report.get("backends", []) if item.get("id") == profile["backend_id"]), None)
+    if not isinstance(backend, dict) or backend.get("status") != "ready":
+        raise HTTPException(status_code=409, detail="The saved local backend is not ready; no connection was established.")
+    models = backend.get("models")
+    if not isinstance(models, list) or profile["model"] not in models:
+        raise HTTPException(status_code=409, detail="The exact saved model ID is not available on the local backend.")
+    return {
+        "profile_id": profile["id"],
+        "backend_id": profile["backend_id"],
+        "model": profile["model"],
+        "status": "verified",
+        "checked_at": datetime.now(UTC).isoformat(),
+        "connection_scope": "one_shot_local_health_and_model_inventory_check",
+        "persistent_connection": False,
+        "credentials_persisted": False,
+        "custom_endpoints_persisted": False,
+        "processes_started": False,
+    }
+
+
 @router.get("/backends")
+
+
 def engine_backends(profile: str = "balanced") -> dict[str, Any]:
     """Inventory local execution backends and recommend one using an explicit workload profile."""
     try:
