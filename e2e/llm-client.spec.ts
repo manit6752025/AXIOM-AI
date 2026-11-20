@@ -60,7 +60,7 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
         updated_at: "2026-11-20T09:00:00Z",
       };
       await route.fulfill({ status: 201, json: { profile: workspaceProfile, credentials_persisted: false } });
-    } else if (/^\\/api\\/llm\\/profiles\\/[^/]+\\/connect$/.test(path) && request.method() === "POST") {
+    } else if (path.startsWith("/api/llm/profiles/") && path.endsWith("/connect") && request.method() === "POST") {
       const body = request.postDataJSON() as { api_key?: string };
       expect(body.api_key).toBe("never-return-this");
       await route.fulfill({ json: {
