@@ -126,7 +126,12 @@ def register(train_app: typer.Typer) -> None:
         if status == "cancelling":
             console.print("Cancellation requested; the worker will stop at its next safe training boundary.")
         else:
-            reason = (job.get("cancellation") or {}).get("unavailable_reason") or "not_cancellable"
+            contract = job.get("cancellation")
+            reason = (
+                contract.get("unavailable_reason")
+                if isinstance(contract, dict)
+                else None
+            ) or "not_cancellable"
             console.print(f"Cancellation was not started: job status is {status} ({reason}).")
 
     @train_app.command("status")
