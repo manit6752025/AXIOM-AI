@@ -58,7 +58,10 @@ Every job summary exposes a `cancellation` object with `supported`,
 `requested`, `requestable`, `mode`, `boundary`, and
 `unavailable_reason`. A cancellation request changes the state to
 `cancelling`; it does not claim that the worker has stopped. The worker checks
-for cancellation before beginning and between safe training steps. Once
+for cancellation before beginning and at safe model-loading/device-placement
+boundaries and between optimizer steps. If a request arrives while an optimizer
+step is already in progress, that step is allowed to finish and its completed
+step count/loss are persisted before the worker records `cancelled`. Once
 `finalizing` begins, adapter persistence is not interrupted. Clients should
 use `requestable` rather than infer cancellation capability from a hard-coded
 list of status strings, and should wait for the terminal `cancelled` state
