@@ -27,6 +27,7 @@ from axiom.models.registry import Model, ModelRegistry
 from axiom.models.compatibility import estimate_model_compatibility
 from axiom.models.discovery import discover_local_model_folders
 from axiom.models.inspector import inspect_model
+from axiom.models.runtime_matrix import probe_local_runtime_matrix
 from axiom.api.model_paths import validate_model_path
 from axiom.path_safety import (
     DEFAULT_SKIP_DIRECTORIES,
@@ -450,6 +451,14 @@ def workspace_import_models(request: WorkspaceModelImportInput) -> dict[str, Any
         raise HTTPException(status_code=status, detail=str(exc)) from exc
     record_workspace_event("models.import", f"Imported {len(imported)} model records")
     return {"models": [model.to_dict() for model in imported], "imported": len(imported)}
+
+
+@router.get("/models/runtime-matrix")
+def workspace_model_runtime_matrix(refresh: bool = Query(False)) -> dict[str, Any]:
+    """Return local runtime/version evidence without network access or model loading."""
+    matrix = probe_local_runtime_matrix(force_refresh=refresh)
+    record_workspace_event("models.runtime_matrix", "Checked local runtime version evidence")
+    return {"matrix": matrix}
 
 
 @router.get("/models/{model_id}")
