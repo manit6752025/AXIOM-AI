@@ -32,7 +32,6 @@ from axiom.path_safety import open_regular_file
 
 _LOG = logging.getLogger(__name__)
 
-_JOB_ACTIVE_STATUSES = frozenset({"queued", "running", "cancelling", "finalizing"})
 _JOB_TERMINAL_STATUSES = frozenset({"completed", "cancelled", "failed"})
 _JOB_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "queued": frozenset({"running", "cancelling", "failed"}),
