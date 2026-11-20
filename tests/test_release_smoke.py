@@ -18,8 +18,17 @@ def test_roadmap_audit_accepts_all_unique_deliverables() -> None:
     assert release_smoke.roadmap_issues(markdown) == []
 
 
+def test_roadmap_audit_accepts_implemented_status_with_code_scan_review_pending() -> None:
+    markdown = "\\n".join(
+        f"- [R{i:03d} · {'Planned' if i % 2 else 'Implemented; tests passing'}] Requirement {i}."
+        for i in range(1, 140)
+    )
+    markdown += "\\n- [R140 · Implemented; tests passing; code-scan review pending] CodeQL review remains an owner action."
+    assert release_smoke.roadmap_issues(markdown) == []
+
+
 def test_roadmap_audit_detects_duplicates_missing_ids_and_unknown_status() -> None:
-    markdown = "- [R001 · Maybe] A\n- [R001 · Planned] Duplicate\n"
+    markdown = "- [R001 · Maybe] A\\n- [R001 · Planned] Duplicate\\n"
     issues = release_smoke.roadmap_issues(markdown)
     assert any("Expected 140" in item for item in issues)
     assert any("Missing roadmap IDs" in item for item in issues)
