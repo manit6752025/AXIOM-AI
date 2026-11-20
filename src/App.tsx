@@ -4504,11 +4504,11 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
           { key: "occurred_at", header: "Time", render: (event) => new Date(event.occurred_at).toLocaleString() },
           { key: "summary", header: "Action", render: (event) => event.summary },
           { key: "decision", header: "Tool decision", render: (event) => event.event_type === "mcp.tool.decision"
-            ? `${event.decision?.toUpperCase()} · ${event.tool_name} · ${event.profile_name}`
+            ? `${event.decision?.toUpperCase()} · ${event.tool_name} · ${event.profile_name} · ${event.reason}`
             : "—" },
           { key: "arguments", header: "Redacted arguments", render: (event) => {
             const names = Object.keys(event.arguments ?? {});
-            return names.length ? names.join(", ") : "—";
+            return names.length ? names.map((name) => `${name}=[REDACTED]`).join(", ") : "—";
           } },
           { key: "review", header: "Review", render: (event) => event.reviewed
             ? `Reviewed by ${event.reviewer_label} · self-attested`
