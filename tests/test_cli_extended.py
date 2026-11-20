@@ -237,6 +237,7 @@ def test_security_audit_json_reports_checks_without_secrets(tmp_path: Path, monk
     monkeypatch.delenv("AXIOM_API_READ_TOKEN", raising=False)
     monkeypatch.delenv("AXIOM_API_WRITE_TOKEN", raising=False)
     monkeypatch.delenv("AXIOM_OPENAI_API_TOKEN", raising=False)
+    monkeypatch.delenv("AXIOM_CORS_ORIGINS", raising=False)
 
     result = runner.invoke(app, ["security", "audit", "--workspace", str(tmp_path), "--json"])
 
