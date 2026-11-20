@@ -495,8 +495,8 @@ Found a vulnerability? Read [SECURITY.md](SECURITY.md). Need help? Run `axiom su
 Local security checks include `axiom doctor --strict --json`,
 `axiom security audit --json`, and
 `axiom security artifact inspect ./dist/<artifact> --json`. The artifact
-inspector checks wheel RECORD hashes or source-archive safety without extracting
-or executing release contents; see
+inspector checks installed package RECORD integrity, wheel hashes, and source-archive
+safety without extracting or executing release contents; see
 [Diagnostics and Support](docs/Diagnostics-and-Support.md).
 
 
