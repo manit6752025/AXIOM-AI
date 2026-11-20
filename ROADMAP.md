@@ -56,7 +56,7 @@ feature exists or a delivery-date promise.
 
 ### 04 · Model lifecycle and compatibility
 
-- [R037 · In progress; validation pending] Expand registry metadata with architecture, size, source, and license; CLI add/update, schema-checked import/export, and hash/tag fields are exposed, while registry/UI validation remains to be completed.
+- [R037 · Implemented; tests passing] Expand registry metadata with architecture, size, source, and license. Strict optional `size_bytes` is persisted in the versioned registry, API create/update/import/export, CLI `model add/update --size-bytes` and list output, and the Models GUI form/list. Discovered weight sizes prefill registration; optional SHA-256 and size fields validate before submission. Python registry/API, CLI JSON, GUI browser acceptance, lint, production build, and Ubuntu/macOS/Windows release gates passed in [quality-gates run #44652145152](https://github.com/manit6752025/AXIOM-AI/actions/runs/44652145152).
 - [R038 · Implemented; tests passing] Add safe local-folder discovery without following directory symlinks; file symlinks are accepted only when resolved targets remain inside trusted roots.
 - [R039 · In progress; validation pending] Add model inspection summaries in the GUI.
 - [R040 · In progress; validation pending] Add duplicate detection by source and content metadata.
