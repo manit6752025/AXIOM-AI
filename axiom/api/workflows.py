@@ -15,6 +15,7 @@ from axiom.core.workflows import (
     WORKFLOW_SCHEMA_VERSION,
     WorkflowStore,
     WorkflowStoreFullError,
+    normalize_workflow_graph,
     validate_workflow_graph,
 )
 from axiom.core.workflow_planning import build_workflow_planning_preview
@@ -35,10 +36,10 @@ WORKFLOW_TEMPLATES = [
             {"id": "report", "type": "report.export"},
         ],
         "edges": [
-            {"source": "dataset", "target": "model"},
-            {"source": "model", "target": "plan"},
-            {"source": "plan", "target": "evaluation"},
-            {"source": "evaluation", "target": "report"},
+            {"source": "dataset", "target": "plan", "source_port": "dataset", "target_port": "dataset"},
+            {"source": "model", "target": "plan", "source_port": "model", "target_port": "model"},
+            {"source": "plan", "target": "evaluation", "source_port": "plan", "target_port": "plan"},
+            {"source": "evaluation", "target": "report", "source_port": "evaluation", "target_port": "evaluation"},
         ],
     },
     {
@@ -65,6 +66,7 @@ class WorkflowNodeInput(BaseModel):
         "evaluation.run",
         "report.export",
     ]
+    ports: dict[str, Any] | None = None
 
 
 class WorkflowEdgeInput(BaseModel):
@@ -72,6 +74,8 @@ class WorkflowEdgeInput(BaseModel):
 
     source: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     target: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    source_port: str | None = Field(default=None, min_length=1, max_length=40)
+    target_port: str | None = Field(default=None, min_length=1, max_length=40)
 
 
 class WorkflowInput(BaseModel):
@@ -91,9 +95,10 @@ class WorkflowDryRunInput(BaseModel):
 
 
 def _validated_payload(request: WorkflowInput) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    nodes = [node.model_dump() for node in request.nodes]
-    edges = [edge.model_dump() for edge in request.edges]
+    raw_nodes = [node.model_dump(exclude_none=True) for node in request.nodes]
+    raw_edges = [edge.model_dump(exclude_none=True) for edge in request.edges]
     try:
+        nodes, edges = normalize_workflow_graph(raw_nodes, raw_edges)
         validate_workflow_graph(request.name, nodes, edges)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -103,12 +108,22 @@ def _validated_payload(request: WorkflowInput) -> tuple[list[dict[str, Any]], li
 @router.post("/validate")
 def validate_workflow(request: WorkflowInput) -> dict[str, Any]:
     nodes, edges = _validated_payload(request)
-    return {"valid": True, "node_count": len(nodes), "connection_count": len(edges)}
+    missing_inputs = validate_workflow_graph(request.name, nodes, edges)
+    return {
+        "valid": True,
+        "node_count": len(nodes),
+        "connection_count": len(edges),
+        "missing_inputs": missing_inputs,
+    }
 
 
 @router.get("/templates")
 def list_workflow_templates() -> dict[str, Any]:
-    return {"templates": WORKFLOW_TEMPLATES}
+    templates = []
+    for template in WORKFLOW_TEMPLATES:
+        nodes, edges = normalize_workflow_graph(template["nodes"], template["edges"])
+        templates.append({**template, "nodes": nodes, "edges": edges, "schema_version": WORKFLOW_SCHEMA_VERSION})
+    return {"templates": templates}
 
 
 @router.get("")
