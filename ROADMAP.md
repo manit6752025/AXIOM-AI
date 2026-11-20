@@ -142,7 +142,7 @@ feature exists or a delivery-date promise.
 - [R105 · Implemented; tests passing] Add read-only security audits for config and MCP policy permissions, active tool grants, API token scopes, CORS origins, and AXIOM's loopback/network-exposure contracts through the CLI, API, and Diagnostics page; never return credential values.
 - [R106 · In progress; validation pending] Harden workspace-relative path resolution against symlinked roots and parent-directory swaps on POSIX; add regression tests for traversal inputs, symlinked roots/parents/final files, and path-selection/open races.
 - [R107 · In progress; validation pending] Check installed runtime dependency compatibility and bounded package RECORD hashes, and inspect Python wheel/source release artifacts for metadata, hash integrity, traversal, symlinks, special files, duplicate paths, and archive expansion without extraction or execution.
-- [R108 · Planned] Add security event export and administrator review workflows.
+- [R108 · Implemented; tests passing] Add security event export and administrator review workflows.
 
 ### 10 · API, telemetry, diagnostics, and delivery
 
