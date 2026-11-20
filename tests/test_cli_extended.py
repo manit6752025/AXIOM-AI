@@ -230,3 +230,31 @@ def test_doctor_json_reports_dependency_versions_and_schema(tmp_path: Path):
     assert len(dependency_checks) == 9
     assert all(item["status"] in {"pass", "fail"} for item in dependency_checks)
     assert any("supported minimum" in item["detail"] for item in dependency_checks)
+
+
+def test_security_audit_json_reports_checks_without_secrets(tmp_path: Path, monkeypatch):
+    (tmp_path / "axiom.yaml").write_text("project:\\n  name: security-cli\\n", encoding="utf-8")
+    monkeypatch.delenv("AXIOM_API_READ_TOKEN", raising=False)
+    monkeypatch.delenv("AXIOM_API_WRITE_TOKEN", raising=False)
+    monkeypatch.delenv("AXIOM_OPENAI_API_TOKEN", raising=False)
+
+    result = runner.invoke(app, ["security", "audit", "--workspace", str(tmp_path), "--json"])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["status"] in {"pass", "warn", "fail"}
+    assert payload["summary"]["api_scope_tokens_enabled"] is False
+    assert any(item["id"] == "security.network.daemon_bind" for item in payload["checks"])
+
+
+def test_security_audit_fails_for_unauthenticated_network_daemon_profile(tmp_path: Path):
+    result = runner.invoke(
+        app,
+        ["security", "audit", "--workspace", str(tmp_path), "--daemon-host", "0.0.0.0", "--allow-network", "--json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    check = next(item for item in payload["checks"] if item["id"] == "security.network.daemon_bind")
+    assert check["status"] == "fail"
