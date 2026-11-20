@@ -50,7 +50,14 @@ def _safe_member_name(name: str) -> bool:
         raw_parts = raw_parts[:-1]
     if not raw_parts:
         return False
-    return all(part not in {"", ".", ".."} for part in raw_parts)
+    reserved = {"CON", "PRN", "AUX", "NUL"}
+    for part in raw_parts:
+        if part in {"", ".", ".."} or ":" in part or part.endswith((".", " ")):
+            return False
+        device_stem = part.split(".", 1)[0].upper()
+        if device_stem in reserved or re.fullmatch(r"(?:COM|LPT)[1-9¹²³]", device_stem):
+            return False
+    return True
 
 
 def _safe_artifact_file(path: str | Path) -> tuple[Path, BinaryIO, int]:
@@ -101,8 +108,16 @@ def _zip_inventory(archive: zipfile.ZipFile) -> tuple[list[zipfile.ZipInfo], lis
     for info in infos:
         name = info.filename
         is_directory = info.is_dir()
+        if not is_directory and name.endswith("/"):
+            unsafe = True
+            checks.append(_check(
+                "artifact.archive.path", "Archive member paths", "fail",
+                "A non-directory archive member has a directory-style trailing slash.",
+                "Rebuild the artifact with file and directory entries represented consistently.",
+            ))
+            continue
         normalized = name[:-1] if is_directory and name.endswith("/") else name
-        folded = normalized.casefold()
+        folded = __import__("unicodedata").normalize("NFC", normalized).casefold()
         if not _safe_member_name(name):
             unsafe = True
             checks.append(_check(
@@ -234,6 +249,18 @@ def _verify_wheel(archive: zipfile.ZipFile, filename: str) -> dict[str, Any]:
         checks.append(_check(
             "artifact.wheel.metadata", "Wheel metadata validity", "pass",
             f"Wheel metadata identifies {package_name} {package_version} with {len(tags)} compatibility tag(s).",
+        ))
+    expected_dist_info = f"{re.sub(r'[-_.]+', '_', package_name).lower()}-{package_version}.dist-info"
+    if dist_info != expected_dist_info:
+        checks.append(_check(
+            "artifact.wheel.dist_info_name", "Wheel metadata directory name", "fail",
+            "The .dist-info directory name does not match the embedded distribution Name and Version.",
+            "Rebuild the wheel with a correctly named .dist-info directory.",
+        ))
+    else:
+        checks.append(_check(
+            "artifact.wheel.dist_info_name", "Wheel metadata directory name", "pass",
+            "The .dist-info directory name matches the embedded distribution Name and Version.",
         ))
 
     parts = Path(filename).name[:-4].split("-")
