@@ -611,7 +611,11 @@ def _validate_workspace_guard(config: dict[str, Any], guard: dict[str, Any] | No
     if not isinstance(output_relative, str):
         raise FineTuningError("The MCP workspace training output is invalid.")
     try:
-        current_output = resolve_workspace_output(output_relative, root)
+        current_output = resolve_workspace_output(
+            output_relative,
+            root,
+            allow_checkpoints=config.get("output_policy") == "resume",
+        )
     except (OSError, RuntimeError, ValueError):
         raise FineTuningError("Adapter output changed or is no longer safe inside outputs/.") from None
     if current_output != Path(config["output_dir"]):
