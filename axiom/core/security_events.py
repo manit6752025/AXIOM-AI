@@ -352,7 +352,7 @@ class SecurityEventStore:
             raise SecurityEventError("MCP tool decision profile is invalid.")
         if type(allowed) is not bool:
             raise SecurityEventError("MCP tool decision outcome must be boolean.")
-        if reason not in _TOOL_DECISION_REASONS:
+        if not isinstance(reason, str) or reason not in _TOOL_DECISION_REASONS:
             raise SecurityEventError("MCP tool decision reason is invalid.")
         if (
             not isinstance(argument_names, (list, tuple))
