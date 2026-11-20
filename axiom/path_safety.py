@@ -53,8 +53,11 @@ def find_existing_relative_path(
     Symlink entries and symlinked directories are rejected or skipped.
     """
     parts = _parts(raw)
+    supplied_root = Path(root)
+    if supplied_root.is_symlink():
+        raise SafePathError("workspace root must not be a symbolic link")
     try:
-        base = Path(root).resolve(strict=True)
+        base = supplied_root.resolve(strict=True)
     except (OSError, RuntimeError) as exc:
         raise FileNotFoundError("Workspace root is unavailable") from exc
 
@@ -108,10 +111,50 @@ def find_existing_relative_path(
 
 
 def open_regular_file(path: Path) -> BinaryIO:
-    """Open a previously selected regular file without following its final symlink."""
+    """Open a regular file without following its final or parent symlinks.
+
+    On POSIX, each path component is opened relative to an already-open
+    directory descriptor with O_NOFOLLOW. This closes the parent-directory
+    swap window left by validating a Path and then calling open(path).
+    """
+    target = Path(path)
+    if ".." in target.parts:
+        raise SafePathError("path must not contain parent-directory components")
+
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if (
+        os.name == "posix"
+        and nofollow
+        and getattr(os, "O_DIRECTORY", 0)
+        and os.open in getattr(os, "supports_dir_fd", set())
+    ):
+        absolute = target if target.is_absolute() else Path.cwd() / target
+        parts = absolute.parts
+        if len(parts) < 2 or parts[0] != absolute.anchor:
+            raise SafePathError("path must identify a regular file")
+        directory_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY")
+            | nofollow
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        directory_fd = os.open(absolute.anchor, directory_flags)
+        try:
+            for component in parts[1:-1]:
+                next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+                os.close(directory_fd)
+                directory_fd = next_fd
+            descriptor = os.open(
+                parts[-1],
+                flags | nofollow | getattr(os, "O_CLOEXEC", 0),
+                dir_fd=directory_fd,
+            )
+        finally:
+            os.close(directory_fd)
+    else:
+        descriptor = os.open(path, flags | nofollow)
+
     try:
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             raise SafePathError("path must refer to a regular file")
