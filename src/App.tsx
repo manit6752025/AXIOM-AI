@@ -1094,7 +1094,7 @@ function App() {
 }
 
 function AxiomMark({ small = false }: { small?: boolean }) {
-  return <img className={`axiom-mark ${small ? "small" : ""}`} src="/axiom-mark.svg" alt="" aria-hidden="true" draggable={false} />;
+  return <img className={`axiom-mark ${small ? "small" : ""}`} src="./axiom-mark.svg" alt="" aria-hidden="true" draggable={false} />;
 }
 
 function ThemeToggle({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => void }) {
