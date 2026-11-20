@@ -121,10 +121,12 @@ def test_memory_estimator_exact_parameters_weight_formats_workspace_margin_and_r
     assert sorted(path.name for path in model.iterdir()) == ["config.json"]
 
 
-def test_memory_estimator_mistral_sliding_cache_and_prefill_temporary_formula(tmp_path: Path) -> None:
+def test_memory_estimator_mistral_sliding_cache_and_prefill_temporary_formula(tmp_path: Path, monkeypatch) -> None:
     model = _model(
         tmp_path, "tiny-mistral", model_type="mistral", sliding_window=3,
     )
+
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(tmp_path))
 
     report = estimate_native_quantization(
         str(model), context_length=24, batch_size=2,
@@ -147,11 +149,13 @@ def test_memory_estimator_mistral_sliding_cache_and_prefill_temporary_formula(tm
     assert bf16["estimated_range_gib"] == [_gib(13612.8 * 0.85), _gib(13612.8 * 1.25)]
 
 
-def test_memory_estimator_accounts_for_tied_embeddings_and_optional_projection_biases(tmp_path: Path) -> None:
+def test_memory_estimator_accounts_for_tied_embeddings_and_optional_projection_biases(tmp_path: Path, monkeypatch) -> None:
     model = _model(
         tmp_path, "biased-tied-llama",
         tie_word_embeddings=True, attention_bias=True, mlp_bias=True,
     )
+
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(tmp_path))
 
     report = estimate_native_quantization(str(model), context_length=16, batch_size=1)
 
