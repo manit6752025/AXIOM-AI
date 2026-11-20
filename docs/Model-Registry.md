@@ -25,6 +25,19 @@ the registration form. The CLI accepts `--size-bytes` for both
 the stored byte count. These operations update registry metadata only and do
 not hash, move, download, or rewrite model weights.
 
+## Duplicate protection
+
+The registry rejects a second record when its case-insensitive display name,
+normalized source identity, or non-empty SHA-256 content digest matches an
+existing record. A source path or catalogue identifier is treated as an
+identity, not as proof that two remote snapshots contain identical weights;
+the optional digest is the content-level comparison. Digest comparison is
+case-insensitive. API creation/import reports conflicts with HTTP 409, while
+invalid metadata remains a validation error; failed imports and duplicate
+creates do not partially mutate the registry. The CLI returns a structured
+error for the same conflicts, and the Models form leaves the user's entered
+metadata available for correction.
+
 ## Search, filter, sort, and paginate
 
 The Models page provides server-side inventory controls:
