@@ -112,7 +112,7 @@ def register_workflow_cli(app: typer.Typer) -> None:
         if workflow is None:
             _error(f"Workflow not found: {workflow_id}")
         try:
-            validate_workflow_graph(workflow["name"], workflow["nodes"], workflow["edges"])
+            missing_inputs = validate_workflow_graph(workflow["name"], workflow["nodes"], workflow["edges"])
         except (KeyError, TypeError, ValueError) as exc:
             _error(f"Workflow graph is invalid: {exc}")
         console.print_json(json.dumps({
@@ -120,6 +120,7 @@ def register_workflow_cli(app: typer.Typer) -> None:
             "valid": True,
             "node_count": len(workflow["nodes"]),
             "connection_count": len(workflow["edges"]),
+            "missing_inputs": missing_inputs,
             "execution_status": "not_executable",
         }))
 

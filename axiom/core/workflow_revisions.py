@@ -7,6 +7,7 @@ from typing import Any
 from axiom.core.workflows import (
     WORKFLOW_SCHEMA_VERSION,
     WORKFLOW_VERSION_HISTORY_LIMIT,
+    normalize_workflow_graph,
     validate_workflow_graph,
 )
 
@@ -45,33 +46,8 @@ def _validated_graph(
     if type(edges) is not list or len(edges) > 128:
         raise WorkflowRevisionError("workflow_history_invalid")
 
-    safe_nodes: list[dict[str, str]] = []
-    for node in nodes:
-        if (
-            not isinstance(node, dict)
-            or set(node) != {"id", "type"}
-            or not isinstance(node.get("id"), str)
-            or len(node["id"]) > 64
-            or not isinstance(node.get("type"), str)
-            or len(node["type"]) > 40
-        ):
-            raise WorkflowRevisionError("workflow_history_invalid")
-        safe_nodes.append({"id": node["id"], "type": node["type"]})
-
-    safe_edges: list[dict[str, str]] = []
-    for edge in edges:
-        if (
-            not isinstance(edge, dict)
-            or set(edge) != {"source", "target"}
-            or not isinstance(edge.get("source"), str)
-            or len(edge["source"]) > 64
-            or not isinstance(edge.get("target"), str)
-            or len(edge["target"]) > 64
-        ):
-            raise WorkflowRevisionError("workflow_history_invalid")
-        safe_edges.append({"source": edge["source"], "target": edge["target"]})
-
     try:
+        safe_nodes, safe_edges = normalize_workflow_graph(nodes, edges)
         validate_workflow_graph(name, safe_nodes, safe_edges)
     except (AttributeError, TypeError, ValueError) as exc:
         raise WorkflowRevisionError("workflow_history_invalid") from exc
@@ -158,10 +134,12 @@ def compare_workflow_revision(
     before_nodes = {node["id"]: node["type"] for node in baseline["nodes"]}
     current_nodes = {node["id"]: node["type"] for node in current["nodes"]}
     before_edges = {
-        (edge["source"], edge["target"]) for edge in baseline["edges"]
+        (edge["source"], edge["source_port"], edge["target"], edge["target_port"])
+        for edge in baseline["edges"]
     }
     current_edges = {
-        (edge["source"], edge["target"]) for edge in current["edges"]
+        (edge["source"], edge["source_port"], edge["target"], edge["target_port"])
+        for edge in current["edges"]
     }
 
     added_node_ids = sorted(current_nodes.keys() - before_nodes.keys())
@@ -176,12 +154,12 @@ def compare_workflow_revision(
         if before_nodes[node_id] != current_nodes[node_id]
     ]
     added_edges = [
-        {"source": source, "target": target}
-        for source, target in sorted(current_edges - before_edges)
+        {"source": source, "source_port": source_port, "target": target, "target_port": target_port}
+        for source, source_port, target, target_port in sorted(current_edges - before_edges)
     ]
     removed_edges = [
-        {"source": source, "target": target}
-        for source, target in sorted(before_edges - current_edges)
+        {"source": source, "source_port": source_port, "target": target, "target_port": target_port}
+        for source, source_port, target, target_port in sorted(before_edges - current_edges)
     ]
     name_changed = baseline["name"] != current["name"]
     changed = bool(
