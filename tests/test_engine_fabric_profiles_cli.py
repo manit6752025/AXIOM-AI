@@ -27,9 +27,12 @@ def test_engine_fabric_profile_cli_save_list_connect_delete(tmp_path, monkeypatc
         "--json",
     ])
     assert saved.exit_code == 0, saved.stdout
-    profile = json.loads(saved.stdout)["profile"]
+    saved_payload = json.loads(saved.stdout)
+    profile = saved_payload["profile"]
     assert profile["backend_id"] == "llama-cpp"
-    assert "api_key" not in saved.stdout and "endpoint" not in saved.stdout
+    assert set(profile) == {"id", "name", "backend_id", "model", "created_at", "updated_at"}
+    assert saved_payload["credentials_persisted"] is False
+    assert saved_payload["custom_endpoints_persisted"] is False
 
     listed = runner.invoke(engine_cli.engine_app, ["profile", "list", "--json"])
     assert listed.exit_code == 0, listed.stdout
@@ -43,6 +46,8 @@ def test_engine_fabric_profile_cli_save_list_connect_delete(tmp_path, monkeypatc
     assert result["credentials_persisted"] is False
 
     saved_content = EngineFabricProfileStore().path.read_text(encoding="utf-8")
+    persisted = json.loads(saved_content)
+    assert set(persisted["profiles"][0]) == {"id", "name", "backend_id", "model", "created_at", "updated_at"}
     assert "api_key" not in saved_content and "endpoint" not in saved_content
 
     deleted = runner.invoke(engine_cli.engine_app, ["profile", "delete", profile["id"], "--yes", "--json"])
