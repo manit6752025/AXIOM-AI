@@ -216,7 +216,7 @@ def test_config_validate_accepts_yaml_mapping(tmp_path: Path):
 
 
 def test_doctor_json_reports_dependency_versions_and_schema(tmp_path: Path):
-    (tmp_path / "axiom.yaml").write_text("project:\\n  name: doctor-json\\n", encoding="utf-8")
+    (tmp_path / "axiom.yaml").write_text("project:\n  name: doctor-json\n", encoding="utf-8")
     result = runner.invoke(app, ["doctor", "--workspace", str(tmp_path), "--json"])
 
     assert result.exit_code == 0, result.stdout
