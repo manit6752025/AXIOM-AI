@@ -66,6 +66,8 @@ tokens do not replace TLS, network isolation, or host security.
 - `POST /api/engine/generate` runs inference from an existing local Transformers model directory and optionally a local PEFT adapter.
 - `GET /api/fine-tuning/runtime` reports compatible local LoRA training dependencies.
 - `POST /api/fine-tuning/jobs` starts one bounded local LoRA training job.
+- `GET /api/fine-tuning/jobs/{job_id}` returns one persisted job with its explicit lifecycle and cancellation contract.
+- `POST /api/fine-tuning/jobs/{job_id}/cancel` requests cooperative cancellation before finalization; it returns the updated job and does not claim the worker has already stopped.
 
 Engine and fine-tuning model loads are local-only; they do not download weights or execute remote model code. See [AXIOM Engine](Local-Engine.md) and [Local fine-tuning](Local-Fine-Tuning.md) for limits and supported inputs.
 
