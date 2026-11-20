@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import shutil
+import subprocess
 import socket
 import sys
 import time
@@ -60,6 +62,7 @@ from axiom.models.inspector import inspect_model
 from axiom.models.registry import Model, ModelRegistry
 from axiom.models.runtime_matrix import probe_local_runtime_matrix
 from axiom.core.storage import atomic_write_text
+from axiom.core import updater
 from axiom.runtime.supercompress import compress_context, redacted_base_url
 from axiom.training.planner import create_training_plan
 from axiom.version import __version__
@@ -344,6 +347,80 @@ def version():
     console.print(f"[bold cyan]AXIOM[/bold cyan] v{__version__}")
 
 
+@app.command("update")
+def update_axiom(
+    ctx: typer.Context,
+    channel: str = typer.Option("beta", "--channel", help="Release channel: beta (includes prereleases) or stable."),
+    check_only: bool = typer.Option(False, "--check", help="Check for a release without installing it."),
+    automatic: bool = typer.Option(False, "--auto", "--yes", "-y", help="Install the verified update without prompting."),
+) -> None:
+    """Fetch the latest AXIOM release and safely update the active Python installation."""
+    try:
+        result = updater.check_for_update(__version__, channel=channel)
+    except (updater.UpdateError, ValueError) as exc:
+        _cli_error(str(exc))
+    latest = result["latest_version"]
+    if latest is None:
+        console.print(f"No published {channel} AXIOM release was found. No files were changed.")
+        return
+    if not result["update_available"]:
+        if updater.compare_versions(__version__, latest) > 0:
+            console.print(f"AXIOM v{__version__} is newer than the latest published {channel} release v{latest}.")
+        else:
+            console.print(f"AXIOM v{__version__} is already up to date on the {channel} channel.")
+        return
+    release = result["release"] or {}
+    console.print(f"Update available: AXIOM v{__version__} -> v{latest}")
+    if release.get("html_url"):
+        console.print(str(release["html_url"]))
+    if check_only:
+        console.print("Check complete. Run 'axiom update --auto' to install the verified wheel.")
+        return
+    non_interactive = bool((ctx.obj or {}).get("non_interactive")) or not sys.stdin.isatty()
+    if not automatic:
+        if non_interactive:
+            _cli_error("An update is available; use 'axiom update --auto' to install it without a prompt.")
+        if not typer.confirm(f"Install AXIOM v{latest} into the active Python environment?", default=False):
+            console.print("Update cancelled. Your current installation was left unchanged.")
+            return
+    try:
+        installed = updater.download_and_install(latest)
+    except updater.UpdateError as exc:
+        _cli_error(str(exc))
+    console.print(f"[bold green]AXIOM v{installed['installed_version']} installed[/bold green].")
+    console.print("Your models, workspaces, account data and browser storage were left in place.")
+    console.print("Restart AXIOM (and the Control Center) to load the updated application.")
+
+
+def _refresh_control_center(root: Path | None = None) -> None:
+    """Lint and rebuild the checked-out frontend without touching browser storage."""
+    source_root = root or Path(__file__).resolve().parents[2]
+    if not (source_root / "package.json").is_file() or not (source_root / "scripts/copy_webui.mjs").is_file():
+        _cli_error("axiom gui --refresh requires the AXIOM source checkout and frontend package.json.")
+    npm = shutil.which("npm")
+    if npm is None:
+        _cli_error("npm is required for axiom gui --refresh; install Node.js/npm and retry.")
+    for step in ("lint", "build"):
+        console.print(f"[cyan]Refreshing Control Center:[/cyan] npm run {step}")
+        try:
+            completed = subprocess.run([npm, "run", step], cwd=source_root, check=False)
+        except OSError as exc:
+            _cli_error(f"Could not run npm {step}: {exc}")
+        if completed.returncode != 0:
+            _cli_error(f"npm run {step} failed with exit code {completed.returncode}; the previous bundled UI remains available.")
+
+
+def _existing_gui_is_ready(port: int) -> bool:
+    if port == 0:
+        return False
+    request = urllib.request.Request(f"http://127.0.0.1:{port}/api/health")
+    try:
+        with urllib.request.urlopen(request, timeout=0.75) as response:
+            return response.status == 200
+    except (OSError, urllib.error.URLError, TimeoutError):
+        return False
+
+
 def _record_mcp_security_event(event_type: str) -> None:
     """Record an allowlisted local MCP security action after it succeeds."""
     try:
@@ -614,8 +691,11 @@ def start_gui(
         "--open/--no-open",
         help="Open the local Control Center in your browser.",
     ),
+    refresh: bool = typer.Option(False, "--refresh", help="Run frontend lint/build, then reload the same Control Center origin without clearing browser storage."),
 ) -> None:
-    """Start the local API and open the AXIOM Control Center."""
+    """Start AXIOM, or rebuild and refresh an already-running Control Center."""
+    if refresh:
+        _refresh_control_center()
     try:
         port = _resolve_gui_port(port)
     except ValueError as exc:
@@ -636,6 +716,13 @@ def start_gui(
         listener.listen(128)
     except OSError as exc:
         listener.close()
+        if refresh and _existing_gui_is_ready(port):
+            ui_url = f"http://127.0.0.1:{port}/ui/?axiom_refresh={time.time_ns()}"
+            console.print(f"[bold green]AXIOM Control Center assets refreshed[/bold green]  {ui_url}")
+            console.print("Reused the running API and browser origin; local sign-in and browser storage were not cleared.")
+            if open_browser:
+                webbrowser.open(ui_url, new=0)
+            return
         _cli_error(f"Could not start the local Control Center: {exc}")
 
     selected_port = listener.getsockname()[1]
@@ -676,10 +763,12 @@ def start_gui(
         _cli_error(f"The local API did not become ready. Check the AXIOM installation and try again (request ID {last_request_id}).")
 
     ui_url = f"{base_url}/ui/"
+    if refresh:
+        ui_url += f"?axiom_refresh={time.time_ns()}"
     console.print(f"[bold green]AXIOM Control Center ready[/bold green]  {ui_url}")
     console.print("The local API is bound to loopback. Press Ctrl-C to stop it.")
     if open_browser:
-        webbrowser.open(ui_url, new=2)
+        webbrowser.open(ui_url, new=0 if refresh else 2)
 
     try:
         thread.join()
