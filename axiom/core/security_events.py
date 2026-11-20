@@ -14,7 +14,9 @@ import re
 import stat
 import uuid
 from datetime import UTC, datetime
+from contextlib import contextmanager
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 
 from axiom.core.storage import atomic_write_text, file_lock
@@ -77,6 +79,18 @@ class SecurityEventStore:
         self.directory = self.root / ".axiom"
         self.path = self.directory / "security-events.json"
         self.lock_path = self.directory / "security-events.lock"
+
+    @contextmanager
+    def _locked(self) -> Iterator[None]:
+        self._check_paths(create=True)
+        try:
+            with self._locked():
+                self._check_paths()
+                if os.name == "posix":
+                    os.chmod(self.lock_path, stat.S_IRUSR | stat.S_IWUSR)
+                yield
+        except (OSError, TimeoutError) as exc:
+            raise SecurityEventError("Security journal lock could not be acquired safely.") from exc
 
     def _check_paths(self, *, create: bool = False) -> None:
         if self.directory.is_symlink():
