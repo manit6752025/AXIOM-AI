@@ -508,6 +508,7 @@ class SecurityEventStore:
             "schema_version": self._loaded_schema_version,
             "exported_at": _utc_now(),
             "integrity": {
+                "schema_version": self._loaded_schema_version,
                 "valid": True,
                 "event_count": len(events),
                 "max_events": MAX_EVENTS,
