@@ -98,3 +98,27 @@ def test_unknown_checkpoint_files_fail_closed(tmp_path):
 
     with pytest.raises(ValueError, match="unknown entry"):
         checkpoints.latest_checkpoint(output)
+
+
+def test_checkpoint_step_must_match_directory_name(tmp_path):
+    output = tmp_path / "adapter"
+    output.mkdir()
+    save(output, 2)
+    checkpoint, state = checkpoints.latest_checkpoint(output)
+    state["completed_steps"] = 3
+    (checkpoint / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="does not match its directory name"):
+        checkpoints.latest_checkpoint(output)
+
+
+def test_checkpoint_schema_rejects_boolean_version(tmp_path):
+    output = tmp_path / "adapter"
+    output.mkdir()
+    save(output, 1)
+    checkpoint, state = checkpoints.latest_checkpoint(output)
+    state["schema_version"] = True
+    (checkpoint / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="schema is unsupported"):
+        checkpoints.latest_checkpoint(output)
