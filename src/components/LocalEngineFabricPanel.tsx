@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Activity, BarChart3, Gauge, RefreshCcw, Rocket, Trash2 } from "lucide-react";
-import { axiomApi, type EngineFabricProfile, type EngineFabricReport, type EngineFabricChatResult, type EngineFabricBenchmarkPreflight, type EngineFabricBenchmarkResult } from "../api/client";
+import { axiomApi, type EngineFabricProfile, type EngineFabricReport, type EngineFabricChatResult, type EngineFabricBenchmarkPreflight, type EngineFabricBenchmarkResult, type EngineFabricSavedProfile } from "../api/client";
 
 const formatStatus = (status: string) => status.replaceAll("_", " ").toUpperCase();
 
@@ -30,6 +30,11 @@ export default function LocalEngineFabricPanel() {
   const [benchmarkResults, setBenchmarkResults] = useState<EngineFabricBenchmarkResult[]>([]);
   const [benchmarkPreflight, setBenchmarkPreflight] = useState<EngineFabricBenchmarkPreflight | null>(null);
   const [checkingRequirements, setCheckingRequirements] = useState(false);
+  const [savedProfiles, setSavedProfiles] = useState<EngineFabricSavedProfile[]>([]);
+  const [profileName, setProfileName] = useState("");
+  const [selectedProfileId, setSelectedProfileId] = useState("");
+  const [profileChecking, setProfileChecking] = useState(false);
+  const [connectionVerified, setConnectionVerified] = useState(false);
 
   const refresh = async (nextProfile = profile) => {
     setLoading(true);
@@ -60,7 +65,12 @@ export default function LocalEngineFabricPanel() {
     }
   };
 
-  useEffect(() => { void refresh("balanced"); }, []);
+  useEffect(() => {
+    void refresh("balanced");
+    void axiomApi.engineBackendProfiles().then((result) => setSavedProfiles(result.profiles)).catch(() => {
+      // Engine Fabric profile controls remain usable through the API/CLI if the workspace API is unavailable.
+    });
+  }, []);
 
   const selected = report?.backends.find((item) => item.id === selectedBackend) ?? null;
   const choices = report?.backends.filter((item) => item.supports_chat) ?? [];
@@ -156,6 +166,90 @@ export default function LocalEngineFabricPanel() {
   };
 
 
+  const saveConnectorProfile = async () => {
+    const name = profileName.trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,47}$/.test(name)) {
+      setError("Connector profile names must be 1–48 safe characters and start with a letter or number.");
+      return;
+    }
+    if (!selected || !model.trim()) {
+      setError("Select a local backend and exact model ID before saving a connector profile.");
+      return;
+    }
+    try {
+      const saved = await axiomApi.saveEngineBackendProfile({
+        name,
+        backend_id: selected.id as EngineFabricChatResult["backend_id"],
+        model: model.trim(),
+      });
+      setSavedProfiles((current) => [
+        saved.profile,
+        ...current.filter((item) => item.id !== saved.profile.id && item.name.toLowerCase() !== name.toLowerCase()),
+      ]);
+      setSelectedProfileId(saved.profile.id);
+      setConnectionVerified(false);
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The workspace connector profile could not be saved.");
+    }
+  };
+
+  const applyConnectorProfile = () => {
+    const item = savedProfiles.find((profileItem) => profileItem.id === selectedProfileId);
+    if (!item) return;
+    setSelectedBackend(item.backend_id);
+    setModel(item.model);
+    setRoutingMode("selected");
+    setResult(null);
+    setConnectionVerified(false);
+    setBenchmarkPreflight(null);
+    setError("Profile loaded. Connect verifies the local health and exact model inventory before dispatch.");
+  };
+
+  const connectConnectorProfile = async () => {
+    if (!selectedProfileId) return;
+    setProfileChecking(true);
+    setError("");
+    try {
+      const verification = await axiomApi.connectEngineBackendProfile(selectedProfileId);
+      const item = savedProfiles.find((profileItem) => profileItem.id === verification.profile_id);
+      if (!item) throw new Error("The verified profile is no longer in the saved profile list.");
+      setSelectedBackend(item.backend_id);
+      setModel(item.model);
+      setRoutingMode("selected");
+      setConnectionVerified(true);
+      setResult(null);
+      setBenchmarkPreflight(null);
+    } catch (cause) {
+      setConnectionVerified(false);
+      setError(cause instanceof Error ? cause.message : "The local connector could not be verified.");
+    } finally {
+      setProfileChecking(false);
+    }
+  };
+
+  const disconnectConnectorProfile = () => {
+    setConnectionVerified(false);
+    setResult(null);
+    setBenchmarkPreflight(null);
+    setBenchmarkResults([]);
+    setError("Disconnected from this AXIOM session. The external runtime remains running and is not stopped.");
+  };
+
+  const deleteConnectorProfile = async () => {
+    if (!selectedProfileId) return;
+    try {
+      await axiomApi.deleteEngineBackendProfile(selectedProfileId);
+      setSavedProfiles((current) => current.filter((item) => item.id !== selectedProfileId));
+      setSelectedProfileId("");
+      setProfileName("");
+      setConnectionVerified(false);
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The connector profile could not be deleted.");
+    }
+  };
+
   const checkBenchmarkRequirements = async () => {
     setError("");
     if (!selected || !model.trim()) { setError("Select a local adapter and an exact discovered model ID first."); return; }
@@ -234,6 +328,39 @@ export default function LocalEngineFabricPanel() {
       </button>
     </div>
     <p>AXIOM Native Engine is a first-class in-process backend; Fabric compares it with Ollama, llama.cpp, LM Studio, vLLM and llama-cpp-python, then routes local chat requests using your workload profile and exact model ID.</p>
+    <section className="surface" aria-label="Engine Fabric connector profiles" style={{ marginTop: 16, padding: 16, border: "1px solid var(--line)", borderRadius: 2 }}>
+      <div className="surface-head">
+        <div><p className="surface-eyebrow">WORKSPACE-LOCAL · SECRET-FREE</p><h3>Saved local connector profiles</h3></div>
+        <span className={"status-pill " + (connectionVerified ? "success" : "neutral")}><i />{connectionVerified ? "VERIFIED THIS SESSION" : "NOT CONNECTED"}</span>
+      </div>
+      <div className="two-column-grid">
+        <label className="field">
+          <span className="field-label-row"><span>Saved Engine Fabric profile</span></span>
+          <select aria-label="Saved Engine Fabric profile" value={selectedProfileId} onChange={(event) => setSelectedProfileId(event.target.value)}>
+            <option value="">Choose a saved local profile</option>
+            {savedProfiles.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.backend_id} · {item.model}</option>)}
+          </select>
+        </label>
+        <div className="integration-form-actions">
+          <button type="button" className="button secondary-button" onClick={applyConnectorProfile} disabled={!selectedProfileId}>Apply</button>
+          <button type="button" className="button secondary-button" onClick={connectConnectorProfile} disabled={!selectedProfileId || profileChecking || running || benchmarking}>
+            {profileChecking ? "Verifying…" : "Connect"}
+          </button>
+          <button type="button" className="button secondary-button" onClick={disconnectConnectorProfile} disabled={!connectionVerified || profileChecking}>Disconnect</button>
+          <button type="button" className="button secondary-button" onClick={() => void deleteConnectorProfile()} disabled={!selectedProfileId || profileChecking}>Delete</button>
+        </div>
+      </div>
+      <div className="two-column-grid">
+        <label className="field">
+          <span className="field-label-row"><span>Profile name</span></span>
+          <input aria-label="Engine Fabric profile name" value={profileName} onChange={(event) => setProfileName(event.target.value)} maxLength={48} placeholder="e.g. Office llama.cpp" />
+        </label>
+        <div className="integration-form-actions">
+          <button type="button" className="button secondary-button" onClick={() => void saveConnectorProfile()} disabled={!profileName.trim() || !selected || !model.trim()}>Save selected backend + model</button>
+        </div>
+      </div>
+      <p className="quiet-note">Profiles store only a fixed backend ID and exact model ID in the active workspace. API keys, endpoint URLs, prompts and chat history are never saved. Connect performs a fresh loopback health/model check; it does not retain a socket or launch a process. Disconnect clears this AXIOM view only and does not stop an external runtime.</p>
+    </section>
     <div className="two-column-grid">
       <label className="field">
         <span className="field-label-row"><span>Optimization profile</span></span>
