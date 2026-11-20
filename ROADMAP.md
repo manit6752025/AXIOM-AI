@@ -143,7 +143,7 @@ feature exists or a delivery-date promise.
 
 ### 09 · Agent profiles, MCP, and security
 
-- [R097 · Planned] Add versioned agent profiles with explicit task capabilities.
+- [R097 · Implemented; tests passing] Add versioned workspace-local agent profiles with an explicit bounded task-capability catalog, a required default-deny profile, safe persistence, API/CLI/GUI CRUD, and revision increments. Profiles are descriptive metadata and never grant tool permissions.
 - [R098 · In progress; validation pending] Enforce default-deny tool permissions in the backend boundary.
 - [R099 · Planned] Add per-tool read, write, network, and execution scopes.
 - [R100 · Planned] Add auditable allow/deny decisions with redacted arguments.
