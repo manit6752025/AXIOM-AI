@@ -73,10 +73,13 @@ control. The API remains bounded by its route schemas and permission policy.
 
 `axiom update --check` inspects the beta channel without installing. Use
 `--channel stable` to exclude prereleases, or `axiom update --auto` to fetch
-and install the exact newer release. The updater verifies the PyPI wheel digest
-and AXIOM package/version metadata before invoking pip in the active Python
-environment. It does not operate on model directories, workspaces, account
-databases, configuration or browser storage. Restart AXIOM after installation.
+and install the exact newer release. The updater maps AXIOM beta tags to
+canonical PEP 440 versions, verifies the PyPI SHA-256, and runs AXIOM's
+non-executing wheel inspector to check package metadata, archive paths, the
+complete RECORD manifest, and each recorded file hash/size before invoking pip
+in the active Python environment. It does not operate on model directories,
+workspaces, account databases, configuration or browser storage. Restart AXIOM
+after installation.
 
 `axiom gui --refresh` is a source-checkout workflow: it runs frontend lint and
 production build. Existing tabs detect the new bundle through a no-cache
