@@ -1238,7 +1238,24 @@ export type McpServerInventoryEntry = {
   configured: boolean;
   executable: string | null;
   argument_count: number;
-  connection_state: "not_inspected";
+  trust_status: "unverified" | "trusted" | "blocked";
+  owner_type: "unknown" | "workspace" | "external";
+  owner_label: string | null;
+  ownership_verified: false;
+  connection_state: "not_inspected" | "connected" | "failed" | "timeout";
+  last_inspected_at: string | null;
+  last_connection_error: string | null;
+};
+
+export type McpServerTrustUpdate = {
+  trust_status: "unverified" | "trusted" | "blocked";
+  owner_type: "unknown" | "workspace" | "external";
+  owner_label: string | null;
+};
+
+export type McpServerTrustRecord = McpServerTrustUpdate & {
+  name: string;
+  ownership_verified: false;
 };
 
 export type McpServerInventory = {
@@ -2242,6 +2259,11 @@ export const axiomApi = {
 
   mcpToolPolicy: () => requestJson<McpToolPolicy>("/api/security/tool-permissions"),
   mcpServerInventory: () => requestJson<McpServerInventory>("/api/mcp/servers"),
+  updateMcpServerTrust: (name: string, update: McpServerTrustUpdate) =>
+    requestJson<McpServerTrustRecord>(
+      `/api/mcp/servers/${encodeURIComponent(name)}/trust`,
+      { method: "PATCH", body: JSON.stringify(update) },
+    ),
   inspectMcpServer: (name: string) =>
     requestJson<McpServerHandshake>(
       `/api/mcp/servers/${encodeURIComponent(name)}/handshake`,
