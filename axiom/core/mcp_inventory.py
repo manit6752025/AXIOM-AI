@@ -49,20 +49,26 @@ def _registry() -> IntegrationRegistry:
     return registry
 
 
-def _command_parts(command: str | None) -> list[str]:
+def _command_parts(command: str | None, *, windows: bool | None = None) -> list[str]:
     if not isinstance(command, str) or not command.strip():
         return []
     if len(command) > MAX_COMMAND_CHARS or "\x00" in command:
         raise McpInventoryError("Configured MCP command exceeds the supported limit.")
+    windows_parser = os.name == "nt" if windows is None else windows
     try:
-        parts = shlex.split(command, posix=True)
+        parts = shlex.split(command, posix=not windows_parser)
+        if windows_parser:
+            # shlex preserves outer quotes in non-POSIX mode; remove only a
+            # matching pair so spaces and backslashes in Windows paths survive.
+            parts = [
+                part[1:-1] if len(part) >= 2 and part[0] == part[-1] and part[0] in {"'", '"'} else part
+                for part in parts
+            ]
     except ValueError as exc:
         raise McpInventoryError("Configured MCP command quoting is invalid.") from exc
     if not parts or len(parts) > MAX_COMMAND_PARTS:
         raise McpInventoryError("Configured MCP command has an invalid number of arguments.")
     return parts
-
-
 def _safe_text(value: object) -> str | None:
     if not isinstance(value, str):
         return None
