@@ -14,6 +14,7 @@ import os
 import re
 import stat
 import tarfile
+import unicodedata
 import zipfile
 from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
@@ -117,7 +118,7 @@ def _zip_inventory(archive: zipfile.ZipFile) -> tuple[list[zipfile.ZipInfo], lis
             ))
             continue
         normalized = name[:-1] if is_directory and name.endswith("/") else name
-        folded = __import__("unicodedata").normalize("NFC", normalized).casefold()
+        folded = unicodedata.normalize("NFC", normalized).casefold()
         if not _safe_member_name(name):
             unsafe = True
             checks.append(_check(
@@ -424,7 +425,7 @@ def _verify_tar_sdist(stream: BinaryIO) -> dict[str, Any]:
                         "Rebuild the source archive with normalized relative POSIX paths.",
                     ))
                     continue
-                normalized = member.name.rstrip("/")
+                normalized = unicodedata.normalize("NFC", member.name.rstrip("/")).casefold()
                 if normalized in seen:
                     checks.append(_check(
                         "artifact.archive.duplicates", "Duplicate archive paths", "fail",
