@@ -173,6 +173,49 @@ def test_integration_handshake_json_reports_protocol_metadata(tmp_path: Path, mo
     assert payload["schemas_enumerated"] is False
 
 
+def test_integration_schemas_json_returns_bounded_read_only_metadata(tmp_path: Path, monkeypatch) -> None:
+    from axiom.core.integrations import AgentIntegration, IntegrationRegistry, IntegrationType
+    from axiom.core import mcp_inventory
+
+    monkeypatch.chdir(tmp_path)
+    IntegrationRegistry().add(
+        AgentIntegration("Local MCP", IntegrationType.MCP, command="python -m local.server")
+    )
+
+    async def fake_inspect(name: str):
+        assert name == "Local MCP"
+        return {
+            "name": name,
+            "transport": "stdio",
+            "status": "ok",
+            "protocol_version": "2025-11-25",
+            "tools": [{
+                "name": "lookup",
+                "title": "Lookup",
+                "description": "Find records",
+                "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}},
+                "output_schema": None,
+                "annotations": {"readOnlyHint": True},
+            }],
+            "resources": [],
+            "resource_templates": [],
+            "truncated": {"tools": False, "resources": False, "resource_templates": False},
+            "duration_ms": 9,
+            "tool_execution_performed": False,
+            "resource_read_performed": False,
+            "prompt_execution_performed": False,
+        }
+
+    monkeypatch.setattr(mcp_inventory, "inspect_mcp_schemas", fake_inspect)
+    result = runner.invoke(app, ["integration", "schemas", "Local MCP", "--json"])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["tools"][0]["name"] == "lookup"
+    assert payload["tool_execution_performed"] is False
+    assert payload["resource_read_performed"] is False
+
+
 def test_model_search_json_skips_symlink_entries(tmp_path: Path) -> None:
     root = tmp_path / "models"
     model_dir = root / "tiny-llama"
