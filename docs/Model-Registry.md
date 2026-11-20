@@ -30,6 +30,30 @@ the stored byte count. Repeat `--workspace-label` when adding/updating models;
 `--clear-workspace-labels` explicitly clears the separate workspace labels. These operations update registry metadata only and do
 not hash, move, download, or rewrite model weights.
 
+## Source attribution and licence review
+
+Registry records distinguish the source identifier/path from the attribution
+attached to that source. Optional `source_attribution` records the publisher,
+author, or organisation; `source_url` links to the source page or model card;
+and `source_revision` records a commit, tag, or other immutable revision when
+available. Source URLs must be trimmed HTTP(S) URLs with a hostname and no
+embedded username/password. AXIOM validates and stores the URL but does not
+fetch it, verify that it exists, or assert that its contents are trustworthy.
+
+The `license_review` field is a human-managed state: `unreviewed` (the default),
+`approved`, `restricted`, or `unknown`. Optional `license_review_notes`
+stores a bounded reviewer note. Older registry records without these properties
+load with safe defaults; no existing record is implicitly considered reviewed.
+The state describes the reviewer's own decision and is not legal advice, a
+copyright determination, a rights grant, or an AXIOM certification. A user
+should check the original licence terms and source before distributing weights.
+
+The Models registration form, API create/update, and CLI `model add/update`
+support these fields. CLI options are `--source-attribution`, `--source-url`,
+`--source-revision`, `--license-review`, and `--license-review-notes`.
+The GUI labels the linked source and review state in the inventory row. Model
+metadata updates never download, modify, or redistribute model files.
+
 ## Duplicate protection
 
 The registry rejects a second record when its case-insensitive display name,
