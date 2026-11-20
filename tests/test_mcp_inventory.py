@@ -383,7 +383,6 @@ def test_schema_browse_respects_capability_flags_and_marks_pagination_truncation
 
     monkeypatch.setattr(mcp_inventory, "Client", FakeClient)
     monkeypatch.setattr(mcp_inventory, "stdio_client", lambda *_args, **_kwargs: object())
-    old_pages = mcp_inventory.MAX_SCHEMA_PAGES
     monkeypatch.setattr(mcp_inventory, "MAX_SCHEMA_PAGES", 2)
 
     result = asyncio.run(mcp_inventory.inspect_mcp_schemas("Local MCP"))
