@@ -19,6 +19,7 @@ VALID_STATUSES = {
     "Planned",
     "In progress",
     "In progress; validation pending",
+    "Implemented; tests passing; code-scan review pending",
 }
 
 
