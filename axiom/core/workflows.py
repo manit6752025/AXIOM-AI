@@ -26,12 +26,12 @@ def _port(port_id: str, data_type: str, *, required: bool = False) -> dict[str, 
 
 WORKFLOW_NODE_PORT_SCHEMAS: dict[str, dict[str, Any]] = {
     "dataset.profile": {
-        "inputs": [],
+        "inputs": [_port("artifact", "artifact")],
         "outputs": [_port("dataset", "dataset"), _port("artifact", "artifact")],
         "required_any_inputs": [],
     },
     "model.inspect": {
-        "inputs": [],
+        "inputs": [_port("artifact", "artifact")],
         "outputs": [_port("model", "model"), _port("artifact", "artifact")],
         "required_any_inputs": [],
     },
