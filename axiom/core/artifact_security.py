@@ -231,7 +231,7 @@ def _zip_read_bounded(archive: zipfile.ZipFile, info: zipfile.ZipInfo, limit: in
 
 
 def _verify_wheel(archive: zipfile.ZipFile, filename: str) -> dict[str, Any]:
-    infos, checks, total_size = _zip_inventory(archive)
+    infos, checks, _total_size = _zip_inventory(archive)
     by_name = {info.filename: info for info in infos}
     dist_info_roots = {
         "/".join(info.filename.split("/")[:i + 1])
@@ -267,7 +267,7 @@ def _verify_wheel(archive: zipfile.ZipFile, filename: str) -> dict[str, Any]:
     package_version = metadata.get("Version", "").strip()
     wheel_version = wheel_metadata.get("Wheel-Version", "").strip()
     tags = wheel_metadata.get_all("Tag", [])
-    if not package_name or not package_version or not wheel_version.startswith(("1.", "2.")) or not tags:
+    if not package_name or not package_version or not re.fullmatch(r"[12]\.\d+", wheel_version) or not tags:
         checks.append(_check(
             "artifact.wheel.metadata", "Wheel metadata validity", "fail",
             "The wheel's Name, Version, Wheel-Version, or Tag metadata is missing or malformed.",
