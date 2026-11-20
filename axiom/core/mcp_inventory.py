@@ -101,7 +101,13 @@ def list_mcp_servers() -> dict[str, Any]:
             "configured": bool(parts),
             "executable": Path(parts[0]).name[:_METADATA_CHARS] if parts else None,
             "argument_count": max(0, len(parts) - 1),
-            "connection_state": "not_inspected",
+            "trust_status": integration.trust_status,
+            "owner_type": integration.owner_type,
+            "owner_label": _safe_text(integration.owner_label),
+            "ownership_verified": False,
+            "connection_state": integration.connection_status,
+            "last_inspected_at": integration.last_inspected_at,
+            "last_connection_error": integration.last_connection_error,
         })
 
     return {
@@ -128,7 +134,36 @@ def _find_server(name: str):
         raise McpInventoryError("MCP integration registry could not be read safely.") from exc
     if not matches:
         raise McpInventoryError("The requested MCP server is not registered.", code="not_found")
-    return matches[0]
+    integration = matches[0]
+    if integration.trust_status == "blocked":
+        raise McpInventoryError(
+            "This MCP server is blocked by the workspace trust policy.",
+            code="server_blocked",
+        )
+    if integration.trust_status != "trusted":
+        raise McpInventoryError(
+            "This MCP server is unverified. Explicitly mark it trusted before starting the process.",
+            code="server_unverified",
+        )
+    return integration
+
+
+def _record_connection_result(name: str, result: dict[str, Any]) -> bool:
+    status = result.get("status")
+    connection_status = (
+        "connected" if status == "ok"
+        else "timeout" if result.get("error_code", "").endswith("timeout")
+        else "failed"
+    )
+    try:
+        _registry().record_mcp_connection(
+            name,
+            connection_status=connection_status,
+            last_connection_error=result.get("error_code") if status != "ok" else None,
+        )
+    except Exception:
+        return False
+    return True
 
 
 async def _perform_handshake(parts: list[str], timeout_seconds: float) -> dict[str, Any]:
@@ -217,6 +252,7 @@ async def inspect_mcp_server(
             "schemas_enumerated": False,
         }
 
+    result["connection_state_persisted"] = _record_connection_result(integration.name, result)
     return {
         "name": _safe_text(integration.name) or "Unnamed MCP server",
         "transport": "stdio",
@@ -509,6 +545,7 @@ async def inspect_mcp_schemas(
             "resource_read_performed": False,
             "prompt_execution_performed": False,
         }
+    result["connection_state_persisted"] = _record_connection_result(integration.name, result)
     return {
         "name": _safe_text(integration.name) or "Unnamed MCP server",
         "transport": "stdio",
