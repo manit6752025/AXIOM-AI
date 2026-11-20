@@ -1,7 +1,7 @@
 """HTTP API for opt-in local LoRA fine-tuning jobs."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -28,6 +28,8 @@ class StartFineTuningRequest(BaseModel):
     sequence_length: int = Field(default=512, ge=32, le=2048)
     learning_rate: float = Field(default=0.0001, ge=0.000001, le=0.01)
     lora_rank: int = Field(default=8, ge=1, le=64)
+    checkpoint_interval: int = Field(default=0, ge=0, le=1000)
+    output_policy: Literal["new", "empty", "resume"] = "empty"
 
 
 @router.get("/runtime")
