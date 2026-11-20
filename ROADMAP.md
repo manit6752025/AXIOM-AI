@@ -153,7 +153,7 @@ feature exists or a delivery-date promise.
 - [R113 · Planned] Add benchmark-linked resource trend charts with missing-data labels.
 - [R114 · Planned] Add telemetry export, clear-history, and privacy controls.
 - [R115 · In progress; validation pending] Add diagnostic checks for config parsing and permissions, safe paths, dependency importability and minimum versions, and storage free space.
-- [R116 · In progress; validation pending] Deliver allowlisted redacted support bundles through the API, Diagnostics GUI, and CLI; exclude secrets, environment values, data/model contents, and absolute workspace paths, and write CLI archives with private POSIX permissions.
+- [R116 · Implemented; tests passing; code-scan review pending] Deliver allowlisted redacted support bundles through the API, Diagnostics GUI, and CLI; exclude secrets, environment values, data/model contents, and absolute workspace paths; reject symlinked output/parent paths and write CLI archives with private POSIX permissions. Verified with 954 Python tests, 62 browser E2E tests, ESLint, TypeScript/production build, and Ubuntu/Windows/macOS release-contract checks (quality-gates run #44706792876). GitHub-managed default CodeQL alerts still require repository-owner review.
 - [R117 · Implemented; tests passing] Add release smoke checks for CLI, API, production UI build, and browser acceptance coverage together.
 - [R118 · Planned] Add cross-platform packaging verification for supported targets.
 - [R119 · Planned] Add migration/rollback notes for every persisted-data schema change.
