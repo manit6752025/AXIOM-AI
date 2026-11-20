@@ -479,7 +479,7 @@ def validate_config(
     if not isinstance(output_raw, str) or not output_raw.strip():
         raise ValueError("Adapter output directory is required.")
     raw_output_path = Path(output_raw).expanduser()
-    if raw_output_path.exists() and raw_output_path.is_symlink():
+    if raw_output_path.is_symlink() or getattr(raw_output_path, "is_junction", lambda: False)():
         raise ValueError("Adapter output directory cannot be a symbolic link.")
     try:
         output_dir = raw_output_path.resolve(strict=False)
@@ -1291,14 +1291,20 @@ def _prepare_output_directory(config: dict[str, Any]) -> None:
             raise FineTuningError("The adapter output directory could not be created safely.") from None
 
 
-def _assert_output_ready_for_finalization(output_dir: Path) -> None:
-    if output_dir.is_symlink() or not output_dir.is_dir():
+def _assert_output_ready_for_finalization(
+    output_dir: Path,
+    *,
+    require_checkpoint: bool = False,
+) -> None:
+    if output_dir.is_symlink() or getattr(output_dir, "is_junction", lambda: False)() or not output_dir.is_dir():
         raise FineTuningError("Adapter output directory changed or is no longer a safe directory.")
     try:
         entries = list(output_dir.iterdir())
     except OSError:
         raise FineTuningError("Adapter output directory could not be inspected safely.") from None
     if not entries:
+        if require_checkpoint:
+            raise FineTuningError("Resume checkpoint storage disappeared before finalization.")
         return
     if len(entries) != 1 or entries[0].name != CHECKPOINT_DIRECTORY:
         raise FineTuningError("Adapter output contains user-managed files; refusing to overwrite them.")
@@ -1642,7 +1648,7 @@ def _run_transformers(
         cancel_check()
     if workspace_guard_check:
         workspace_guard_check()
-    _assert_output_ready_for_finalization(output_dir)
+    _assert_output_ready_for_finalization(output_dir, require_checkpoint=config["output_policy"] == "resume")
     try:
         model.save_pretrained(str(output_dir), safe_serialization=True)
         tokenizer.save_pretrained(str(output_dir))
