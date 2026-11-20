@@ -418,6 +418,62 @@ def test_schema_inspection_timeout_returns_no_child_output(tmp_path, monkeypatch
     assert "private path.json" not in str(result)
 
 
+
+def test_schema_browse_negotiates_real_stdio_tool_resource_and_template_metadata(tmp_path, monkeypatch):
+    import shlex
+    import sys
+
+    monkeypatch.chdir(tmp_path)
+    server_script = tmp_path / "schema_probe.py"
+    marker = tmp_path / "capability-executed.txt"
+    server_script.write_text(
+        "from pathlib import Path\n"
+        "from mcp.server import MCPServer\n"
+        "server = MCPServer('AXIOM Schema Probe')\n"
+        f"marker = Path({str(marker)!r})\n"
+        "@server.tool()\n"
+        "def search_catalog(query: str) -> dict:\n"
+        "    'Search the catalog by name.'\n"
+        "    marker.write_text('tool executed', encoding='utf-8')\n"
+        "    return {'matches': []}\n"
+        "@server.resource('catalog://items')\n"
+        "def catalog_items() -> str:\n"
+        "    'The catalog item index.'\n"
+        "    marker.write_text('resource read', encoding='utf-8')\n"
+        "    return 'item index'\n"
+        "@server.resource('catalog://items/{item_id}')\n"
+        "def catalog_item(item_id: str) -> str:\n"
+        "    'A catalog item.'\n"
+        "    marker.write_text('resource template read', encoding='utf-8')\n"
+        "    return item_id\n"
+        "if __name__ == '__main__':\n"
+        "    server.run()\n",
+        encoding="utf-8",
+    )
+    IntegrationRegistry().add(
+        AgentIntegration(
+            "Schema Probe",
+            IntegrationType.MCP,
+            command=shlex.join([sys.executable, str(server_script)]),
+        )
+    )
+
+    result = asyncio.run(
+        mcp_inventory.inspect_mcp_schemas("Schema Probe", timeout_seconds=12)
+    )
+
+    assert result["status"] == "ok", result
+    assert result["server_name"] == "AXIOM Schema Probe"
+    assert [tool["name"] for tool in result["tools"]] == ["search_catalog"]
+    assert result["tools"][0]["input_schema"]["properties"]["query"]["type"] == "string"
+    assert [resource["name"] for resource in result["resources"]] == ["catalog_items"]
+    assert [template["name"] for template in result["resource_templates"]] == ["catalog_item"]
+    assert result["tool_execution_performed"] is False
+    assert result["resource_read_performed"] is False
+    assert result["prompt_execution_performed"] is False
+    assert not marker.exists(), "Schema browsing must not execute tool or resource handlers"
+
+
 def test_handshake_rejects_unknown_server_and_invalid_timeout(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _add_server()
