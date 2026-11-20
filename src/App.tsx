@@ -38,6 +38,7 @@ import {
   type McpToolPolicy,
   type McpServerInventory,
   type McpServerHandshake,
+  type McpSchemaInspection,
   type RuntimeSnapshot,
   type TrainingPlan as TrainingPlanResult,
   type WorkspaceDataset,
@@ -2400,6 +2401,25 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
     void refresh(filters);
   };
 
+  const inspectServerSchemas = async (name: string) => {
+    setInspectingSchemas(name);
+    setServerInventoryError("");
+    try {
+      const result = await axiomApi.inspectMcpServerSchemas(name);
+      setSchemaResults((current) => ({ ...current, [name]: result }));
+      onNotify(
+        result.status === "ok"
+          ? `Read-only schemas loaded for ${name}.`
+          : `Schema inspection ${result.status}: ${result.message || "metadata could not be loaded"}`,
+        result.status === "ok" ? "success" : "warning",
+      );
+    } catch (cause) {
+      setServerInventoryError(cause instanceof Error ? cause.message : "MCP schemas could not be inspected.");
+    } finally {
+      setInspectingSchemas("");
+    }
+  };
+
   useEffect(() => { void refresh(); }, []);
 
   const discoverLocalModels = async () => {
@@ -4152,6 +4172,8 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
   const [serverInventoryError, setServerInventoryError] = useState("");
   const [handshakeResults, setHandshakeResults] = useState<Record<string, McpServerHandshake>>({});
   const [inspectingServer, setInspectingServer] = useState("");
+  const [schemaResults, setSchemaResults] = useState<Record<string, McpSchemaInspection>>({});
+  const [inspectingSchemas, setInspectingSchemas] = useState("");
 
   const refresh = async () => {
     setLoading(true);
@@ -4292,9 +4314,14 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
                 <b>{server.name}</b>
                 <small>{server.transport.toUpperCase()} · {server.executable || "No command configured"} · {server.argument_count} arguments · Not inspected</small>
               </span>
-              <button type="button" className="button secondary-button" onClick={() => void inspectServerHandshake(server.name)} disabled={!server.configured || Boolean(inspectingServer)}>
-                {busy ? "Negotiating…" : "Inspect handshake"}
-              </button>
+              <div className="integration-form-actions">
+                <button type="button" className="button secondary-button" onClick={() => void inspectServerHandshake(server.name)} disabled={!server.configured || Boolean(inspectingServer) || Boolean(inspectingSchemas)}>
+                  {busy ? "Negotiating…" : "Inspect handshake"}
+                </button>
+                <button type="button" className="button secondary-button" onClick={() => void inspectServerSchemas(server.name)} disabled={!server.configured || Boolean(inspectingServer) || Boolean(inspectingSchemas)}>
+                  {inspectingSchemas === server.name ? "Browsing…" : "Browse schemas"}
+                </button>
+              </div>
             </div>
             {result && <div className="quiet-note" role="status">
               <StatusPill tone={result.status === "ok" ? "success" : "warning"}>{result.status === "ok" ? "HANDSHAKE OK" : result.status.toUpperCase()}</StatusPill>
@@ -4302,6 +4329,30 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
                 ? ` ${result.server_name || server.name} · protocol ${result.protocol_version || "not reported"} · ${result.server_version || "version not reported"} · ${Object.entries(result.capabilities || {}).filter(([, enabled]) => enabled).map(([key]) => key).join(", ") || "no capabilities reported"} · ${result.duration_ms} ms`
                 : ` ${result.message || "Protocol negotiation did not complete."}`}
               <span> · no tools executed · no schemas enumerated</span>
+            </div>}
+            {schemaResults[server.name] && <div className="surface-subsection" aria-label={`Schemas for ${server.name}`}>
+              {schemaResults[server.name].status === "ok" ? <>
+                <div className="field-label-row">
+                  <b>Advertised schemas</b>
+                  <StatusPill tone="success">READ ONLY</StatusPill>
+                </div>
+                <p className="quiet-note">
+                  {schemaResults[server.name].tools?.length || 0} tools · {schemaResults[server.name].resources?.length || 0} resources · {schemaResults[server.name].resource_templates?.length || 0} templates · {schemaResults[server.name].duration_ms} ms
+                  {Object.values(schemaResults[server.name].truncated || {}).some(Boolean) ? " · list truncated at the safety limit" : ""}
+                </p>
+                {(schemaResults[server.name].tools || []).map((tool) => <details className="surface-divider" key={tool.name}>
+                  <summary><b>{tool.name}</b>{tool.description ? ` · ${tool.description}` : ""}</summary>
+                  <pre className="code-preview">{JSON.stringify(tool.input_schema, null, 2)}</pre>
+                  {tool.output_schema && <pre className="code-preview">{JSON.stringify(tool.output_schema, null, 2)}</pre>}
+                </details>)}
+                {[...(schemaResults[server.name].resources || []).map((resource) => ({ kind: "Resource", name: resource.name, uri: resource.uri, mime: resource.mime_type })),
+                  ...(schemaResults[server.name].resource_templates || []).map((resource) => ({ kind: "Template", name: resource.name, uri: resource.uri_template, mime: resource.mime_type }))].map((resource, index) =>
+                  <div className="permission-row" key={`${resource.kind}-${resource.name}-${index}`}>
+                    <span><b>{resource.kind}: {resource.name || "Unnamed"}</b><small>{resource.uri || "URI redacted"} · {resource.mime || "MIME type not reported"}</small></span>
+                  </div>
+                )}
+                <p className="quiet-note">Schemas only. No tools were invoked, no resources were read, and no prompts were executed.</p>
+              </> : <InlineAlert tone="warning" role="alert">{schemaResults[server.name].message || "Schema inspection did not complete."}</InlineAlert>}
             </div>}
           </div>;
         })}
