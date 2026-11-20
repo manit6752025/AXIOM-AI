@@ -45,6 +45,21 @@ Saved filter presets are stored in this browser's local storage under a versione
 
 Registry contents and search requests still go to the local AXIOM API. A saved preset is a convenience for this browser, not a cross-device account setting or server-side shared preference.
 
+## Local model inspection
+
+The Models page can discover candidate folders below the workspace `models/`
+directory and inspect a selected candidate's local configuration and supported
+weight-file metadata. The summary reports the detected architecture/model type,
+format, combined weight-file size, tokenizer/config presence, detected
+capabilities, and a heuristic memory estimate when enough metadata is available.
+Use **Use metadata** to prefill the registry form from the inspection result.
+
+Inspection is metadata-only: it does not load or execute model weights, contact a
+remote catalogue, or prove that a runtime can load the model. The scan is bounded
+and does not follow directory symlinks; selected paths are validated against the
+trusted workspace model root. Missing or ambiguous metadata remains unknown
+rather than being inferred as a confirmed capability.
+
 ## Hardware fit and compatibility report
 
 Each registered model row has a **Check hardware fit** action connected to GET /api/workspace/models/{model_id}/compatibility. The API reads registered metadata, inspects the current hardware snapshot, and returns a structured report with:
