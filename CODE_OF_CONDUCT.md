@@ -198,7 +198,7 @@ You do need to treat other people with respect.
 
 ## 11. Attribution
 
-This document is written for the AXIOM project by @manit6752025 and @taxcollecter23
+This document is written for the AXIOM project by @manit6752025 and @taxcollector23
 
 It is informed by common open-source community standards and adapted to the needs of an engineering-focused AI project.
 
