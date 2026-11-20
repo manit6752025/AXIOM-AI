@@ -21,16 +21,20 @@ def test_fine_tuning_runtime_route_is_registered(monkeypatch):
 def test_fine_tuning_start_route_returns_created_job(monkeypatch):
     from axiom.api import fine_tuning
     expected = {"id": "a" * 32, "status": "queued", "logs": ["Job queued."]}
-    monkeypatch.setattr(fine_tuning, "start_finetuning_job", lambda _config: expected)
+    submitted = {}
+    monkeypatch.setattr(fine_tuning, "start_finetuning_job", lambda config: submitted.update(config) or expected)
     payload = {
         "model_path": "/models/base", "dataset_path": "/data/train.jsonl", "output_dir": "/runs/adapter",
         "text_field": "text", "max_steps": 3, "sequence_length": 64,
         "learning_rate": 0.0001, "lora_rank": 4,
+        "checkpoint_interval": 2, "output_policy": "resume",
     }
     response = TestClient(create_app()).post("/api/fine-tuning/jobs", json=payload)
     assert response.status_code == 202
     assert response.json()["id"] == expected["id"]
     assert response.json()["status"] == "queued"
+    assert submitted["checkpoint_interval"] == 2
+    assert submitted["output_policy"] == "resume"
 
 
 def test_fine_tuning_start_rejects_out_of_bounds_job(monkeypatch):
@@ -102,3 +106,19 @@ def test_fine_tuning_cancel_route_returns_not_found_for_missing_job(monkeypatch)
     monkeypatch.setattr(fine_tuning, "cancel_finetuning_job", lambda _job_id: None)
     response = TestClient(create_app()).post(f"/api/fine-tuning/jobs/{'b' * 32}/cancel")
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("checkpoint_interval", 1001), ("output_policy", "overwrite")],
+)
+def test_fine_tuning_start_rejects_invalid_checkpoint_policy(field, value):
+    payload = {
+        "model_path": "/models/base", "dataset_path": "/data/train.jsonl", "output_dir": "/runs/adapter",
+        "text_field": "text", "max_steps": 3, "sequence_length": 64,
+        "learning_rate": 0.0001, "lora_rank": 4,
+        "checkpoint_interval": 0, "output_policy": "empty",
+    }
+    payload[field] = value
+    response = TestClient(create_app()).post("/api/fine-tuning/jobs", json=payload)
+    assert response.status_code == 422
