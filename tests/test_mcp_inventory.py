@@ -32,6 +32,7 @@ def test_mcp_inventory_api_routes_are_registered_with_expected_methods():
     assert routes["/api/mcp/servers"] == {"GET"}
     assert routes["/api/mcp/servers/{name}/handshake"] == {"POST"}
     assert routes["/api/mcp/servers/{name}/schemas"] == {"POST"}
+    assert routes["/api/mcp/servers/{name}/trust"] == {"PATCH"}
 
 
 def test_mcp_inventory_api_maps_missing_server_to_not_found(monkeypatch):
@@ -78,7 +79,13 @@ def test_inventory_is_passive_bounded_and_only_lists_mcp_servers(tmp_path, monke
         "configured": True,
         "executable": "python",
         "argument_count": 2,
+        "trust_status": "unverified",
+        "owner_type": "unknown",
+        "owner_label": None,
+        "ownership_verified": False,
         "connection_state": "not_inspected",
+        "last_inspected_at": None,
+        "last_connection_error": None,
     }]
     assert "starts the registered process" in result["inspection_note"]
     assert registry.path.exists()
