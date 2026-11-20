@@ -379,6 +379,9 @@ def test_benchmark_forwards_sampling_options_without_disclosing_stop_text(monkey
         return {"response": "secret generated text", "eval_count": 2, "total_duration_ms": 1}
 
     monkeypatch.setattr(engine_fabric, "run_engine_backend_chat", fake_chat)
+    monkeypatch.setattr(engine_fabric, "discover_engine_backends", lambda profile="balanced": {
+        "backends": [{"id": "ollama", "status": "ready", "supports_chat": True, "models": ["tiny-local"], "error": None}],
+    })
     result = engine_fabric.run_engine_backend_benchmark(
         "ollama", "tiny-local", "private representative prompt",
         warmup_runs=0, iterations=1, top_p=0.75, top_k=12, min_p=0.18,
