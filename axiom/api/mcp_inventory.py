@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from axiom.core.integrations import IntegrationRegistry
-from axiom.core.mcp_inventory import McpInventoryError, inspect_mcp_server, list_mcp_servers
+from axiom.core.mcp_inventory import McpInventoryError, _registry, inspect_mcp_server, list_mcp_servers
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp-inventory"])
 
@@ -22,7 +22,7 @@ class McpServerTrustUpdate(BaseModel):
 def update_mcp_server_trust(name: str, request: McpServerTrustUpdate) -> dict[str, Any]:
     """Persist explicit trust and user-declared ownership for an MCP server."""
     try:
-        registry = IntegrationRegistry(create=False)
+        registry = _registry()
         existing = next(
             (
                 item for item in registry.list()
