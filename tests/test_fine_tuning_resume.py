@@ -304,7 +304,7 @@ def test_workspace_output_guard_rejects_resume_folder_with_user_files(tmp_path):
     (output / ".axiom-checkpoints").mkdir()
     (output / "do-not-overwrite.txt").write_text("keep", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="checkpoint-only"):
+    with pytest.raises(ValueError, match="checkpoint directory"):
         resolve_workspace_output(
             "outputs/adapter",
             workspace,
