@@ -58,6 +58,22 @@ const snapshot = {
   inputs: { parameter_billions: 7, requested_method: "qlora", model: "models/qwen", dataset: "data/train.jsonl" },
   hardware,
   plan: basePlan,
+  reproducibility: {
+    schema_version: 1,
+    seed: 42,
+    seed_status: "recorded_only",
+    seed_applied: false,
+    software: {
+      schema_version: 1,
+      captured: true,
+      axiom_version: "0.3.0-beta.8",
+      python_version: "3.12.3",
+      python_implementation: "CPython",
+      platform: { system: "Linux", machine: "x86_64" },
+      packages: { torch: "2.4.0", transformers: "5.0.0", peft: "0.20.0", accelerate: "1.1.0", numpy: "2.1.0", safetensors: "0.4.5" },
+    },
+    scope_note: "Seed is recorded only and is not applied to any runtime or training job.",
+  },
   execution: { started: false, scope_note: "This is the exact saved planning snapshot; no training job was started." },
   fingerprint: { algorithm: "sha256", value: "a".repeat(64) },
 };
@@ -110,12 +126,19 @@ test("Training prints a reproducible saved plan and diffs two snapshots", async 
 
   await page.goto("/?page=training");
   await expect(page.getByRole("heading", { name: "Saved plan tools" })).toBeVisible();
+  await expect(page.getByLabel("Reproducibility seed (metadata only)")).toHaveValue("42");
 
   await page.getByLabel("Saved plan to print").selectOption("plan-left");
   await page.getByRole("button", { name: "Print canonical JSON" }).click();
   await expect(page.getByText("Saved plan fingerprint")).toBeVisible();
   await expect(page.locator(".plan-reproducible-json")).toContainText("application/vnd.axiom.training-plan+json");
   await expect(page.locator(".plan-reproducible-json")).toContainText("models/qwen");
+  await expect(page.locator(".plan-reproducible-json")).toContainText("recorded_only");
+  await expect(page.locator(".plan-reproducible-json")).toContainText("2.4.0");
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download manifest" }).click();
+  const manifestDownload = await downloadPromise;
+  expect(manifestDownload.suggestedFilename()).toMatch(/^axiom-training-plan-[a-f0-9]{12}\\.json$/);
 
   await page.getByLabel("Baseline saved plan").selectOption("plan-left");
   await page.getByLabel("Comparison saved plan").selectOption("plan-right");

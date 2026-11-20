@@ -2,18 +2,108 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
 import math
+import platform
 from typing import Any
 
 PLAN_SNAPSHOT_SCHEMA_VERSION = 1
 PLAN_SNAPSHOT_FORMAT = "application/vnd.axiom.training-plan+json;version=1"
 PLANNER_ALGORITHM_VERSION = 1
+SOFTWARE_MANIFEST_SCHEMA_VERSION = 1
+SOFTWARE_DISTRIBUTIONS = {
+    "torch": "torch",
+    "transformers": "transformers",
+    "peft": "peft",
+    "accelerate": "accelerate",
+    "numpy": "numpy",
+    "safetensors": "safetensors",
+}
 _SCOPE_NOTE = (
     "This is the exact saved planning snapshot, not a regenerated estimate, benchmark, "
     "training job, or guarantee of runtime fit. Hardware and planner inputs are recorded "
     "for comparison; running the plan requires a separate explicit action."
 )
+_REPRODUCIBILITY_SCOPE_NOTE = (
+    "The seed is recorded as provenance only. Exporting or comparing this plan does not "
+    "seed Python, PyTorch, CUDA, or another random-number generator, start a job, or pass "
+    "the seed to the local LoRA worker. A future workflow executor must explicitly consume "
+    "this value before it can affect execution."
+)
+
+
+def capture_software_manifest(axiom_version: str) -> dict[str, Any]:
+    """Capture bounded, non-secret software-version evidence at plan-save time."""
+    if not isinstance(axiom_version, str) or not axiom_version or len(axiom_version) > 64:
+        raise ValueError("AXIOM version must be a non-empty string of at most 64 characters.")
+    packages: dict[str, str | None] = {}
+    for name, distribution in SOFTWARE_DISTRIBUTIONS.items():
+        try:
+            packages[name] = importlib.metadata.version(distribution)
+        except importlib.metadata.PackageNotFoundError:
+            packages[name] = None
+    return {
+        "schema_version": SOFTWARE_MANIFEST_SCHEMA_VERSION,
+        "captured": True,
+        "axiom_version": axiom_version,
+        "python_version": platform.python_version(),
+        "python_implementation": platform.python_implementation(),
+        "platform": {"system": platform.system(), "machine": platform.machine()},
+        "packages": packages,
+    }
+
+
+def _software_manifest(record: dict[str, Any]) -> dict[str, Any]:
+    raw = record.get("software_manifest")
+    if raw is None:
+        return {
+            "schema_version": SOFTWARE_MANIFEST_SCHEMA_VERSION,
+            "captured": False,
+            "axiom_version": None,
+            "python_version": None,
+            "python_implementation": None,
+            "platform": {"system": None, "machine": None},
+            "packages": {},
+        }
+    if not isinstance(raw, dict) or type(raw.get("schema_version")) is not int or raw.get("schema_version") != SOFTWARE_MANIFEST_SCHEMA_VERSION:
+        raise ValueError("Saved experiment has an unsupported software manifest.")
+    captured = raw.get("captured")
+    if type(captured) is not bool:
+        raise ValueError("Saved experiment has an invalid software manifest status.")
+    text_fields = ("axiom_version", "python_version", "python_implementation")
+    normalized: dict[str, str | None] = {}
+    for field in text_fields:
+        value = raw.get(field)
+        if value is not None and (not isinstance(value, str) or len(value) > 128):
+            raise ValueError(f"Saved experiment has an invalid software manifest {field}.")
+        normalized[field] = value
+    raw_platform = raw.get("platform", {})
+    if not isinstance(raw_platform, dict):
+        raise ValueError("Saved experiment has an invalid software manifest platform.")
+    platform_values: dict[str, str | None] = {}
+    for field in ("system", "machine"):
+        value = raw_platform.get(field)
+        if value is not None and (not isinstance(value, str) or len(value) > 128):
+            raise ValueError(f"Saved experiment has an invalid software manifest platform {field}.")
+        platform_values[field] = value
+    raw_packages = raw.get("packages", {})
+    if not isinstance(raw_packages, dict) or len(raw_packages) > len(SOFTWARE_DISTRIBUTIONS):
+        raise ValueError("Saved experiment has an invalid software package manifest.")
+    packages: dict[str, str | None] = {}
+    for name, version in raw_packages.items():
+        if name not in SOFTWARE_DISTRIBUTIONS or (version is not None and (not isinstance(version, str) or len(version) > 128)):
+            raise ValueError("Saved experiment has an invalid software package version.")
+        packages[name] = version
+    if captured and not normalized["axiom_version"]:
+        raise ValueError("Captured software manifest is missing the AXIOM version.")
+    return {
+        "schema_version": SOFTWARE_MANIFEST_SCHEMA_VERSION,
+        "captured": captured,
+        **normalized,
+        "platform": platform_values,
+        "packages": packages,
+    }
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -65,6 +155,19 @@ def reproducible_plan_document(record: dict[str, Any]) -> dict[str, Any]:
     if axiom_version is not None and not isinstance(axiom_version, str):
         raise ValueError("Saved experiment has an invalid AXIOM version.")
 
+    seed = record.get("seed")
+    if seed is not None and (type(seed) is not int or not 0 <= seed <= 4_294_967_295):
+        raise ValueError("Saved experiment has an invalid reproducibility seed.")
+    software = _software_manifest(record)
+    reproducibility = {
+        "schema_version": SOFTWARE_MANIFEST_SCHEMA_VERSION,
+        "seed": seed,
+        "seed_status": "recorded_only" if seed is not None else "not_recorded",
+        "seed_applied": False,
+        "software": software,
+        "scope_note": _REPRODUCIBILITY_SCOPE_NOTE,
+    }
+
     document: dict[str, Any] = {
         "format": PLAN_SNAPSHOT_FORMAT,
         "schema_version": PLAN_SNAPSHOT_SCHEMA_VERSION,
@@ -81,6 +184,7 @@ def reproducible_plan_document(record: dict[str, Any]) -> dict[str, Any]:
         },
         "hardware": hardware,
         "plan": plan,
+        "reproducibility": reproducibility,
         "execution": {
             "started": False,
             "scope_note": _SCOPE_NOTE,
@@ -111,7 +215,7 @@ def diff_plan_records(
     left_record: dict[str, Any],
     right_record: dict[str, Any],
 ) -> dict[str, Any]:
-    """Compare saved plan inputs, captured hardware, planner provenance, and estimates."""
+    """Compare saved plan inputs, captured hardware, provenance, and estimates."""
     left = reproducible_plan_document(left_record)
     right = reproducible_plan_document(right_record)
     left_flat = _flatten({key: value for key, value in left.items() if key != "fingerprint" and key != "execution"})
@@ -131,6 +235,7 @@ def diff_plan_records(
             "hardware": "hardware",
             "planner": "planner",
             "plan": "estimate",
+            "reproducibility": "provenance",
             "format": "format",
             "schema_version": "format",
         }.get(top_level, "metadata")
@@ -160,7 +265,8 @@ def diff_plan_records(
         "identical": left_fingerprint == right_fingerprint,
         "changes": changes,
         "scope_note": (
-            "Diff compares recorded inputs, hardware, planner provenance, and the exact saved "
-            "estimate. It does not run a planner, benchmark a model, or compare training outcomes."
+            "Diff compares recorded inputs, hardware, software/seed provenance, and the exact saved "
+            "estimate. It does not run a planner, apply a seed, benchmark a model, or execute training."
         ),
     }
+}

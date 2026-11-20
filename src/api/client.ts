@@ -866,6 +866,16 @@ export type WorkspaceEvent = {
   timestamp: string;
 };
 
+export type TrainingSoftwareManifest = {
+  schema_version: 1;
+  captured: boolean;
+  axiom_version: string | null;
+  python_version: string | null;
+  python_implementation: string | null;
+  platform: { system: string | null; machine: string | null };
+  packages: Record<string, string | null>;
+};
+
 export type WorkspaceExperiment = {
   schema_version: 1;
   id: string;
@@ -877,6 +887,8 @@ export type WorkspaceExperiment = {
   tags: string[];
   parameter_billions: number;
   requested_method: string;
+  seed?: number;
+  software_manifest?: TrainingSoftwareManifest;
   planner_algorithm_version?: number;
   axiom_version?: string;
   status: "planned";
@@ -900,6 +912,14 @@ export type ReproduciblePlanSnapshot = {
   };
   hardware: HardwareSnapshot;
   plan: TrainingPlan;
+  reproducibility: {
+    schema_version: 1;
+    seed: number | null;
+    seed_status: "recorded_only" | "not_recorded";
+    seed_applied: false;
+    software: TrainingSoftwareManifest;
+    scope_note: string;
+  };
   execution: { started: false; scope_note: string };
   fingerprint: { algorithm: "sha256"; value: string };
 };
@@ -911,7 +931,7 @@ export type SavedPlanDiff = {
   identical: boolean;
   changes: Array<{
     path: string;
-    category: "inputs" | "hardware" | "planner" | "estimate" | "format" | "metadata";
+    category: "inputs" | "hardware" | "planner" | "estimate" | "provenance" | "format" | "metadata";
     before_present: boolean;
     before: unknown;
     after_present: boolean;
@@ -1920,6 +1940,7 @@ export const axiomApi = {
     name: string;
     parameter_billions: number;
     method: string;
+    seed?: number;
     plan_snapshot?: TrainingPlan;
     model?: string;
     dataset?: string;
