@@ -853,7 +853,7 @@ export type FineTuningJob = {
     boundary: string; unavailable_reason: "already_requested" | "finalization_started" | "job_terminal" | "job_not_cancellable" | null;
   };
   checkpoint?: { enabled: boolean; interval: number; latest_step: number; retained: number; last_saved_at: string | null; resume_available: boolean };
-  logs: string[]; result?: { resumed_from_step?: number; checkpoint?: { enabled: boolean; interval: number; latest_step: number; retained: number; last_saved_at: string | null; resume_available: boolean }; output_dir: string; adapter_files: string[]; target_modules: string[]; dataset_rows: number; max_steps: number; device?: string; engine?: string; trainable_parameters?: number };
+  logs: string[]; result?: { resumed_from_step?: number; checkpoint?: { enabled: boolean; interval: number; latest_step: number; retained: number; last_saved_at: string | null; resume_available: boolean } | null; output_dir: string; adapter_files: string[]; target_modules: string[]; dataset_rows: number; max_steps: number; device?: string; engine?: string; trainable_parameters?: number };
 };
 export type FineTuningJobPage = {
   jobs: FineTuningJob[]; total: number; limit: number; offset: number;
