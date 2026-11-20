@@ -269,4 +269,3 @@ def diff_plan_records(
             "estimate. It does not run a planner, apply a seed, benchmark a model, or execute training."
         ),
     }
-}
