@@ -85,7 +85,7 @@ test("MCP inventory stays passive until an explicit protocol handshake", async (
   await page.getByRole("button", { name: "Browse schemas" }).click();
   await expect(page.getByText("Advertised schemas")).toBeVisible();
   await expect(page.getByText("search_catalog", { exact: true })).toBeVisible();
-  await expect(page.locator(".code-preview").first()).toContainText('"query"');
+  await expect(page.locator(".mcp-schema-preview").first()).toContainText('"query"');
   await expect(page.getByText(/Resource: Catalog/)).toBeVisible();
   await expect(page.getByText(/no tools were invoked, no resources were read/)).toBeVisible();
   expect(schemaCalls).toBe(1);
