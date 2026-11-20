@@ -259,3 +259,41 @@ def test_security_audit_fails_for_unauthenticated_network_daemon_profile(tmp_pat
     payload = json.loads(result.stdout)
     check = next(item for item in payload["checks"] if item["id"] == "security.network.daemon_bind")
     assert check["status"] == "fail"
+
+
+def test_security_artifact_inspect_emits_machine_readable_results(tmp_path: Path):
+    import zipfile
+
+    artifact = tmp_path / "demo-1.0.zip"
+    with zipfile.ZipFile(artifact, "w") as archive:
+        archive.writestr("demo-1.0/pyproject.toml", "[build-system]\\n")
+
+    result = runner.invoke(
+        app,
+        ["security", "artifact", "inspect", str(artifact), "--json"],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["status"] == "pass"
+    assert payload["artifact"]["format"] == "sdist-zip"
+    assert payload["summary"]["files_inspected"] == 1
+
+
+def test_security_artifact_inspect_fails_traversal_archive(tmp_path: Path):
+    import zipfile
+
+    artifact = tmp_path / "unsafe.zip"
+    with zipfile.ZipFile(artifact, "w") as archive:
+        archive.writestr("../outside.txt", "must not extract")
+
+    result = runner.invoke(
+        app,
+        ["security", "artifact", "inspect", str(artifact), "--json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "fail"
+    assert any(item["id"] == "artifact.archive.path" for item in payload["checks"])
