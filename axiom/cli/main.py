@@ -1055,17 +1055,20 @@ def integration_mcp_list(
 
     table = Table(title="AXIOM MCP Server Inventory")
     table.add_column("Name")
-    table.add_column("Transport")
+    table.add_column("Trust")
+    table.add_column("Owner")
+    table.add_column("Last check")
     table.add_column("Executable")
-    table.add_column("Arguments", justify="right")
-    table.add_column("State")
+    table.add_column("Args", justify="right")
     for server in inventory["servers"]:
+        owner = server["owner_label"] or server["owner_type"]
         table.add_row(
             server["name"],
-            server["transport"],
+            server["trust_status"],
+            owner,
+            server["connection_state"].replace("_", " "),
             server["executable"] or "Not configured",
             str(server["argument_count"]),
-            "Not inspected" if server["configured"] else "Invalid command",
         )
     console.print(table)
     console.print("Inventory is passive; no server processes were started.")
