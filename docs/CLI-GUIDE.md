@@ -15,6 +15,21 @@ axiom workflow list --limit 20 --page-json
 
 `--json` keeps the existing JSON-array output for compatibility. `--page-json` includes `total`, `has_more`, and `next_cursor`. Keep the same search term between cursor requests; start a fresh listing to include newly saved designs.
 
+## Security audit
+
+```bash
+axiom security audit
+axiom security audit --json
+axiom security audit --strict --json
+```
+
+The audit checks local configuration and MCP policy permissions, active tool
+grants, API token-scope configuration, and CORS origins. It never prints token
+values. The `--daemon-host` and `--allow-network` options evaluate a proposed
+listener profile; they do not inspect or modify a live listener. Non-loopback
+daemon profiles are reported as unsafe because that lightweight HTTP service
+does not provide authentication.
+
 ## Global output controls
 
 These root options are placed before the command name:
