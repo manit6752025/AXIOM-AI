@@ -146,3 +146,54 @@ def test_security_event_export_contains_no_credentials_or_arbitrary_text(tmp_pat
     assert "command_line" not in exported.lower()
     assert store.list_page()["privacy"]["credential_values_stored"] is False
     assert store.list_page()["privacy"]["reviewer_identity_authenticated"] is False
+
+
+def test_security_event_read_operations_do_not_create_workspace_metadata(tmp_path: Path):
+    store = SecurityEventStore(tmp_path)
+
+    page = store.list_page()
+    exported = store.export()
+    verified = store.verify()
+
+    assert page["events"] == []
+    assert exported["events"] == []
+    assert verified["valid"] is True
+    assert not (tmp_path / ".axiom").exists()
+
+
+def test_security_event_pagination_returns_newest_first_without_skipping_reviews(tmp_path: Path):
+    store = SecurityEventStore(tmp_path)
+    first = store.record("mcp.profile.created")
+    second = store.record("mcp.permissions.saved")
+    third = store.record("mcp.profile.activated")
+    store.review(second["event_id"], "Reviewer")
+
+    first_page = store.list_page(limit=2, offset=0)
+    second_page = store.list_page(limit=2, offset=2)
+
+    assert [event["event_id"] for event in first_page["events"]] == [
+        third["event_id"],
+        second["event_id"],
+    ]
+    assert first_page["events"][1]["reviewed"] is True
+    assert [event["event_id"] for event in second_page["events"]] == [first["event_id"]]
+    assert first_page["has_more"] is True
+    assert second_page["has_more"] is False
+
+
+def test_security_event_store_rejects_symlinked_lock_file(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    metadata = workspace / ".axiom"
+    metadata.mkdir()
+    target = tmp_path / "outside-lock"
+    target.write_text("preserve", encoding="utf-8")
+    lock = metadata / "security-events.lock"
+    try:
+        lock.symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Symlinks are unavailable on this platform: {exc}")
+
+    with pytest.raises(SecurityEventError, match="symbolic link|lock"):
+        SecurityEventStore(workspace).record("mcp.profile.created")
+    assert target.read_text(encoding="utf-8") == "preserve"
