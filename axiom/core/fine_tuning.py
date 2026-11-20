@@ -1361,7 +1361,8 @@ def execute_finetuning_job(
         _update_job(job_id, status="running", started_at=_now(), error=None, logs=[*job.get("logs", []), "Loading local tokenizer/model and preparing LoRA adapters."][-80:])
 
         def progress(step: int, loss: float | None) -> None:
-            check_cancel()
+            # This callback runs after the optimizer step. Persist that completed
+            # step before observing cancellation requested while it was in flight.
             current = _read_job(job_id)
             if current is None:
                 return
@@ -1387,6 +1388,7 @@ def execute_finetuning_job(
             updated = _update_job(job_id, **changes)
             if on_progress:
                 on_progress(updated)
+            check_cancel()
 
         result = _run_transformers(
             job["config"],
