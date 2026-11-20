@@ -32,3 +32,20 @@ async def inspect_mcp_server_handshake(name: str) -> dict[str, Any]:
             "missing_command": 409,
         }.get(exc.code, 503)
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@router.post("/servers/{name}/schemas")
+async def inspect_mcp_server_schemas(name: str) -> dict[str, Any]:
+    """Explicitly list bounded tool/resource schemas without invoking server capabilities."""
+    from axiom.core.mcp_inventory import inspect_mcp_schemas
+
+    try:
+        return await inspect_mcp_schemas(name)
+    except McpInventoryError as exc:
+        status_code = {
+            "not_found": 404,
+            "invalid_name": 422,
+            "invalid_timeout": 422,
+            "missing_command": 409,
+        }.get(exc.code, 503)
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
