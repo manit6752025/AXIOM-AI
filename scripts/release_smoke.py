@@ -570,6 +570,8 @@ def inspect(root: Path) -> dict[str, Any]:
             "stages downloads before publishing", "public Llama/Mistral/Qwen2/Qwen3 safetensors",
             "CPU, NVIDIA CUDA, AMD ROCm, Apple Metal/MPS, and Intel XPU",
             "remote model code", "does not silently route generation through another engine",
+            "### Hardware validation boundary",
+            "does **not** certify execution on physical CUDA, ROCm, Apple Metal/MPS, or Intel XPU hardware.",
         )),
         ("native dependency/device readiness regression tests", native_runtime_status_tests, (
             "test_runtime_status_reports_required_and_optional_dependency_readiness",
