@@ -2,6 +2,29 @@
 
 The Control Center's **Models** page reads from the local AXIOM model registry. Registry actions operate on metadata; removing a registry record does not delete the model's weight files.
 
+## Registered metadata and validation
+
+Each registry record supports a stable ID, display name, source or local path, format,
+parameter metadata, quantization, architecture, licence, tags, favorite status,
+optional SHA-256 content digest, and optional `size_bytes`. Weight size is the
+combined weight-file size in bytes when known; it is metadata, not a live disk
+measurement. Discovering and inspecting a local model folder pre-fills the size
+from the files found during that bounded inspection. Manual registration can
+supply a known size or leave it unknown.
+
+The size field accepts a non-negative safe integer up to 9,007,199,254,740,991
+bytes. Boolean, fractional, negative, and out-of-range values are rejected.
+The optional content digest must be exactly 64 hexadecimal characters. Both
+fields are included in schema-version-1 JSON import/export and remain optional
+so older registry exports continue to import. Updates validate the complete
+candidate record before writing it.
+
+The Models page displays known sizes and exposes the size and digest fields in
+the registration form. The CLI accepts `--size-bytes` for both
+`axiom model add` and `axiom model update`; `axiom model list` displays
+the stored byte count. These operations update registry metadata only and do
+not hash, move, download, or rewrite model weights.
+
 ## Search, filter, sort, and paginate
 
 The Models page provides server-side inventory controls:
