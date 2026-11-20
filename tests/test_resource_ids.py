@@ -75,7 +75,7 @@ def test_unversioned_workflow_records_migrate_without_changing_ids(tmp_path):
 
     read = store.list()[0]
     assert read["id"] == "legacy-workflow-id"
-    assert read["schema_version"] == 1
+    assert read["schema_version"] == 2
     assert read["revision"] == 1
     assert read["versions"] == []
     assert "schema_version" not in json.loads(path.read_text(encoding="utf-8"))[0]
@@ -87,7 +87,7 @@ def test_unversioned_workflow_records_migrate_without_changing_ids(tmp_path):
     assert updated["id"] == "legacy-workflow-id"
     stored = json.loads(path.read_text(encoding="utf-8"))[0]
     assert stored["id"] == "legacy-workflow-id"
-    assert stored["schema_version"] == 1
+    assert stored["schema_version"] == 2
     assert stored["revision"] == 2
 
 
