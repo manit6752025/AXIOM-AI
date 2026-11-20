@@ -1268,6 +1268,48 @@ def _assert_output_empty(output_dir: Path) -> None:
     raise FineTuningError("Adapter output directory is no longer empty; refusing to overwrite existing files.")
 
 
+def _prepare_output_directory(config: dict[str, Any]) -> None:
+    output_dir = Path(config["output_dir"])
+    policy = config.get("output_policy", "empty")
+    if policy == "resume":
+        _assert_output_ready_for_finalization(output_dir)
+        return
+    if policy == "new":
+        try:
+            output_dir.mkdir(mode=0o700, exist_ok=False)
+        except FileExistsError:
+            raise FineTuningError("The 'new' output policy path now exists; refusing to use it.") from None
+        except OSError:
+            raise FineTuningError("The new adapter output directory could not be created safely.") from None
+        return
+    if output_dir.exists():
+        _assert_output_empty(output_dir)
+    else:
+        try:
+            output_dir.mkdir(mode=0o700, exist_ok=False)
+        except OSError:
+            raise FineTuningError("The adapter output directory could not be created safely.") from None
+
+
+def _assert_output_ready_for_finalization(output_dir: Path) -> None:
+    if output_dir.is_symlink() or not output_dir.is_dir():
+        raise FineTuningError("Adapter output directory changed or is no longer a safe directory.")
+    try:
+        entries = list(output_dir.iterdir())
+    except OSError:
+        raise FineTuningError("Adapter output directory could not be inspected safely.") from None
+    if not entries:
+        return
+    if len(entries) != 1 or entries[0].name != CHECKPOINT_DIRECTORY:
+        raise FineTuningError("Adapter output contains user-managed files; refusing to overwrite them.")
+    try:
+        retained = checkpoint_count(output_dir)
+    except ValueError as exc:
+        raise FineTuningError(str(exc)) from None
+    if retained < 1:
+        raise FineTuningError("Adapter output contains no complete checkpoint; refusing to save into an uncertain directory.")
+
+
 def _run_transformers(
     config: dict[str, Any],
     progress: Callable[[int, float | None], None],
@@ -1275,15 +1317,17 @@ def _run_transformers(
     begin_finalizing: Callable[[], None] | None = None,
     workspace_guard_check: Callable[[], None] | None = None,
     workspace_guard: dict[str, Any] | None = None,
+    on_checkpoint: Callable[[dict[str, Any]], None] | None = None,
+    on_resume: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
-    """Train a local causal-LM LoRA adapter with AXIOM's own bounded PyTorch loop."""
+    """Train or resume a local causal-LM LoRA adapter with bounded AXIOM checkpoints."""
     if cancel_check:
         cancel_check()
     if workspace_guard_check:
         workspace_guard_check()
     try:
         import torch
-        from peft import LoraConfig, TaskType, get_peft_model
+        from peft import LoraConfig, PeftModel, TaskType, get_peft_model
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except (ImportError, OSError):
         raise FineTuningError(
@@ -1302,8 +1346,25 @@ def _run_transformers(
     model_path = config["model_path"]
     validate_local_model_tree(Path(model_path))
     output_dir = Path(config["output_dir"])
-    if output_dir.exists() and any(output_dir.iterdir()):
-        raise FineTuningError("Adapter output directory is no longer empty; refusing to overwrite existing files.")
+    resume_checkpoint: Path | None = None
+    resume_state: dict[str, Any] | None = None
+    resume_payload: dict[str, Any] | None = None
+    base_model_fingerprint = model_tree_fingerprint(Path(model_path))
+    if config["output_policy"] == "resume":
+        _assert_output_ready_for_finalization(output_dir)
+        try:
+            resume_checkpoint, resume_state = latest_checkpoint(output_dir)
+            _validate_resume_metadata(
+                resume_state,
+                config,
+                dataset_sha256=training_dataset_sha256,
+                base_model_fingerprint=base_model_fingerprint,
+            )
+            loaded = load_checkpoint_payload(resume_checkpoint, torch)
+            resume_state = loaded["state"]
+            resume_payload = loaded["payload"]
+        except ValueError as exc:
+            raise FineTuningError(str(exc)) from None
 
     try:
         if workspace_guard_check:
@@ -1340,30 +1401,46 @@ def _run_transformers(
         "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj",
         "c_attn", "c_proj", "query_key_value", "Wqkv", "query", "value",
     )
-    targets = [name for name in preferred if name in leaf_names]
-    if not targets:
-        raise FineTuningError(
-            "No supported attention/MLP projection layers were found for LoRA. "
-            "AXIOM supports common Llama-style q_proj/k_proj/v_proj/o_proj and several other known projection layouts."
-        )
-
-    try:
-        model = get_peft_model(
-            model,
-            LoraConfig(
-                task_type=TaskType.CAUSAL_LM,
-                r=config["lora_rank"],
-                lora_alpha=max(8, config["lora_rank"] * 2),
-                lora_dropout=0.05,
-                target_modules=targets,
-                bias="none",
-            ),
-        )
-    except Exception as exc:
-        message = _clip(exc, 300)
-        raise FineTuningError(
-            "PEFT could not attach a LoRA adapter to this model architecture." + (f" Detail: {message}" if message else "")
-        ) from None
+    if resume_state is not None:
+        training = resume_state.get("training", {})
+        targets = training.get("target_modules")
+        if not isinstance(targets, list) or not targets or any(target not in leaf_names for target in targets):
+            raise FineTuningError("Resume checkpoint target modules do not match the selected base model.")
+        try:
+            model = PeftModel.from_pretrained(
+                model, str(resume_checkpoint), is_trainable=True, local_files_only=True
+            )
+        except Exception as exc:
+            message = _clip(exc, 300)
+            raise FineTuningError(
+                "PEFT could not restore the adapter from the selected local checkpoint."
+                + (f" Detail: {message}" if message else "")
+            ) from None
+    else:
+        targets = [name for name in preferred if name in leaf_names]
+        if not targets:
+            raise FineTuningError(
+                "No supported attention/MLP projection layers were found for LoRA. "
+                "AXIOM supports common Llama-style q_proj/k_proj/v_proj/o_proj and several other known projection layouts."
+            )
+        try:
+            model = get_peft_model(
+                model,
+                LoraConfig(
+                    task_type=TaskType.CAUSAL_LM,
+                    r=config["lora_rank"],
+                    lora_alpha=max(8, config["lora_rank"] * 2),
+                    lora_dropout=0.05,
+                    target_modules=targets,
+                    bias="none",
+                ),
+            )
+        except Exception as exc:
+            message = _clip(exc, 300)
+            raise FineTuningError(
+                "PEFT could not attach a LoRA adapter to this model architecture."
+                + (f" Detail: {message}" if message else "")
+            ) from None
 
     trainable_parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
     if not trainable_parameters:
@@ -1385,20 +1462,75 @@ def _run_transformers(
     except Exception as exc:
         message = _clip(exc, 240)
         raise FineTuningError(
-            f"Could not place the local model on {device}. The model may exceed available memory." + (f" Detail: {message}" if message else "")
+            f"Could not place the local model on {device}. The model may exceed available memory."
+            + (f" Detail: {message}" if message else "")
         ) from None
 
     if cancel_check:
         cancel_check()
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if workspace_guard_check:
+        workspace_guard_check()
+    _prepare_output_directory(config)
+
     optimizer = torch.optim.AdamW(trainable_parameters, lr=config["learning_rate"])
     rng = random.Random(AXIOM_TRAINING_SEED)
     order: list[int] = []
     position = 0
+    start_step = 0
+    if resume_state is not None and resume_payload is not None:
+        try:
+            optimizer_state = resume_payload.get("optimizer_state_dict")
+            python_rng_state = resume_payload.get("python_rng_state")
+            torch_rng_state = resume_payload.get("torch_cpu_rng_state")
+            saved_order = resume_payload.get("order")
+            saved_position = resume_payload.get("position")
+            if not isinstance(optimizer_state, dict):
+                raise ValueError("optimizer state is missing")
+            if not isinstance(saved_order, list) or len(saved_order) != len(texts):
+                raise ValueError("dataset sampling order does not match the current dataset")
+            if any(isinstance(item, bool) or not isinstance(item, int) for item in saved_order):
+                raise ValueError("dataset sampling order is invalid")
+            if sorted(saved_order) != list(range(len(texts))):
+                raise ValueError("dataset sampling order is not a complete permutation")
+            if isinstance(saved_position, bool) or not isinstance(saved_position, int) or not 0 <= saved_position <= len(texts):
+                raise ValueError("dataset sampling position is invalid")
+            if torch_rng_state is None:
+                raise ValueError("CPU random-number state is missing")
+            optimizer.load_state_dict(optimizer_state)
+            rng.setstate(python_rng_state)
+            torch.set_rng_state(torch_rng_state.cpu())
+            saved_cuda_states = resume_payload.get("torch_cuda_rng_states")
+            if (
+                device.type == "cuda"
+                and isinstance(saved_cuda_states, list)
+                and len(saved_cuda_states) == torch.cuda.device_count()
+            ):
+                torch.cuda.set_rng_state_all(saved_cuda_states)
+            order = saved_order
+            position = saved_position
+            start_step = int(resume_state["completed_steps"])
+        except Exception as exc:
+            message = _clip(exc, 240)
+            raise FineTuningError(
+                "The local checkpoint optimizer or random-number state could not be restored safely."
+                + (f" Detail: {message}" if message else "")
+            ) from None
+        if on_resume:
+            checkpoint_summary = {
+                "enabled": True,
+                "interval": config["checkpoint_interval"],
+                "latest_step": start_step,
+                "retained": checkpoint_count(output_dir),
+                "last_saved_at": resume_state.get("created_at"),
+                "resume_available": True,
+                "last_loss": resume_state.get("training", {}).get("last_loss"),
+            }
+            on_resume(checkpoint_summary)
+
     model.train()
     optimizer.zero_grad(set_to_none=True)
-
-    for step in range(1, config["max_steps"] + 1):
+    latest_checkpoint_summary: dict[str, Any] | None = None
+    for step in range(start_step + 1, config["max_steps"] + 1):
         if cancel_check:
             cancel_check()
         if position >= len(order):
@@ -1442,6 +1574,53 @@ def _run_transformers(
                 f"Local LoRA training failed at step {step} on {device}. Check available memory and model compatibility."
                 + (f" Detail: {message}" if message else "")
             ) from None
+
+        interval = config["checkpoint_interval"]
+        if interval > 0 and (step % interval == 0 or step == config["max_steps"]):
+            optimizer_payload = {
+                "optimizer_state_dict": optimizer.state_dict(),
+                "python_rng_state": rng.getstate(),
+                "torch_cpu_rng_state": torch.get_rng_state(),
+                "torch_cuda_rng_states": torch.cuda.get_rng_state_all() if device.type == "cuda" else [],
+                "order": order,
+                "position": position,
+            }
+            training_metadata = {
+                "model_path": config["model_path"],
+                "model_fingerprint": base_model_fingerprint,
+                "dataset_path": config["dataset_path"],
+                "dataset_sha256": training_dataset_sha256,
+                "text_field": config["text_field"],
+                "sequence_length": config["sequence_length"],
+                "learning_rate": config["learning_rate"],
+                "lora_rank": config["lora_rank"],
+                "output_dir": config["output_dir"],
+                "seed": AXIOM_TRAINING_SEED,
+                "target_modules": targets,
+                "max_steps_at_save": config["max_steps"],
+                "device": str(device),
+                "dataset_rows": len(texts),
+                "last_loss": loss_value,
+            }
+            try:
+                latest_checkpoint_summary = save_checkpoint(
+                    output_dir,
+                    step,
+                    model=model,
+                    torch_module=torch,
+                    optimizer_payload=optimizer_payload,
+                    training_metadata=training_metadata,
+                )
+            except Exception as exc:
+                message = _clip(exc, 240)
+                raise FineTuningError(
+                    "Could not persist a verified local training checkpoint."
+                    + (f" Detail: {message}" if message else "")
+                ) from None
+            latest_checkpoint_summary["interval"] = interval
+            if on_checkpoint:
+                on_checkpoint(latest_checkpoint_summary)
+
         progress(step, loss_value)
 
     if begin_finalizing:
@@ -1450,7 +1629,7 @@ def _run_transformers(
         cancel_check()
     if workspace_guard_check:
         workspace_guard_check()
-    _assert_output_empty(output_dir)
+    _assert_output_ready_for_finalization(output_dir)
     try:
         model.save_pretrained(str(output_dir), safe_serialization=True)
         tokenizer.save_pretrained(str(output_dir))
@@ -1473,6 +1652,15 @@ def _run_transformers(
         "device": str(device),
         "engine": "axiom-lora-engine",
         "trainable_parameters": sum(parameter.numel() for parameter in trainable_parameters),
+        "resumed_from_step": start_step,
+        "checkpoint": latest_checkpoint_summary or (resume_state and {
+            "enabled": True,
+            "interval": config["checkpoint_interval"],
+            "latest_step": resume_state["completed_steps"],
+            "retained": checkpoint_count(output_dir),
+            "last_saved_at": resume_state.get("created_at"),
+            "resume_available": True,
+        }),
     }
 
 
