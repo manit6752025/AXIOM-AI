@@ -107,3 +107,22 @@ def test_support_bundle_cli_rejects_symlink_output(tmp_path: Path):
     assert result.exit_code != 0
     assert target.read_bytes() == b"preserve-target"
     assert output.is_symlink()
+
+
+def test_support_bundle_cli_rejects_symlinked_parent_directories(tmp_path: Path):
+    workspace, _ = _private_workspace(tmp_path / "workspace")
+    actual_parent = tmp_path / "actual"
+    actual_parent.mkdir()
+    alias = tmp_path / "alias"
+    try:
+        alias.symlink_to(actual_parent, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Directory symlinks are not available: {exc}")
+
+    result = runner.invoke(
+        app,
+        ["support-bundle", "--workspace", str(workspace), "--output", str(alias / "bundle.zip"), "--json"],
+    )
+
+    assert result.exit_code != 0
+    assert not (actual_parent / "bundle.zip").exists()

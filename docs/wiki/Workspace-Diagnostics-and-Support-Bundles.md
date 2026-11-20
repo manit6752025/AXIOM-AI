@@ -12,7 +12,7 @@ AXIOM's CLI and Control Center share read-only workspace checks intended to iden
     axiom support-bundle --output ./axiom-support-bundle.zip
     axiom support-bundle --output ./axiom-support-bundle.zip --force --json
 
-Use `--force` only when intentionally replacing an existing output file. Without it, the CLI refuses to overwrite; output symlinks are rejected.
+Use `--force` only when intentionally replacing an existing output file. Without it, the CLI refuses to overwrite; output symlinks and symlinked parent directories are rejected.
 
 ## Checks
 
