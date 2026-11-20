@@ -559,8 +559,9 @@ def inspect(root: Path) -> dict[str, Any]:
             "test_engine_stream_endpoint_yields_token_snapshots_and_final_metrics",
             'captured["device_preference"] == "cuda"',
         )),
-        ("native CLI device regression", native_engine_cli_tests, (
+        ("native CLI device/readiness regression", native_engine_cli_tests, (
             "test_engine_run_passes_explicit_device_to_native_stream",
+            "test_engine_status_json_reports_readiness_devices_and_local_only_scope",
         )),
         ("native Runtime GUI", native_engine_panel, (
             'aria-label="Execution device"', "status?.devices", "status?.recommended_device",
