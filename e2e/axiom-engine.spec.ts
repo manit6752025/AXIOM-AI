@@ -7,6 +7,11 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   let unloadCalls = 0;
   let benchmarkCalls = 0;
   let benchmarkAbortObserved = false;
+  page.on("requestfailed", (request) => {
+    if (request.url().endsWith("/api/engine/benchmark") && benchmarkCalls > 1) {
+      benchmarkAbortObserved = true;
+    }
+  });
 
   await page.route("**/api/workspace/runtime", (route) => route.fulfill({
     json: {
@@ -103,22 +108,14 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await page.route("**/api/engine/benchmark", async (route) => {
     benchmarkCalls += 1;
     if (benchmarkCalls > 1) {
-      const requestUrl = route.request().url();
-      await new Promise<void>((resolve) => {
-        const listener = (request: Request) => {
-          if (request.url() === requestUrl) {
-            benchmarkAbortObserved = true;
-            page.off("requestfailed", listener);
-            clearTimeout(timeout);
-            resolve();
-          }
-        };
-        const timeout = setTimeout(() => {
-          page.off("requestfailed", listener);
-          resolve();
-        }, 5000);
-        page.on("requestfailed", listener);
-      });
+      // Keep the intercepted response pending briefly so the Stop button,
+      // not the mock server, must abort the browser fetch.
+      await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+      try {
+        await route.fulfill({ json: { detail: "The benchmark should have been cancelled by the UI." } });
+      } catch {
+        // AbortController already cancelled/handled the intercepted request.
+      }
       return;
     }
     const requestBody = route.request().postDataJSON() as Record<string, unknown>;
