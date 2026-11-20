@@ -1884,7 +1884,12 @@ export const axiomApi = {
     name: string;
     nodes: WorkflowNode[];
     edges: WorkflowEdge[];
-  }) => requestJson<{ valid: boolean; node_count: number; connection_count: number }>(
+  }) => requestJson<{
+    valid: boolean;
+    node_count: number;
+    connection_count: number;
+    missing_inputs: Array<{ node_id: string; port_id: string; reason: string }>;
+  }>(
     "/api/workflows/validate",
     { method: "POST", body: JSON.stringify(workflow) },
   ),
