@@ -131,6 +131,15 @@ that installed versions meet the minimum versions declared by
 outdated versions. This is a compatibility and local-install check, not a
 vulnerability-database lookup.
 
+The read-only security posture audit additionally checks each required runtime
+distribution's installed metadata and verifies hashed package files against
+its local `RECORD` manifest. Package inspection is bounded to 128 hashed files
+or 4 MiB per distribution; install-scheme files outside the package directory
+(such as generated console scripts) are not included in that hash pass. A
+missing or invalid RECORD inventory is reported as incomplete rather than
+silently treated as verified.
+
+
 Inspect a locally built wheel or source archive without extracting or running
 it:
 
