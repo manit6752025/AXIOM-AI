@@ -152,7 +152,7 @@ feature exists or a delivery-date promise.
 - [R112 · In progress; validation pending] Expose point-in-time CPU, process RSS, system RAM, device allocator, and trusted-model-storage telemetry via `GET /api/engine/telemetry` and `axiom engine telemetry --json`; the endpoint omits raw paths and user content. Historical sampling/export and physical-hardware validation remain outstanding.
 - [R113 · Planned] Add benchmark-linked resource trend charts with missing-data labels.
 - [R114 · Planned] Add telemetry export, clear-history, and privacy controls.
-- [R115 · Planned] Add diagnostic checks for config, paths, dependencies, and storage.
+- [R115 · In progress; validation pending] Add diagnostic checks for config parsing and permissions, safe paths, dependency importability and minimum versions, and storage free space.
 - [R116 · Planned] Add copyable support bundles with explicit secret/data redaction.
 - [R117 · Implemented; tests passing] Add release smoke checks for CLI, API, production UI build, and browser acceptance coverage together.
 - [R118 · Planned] Add cross-platform packaging verification for supported targets.
