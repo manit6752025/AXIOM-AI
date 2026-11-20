@@ -29,7 +29,8 @@ axiom --no-banner train run \
   --model-path "$HOME/models/my-transformers-model" \
   --dataset "$HOME/data/train.jsonl" \
   --output-dir "$HOME/runs/my-lora-adapter" \
-  --max-steps 20 --sequence-length 512 --lora-rank 8
+  --max-steps 20 --sequence-length 512 --lora-rank 8 \
+  --checkpoint-interval 5 --output-policy empty
 axiom --no-banner train jobs --limit 20 --offset 0
 axiom --no-banner train status JOB_ID
 ```
@@ -37,6 +38,32 @@ axiom --no-banner train status JOB_ID
 `train run` is an actual training operation and runs until completion or failure. Progress, loss when available, and the final adapter directory are recorded. The history is stored under `${AXIOM_FINETUNE_HOME:-~/.local/share/axiom/fine-tuning}/jobs`.
 
 The `train jobs` command accepts `--limit` (1–100) and `--offset` (0–5,000), and its JSON output includes total, next-page, and bounded-scan metadata. The Control Center Training panel exposes the same history in pages of ten and lets you select a previous job to inspect its logs and output.
+
+## Checkpoints, resume, and output policies
+
+The `train run` command and Training panel expose two controls:
+
+- `--checkpoint-interval N` (0–1,000): save a recoverable checkpoint every N completed optimizer steps. Zero disables checkpointing. When enabled, AXIOM also saves the final step even when it is not an exact interval boundary.
+- `--output-policy new|empty|resume`: `new` requires a path that does not exist; `empty` (the default) accepts a new or existing empty directory; `resume` requires an existing AXIOM output directory containing only verified checkpoints and no final adapter files.
+
+Checkpoints are stored below `.axiom-checkpoints/` in the selected output directory. AXIOM writes each checkpoint to a temporary directory, records a SHA-256 manifest for the adapter configuration, adapter weights, and optimizer state, then atomically publishes the completed checkpoint directory. The latest three complete checkpoints are retained. Interrupted temporary directories are never selected for resume. Before deserializing optimizer state, AXIOM verifies the manifest and uses PyTorch's restricted `weights_only` loader.
+
+A checkpoint contains the trainable LoRA adapter, optimizer state, dataset sampling order/position, and Python/PyTorch random-number-generator states. Resuming restores those values and continues at the next optimizer step. The same local base-model path, dataset path and exact dataset bytes, text field, sequence length, learning rate, LoRA rank, output directory, training seed, and compute device must be used. The requested maximum step count may be increased, but it cannot be below the checkpoint's completed step. The checkpoint interval may be changed for later saves.
+
+The base-model compatibility fingerprint includes relative file names, sizes, modification metadata, and a content hash of `config.json`; it does not re-read every potentially multi-gigabyte weight file. It detects ordinary local changes while keeping resume preflight bounded, but is not a cryptographic content identity for the entire model tree.
+
+Example: resume an interrupted run into the same output directory, using the same model, dataset, and training settings:
+
+```bash
+axiom --no-banner train run \
+  --model-path "$HOME/models/my-transformers-model" \
+  --dataset "$HOME/data/train.jsonl" \
+  --output-dir "$HOME/runs/my-lora-adapter" \
+  --max-steps 40 --sequence-length 512 --lora-rank 8 \
+  --learning-rate 0.0001 --checkpoint-interval 5 --output-policy resume
+```
+
+Only completed checkpoint steps are recoverable. If a process exits or is cancelled between checkpoint intervals, later uncheckpointed steps are repeated when the run resumes from the most recent verified checkpoint. A completed run writes final adapter files at the output-directory root; that completed output is not a resume target. Use a separate output directory for a new run.
 
 ## Job lifecycle and cancellation contract
 
@@ -143,6 +170,6 @@ contents or semantic quality, run inference, or write files.
 - Steps: 1–1,000; sequence length: 32–2,048 tokens; LoRA rank: 1–64; learning rate: 0.000001–0.01.
 - A single local fine-tuning job is allowed at a time to avoid accidental competing CPU/GPU workloads.
 - The MCP trainer rejects symbolic links and junctions inside model directories and limits its directory metadata scan to 50,000 entries.
-- The output must be new or empty. Only the generated adapter and tokenizer files are written to the output directory; the base-model directory and dataset are inputs.
+- Output policy defaults to a new or empty directory; resume is allowed only for an interrupted checkpoint-only directory with matching inputs. When enabled, the latest three complete checkpoints are retained below `.axiom-checkpoints/`.
 - These limits do not guarantee that a model fits available memory. Start with a small model, short sequence length, and a few steps. GPU capability and architecture-specific LoRA compatibility are checked by the installed runtime, not inferred from the planning estimate.
 - This is supervised causal-LM LoRA fine-tuning, not full-weight training, QLoRA, preference training, or a general workflow executor.
