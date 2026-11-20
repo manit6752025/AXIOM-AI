@@ -62,15 +62,34 @@ def _safe_member_name(name: str) -> bool:
 
 
 def _safe_artifact_file(path: str | Path) -> tuple[Path, BinaryIO, int]:
-    candidate = Path(path).expanduser()
+    """Open a local artifact without following symlinked path components on POSIX."""
+    candidate = Path(os.path.abspath(Path(path).expanduser()))
+    if not candidate.name or len(candidate.parts) < 2:
+        raise ValueError("Release artifact must be a regular file path.")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     try:
-        if candidate.is_symlink():
-            raise ValueError("Release artifact path must not be a symbolic link.")
-        resolved = candidate.resolve(strict=True)
-        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-        if hasattr(os, "O_NOFOLLOW"):
-            flags |= os.O_NOFOLLOW
-        descriptor = os.open(resolved, flags)
+        if os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"):
+            directory_fd = os.open(candidate.anchor, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                for component in candidate.parts[1:-1]:
+                    next_fd = os.open(
+                        component,
+                        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                        dir_fd=directory_fd,
+                    )
+                    os.close(directory_fd)
+                    directory_fd = next_fd
+                descriptor = os.open(
+                    candidate.name,
+                    flags | os.O_NOFOLLOW,
+                    dir_fd=directory_fd,
+                )
+            finally:
+                os.close(directory_fd)
+        else:
+            if candidate.is_symlink():
+                raise ValueError("Release artifact path must not be a symbolic link.")
+            descriptor = os.open(candidate, flags)
         stream = os.fdopen(descriptor, "rb")
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode):
@@ -79,8 +98,10 @@ def _safe_artifact_file(path: str | Path) -> tuple[Path, BinaryIO, int]:
         if info.st_size <= 0 or info.st_size > _MAX_ARTIFACT_BYTES:
             stream.close()
             raise ValueError("Release artifact is empty or exceeds the 256 MiB inspection limit.")
-        return resolved, stream, info.st_size
-    except (OSError, RuntimeError) as exc:
+        return candidate, stream, info.st_size
+    except ValueError:
+        raise
+    except OSError as exc:
         raise ValueError("Release artifact could not be opened safely.") from exc
 
 
