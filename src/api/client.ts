@@ -1250,7 +1250,7 @@ export type SecurityEventRecord = {
   target_event_id?: string;
 };
 
-export type SecurityEventListItem = SecurityEventRecord & {
+export type SecurityEventListItem = Omit<SecurityEventRecord, "reviewer_label"> & {
   reviewed: boolean;
   reviewed_at: string | null;
   reviewer_label: string | null;
