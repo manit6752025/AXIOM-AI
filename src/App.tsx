@@ -2401,25 +2401,6 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
     void refresh(filters);
   };
 
-  const inspectServerSchemas = async (name: string) => {
-    setInspectingSchemas(name);
-    setServerInventoryError("");
-    try {
-      const result = await axiomApi.inspectMcpServerSchemas(name);
-      setSchemaResults((current) => ({ ...current, [name]: result }));
-      onNotify(
-        result.status === "ok"
-          ? `Read-only schemas loaded for ${name}.`
-          : `Schema inspection ${result.status}: ${result.message || "metadata could not be loaded"}`,
-        result.status === "ok" ? "success" : "warning",
-      );
-    } catch (cause) {
-      setServerInventoryError(cause instanceof Error ? cause.message : "MCP schemas could not be inspected.");
-    } finally {
-      setInspectingSchemas("");
-    }
-  };
-
   useEffect(() => { void refresh(); }, []);
 
   const discoverLocalModels = async () => {
@@ -4218,6 +4199,25 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
       setServerInventoryError(cause instanceof Error ? cause.message : "MCP handshake could not be inspected.");
     } finally {
       setInspectingServer("");
+    }
+  };
+
+  const inspectServerSchemas = async (name: string) => {
+    setInspectingSchemas(name);
+    setServerInventoryError("");
+    try {
+      const result = await axiomApi.inspectMcpServerSchemas(name);
+      setSchemaResults((current) => ({ ...current, [name]: result }));
+      onNotify(
+        result.status === "ok"
+          ? `Read-only schemas loaded for ${name}.`
+          : `Schema inspection ${result.status}: ${result.message || "metadata could not be loaded"}`,
+        result.status === "ok" ? "success" : "warning",
+      );
+    } catch (cause) {
+      setServerInventoryError(cause instanceof Error ? cause.message : "MCP schemas could not be inspected.");
+    } finally {
+      setInspectingSchemas("");
     }
   };
 
