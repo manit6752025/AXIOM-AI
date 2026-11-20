@@ -11,6 +11,7 @@ import re
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
+from axiom.core.workspace_context import active_workspace_root
 from threading import RLock
 from typing import Any
 from axiom.core.resource_ids import new_resource_id
@@ -65,7 +66,7 @@ class AgentProfileStore:
     """Store versioned profile metadata under the current workspace's `.axiom`."""
 
     def __init__(self, root: Path | None = None) -> None:
-        self.root = (root or Path.cwd()).resolve()
+        self.root = (root or active_workspace_root()).resolve()
         self.directory = self.root / ".axiom"
         self.path = self.directory / "agent-profiles.json"
 

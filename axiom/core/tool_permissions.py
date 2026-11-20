@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from axiom.core.storage import atomic_write_text, file_lock
+from axiom.core.workspace_context import workspace_metadata_dir
 
 TOOL_DESCRIPTIONS = {
     "axiom_info": "Read AXIOM release information.",
@@ -111,7 +112,7 @@ class ToolPermissionStore:
     """Persist named tool allowlists; an absent entry never grants access."""
 
     def __init__(self, root: Path | None = None) -> None:
-        self.root = Path(root) if root is not None else Path(".axiom")
+        self.root = Path(root) if root is not None else workspace_metadata_dir()
         self.policy_file = self.root / "tool_permissions.json"
         self.lock_file = self.root / ".tool_permissions.lock"
 

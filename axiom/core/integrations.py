@@ -6,6 +6,7 @@ from enum import Enum
 from pathlib import Path
 
 from axiom.core.storage import atomic_write_text, file_lock
+from axiom.core.workspace_context import workspace_metadata_dir
 
 
 class IntegrationType(str, Enum):
@@ -75,7 +76,7 @@ class IntegrationRegistry:
         *,
         create: bool = True,
     ):
-        self.root = Path(root) if root is not None else Path(".axiom")
+        self.root = Path(root) if root is not None else workspace_metadata_dir()
         self.path = self.root / "integrations.json"
         self.lock_file = self.root / ".integrations.lock"
 
