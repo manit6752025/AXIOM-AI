@@ -426,6 +426,17 @@ def test_every_registered_mcp_tool_has_a_default_deny_guard_at_entry():
             missing_permissions.append(handler.name)
         elif min(index for index, _ in valid_guards) > 1:
             late_guards.append(handler.name)
+        elif not any(
+            any(
+                keyword.arg == "arguments"
+                and isinstance(keyword.value, ast.Call)
+                and isinstance(keyword.value.func, ast.Name)
+                and keyword.value.func.id == "locals"
+                for keyword in call.keywords
+            )
+            for _index, call in valid_guards
+        ):
+            missing_permissions.append(handler.name + " (missing argument-name audit metadata)")
 
     assert not missing_permissions, (
         "Every registered MCP tool must enforce a known ToolPermissionStore capability: "
@@ -456,3 +467,14 @@ def test_mcp_tool_invocation_is_denied_until_explicit_profile_grant(tmp_path, mo
     result = axiom_info()
     assert result["name"] == "AXIOM"
     assert result["version"]
+
+    decisions = [
+        event for event in ToolPermissionStore().workspace_root.joinpath(".axiom", "security-events.json").read_text(encoding="utf-8")
+        and __import__("json").loads(
+            ToolPermissionStore().workspace_root.joinpath(".axiom", "security-events.json").read_text(encoding="utf-8")
+        )["events"]
+        if event["event_type"] == "mcp.tool.decision" and event["tool_name"] == "axiom_info"
+    ]
+    assert [event["decision"] for event in decisions] == ["denied", "allowed"]
+    assert [event["reason"] for event in decisions] == ["not_granted", "explicit_grant"]
+    assert all(event["arguments"] == {} for event in decisions)
