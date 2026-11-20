@@ -277,6 +277,28 @@ def _verify_wheel(archive: zipfile.ZipFile, filename: str) -> dict[str, Any]:
             "artifact.wheel.metadata", "Wheel metadata validity", "pass",
             f"Wheel metadata identifies {package_name} {package_version} with {len(tags)} compatibility tag(s).",
         ))
+    filename_tag_matches = False
+    if len(parts) in {5, 6}:
+        file_python, file_abi, file_platform = parts[-3:]
+        expected_tags = {
+            f"{python}-{abi}-{platform_tag}"
+            for python in file_python.split(".")
+            for abi in file_abi.split(".")
+            for platform_tag in file_platform.split(".")
+        }
+        filename_tag_matches = set(tags) == expected_tags
+    if filename_tag_matches:
+        checks.append(_check(
+            "artifact.wheel.tags", "Wheel compatibility tags", "pass",
+            "Embedded WHEEL compatibility tags match the wheel filename.",
+        ))
+    else:
+        checks.append(_check(
+            "artifact.wheel.tags", "Wheel compatibility tags", "fail",
+            "Embedded WHEEL compatibility tags do not match the wheel filename.",
+            "Rebuild the wheel with matching Python, ABI, and platform tags.",
+        ))
+
     expected_dist_info = f"{re.sub(r'[-_.]+', '_', package_name).lower()}-{package_version}.dist-info"
     if dist_info != expected_dist_info:
         checks.append(_check(
