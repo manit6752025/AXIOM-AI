@@ -74,3 +74,31 @@ def test_fine_tuning_jobs_endpoint_returns_bounded_page(monkeypatch):
 def test_fine_tuning_jobs_endpoint_rejects_unbounded_paging():
     response = TestClient(create_app()).get("/api/fine-tuning/jobs?limit=101")
     assert response.status_code == 422
+
+def test_fine_tuning_cancel_route_returns_explicit_cancellation_contract(monkeypatch):
+    from axiom.api import fine_tuning
+
+    expected = {
+        "id": "a" * 32,
+        "status": "cancelling",
+        "cancellation": {
+            "supported": True,
+            "requested": True,
+            "requestable": False,
+            "mode": "cooperative",
+            "boundary": "before worker start or between training steps; adapter finalization is not interruptible",
+            "unavailable_reason": "already_requested",
+        },
+    }
+    monkeypatch.setattr(fine_tuning, "cancel_finetuning_job", lambda _job_id: expected)
+    response = TestClient(create_app()).post(f"/api/fine-tuning/jobs/{'a' * 32}/cancel")
+    assert response.status_code == 200
+    assert response.json() == expected
+
+
+def test_fine_tuning_cancel_route_returns_not_found_for_missing_job(monkeypatch):
+    from axiom.api import fine_tuning
+
+    monkeypatch.setattr(fine_tuning, "cancel_finetuning_job", lambda _job_id: None)
+    response = TestClient(create_app()).post(f"/api/fine-tuning/jobs/{'b' * 32}/cancel")
+    assert response.status_code == 404
