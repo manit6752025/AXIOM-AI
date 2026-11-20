@@ -330,5 +330,5 @@ test("workflow editor creates a branching graph with typed input/output ports", 
     }),
   ]));
   expect(createdPayload?.nodes.every((node) => node.ports)).toBe(true);
-  await expect(page.getByText("Saved · design only · execution is disabled")).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Saved · design only · execution is disabled" })).toBeVisible();
 });
