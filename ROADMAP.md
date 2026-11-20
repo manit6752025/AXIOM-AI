@@ -132,7 +132,7 @@ feature exists or a delivery-date promise.
 ### 09 · Agent profiles, MCP, and security
 
 - [R097 · Implemented; tests passing] Add versioned workspace-local agent profiles with an explicit bounded task-capability catalog, a required default-deny profile, safe persistence, API/CLI/GUI CRUD, and revision increments. Profiles are descriptive metadata and never grant tool permissions.
-- [R098 · In progress; validation pending] Enforce default-deny tool permissions in the backend boundary.
+- [R098 · Implemented; tests passing] Enforce default-deny MCP tool permissions at the backend boundary. Every registered MCP handler performs a known capability check before operational work; unknown tools and absent grants are denied, the workspace policy fails closed on malformed data, and access is managed through the API, CLI, and Control Center. Verified by the full CI suite: 995 Python tests, ESLint, TypeScript/production build, 62 browser acceptance tests, and Ubuntu/macOS/Windows release-contract checks (run #44728649733).
 - [R099 · Implemented; tests passing] Classify every MCP tool with explicit read, write, network, and/or execution scopes in the backend-owned permission inventory. Tool grants remain default-deny and scope labels describe the authority an approved tool can exercise.
 - [R100 · Planned] Add auditable allow/deny decisions with redacted arguments.
 - [R101 · Planned] Add MCP server inventory and protocol handshake inspection.
