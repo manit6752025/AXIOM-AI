@@ -137,7 +137,7 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
   expect(continuedMessages.some((message) => message.role === "user" && message.content === "Continue our previous answer")).toBe(true);
 
   await panel.getByLabel("LLM provider", { exact: true }).selectOption("ollama-local");
-  await panel.getByRole("button", { name: "Connect" }).click();
+  await panel.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(panel.getByLabel("Model ID")).toHaveValue("qwen2.5:0.5b");
   await panel.getByLabel("Prompt").fill("Hello Ollama local model");
   await panel.getByRole("button", { name: "Generate locally" }).click();
@@ -150,7 +150,7 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
 
   await panel.getByLabel("LLM provider", { exact: true }).selectOption("deepseek");
   await panel.getByLabel("Provider API key").fill("never-return-this");
-  await panel.getByRole("button", { name: "Connect" }).click();
+  await panel.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(panel.getByLabel("Model ID")).toHaveValue("deepseek-chat");
   await expect.poll(() => modelCatalogueCalls).toBeGreaterThan(1);
 
@@ -186,11 +186,11 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
   await expect(reloadedPanel.getByLabel("LLM provider")).toHaveValue("deepseek");
   await expect(reloadedPanel.getByLabel("Model ID")).toHaveValue("deepseek-chat");
   await reloadedPanel.getByLabel("Provider API key").fill("never-return-this");
-  await reloadedPanel.getByRole("button", { name: "Connect" }).click();
+  await reloadedPanel.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(reloadedPanel.getByRole("button", { name: "Disconnect" })).toBeEnabled();
   await reloadedPanel.getByRole("button", { name: "Disconnect" }).click();
   await expect(reloadedPanel.getByLabel("Provider API key")).toHaveValue("");
-  await expect(reloadedPanel.getByRole("button", { name: "Connect" })).toBeDisabled();
+  await expect(reloadedPanel.getByRole("button", { name: "Connect", exact: true })).toBeDisabled();
   const afterDisconnect = await page.evaluate(() => localStorage.getItem("axiom-llm-provider-profiles-v1") || "");
   expect(afterDisconnect).not.toContain("never-return-this");
   expect(JSON.stringify(workspaceProfile)).not.toContain("never-return-this");
