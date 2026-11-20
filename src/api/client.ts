@@ -529,6 +529,10 @@ export type WorkspaceModel = {
   architecture?: string | null;
   license?: string | null;
   license_review?: "unreviewed" | "approved" | "restricted" | "unknown";
+  source_attribution?: string | null;
+  source_url?: string | null;
+  source_revision?: string | null;
+  license_review_notes?: string | null;
   tags?: string[];
   favorite?: boolean;
   content_sha256?: string | null;
