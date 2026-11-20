@@ -84,11 +84,52 @@ class SecurityEventStore:
     def _locked(self) -> Iterator[None]:
         self._check_paths(create=True)
         try:
-            with file_lock(self.lock_path):
-                self._check_paths()
-                if os.name == "posix":
-                    os.chmod(self.lock_path, stat.S_IRUSR | stat.S_IWUSR)
-                yield
+            if (
+                os.name == "posix"
+                and getattr(os, "O_NOFOLLOW", 0)
+                and getattr(os, "O_DIRECTORY", 0)
+                and os.open in getattr(os, "supports_dir_fd", set())
+            ):
+                directory_fd = os.open(
+                    self.directory,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                )
+                handle = None
+                descriptor = None
+                import fcntl
+
+                try:
+                    descriptor = os.open(
+                        self.lock_path.name,
+                        os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                        0o600,
+                        dir_fd=directory_fd,
+                    )
+                    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                        raise SecurityEventError("Security journal lock must be a regular file.")
+                    os.fchmod(descriptor, stat.S_IRUSR | stat.S_IWUSR)
+                    handle = os.fdopen(descriptor, "r+b")
+                    descriptor = None
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                    self._check_paths()
+                    yield
+                finally:
+                    if handle is not None:
+                        try:
+                            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                        finally:
+                            handle.close()
+                    if descriptor is not None:
+                        os.close(descriptor)
+                    os.close(directory_fd)
+            else:
+                # Windows uses the portable path-based lock fallback; symlink
+                # checks are repeated after acquiring the handle.
+                with file_lock(self.lock_path):
+                    self._check_paths()
+                    yield
+        except SecurityEventError:
+            raise
         except (OSError, TimeoutError) as exc:
             raise SecurityEventError("Security journal lock could not be acquired safely.") from exc
 
