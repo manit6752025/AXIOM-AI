@@ -89,3 +89,19 @@ workstream. Runtime traces are tested as memory-only, metadata-only storage;
 browser persistence is local to the browser profile. No claim is made that AXIOM
 can delete arbitrary files, securely erase storage media, or clean every output
 from third-party runtimes.
+
+
+## Frontend error reports
+
+The Diagnostics page keeps a ring buffer of at most 50 frontend error events in
+browser memory. A report contains only an ISO timestamp, an allowlisted event
+source/category/error name, a known Control Center page ID, and an HTTP status
+code where applicable. Raw error messages, stack traces, request URLs/IDs,
+headers, request bodies, prompts, dataset values, credentials, and environment
+values are not collected. Arbitrary browser error text is deliberately ignored.
+
+Reports are not written to local storage, project files, or a server and are
+never uploaded automatically. A user may explicitly download the current
+redacted JSON report or clear the in-memory entries. Reloading or closing the
+browser clears the report. The generated download is a user-created local file;
+review it before sharing.

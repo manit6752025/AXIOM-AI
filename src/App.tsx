@@ -13,6 +13,13 @@ import ModelStudioPanel from "./components/ModelStudioPanel";
 import LocalFineTuningPanel from "./components/LocalFineTuningPanel";
 import { downloadBlob } from "./utils/browserDownload";
 import {
+  clearFrontendErrorReport,
+  FRONTEND_ERROR_EVENT,
+  getFrontendErrorReport,
+  installFrontendErrorHandlers,
+  type FrontendErrorEntry,
+} from "./diagnostics/frontendErrors";
+import {
   AccessibleDialog,
   ConfirmationDialog,
   DataTable,
@@ -737,6 +744,8 @@ function App() {
   });
   const [pendingApiRequests, setPendingApiRequests] = useState(0);
   const [clockNow, setClockNow] = useState(() => Date.now());
+
+  useEffect(() => installFrontendErrorHandlers(), []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -3671,7 +3680,33 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
   const [datasetCount, setDatasetCount] = useState<number | null>(null);
   const [workspaceDiagnostics, setWorkspaceDiagnostics] = useState<WorkspaceDiagnostics | null>(null);
   const [bundleBusy, setBundleBusy] = useState(false);
+  const [frontendErrors, setFrontendErrors] = useState(() => getFrontendErrorReport().events);
+  const [frontendReportBusy, setFrontendReportBusy] = useState(false);
 
+  useEffect(() => {
+    const refreshFrontendErrors = () => setFrontendErrors(getFrontendErrorReport().events);
+    window.addEventListener(FRONTEND_ERROR_EVENT, refreshFrontendErrors);
+    return () => window.removeEventListener(FRONTEND_ERROR_EVENT, refreshFrontendErrors);
+  }, []);
+
+  const exportFrontendErrors = () => {
+    setFrontendReportBusy(true);
+    try {
+      const report = getFrontendErrorReport();
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+      downloadBlob(blob, "axiom-frontend-error-report.json");
+      onNotify("Redacted frontend error report downloaded. Review it before sharing.", "success");
+    } catch {
+      onNotify("Frontend error report could not be exported.", "warning");
+    } finally {
+      setFrontendReportBusy(false);
+    }
+  };
+
+  const clearFrontendErrorsFromView = () => {
+    clearFrontendErrorReport();
+    setFrontendErrors([]);
+  };
 
   const downloadBundle = async () => {
     setBundleBusy(true);
@@ -3726,6 +3761,37 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
       <DiagnosticRow icon={modelCount !== null ? CircleCheck : TriangleAlert} title="Model registry" detail={modelCount === null ? "Registry endpoint unavailable." : `${modelCount} model${modelCount === 1 ? "" : "s"} registered.`} state={modelCount === null ? "FAILED" : "PASS"} tone={modelCount === null ? "warning" : "success"} />
       <DiagnosticRow icon={datasetCount !== null ? CircleCheck : TriangleAlert} title="Dataset inventory" detail={datasetCount === null ? "Dataset endpoint unavailable." : `${datasetCount} JSONL file${datasetCount === 1 ? "" : "s"} found in data/.`} state={datasetCount === null ? "FAILED" : "PASS"} tone={datasetCount === null ? "warning" : "success"} />
     </div>
+    <Surface
+      title="Frontend error report"
+      eyebrow="LOCAL / REDACTED / NO UPLOAD"
+      action={<StatusPill tone={frontendErrors.length ? "warning" : "success"}>{frontendErrors.length}/50 EVENTS</StatusPill>}
+    >
+      <p className="quiet-note">This browser-profile report is held in memory and capped at 50 events. It contains only timestamps, allowlisted source/category/error names, a workspace page ID, and HTTP status codes. Raw messages, stack traces, URLs, request IDs, headers, request bodies, prompts, dataset values, credentials, and environment values are never included. Nothing is uploaded automatically.</p>
+      <div className="integration-form-actions">
+        <button type="button" className="button secondary-button" onClick={exportFrontendErrors} disabled={!frontendErrors.length || frontendReportBusy}>
+          <ArrowDownToLine size={15} /> {frontendReportBusy ? "Preparing report…" : "Download redacted report"}
+        </button>
+        <button type="button" className="button secondary-button" onClick={clearFrontendErrorsFromView} disabled={!frontendErrors.length}>
+          Clear in-memory report
+        </button>
+      </div>
+      {frontendErrors.length
+        ? <DataTable<FrontendErrorEntry>
+            caption="Redacted frontend error events"
+            rows={[...frontendErrors].reverse()}
+            rowKey={(entry) => String(entry.id)}
+            columns={[
+              { key: "occurred_at", header: "Time", render: (entry) => entry.occurred_at },
+              { key: "source", header: "Source", render: (entry) => entry.source },
+              { key: "category", header: "Category", render: (entry) => entry.category },
+              { key: "error_name", header: "Error type", render: (entry) => entry.error_name },
+              { key: "page", header: "Page", render: (entry) => entry.page },
+              { key: "http_status", header: "HTTP", render: (entry) => entry.http_status ?? "—" },
+            ]}
+          />
+        : <EmptyState icon={CircleCheck} title="No frontend errors recorded" description="Runtime errors and failed API requests will appear here as redacted metadata. Messages and data values are not collected." />
+      }
+    </Surface>
     {workspaceDiagnostics && <Surface title="Workspace checks" eyebrow="READ-ONLY BACKEND DIAGNOSTICS" action={<StatusPill tone={workspaceDiagnostics.status === "pass" ? "success" : workspaceDiagnostics.status === "fail" ? "danger" : "warning"}>{workspaceDiagnostics.status.toUpperCase()}</StatusPill>}>
       <p className="quiet-note">{workspaceDiagnostics.summary.passed} passed · {workspaceDiagnostics.summary.warnings} warning(s) · {workspaceDiagnostics.summary.failed} failed. Checks are read-only; no repair actions are run automatically.</p>
       <div className="diag-list">{workspaceDiagnostics.checks.map((check) => {

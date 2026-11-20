@@ -1,3 +1,5 @@
+import { recordFrontendError } from "../diagnostics/frontendErrors";
+
 const API_BASE = import.meta.env.VITE_AXIOM_API_URL || "";
 
 
@@ -1213,6 +1215,12 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
     }
 
     if (!response.ok) {
+      recordFrontendError({
+        source: "api.request",
+        category: "api_http_error",
+        errorName: "ApiError",
+        httpStatus: response.status,
+      });
       const bodyRequestId = payload && typeof payload === "object"
         ? (payload as ApiErrorBody).request_id
         : undefined;
@@ -1225,9 +1233,11 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
     return payload as T;
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
+      recordFrontendError({ source: "api.request", category: "api_timeout", errorName: "AbortError" });
       throw new Error(`AXIOM backend did not respond within 15 seconds (request ID ${requestId}).`, { cause: error });
     }
     if (error instanceof TypeError) {
+      recordFrontendError({ source: "api.request", category: "api_network_error", errorName: "TypeError" });
       throw new Error(`AXIOM backend is unavailable. Start the local API and try again (request ID ${requestId}).`, { cause: error });
     }
     throw error;

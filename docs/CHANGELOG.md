@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — redacted local frontend error reporting
+
+- Added a 50-entry in-memory frontend error ring buffer that stores only timestamps, allowlisted source/category/error names, page IDs, and HTTP status codes; ignores raw messages, stacks, URLs, request IDs, headers, request bodies, prompts, dataset values, credentials, and environment values.
+- Added explicit user-triggered JSON download and clear controls to Diagnostics. Reports are browser-local, cleared on reload, and never uploaded automatically; API HTTP/network/timeout errors and global runtime/unhandled-rejection events feed the redacted store.
+
 ## Unreleased — explicit export and local-file boundaries
 
 - Centralized browser Blob download handling with path-component stripping, platform-safe filenames, temporary anchor cleanup, and delayed object-URL revocation across model, dataset, evaluation, workflow, workspace metadata, and support-bundle exports.
