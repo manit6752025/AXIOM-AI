@@ -2360,3 +2360,17 @@ html[data-accent="violet"] .app-shell.light {
 .mcp-schema-detail { padding: 10px 0; border-bottom: 1px solid var(--line); }
 .mcp-schema-detail summary { color: var(--ink-strong); font-size: 11px; line-height: 1.5; cursor: pointer; }
 .mcp-schema-preview { max-height: 280px; margin: 10px 0 14px; font-size: 10px; }
+
+
+/* Per-server MCP trust and ownership controls */
+.mcp-server-trust { margin: 10px 0 16px; padding: 10px 0; border-top: 1px solid var(--line); }
+.mcp-server-trust-fields { display: grid; grid-template-columns: minmax(120px, .8fr) minmax(120px, .8fr) minmax(180px, 1.4fr) auto; align-items: end; gap: 10px; margin-top: 10px; }
+.mcp-server-trust-fields .field { min-width: 0; margin: 0; }
+.mcp-server-trust-fields .button { white-space: nowrap; }
+@media (max-width: 900px) {
+  .mcp-server-trust-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mcp-server-trust-fields .button { justify-self: start; }
+}
+@media (max-width: 520px) {
+  .mcp-server-trust-fields { grid-template-columns: minmax(0, 1fr); }
+}
