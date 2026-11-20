@@ -241,6 +241,8 @@ def _package_integrity_check(
 
     if hashed_files == 0:
         problems.append("no hashed installation files were available to verify")
+    if skipped_external:
+        problems.append(f"{skipped_external} install-scheme file(s) outside the package directory were not verified")
     if bounded:
         if verified != hashed_files:
             problems.append("not every hashed installation file could be verified")
@@ -269,8 +271,6 @@ def _package_integrity_check(
         remediation = "Reinstall the package from a trusted source and review local import paths."
     else:
         detail = f"{distribution_name} {version} meets the minimum {minimum}; verified {verified} installed file hash(es) against RECORD."
-        if skipped_external:
-            detail += f" {skipped_external} install-scheme file(s) outside the package directory were not inspected."
         remediation = None
         status = "pass"
     return _check(
