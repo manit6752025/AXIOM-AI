@@ -612,7 +612,7 @@ def inspect(root: Path) -> dict[str, Any]:
             "local_only: true", "remote_code: false", "engineLoaded = true",
             'getByRole("button", { name: "Run with AXIOM Engine" })',
             'getByRole("button", { name: "Unload model" })',
-            'getByLabel("Execution device")',
+            'getByLabel("Execution device", { exact: true })',
             'option[value="cuda"]',
             'option[value="rocm"]',
             'option[value="mps"]',
