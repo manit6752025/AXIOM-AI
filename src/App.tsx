@@ -4344,7 +4344,7 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
                 {(schemaResults[server.name].tools || []).map((tool) => <details className="mcp-schema-detail" key={tool.name}>
                   <summary><b>{tool.name}</b>{tool.description ? ` · ${tool.description}` : ""}</summary>
                   <pre className="plan-reproducible-json mcp-schema-preview">{JSON.stringify(tool.input_schema, null, 2)}</pre>
-                  {tool.output_schema && <pre className="code-preview">{JSON.stringify(tool.output_schema, null, 2)}</pre>}
+                  {tool.output_schema && <pre className="plan-reproducible-json mcp-schema-preview">{JSON.stringify(tool.output_schema, null, 2)}</pre>}
                 </details>)}
                 {[...(schemaResults[server.name].resources || []).map((resource) => ({ kind: "Resource", name: resource.name, uri: resource.uri, mime: resource.mime_type })),
                   ...(schemaResults[server.name].resource_templates || []).map((resource) => ({ kind: "Template", name: resource.name, uri: resource.uri_template, mime: resource.mime_type }))].map((resource, index) =>
@@ -4359,7 +4359,7 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
         })}
       </div> : <EmptyState icon={Network} title="No MCP servers registered" description="Add a stdio MCP server with axiom integration add to see it here. Inventory is passive and does not start processes." /> : <div className="loading-state" role="status">Loading registered MCP servers…</div>}
       <div className="surface-divider" />
-      <Callout tone="warning" title="Handshake starts a process">Inspect handshake explicitly starts the registered stdio command for a time-limited protocol negotiation. AXIOM uses the MCP SDK's minimal child environment, does not enumerate tool/resource schemas, and never invokes tools during this check.</Callout>
+      <Callout tone="warning" title="Inspection starts a process">Both inspection actions explicitly start the selected registered stdio command with a time limit and the MCP SDK's minimal child environment. Handshake negotiates protocol metadata; Browse schemas requests only tools/list, resources/list and resource-template list metadata. Neither action calls tools, reads resources, runs prompts, or forwards AXIOM credentials to the child.</Callout>
       <p className="quiet-note">{serverInventory?.inspection_note || "Registered server information is read without starting external processes."} Use axiom integration handshake NAME for the same check from the CLI.</p>
     </Surface>
     <div className="two-column-grid mcp-layout">
