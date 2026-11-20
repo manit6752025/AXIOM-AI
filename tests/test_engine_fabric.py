@@ -482,6 +482,7 @@ def test_discovered_backends_publish_sampling_contract(monkeypatch):
             "status": "ready", "installed": True, "reachable": True, "models": ["tiny"], "model_count": 1,
             "error": None, "scope": "fixed_loopback_only",
             "generation": engine_fabric._generation_capabilities(definition["id"]),
+            "benchmark_requirements": engine_fabric.benchmark_adapter_requirements(definition["id"]),
         }
     monkeypatch.setattr(engine_fabric, "_probe_backend", fake_probe)
     monkeypatch.setattr(engine_fabric, "_native_backend", lambda: {
