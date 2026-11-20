@@ -179,8 +179,8 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
   await page.reload();
   const reloadedPanel = page.locator(".llm-client-panel");
   await expect(reloadedPanel.getByRole("heading", { name: "Unified LLM client" })).toBeVisible();
-  await expect(reloadedPanel.getByLabel("Saved provider profile")).toContainText("DeepSeek team · deepseek");
-  await reloadedPanel.getByLabel("Saved provider profile").selectOption({ label: "DeepSeek team · deepseek" });
+  await expect(reloadedPanel.getByLabel("Saved provider profile", { exact: true })).toContainText("DeepSeek team · deepseek");
+  await reloadedPanel.getByLabel("Saved provider profile", { exact: true }).selectOption({ label: "DeepSeek team · deepseek" });
   await reloadedPanel.getByRole("button", { name: "Apply profile" }).click();
   await expect(reloadedPanel.getByLabel("LLM provider")).toHaveValue("deepseek");
   await expect(reloadedPanel.getByLabel("Provider API key")).toHaveValue("");
