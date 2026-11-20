@@ -1712,9 +1712,10 @@ function Topbar({
                   </button>
                 );
               }) : <div className="command-empty">No matching pages or actions for "{query}".</div>}
-              <div id="command-palette-keyboard-hint" className="command-hint"><kbd>↑↓</kbd> move <kbd>Home/End</kbd> jump <kbd>↵</kbd> run <kbd>esc</kbd> close</div>
+              <div className="command-hint"><kbd>↑↓</kbd> move <kbd>Home/End</kbd> jump <kbd>↵</kbd> run <kbd>esc</kbd> close</div>
             </div>
           )}
+          <span id="command-palette-keyboard-hint" className="sr-only">Use Up and Down arrow keys to move through command results, Home or End to jump to the first or last result, Enter to run the selected result, and Escape to close the palette.</span>
           <span id="command-palette-announcement" className="sr-only" role="status" aria-live="polite" aria-atomic="true">
             {searchOpen
               ? results.length === 0
