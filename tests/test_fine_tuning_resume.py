@@ -227,7 +227,7 @@ def test_local_training_resumes_verified_adapter_optimizer_and_sampling_state(tm
     model_dir.mkdir()
     (model_dir / "config.json").write_text('{"model_type":"llama"}', encoding="utf-8")
     dataset = tmp_path / "train.jsonl"
-    dataset.write_text('{"text":"hello"}\\n', encoding="utf-8")
+    dataset.write_text('{"text":"hello"}\n', encoding="utf-8")
     output = tmp_path / "adapter"
     config = {
         "model_path": str(model_dir),
