@@ -338,7 +338,11 @@ def _verify_wheel(archive: zipfile.ZipFile, filename: str) -> dict[str, Any]:
             mismatch = True
             continue
         algorithm, separator, expected = hash_value.partition("=")
-        if not separator or algorithm.lower() not in {"sha256", "sha384", "sha512"}:
+        if (
+            not separator
+            or algorithm.lower() not in {"sha256", "sha384", "sha512"}
+            or not re.fullmatch(r"[A-Za-z0-9_-]+", expected)
+        ):
             mismatch = True
             continue
         try:
@@ -379,10 +383,15 @@ def _verify_wheel(archive: zipfile.ZipFile, filename: str) -> dict[str, Any]:
 
 
 def hmac_compare(left: str, right: str) -> bool:
-    """Constant-time string equality for manifest digests."""
+    """Constant-time ASCII equality for manifest digests."""
     import hmac
 
-    return hmac.compare_digest(left.encode("ascii", "ignore"), right.encode("ascii", "ignore"))
+    try:
+        left_bytes = left.encode("ascii")
+        right_bytes = right.encode("ascii")
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(left_bytes, right_bytes)
 
 
 def _verify_zip_sdist(archive: zipfile.ZipFile) -> dict[str, Any]:
@@ -451,14 +460,21 @@ def _verify_tar_sdist(stream: BinaryIO) -> dict[str, Any]:
                         build_manifest = True
             if count == 0:
                 raise ValueError("Source archive contains no entries.")
-    except (tarfile.TarError, OSError) as exc:
+    except (tarfile.TarError, OSError, EOFError) as exc:
         raise ValueError("Source archive is malformed or could not be inspected safely.") from exc
 
-    if checks:
-        if not any(item["status"] == "pass" for item in checks):
-            checks.append(_check("artifact.archive.structure", "Archive structure", "pass", f"Inspected {count} source archive entries without extracting them."))
-    else:
-        checks.append(_check("artifact.archive.structure", "Archive structure", "pass", f"Inspected {count} source archive entries with safe paths and regular file types."))
+    if not any(item["id"] == "artifact.archive.structure" for item in checks):
+        if any(item["status"] == "fail" for item in checks):
+            checks.append(_check(
+                "artifact.archive.structure", "Archive structure", "fail",
+                "The source archive contains unsafe paths or filesystem entries.",
+                "Rebuild the archive with unique relative paths and regular files/directories only.",
+            ))
+        else:
+            checks.append(_check(
+                "artifact.archive.structure", "Archive structure", "pass",
+                f"Inspected {count} source archive entries with safe paths and regular file types.",
+            ))
     checks.append(_check(
         "artifact.sdist.build_metadata", "Source distribution metadata",
         "pass" if build_manifest else "warn",
@@ -483,7 +499,7 @@ def inspect_release_artifact(path: str | Path) -> dict[str, Any]:
             try:
                 with zipfile.ZipFile(stream, "r") as archive:
                     report = _verify_wheel(archive, filename)
-            except (zipfile.BadZipFile, OSError, RuntimeError) as exc:
+            except (zipfile.BadZipFile, OSError, RuntimeError, EOFError) as exc:
                 raise ValueError("Wheel archive is malformed or could not be inspected safely.") from exc
             artifact_format = "wheel"
         elif filename.lower().endswith((".tar.gz", ".tgz")):
