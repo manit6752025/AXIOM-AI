@@ -22,6 +22,7 @@ from axiom.daemon import local_summary
 from axiom.core.diagnostics import diagnose_workspace
 from axiom.core.security_audit import audit_security_posture
 from axiom.core.artifact_security import inspect_release_artifact
+from axiom.core.security_events import SecurityEventError, SecurityEventStore
 from axiom.cli.support_bundle import register as register_support_bundle_cli
 from axiom.cli.roadmap import roadmap_app as roadmap_cli_app
 from axiom.datasets.inspector import inspect_dataset
@@ -31,6 +32,7 @@ from axiom.path_safety import SafePathError, open_regular_file
 AXIOM_VERSION = __version__
 security_app = typer.Typer(help="Audit local configuration, permissions, API credentials, and network exposure.", no_args_is_help=True)
 artifact_app = typer.Typer(help="Inspect Python release packages without extracting or executing them.", no_args_is_help=True)
+security_events_app = typer.Typer(help="Review, verify, and export the local security event journal.", no_args_is_help=True)
 MAX_CONFIG_VALIDATION_BYTES = 256 * 1024
 console = Console()
 
@@ -145,6 +147,7 @@ def register(app, model_app, dataset_app) -> None:
 
     app.add_typer(security_app, name="security")
     security_app.add_typer(artifact_app, name="artifact")
+    security_app.add_typer(security_events_app, name="events")
 
     @artifact_app.command("inspect")
     def security_artifact_inspect(
@@ -756,6 +759,74 @@ def register(app, model_app, dataset_app) -> None:
                     console.print(f"  • {suggestion}")
         if not valid:
             raise typer.Exit(code=1)
+
+
+    @security_events_app.command("list")
+    def security_events_list(
+        limit: int = typer.Option(50, min=1, max=100, help="Maximum events to show."),
+        offset: int = typer.Option(0, min=0, max=1999, help="Number of recent events to skip."),
+        json_output: bool = typer.Option(False, "--json", help="Emit machine-readable event records."),
+    ) -> None:
+        """List recent security events and their review status."""
+        try:
+            report = SecurityEventStore().list_page(limit, offset)
+        except SecurityEventError:
+            emit_error("Security event journal could not be read or verified safely.", code="security_events_unavailable", exit_code=2)
+            return
+        if json_output:
+            typer.echo(json.dumps(report, indent=2, sort_keys=True))
+            return
+        table = Table(title="AXIOM Security Events · newest first")
+        table.add_column("Time")
+        table.add_column("Action")
+        table.add_column("Review")
+        table.add_column("Reviewer")
+        for event in report["events"]:
+            table.add_row(
+                event["occurred_at"],
+                event["summary"],
+                "REVIEWED" if event["reviewed"] else "PENDING",
+                event.get("reviewer_label") or "—",
+            )
+        console.print(table)
+        console.print(f"Integrity: {'VALID' if report['integrity']['valid'] else 'INVALID'} · {report['total']} event(s)")
+
+    @security_events_app.command("verify")
+    def security_events_verify(
+        json_output: bool = typer.Option(False, "--json", help="Emit machine-readable verification details."),
+    ) -> None:
+        """Verify the retained security event hash chain."""
+        try:
+            report = SecurityEventStore().verify()
+        except SecurityEventError:
+            emit_error("Security event journal integrity verification failed.", code="security_events_integrity_failed", exit_code=2)
+            return
+        typer.echo(json.dumps(report, indent=2, sort_keys=True) if json_output else
+                   f"Security event journal: {'VALID' if report['valid'] else 'INVALID'} · {report['event_count']} event(s) · head {report['head_hash']}")
+
+    @security_events_app.command("export")
+    def security_events_export() -> None:
+        """Print the redacted, verifiable security journal as JSON to stdout."""
+        try:
+            report = SecurityEventStore().export()
+        except SecurityEventError:
+            emit_error("Security event journal could not be exported safely.", code="security_events_export_failed", exit_code=2)
+            return
+        typer.echo(json.dumps(report, indent=2, sort_keys=True))
+
+    @security_events_app.command("review")
+    def security_events_review(
+        event_id: str = typer.Argument(..., help="Event ID from axiom security events list --json."),
+        reviewer_label: str = typer.Argument(..., help="Self-attested reviewer label (not an authenticated identity)."),
+    ) -> None:
+        """Append a self-attested acknowledgement for one security event."""
+        try:
+            result = SecurityEventStore().review(event_id, reviewer_label)
+        except SecurityEventError:
+            emit_error("Security event review could not be recorded safely.", code="security_event_review_failed", exit_code=2)
+            return
+        action = "already reviewed" if result["already_reviewed"] else "review acknowledgement recorded"
+        typer.echo(f"{action}: {event_id} · reviewer label: {result['review']['reviewer_label']} (self-attested)")
 
     app.add_typer(roadmap_cli_app, name="roadmap")
     register_support_bundle_cli(app)
