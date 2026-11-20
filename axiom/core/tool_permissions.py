@@ -90,6 +90,13 @@ TOOL_DESCRIPTIONS = {
     "axiom_supercompress_status": "Read optional SuperCompress configuration status.",
     "axiom_supercompress": "Send context to the configured compression service.",
 }
+TOOL_SCOPES: dict[str, tuple[str, ...]] = {
+    name: (("network",) if name == "axiom_supercompress" else ())
+    + (("execution",) if name in {"axiom_training_job_start", "axiom_engine_generate", "axiom_prediction_job_start"} else ())
+    + (("write",) if name in {"axiom_workflow_save", "axiom_training_job_start", "axiom_prediction_job_start", "axiom_dataset_clean", "axiom_evaluation_run"} else ())
+    + (("read",) if name not in {"axiom_workflow_save", "axiom_training_job_cancel", "axiom_prediction_job_cancel"} else ())
+    for name in TOOL_DESCRIPTIONS
+}
 _PROFILE_NAME = re.compile(r"^[A-Za-z0-9_-]{1,48}$")
 
 
@@ -153,7 +160,7 @@ class ToolPermissionStore:
             "active_profile": config["active_profile"],
             "profiles": [config["profiles"][name] for name in sorted(config["profiles"])],
             "tools": [
-                {"name": name, "description": description}
+                {"name": name, "description": description, "scopes": list(TOOL_SCOPES[name])}
                 for name, description in TOOL_DESCRIPTIONS.items()
             ],
         }
