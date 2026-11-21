@@ -40,6 +40,9 @@ import {
   type DatasetQualityResult,
   type HardwareStatus,
   type McpToolPolicy,
+  type PluginManifestRegistry,
+  type PluginManifestRecord,
+  type PluginToolGrant,
   type McpServerInventory,
   type McpServerHandshake,
   type McpSchemaInspection,
@@ -4762,14 +4765,22 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
   const [inspectingSchemas, setInspectingSchemas] = useState("");
   const [serverTrustDrafts, setServerTrustDrafts] = useState<Record<string, McpServerTrustUpdate>>({});
   const [savingServerTrust, setSavingServerTrust] = useState("");
+  const [pluginRegistry, setPluginRegistry] = useState<PluginManifestRegistry | null>(null);
+  const [pluginRegistryError, setPluginRegistryError] = useState("");
+  const [pluginManifestDraft, setPluginManifestDraft] = useState("");
+  const [selectedPluginId, setSelectedPluginId] = useState("");
+  const [pluginGrantDraft, setPluginGrantDraft] = useState<Record<string, string[]>>({});
+  const [pluginSaving, setPluginSaving] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
     setError("");
     setServerInventoryError("");
-    const [policyResult, inventoryResult] = await Promise.allSettled([
+    setPluginRegistryError("");
+    const [policyResult, inventoryResult, pluginResult] = await Promise.allSettled([
       axiomApi.mcpToolPolicy(),
       axiomApi.mcpServerInventory(),
+      axiomApi.pluginManifestRegistry(),
     ]);
     if (policyResult.status === "fulfilled") {
       const result = policyResult.value;
@@ -4792,7 +4803,100 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
     } else {
       setServerInventoryError(inventoryResult.reason instanceof Error ? inventoryResult.reason.message : "MCP server inventory unavailable.");
     }
+    if (pluginResult.status === "fulfilled") {
+      const result = pluginResult.value;
+      setPluginRegistry(result);
+      const selected = result.manifests.find((record) => record.manifest.id === selectedPluginId)
+        || result.manifests[0];
+      setSelectedPluginId(selected?.manifest.id || "");
+      setPluginGrantDraft(Object.fromEntries(
+        (selected?.granted_tools || []).map((grant) => [grant.name, grant.scopes]),
+      ));
+    } else {
+      setPluginRegistryError(pluginResult.reason instanceof Error ? pluginResult.reason.message : "Plugin manifest registry unavailable.");
+    }
     setLoading(false);
+  };
+
+  const selectPlugin = (record: PluginManifestRecord | undefined) => {
+    setSelectedPluginId(record?.manifest.id || "");
+    setPluginGrantDraft(Object.fromEntries(
+      (record?.granted_tools || []).map((grant) => [grant.name, grant.scopes]),
+    ));
+  };
+
+  const registerPlugin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setPluginSaving(true);
+    setPluginRegistryError("");
+    try {
+      const parsed: unknown = JSON.parse(pluginManifestDraft);
+      const result = await axiomApi.registerPluginManifest(parsed);
+      const refreshed = await axiomApi.pluginManifestRegistry();
+      setPluginRegistry(refreshed);
+      const registered = refreshed.manifests.find((record) => record.manifest.id === result.manifest.id);
+      selectPlugin(registered);
+      setPluginManifestDraft("");
+      onNotify(`Registered declarative plugin ${result.manifest.id} ${result.manifest.version}; permissions remain denied.`, "success");
+    } catch (cause) {
+      setPluginRegistryError(cause instanceof Error ? cause.message : "Plugin manifest could not be registered.");
+    } finally {
+      setPluginSaving(false);
+    }
+  };
+
+  const togglePluginScope = (toolName: string, scope: string, checked: boolean) => {
+    setPluginGrantDraft((current) => {
+      const nextScopes = new Set(current[toolName] || []);
+      if (checked) nextScopes.add(scope);
+      else nextScopes.delete(scope);
+      const next = { ...current };
+      if (nextScopes.size) next[toolName] = [...nextScopes].sort();
+      else delete next[toolName];
+      return next;
+    });
+  };
+
+  const savePluginGrant = async () => {
+    const selected = pluginRegistry?.manifests.find((record) => record.manifest.id === selectedPluginId);
+    if (!selected) return;
+    setPluginSaving(true);
+    setPluginRegistryError("");
+    try {
+      await axiomApi.grantPluginPermissions(selectedPluginId, {
+        manifest_sha256: selected.sha256,
+        tools: Object.entries(pluginGrantDraft)
+          .filter(([, scopes]) => scopes.length > 0)
+          .map(([name, scopes]) => ({ name, scopes: [...scopes].sort() })),
+      });
+      const refreshed = await axiomApi.pluginManifestRegistry();
+      setPluginRegistry(refreshed);
+      const updated = refreshed.manifests.find((record) => record.manifest.id === selectedPluginId);
+      selectPlugin(updated);
+      onNotify(`Saved scoped grants for ${selectedPluginId}.`, "success");
+    } catch (cause) {
+      setPluginRegistryError(cause instanceof Error ? cause.message : "Plugin permissions could not be saved.");
+    } finally {
+      setPluginSaving(false);
+    }
+  };
+
+  const revokePluginGrant = async () => {
+    if (!selectedPluginId) return;
+    setPluginSaving(true);
+    setPluginRegistryError("");
+    try {
+      await axiomApi.revokePluginPermissions(selectedPluginId);
+      const refreshed = await axiomApi.pluginManifestRegistry();
+      setPluginRegistry(refreshed);
+      const updated = refreshed.manifests.find((record) => record.manifest.id === selectedPluginId);
+      selectPlugin(updated);
+      onNotify(`Revoked all plugin permissions for ${selectedPluginId}.`, "success");
+    } catch (cause) {
+      setPluginRegistryError(cause instanceof Error ? cause.message : "Plugin permissions could not be revoked.");
+    } finally {
+      setPluginSaving(false);
+    }
   };
 
   const inspectServerHandshake = async (name: string) => {
@@ -5074,6 +5178,56 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
       <div className="surface-divider" />
       <Callout tone="warning" title="Trusted servers only">New MCP servers are unverified by default. Save the server as Trusted before either inspection action can start its process; Blocked servers remain disabled. Each inspection uses a time limit and the MCP SDK's minimal child environment. Handshake negotiates protocol metadata; Browse schemas requests only tools/list, resources/list and resource-template list metadata. Neither action calls tools, reads resources, runs prompts, or forwards AXIOM credentials to the child.</Callout>
       <p className="quiet-note">{serverInventory?.inspection_note || "Registered server information is read without starting external processes."} Use axiom integration trust NAME trusted before axiom integration handshake NAME from the CLI.</p>
+    </Surface>
+    <Surface title="Declarative plugin manifests" eyebrow="VERSIONED / DEFAULT DENY">
+      <p className="quiet-note">Register strict JSON manifests to declare plugin identity, versions, tools, and requested scopes. Registration never grants access. Grants are pinned to the exact SHA-256 manifest fingerprint; registering a newer version marks previous grants stale and denies them.</p>
+      {pluginRegistryError && <InlineAlert tone="warning" role="alert">{pluginRegistryError}</InlineAlert>}
+      <form className="profile-create-form" onSubmit={(event) => void registerPlugin(event)}>
+        <label className="field">
+          <span className="field-label-row"><span>Plugin manifest JSON</span><span className="quiet-note">{pluginManifestDraft.length.toLocaleString()} / 65,536</span></span>
+          <textarea value={pluginManifestDraft} onChange={(event) => setPluginManifestDraft(event.target.value)} rows={7} maxLength={65536} spellCheck={false} placeholder={'{\n  "manifest_schema_version": 1,\n  "id": "com.example.research",\n  "name": "Example research",\n  "version": "1.0.0",\n  "description": "A declarative plugin",\n  "tools": [{ "name": "search", "description": "Search data", "scopes": ["read"] }]\n}'} required />
+        </label>
+        <div className="integration-form-actions">
+          <button type="submit" className="button secondary-button" disabled={pluginSaving || !pluginManifestDraft.trim()}><Plus size={15} /> {pluginSaving ? "Registering…" : "Validate and register"}</button>
+          <button type="button" className="button secondary-button" onClick={() => void refresh()} disabled={pluginSaving || loading}>Refresh manifests</button>
+        </div>
+      </form>
+      <div className="surface-divider" />
+      {pluginRegistry ? pluginRegistry.manifests.length ? <>
+        <div className="field">
+          <span className="field-label-row"><span>Registered plugin</span><span className="quiet-note">{pluginRegistry.manifests.length} / {pluginRegistry.maximum_manifests}</span></span>
+          <select aria-label="Registered plugin manifest" value={selectedPluginId} onChange={(event) => selectPlugin(pluginRegistry.manifests.find((record) => record.manifest.id === event.target.value))}>
+            {pluginRegistry.manifests.map((record) => <option key={record.manifest.id} value={record.manifest.id}>{record.manifest.name} · {record.manifest.version}</option>)}
+          </select>
+        </div>
+        {(() => {
+          const selected = pluginRegistry.manifests.find((record) => record.manifest.id === selectedPluginId);
+          if (!selected) return null;
+          return <>
+            <div className="field-label-row">
+              <b>{selected.manifest.id} · {selected.manifest.version}</b>
+              <StatusPill tone={selected.permission_status === "granted" ? "success" : selected.permission_status === "stale_manifest" ? "warning" : "danger"}>{selected.permission_status.replaceAll("_", " ").toUpperCase()}</StatusPill>
+            </div>
+            <p className="quiet-note">{selected.manifest.description}</p>
+            <p className="quiet-note">Manifest SHA-256: <code>{selected.sha256}</code></p>
+            {selected.permission_status === "stale_manifest" && <InlineAlert tone="warning" role="alert">This manifest has changed since its previous grant. All old permissions are denied; review and save a new grant against the current hash.</InlineAlert>}
+            <div className="permission-list">
+              {selected.manifest.tools.map((tool) => <div className="permission-row" key={tool.name}>
+                <span><b>{tool.name}</b><small>{tool.description}</small>
+                  <span className="integration-form-actions">{tool.scopes.map((scope) => <label className="quiet-note" key={scope}>
+                    <input type="checkbox" checked={(pluginGrantDraft[tool.name] || []).includes(scope)} onChange={(event) => togglePluginScope(tool.name, scope, event.target.checked)} disabled={pluginSaving} /> {scope}
+                  </label>)}</span>
+                </span>
+              </div>)}
+            </div>
+            <div className="integration-form-actions">
+              <button type="button" className="button primary-button" onClick={() => void savePluginGrant()} disabled={pluginSaving}>{pluginSaving ? "Saving…" : "Save scoped grants"}</button>
+              <button type="button" className="button secondary-button" onClick={() => void revokePluginGrant()} disabled={pluginSaving || selected.permission_status === "default_deny"}>Revoke all grants</button>
+            </div>
+          </>;
+        })()}
+      </> : <EmptyState icon={ShieldCheck} title="No plugin manifests registered" description="Paste a declarative schema-v1 manifest above. Every new plugin starts with all tool access denied." /> : <div className="loading-state" role="status">Loading plugin manifest registry…</div>}
+      <Callout tone="warning" title="Manifests are not executable plugins">{pluginRegistry?.execution_note || "AXIOM does not load plugin code, run manifest commands, or treat manifest registration as permission approval."} Permission grants are metadata for a future isolated runtime; they do not start an external process or invoke a plugin in this release.</Callout>
     </Surface>
     <div className="two-column-grid mcp-layout">
       <Surface title="Tool permissions" eyebrow="BACKEND-ENFORCED">
