@@ -200,25 +200,31 @@ class AgentProfileStore:
             self._check_paths(create=True)
             if self.lock_file.is_symlink():
                 raise AgentProfileError("The agent-profile lock must not be a symbolic link.")
-            with file_lock(self.lock_file):
-                document = self._load_unlocked()
-                if len(document["profiles"]) >= MAX_PROFILES:
-                raise AgentProfileError("The profile limit has been reached.")
-            if any(profile["name"].casefold() == normalized_name.casefold() for profile in document["profiles"]):
-                raise AgentProfileError("A profile with that name already exists.")
-            now = _now()
-            profile = {
-                "id": new_resource_id(),
-                "name": normalized_name,
-                "version": 1,
-                "task_capabilities": caps,
-                "created_at": now,
-                "updated_at": now,
-                "built_in": False,
-            }
-            document["profiles"].append(profile)
-            self._save(document)
-            return profile
+            try:
+                with file_lock(self.lock_file):
+                    document = self._load_unlocked()
+                    if len(document["profiles"]) >= MAX_PROFILES:
+                        raise AgentProfileError("The profile limit has been reached.")
+                    if any(
+                        profile["name"].casefold() == normalized_name.casefold()
+                        for profile in document["profiles"]
+                    ):
+                        raise AgentProfileError("A profile with that name already exists.")
+                    now = _now()
+                    profile = {
+                        "id": new_resource_id(),
+                        "name": normalized_name,
+                        "version": 1,
+                        "task_capabilities": caps,
+                        "created_at": now,
+                        "updated_at": now,
+                        "built_in": False,
+                    }
+                    document["profiles"].append(profile)
+                    self._save(document)
+                    return profile
+            except (OSError, TimeoutError) as exc:
+                raise AgentProfileError("The agent-profile lock could not be acquired or saved safely.") from exc
 
     def update_capabilities(self, profile_id: str, capabilities: list[str]) -> dict[str, Any]:
         caps = validate_capabilities(capabilities)
@@ -226,29 +232,38 @@ class AgentProfileStore:
             self._check_paths(create=True)
             if self.lock_file.is_symlink():
                 raise AgentProfileError("The agent-profile lock must not be a symbolic link.")
-            with file_lock(self.lock_file):
-                document = self._load_unlocked()
-                profile = next((item for item in document["profiles"] if item["id"] == profile_id), None)
-            if profile is None:
-                raise AgentProfileError("Agent profile not found.")
-            profile["task_capabilities"] = caps
-            profile["version"] += 1
-            profile["updated_at"] = _now()
-            self._save(document)
-            return profile
+            try:
+                with file_lock(self.lock_file):
+                    document = self._load_unlocked()
+                    profile = next(
+                        (item for item in document["profiles"] if item["id"] == profile_id),
+                        None,
+                    )
+                    if profile is None:
+                        raise AgentProfileError("Agent profile not found.")
+                    profile["task_capabilities"] = caps
+                    profile["version"] += 1
+                    profile["updated_at"] = _now()
+                    self._save(document)
+                    return profile
+            except (OSError, TimeoutError) as exc:
+                raise AgentProfileError("The agent-profile lock could not be acquired or saved safely.") from exc
 
     def delete(self, profile_id: str) -> dict[str, Any]:
         with _LOCK:
             self._check_paths(create=True)
             if self.lock_file.is_symlink():
                 raise AgentProfileError("The agent-profile lock must not be a symbolic link.")
-            with file_lock(self.lock_file):
-                document = self._load_unlocked()
-                if profile_id == "default":
-                raise AgentProfileError("The default profile cannot be deleted.")
-            remaining = [item for item in document["profiles"] if item["id"] != profile_id]
-            if len(remaining) == len(document["profiles"]):
-                raise AgentProfileError("Agent profile not found.")
-            document["profiles"] = remaining
-            self._save(document)
-            return {"deleted_id": profile_id, "remaining": len(remaining)}
+            try:
+                with file_lock(self.lock_file):
+                    document = self._load_unlocked()
+                    if profile_id == "default":
+                        raise AgentProfileError("The default profile cannot be deleted.")
+                    remaining = [item for item in document["profiles"] if item["id"] != profile_id]
+                    if len(remaining) == len(document["profiles"]):
+                        raise AgentProfileError("Agent profile not found.")
+                    document["profiles"] = remaining
+                    self._save(document)
+                    return {"deleted_id": profile_id, "remaining": len(remaining)}
+            except (OSError, TimeoutError) as exc:
+                raise AgentProfileError("The agent-profile lock could not be acquired or saved safely.") from exc
