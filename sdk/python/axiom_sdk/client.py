@@ -63,7 +63,7 @@ class AxiomClient:
         self.workspace_id = workspace_id.strip() if workspace_id is not None else None
         self.timeout = float(timeout)
         self.user_agent = user_agent.strip()
-        self.headers = self._validate_extra_headers(headers or {})
+        self.headers = self._validate_extra_headers(headers if headers is not None else {})
         self._closed = False
         self._opener = urllib.request.build_opener(_NoRedirectHandler())
 
@@ -317,6 +317,13 @@ class AxiomClient:
         timeout: float = 900,
         chunk_size: int = 1024 * 1024,
     ) -> int:
+        if (
+            not isinstance(workspace_id, str)
+            or not workspace_id.strip()
+            or len(workspace_id) > 128
+            or any(ord(character) < 32 or ord(character) == 127 for character in workspace_id)
+        ):
+            raise AxiomConfigurationError("Workspace ID must contain 1 to 128 printable characters.")
         """Stream a workspace archive into a caller-owned binary file-like object.
 
         Unlike download_workspace_backup(), this method does not buffer the
@@ -375,6 +382,10 @@ class AxiomClient:
     ) -> WorkspaceBackupRestoreResult:
         if not isinstance(archive, bytes) or not archive:
             raise AxiomConfigurationError("Backup archive must be a non-empty bytes object.")
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 64 or any(
+            ord(character) < 32 or ord(character) == 127 for character in name
+        ):
+            raise AxiomConfigurationError("Restored workspace name must contain 1 to 64 printable characters.")
         _status, _headers, raw = self._send(
             "POST",
             "/api/workspaces/backup/restore",
