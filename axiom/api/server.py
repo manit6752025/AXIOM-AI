@@ -29,6 +29,7 @@ from axiom.api.server_optimizer_routes import register_optimizer_routes
 from axiom.api.security import router as security_router
 from axiom.api.workspace import router as workspace_router
 from axiom.api.workspaces import router as workspaces_router
+from axiom.api.knowledge import router as knowledge_router
 from axiom.api.workflows import router as workflows_router
 from axiom.version import __version__
 
@@ -294,6 +295,7 @@ def create_app() -> Any:
     app.include_router(hardware_snapshots_router)
     app.include_router(workspace_router)
     app.include_router(workspaces_router)
+    app.include_router(knowledge_router)
     app.include_router(workflows_router)
     app.include_router(security_router)
     app.include_router(evaluation_router)
