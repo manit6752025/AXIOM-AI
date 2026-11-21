@@ -2408,21 +2408,6 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
   };
 
   useEffect(() => { void refresh(); }, []);
-  const refreshSnapshots = async () => {
-    setSnapshotLoading(true);
-    setSnapshotError("");
-    try {
-      setSnapshotHistory(await axiomApi.datasetSnapshots());
-    } catch (cause) {
-      setSnapshotError(cause instanceof Error ? cause.message : "Dataset snapshot history is unavailable.");
-    } finally {
-      setSnapshotLoading(false);
-    }
-  };
-
-  useEffect(() => { void refreshSnapshots(); }, []);
-
-
   const discoverLocalModels = async () => {
     setDiscoveryBusy(true);
     setInspection(null);
@@ -2766,6 +2751,20 @@ function Datasets({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
   const [cleanPreviewBusy, setCleanPreviewBusy] = useState<string | null>(null);
   const [inventoryBusy, setInventoryBusy] = useState(true);
   const [error, setError] = useState("");
+
+  const refreshSnapshots = async () => {
+    setSnapshotLoading(true);
+    setSnapshotError("");
+    try {
+      setSnapshotHistory(await axiomApi.datasetSnapshots());
+    } catch (cause) {
+      setSnapshotError(cause instanceof Error ? cause.message : "Dataset snapshot history is unavailable.");
+    } finally {
+      setSnapshotLoading(false);
+    }
+  };
+
+  useEffect(() => { void refreshSnapshots(); }, []);
 
   const refresh = async (search = datasetSearchInput.trim()) => {
     setInventoryBusy(true);
