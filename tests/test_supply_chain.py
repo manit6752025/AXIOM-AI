@@ -83,6 +83,16 @@ def test_spdx_sbom_bounds_lazy_dependency_metadata_iterators():
         generate_spdx_sbom(distributions=[oversized])
 
 
+def test_spdx_sbom_bounds_aggregate_requirement_metadata(monkeypatch: pytest.MonkeyPatch):
+    packages = [
+        distribution("package-one", "1.0", requires=["dependency-a>=1", "dependency-b>=1"]),
+        distribution("package-two", "1.0", requires=["dependency-c>=1"]),
+    ]
+    monkeypatch.setattr(supply_chain, "MAX_TOTAL_REQUIREMENTS", 2)
+    with pytest.raises(SupplyChainError, match="requirement entries"):
+        generate_spdx_sbom(distributions=packages)
+
+
 def test_spdx_sbom_rejects_unbounded_or_invalid_installed_metadata():
     too_many = [distribution(f"pkg-{index}", "1.0") for index in range(supply_chain.MAX_DISTRIBUTIONS + 1)]
     with pytest.raises(SupplyChainError, match="exceeds"):
