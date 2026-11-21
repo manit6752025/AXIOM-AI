@@ -19,6 +19,8 @@ command tree in the test suite. Subcommands and options can differ by
 installation extras or platform; use the installed `--help` output as the
 final authority for those details.
 
+Prompt template usage, variable types, safety limits, and API examples are in the [Prompt Studio guide](Prompt-Studio.md).
+
 ### Complete top-level command index
 
 | Area | Registered root commands |
