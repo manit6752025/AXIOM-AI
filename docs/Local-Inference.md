@@ -37,7 +37,20 @@ axiom --no-banner infer run qwen2.5:0.5b --prompt-file ./prompt.txt --json
 
 Use `axiom --no-banner infer --help` and `axiom --no-banner infer run --help` for all options. The prompt limit is 12,000 characters, generation is bounded to 1–2,048 tokens, and the request timeout is finite.
 
+For schema-constrained JSON output, pass a local JSON Schema file. Structured mode is non-streaming and caps generation at 512 tokens:
+
+```bash
+axiom --no-banner infer run qwen2.5:0.5b \
+  --prompt "Return a concise answer and confidence." \
+  --schema-file ./response.schema.json --num-predict 256 --json
+```
+
+The CLI validates the schema before calling Ollama, then validates the complete JSON response before adding `structured_output_validated: true` to the JSON report. Symlinked, oversized, invalid, unsupported, or non-regular schema files are rejected. See [Structured local inference](wiki/Structured-Output.md) for the schema subset and API contract.
+
 ## GUI
+
+The Runtime page also supports structured JSON generation. Expand **Structured JSON output · optional** to supply a schema; AXIOM uses a bounded non-streaming request and displays parsed JSON only after validation. Leaving the schema blank preserves the existing streaming free-text path.
+
 
 Start AXIOM's local API and open **Runtime** in Control Center. The **Local model inference** panel checks the local Ollama API, suggests model names reported by Ollama, and sends prompts through AXIOM's inference API. Generation can take time on CPU; the request timeout is bounded to five minutes. Output is displayed in the GUI and is not saved to workspace logs by this feature.
 
