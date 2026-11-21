@@ -10,6 +10,7 @@ from axiom.core.knowledge import KnowledgeBaseStore, KnowledgeStoreCapacityError
 from axiom.core.workspace_context import active_workspace_root
 from axiom.core.embeddings import EmbeddingEngineError
 from axiom.core.knowledge_search import KnowledgeSearchError, search_knowledge_base
+from axiom.core.engine import resolve_local_model_directory
 
 router = APIRouter(prefix="/api/workspace/knowledge-bases", tags=["workspace-knowledge"])
 
@@ -136,7 +137,7 @@ class KnowledgeSearchRequest(BaseModel):
     @field_validator("embedding_model_path", mode="before")
     @classmethod
     def embedding_path_must_be_trusted_when_supplied(cls, value: Any) -> Any:
-        return _validated_path(value, "Base model") if value is not None else None
+        return resolve_local_model_directory(value.strip(), "Base model") if value is not None and isinstance(value, str) and value.strip() else (None if value is None else (_ for _ in ()).throw(ValueError("Model path must be non-empty text.")))
 
     @model_validator(mode="after")
     def chunk_overlap_must_be_smaller_than_chunk_size(self) -> "KnowledgeSearchRequest":
