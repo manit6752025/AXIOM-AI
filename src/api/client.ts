@@ -705,6 +705,59 @@ export type AgentProfileReport = {
   total: number; limit: number; offset: number; has_more: boolean;
 };
 
+export type PromptTemplateVariable = {
+  name: string;
+  type: "string" | "integer" | "number" | "boolean" | "choice";
+  required?: boolean;
+  default?: string | number | boolean | null;
+  description?: string;
+  choices?: string[];
+  min_length?: number | null;
+  max_length?: number | null;
+  minimum?: number | null;
+  maximum?: number | null;
+};
+export type PromptTemplate = {
+  id: string;
+  name: string;
+  description: string;
+  body: string;
+  variables: PromptTemplateVariable[];
+  version: number;
+  created_at: string;
+  updated_at: string;
+  content_sha256: string;
+  variable_count?: number;
+};
+export type PromptTemplateSummary = Omit<PromptTemplate, "body" | "variables"> & {
+  body?: string;
+  variables?: PromptTemplateVariable[];
+};
+export type PromptTemplatePage = {
+  schema_version: 1;
+  templates: PromptTemplateSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+};
+export type PromptTemplateVersion = {
+  version: number;
+  updated_at: string;
+  name: string;
+  content_sha256: string;
+  current: boolean;
+};
+export type PromptTemplateRenderResult = {
+  template_id: string;
+  template_name: string;
+  version: number;
+  rendered: string;
+  variables_used: string[];
+  execution_performed: false;
+  model_invoked: false;
+};
+
 export type WorkspaceModel = {
   id: string;
   name: string;
@@ -2772,6 +2825,41 @@ export const axiomApi = {
     }),
   deleteAgentProfile: (id: string) =>
     requestJson<{ deleted_id: string; remaining: number }>(`/api/agent-profiles/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  promptTemplates: (options: { limit?: number; offset?: number; search?: string } = {}) => {
+    const query = new URLSearchParams({
+      limit: String(options.limit ?? 50),
+      offset: String(options.offset ?? 0),
+    });
+    if (options.search) query.set("search", options.search);
+    return requestJson<PromptTemplatePage>(`/api/prompt-templates?${query.toString()}`);
+  },
+  promptTemplate: (id: string) =>
+    requestJson<{ template: PromptTemplate }>(`/api/prompt-templates/${encodeURIComponent(id)}`),
+  createPromptTemplate: (input: { name: string; description?: string; body: string; variables: PromptTemplateVariable[] }) =>
+    requestJson<{ template: PromptTemplate }>("/api/prompt-templates", {
+      method: "POST", body: JSON.stringify(input),
+    }),
+  updatePromptTemplate: (id: string, input: { expected_version: number; name: string; description: string; body: string; variables: PromptTemplateVariable[] }) =>
+    requestJson<{ template: PromptTemplate }>(`/api/prompt-templates/${encodeURIComponent(id)}`, {
+      method: "PUT", body: JSON.stringify(input),
+    }),
+  promptTemplateVersions: (id: string) =>
+    requestJson<{ template_id: string; versions: PromptTemplateVersion[]; total: number }>(
+      `/api/prompt-templates/${encodeURIComponent(id)}/versions`,
+    ),
+  promptTemplateRevision: (id: string, version: number) =>
+    requestJson<{ revision: PromptTemplate }>(
+      `/api/prompt-templates/${encodeURIComponent(id)}/versions/${version}`,
+    ),
+  renderPromptTemplate: (id: string, input: { values: Record<string, unknown>; revision?: number }) =>
+    requestJson<PromptTemplateRenderResult>(`/api/prompt-templates/${encodeURIComponent(id)}/render`, {
+      method: "POST", body: JSON.stringify(input),
+    }),
+  deletePromptTemplate: (id: string, expectedVersion: number) =>
+    requestJson<{ deleted_id: string; deleted: true }>(
+      `/api/prompt-templates/${encodeURIComponent(id)}?expected_version=${expectedVersion}`,
+      { method: "DELETE" },
+    ),
   apiContractExamples: () => requestJson<ApiContractExamples>("/api/contract/examples"),
   playgroundRead: (endpoint: PlaygroundEndpoint) => {
     if (!playgroundEndpointPaths.has(endpoint)) {
