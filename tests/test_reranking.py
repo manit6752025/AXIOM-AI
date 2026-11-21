@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from axiom.core.reranking import _ranked_results, validate_rerank_inputs
+from axiom.core.reranking import RerankerError, _ranked_results, validate_rerank_inputs
 
 
 def test_reranker_ranks_descending_and_preserves_original_order_for_ties():
@@ -14,9 +14,9 @@ def test_reranker_ranks_descending_and_preserves_original_order_for_ties():
 
 
 def test_reranker_rejects_mismatched_and_nonfinite_scores():
-    with pytest.raises(Exception, match="different number"):
+    with pytest.raises(RerankerError, match="different number"):
         _ranked_results([0.1], ["one", "two"])
-    with pytest.raises(Exception, match="invalid score"):
+    with pytest.raises(RerankerError, match="invalid score"):
         _ranked_results([float("nan")], ["one"])
 
 
