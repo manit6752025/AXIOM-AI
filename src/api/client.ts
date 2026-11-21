@@ -1027,7 +1027,12 @@ export type WorkspaceModelProvenance = {
     maximum_weight_files: number;
   };
   license_evidence: {
-    status: "local_files_found" | "no_local_license_file_found";
+    status: "local_files_found" | "no_local_license_file_found" | "skipped_count_or_total_size_limit";
+    candidate_file_count: number;
+    candidate_total_bytes: number;
+    maximum_file_bytes: number;
+    maximum_files: number;
+    maximum_total_bytes: number;
     human_review_required: true;
     declared_license: string | null;
     registry_review_state: "unreviewed" | "approved" | "restricted" | "unknown" | null;
