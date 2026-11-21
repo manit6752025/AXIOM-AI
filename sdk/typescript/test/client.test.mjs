@@ -116,6 +116,31 @@ test("restores ZIP data and downloads workspace backups as bytes", async () => {
   client.close();
 });
 
+test("exposes workspace backup response bodies as a streaming reader", async () => {
+  const client = new AxiomClient({
+    fetchImpl: async () => new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array([80, 75]));
+          controller.enqueue(new Uint8Array([3, 4]));
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/zip" } },
+    ),
+  });
+  const stream = await client.downloadWorkspaceBackupStream("ws-large");
+  const reader = stream.getReader();
+  const chunks = [];
+  while (true) {
+    const item = await reader.read();
+    if (item.done) break;
+    chunks.push(...item.value);
+  }
+  assert.deepEqual(chunks, [80, 75, 3, 4]);
+  client.close();
+});
+
 test("rejects insecure remote origins, invalid paths and protected custom headers", () => {
   assert.throws(() => new AxiomClient({ baseUrl: "http://api.example.com" }), AxiomConfigurationError);
   assert.throws(() => new AxiomClient({ baseUrl: "https://user:pass@example.com" }), AxiomConfigurationError);
