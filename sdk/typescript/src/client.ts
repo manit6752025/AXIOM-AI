@@ -370,7 +370,7 @@ export class AxiomClient {
   downloadWorkspaceBackup(workspaceId: string, options: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Uint8Array> {
     return this.requestBytes("GET", `/api/workspaces/${encodeURIComponent(workspaceId)}/backup`, {
       ...options,
-      timeoutMs: options.timeoutMs ?? 900_000,
+      timeoutMs: options.timeoutMs ?? this.timeoutMs,
     });
   }
 
@@ -381,7 +381,7 @@ export class AxiomClient {
     const pending = await this.checkedResponse(
       "GET",
       `/api/workspaces/${encodeURIComponent(workspaceId)}/backup`,
-      { ...options, timeoutMs: options.timeoutMs ?? 900_000 },
+      { ...options, timeoutMs: options.timeoutMs ?? this.timeoutMs },
     );
     const body = pending.response.body;
     if (!body) {
@@ -433,7 +433,7 @@ export class AxiomClient {
       body: archive,
       contentType: "application/zip",
       ...options,
-      timeoutMs: options.timeoutMs ?? 900_000,
+      timeoutMs: options.timeoutMs ?? this.timeoutMs,
     });
   }
 
