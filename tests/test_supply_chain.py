@@ -73,12 +73,37 @@ def test_spdx_sbom_percent_encodes_purl_version_epochs():
     package = report["packages"][0]
     assert package["externalRefs"][0]["referenceLocator"] == "pkg:pypi/legacy-package@1%212.3+local"
 
+def test_spdx_sbom_bounds_lazy_dependency_metadata_iterators():
+    oversized = SimpleNamespace(
+        metadata={"Name": "large-requirements"},
+        version="1.0",
+        requires=(f"dependency-{index}>=1" for index in range(4097)),
+    )
+    with pytest.raises(SupplyChainError, match="Dependency metadata"):
+        generate_spdx_sbom(distributions=[oversized])
+
+
 def test_spdx_sbom_rejects_unbounded_or_invalid_installed_metadata():
     too_many = [distribution(f"pkg-{index}", "1.0") for index in range(supply_chain.MAX_DISTRIBUTIONS + 1)]
     with pytest.raises(SupplyChainError, match="exceeds"):
         generate_spdx_sbom(distributions=too_many)
     with pytest.raises(SupplyChainError, match="invalid"):
         generate_spdx_sbom(distributions=[distribution("../unsafe", "1.0")])
+
+
+def test_audit_parser_bounds_total_finding_inventory():
+    vulnerabilities = [
+        {"id": f"PYSEC-2026-{index}", "aliases": [], "fix_versions": []}
+        for index in range(supply_chain.MAX_AUDIT_FINDINGS + 1)
+    ]
+    payload = [{"name": "example", "version": "1.0", "vulns": vulnerabilities}]
+    with pytest.raises(SupplyChainError, match="finding inventory"):
+        supply_chain._parse_pip_audit_output(
+            payload,
+            generated_at="2026-11-21T00:00:00Z",
+            scanner_version="2.10.1",
+            exit_code=1,
+        )
 
 
 def test_report_export_is_create_only_private_and_rejects_overwrite(tmp_path: Path):
