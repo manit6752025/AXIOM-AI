@@ -9,10 +9,9 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
-from threading import Thread
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Thread
 from typing import Any, Iterable
 
 MAX_DISTRIBUTIONS = 4096
