@@ -15,6 +15,7 @@ from starlette.responses import StreamingResponse
 from axiom.core import model_studio
 from axiom.core.engine_fabric import EngineFabricBenchmarkRequirementError, EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
 from axiom.core.engine_fabric_profiles import EngineFabricProfileError, EngineFabricProfileStore
+from axiom.core.resource_telemetry import ResourceTelemetryError, ResourceTelemetryOptInRequired, ResourceTelemetryStore
 
 from axiom.core.engine import (
     AxiomEngineError,
@@ -45,6 +46,14 @@ def _validated_path(value: Any, label: str) -> Any:
     # The core matches user input against filesystem-discovered directories
     # under explicitly configured trusted roots before returning a usable path.
     return resolve_local_model_directory(candidate, label)
+
+
+class ResourceTelemetryHistorySettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+    max_samples: int = Field(default=120, ge=1, le=500, strict=True)
+    max_age_days: int = Field(default=30, ge=1, le=3650, strict=True)
 
 
 class NativePullRequest(BaseModel):
@@ -240,6 +249,49 @@ def engine_status() -> dict[str, Any]:
 def engine_telemetry() -> dict[str, Any]:
     """Return local CPU, RAM, device allocator and trusted-model-storage telemetry."""
     return runtime_telemetry()
+
+
+@router.get("/telemetry-history")
+def engine_telemetry_history(limit: int = 500) -> dict[str, Any]:
+    """Read explicit, bounded workspace resource history without probing hardware."""
+    try:
+        return ResourceTelemetryStore().list(limit=limit)
+    except ResourceTelemetryError:
+        raise HTTPException(status_code=409, detail="Resource telemetry history is invalid or unavailable.") from None
+
+
+@router.put("/telemetry-history/settings")
+def configure_engine_telemetry_history(request: ResourceTelemetryHistorySettingsRequest) -> dict[str, Any]:
+    """Enable or disable persistent resource history and set its retention limits."""
+    try:
+        return ResourceTelemetryStore().configure(
+            enabled=request.enabled,
+            max_samples=request.max_samples,
+            max_age_days=request.max_age_days,
+        )
+    except ResourceTelemetryError:
+        raise HTTPException(status_code=422, detail="Resource telemetry retention settings are invalid or could not be saved.") from None
+
+
+@router.post("/telemetry-history", status_code=201)
+def record_engine_telemetry_history() -> dict[str, Any]:
+    """Capture one allowlisted local resource sample only after explicit opt-in."""
+    store = ResourceTelemetryStore()
+    try:
+        return store.record(runtime_telemetry())
+    except ResourceTelemetryOptInRequired:
+        raise HTTPException(status_code=409, detail="Persistent resource history is disabled. Enable it explicitly first.") from None
+    except ResourceTelemetryError:
+        raise HTTPException(status_code=409, detail="The resource telemetry sample could not be stored safely.") from None
+
+
+@router.delete("/telemetry-history")
+def clear_engine_telemetry_history() -> dict[str, Any]:
+    """Clear stored resource samples while preserving opt-in and retention settings."""
+    try:
+        return ResourceTelemetryStore().clear()
+    except ResourceTelemetryError:
+        raise HTTPException(status_code=409, detail="Resource telemetry history could not be cleared safely.") from None
 
 
 @router.post("/unload")
