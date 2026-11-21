@@ -39,3 +39,30 @@ The core also validates these bounds, so a non-API caller cannot bypass the work
 - Compare results only when model, prompt, output-token limit, temperature, runtime configuration, hardware, and concurrency are kept consistent. Repeat runs to characterize variability.
 
 The Runtime screen and API call use the existing loopback-only Ollama adapter at 127.0.0.1:11434. This is a local runtime measurement, not a cross-device leaderboard or a guaranteed performance estimate.
+
+## Reproducible native-engine benchmark profiles
+
+AXIOM Native Engine can save a named, workspace-local benchmark profile. In
+Runtime, enter a profile name before running a benchmark. The CLI supports
+'axiom engine benchmark --profile-name "Qwen CPU baseline"'. Use
+'axiom engine benchmark-profiles --json' to list saved profiles and
+'axiom engine benchmark-compare PROFILE_ID_A PROFILE_ID_B --json' to compare
+two records.
+
+Each record includes the selected model label, benchmark settings, per-run
+and aggregate measurements, CPU/GPU and memory inventory, operating-system
+and Python/AXIOM/PyTorch versions, and SHA-256 fingerprints. A bounded set of
+model configuration metadata files is hashed for provenance; model weight
+files are never read for profile fingerprinting. Hardware/software/model,
+workload settings and prompt digest are compared explicitly. A mismatch makes
+the comparison descriptive rather than controlled; AXIOM does not present
+cross-device numbers as directly comparable performance results.
+
+Saving is an explicit operator action. The prompt itself, generated output,
+model filesystem paths, credentials, environment values and model weights
+are not stored. AXIOM retains only the prompt's SHA-256 fingerprint and
+character count. The profile store is workspace-scoped, bounded to 100 records
+and 4 MiB, uses a lock plus atomic replacement, and applies restrictive file
+permissions on POSIX systems. Profile JSON is local metadata, not a signed
+remote attestation; its content fingerprint detects accidental/tampered
+changes but does not protect against an attacker able to rewrite the store.

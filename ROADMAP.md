@@ -161,7 +161,7 @@ feature exists or a delivery-date promise.
 
 ### 11 · Applied AI workflows and knowledge infrastructure
 
-- [R121 · Planned] Add reproducible hardware-specific benchmark profiles with environment and provenance records.
+- [R121 · In progress; validation pending] Implemented workspace-local reproducibility profiles for native benchmark runs: bounded/locked atomic store, hardware and software environment provenance, model configuration metadata fingerprint, prompt hash-only workload identity, per-run/aggregate metrics, and controlled-versus-descriptive comparison. Wired optional profile saving, listing/comparison API, CLI and Runtime UI; added core/API/CLI tests. Browser acceptance and release-smoke enforcement are being added; full CI and actual native benchmark execution on reference hardware remain required before marking complete.
 - [R122 · Planned] Add versioned Prompt Studio templates with typed variables, validation, and revision history.
 - [R123 · Planned] Add JSON Schema-constrained local inference with safe schema validation and bounded outputs.
 - [R124 · Planned] Add a local embeddings engine abstraction with bounded batch and chunk processing.

@@ -159,6 +159,27 @@ def model_compatibility_issues(core_source: str, api_source: str, client_source:
     return issues
 
 
+def benchmark_profile_issues(profile_core: str, api_source: str, cli_source: str, client_source: str, panel_source: str, core_tests: str, api_tests: str, cli_tests: str, e2e_source: str, docs_source: str) -> list[str]:
+    """Require saved benchmark provenance to be connected to tests and UX."""
+    checks = (
+        ("Profile store", profile_core, ("class BenchmarkProfileStore", "def create(", "def list(", "def compare(", "prompt_sha256", "model_config_sha256", "_hardware_record(", "_software_record(", "MAX_PROFILES = 100", "MAX_STORE_BYTES", "file_lock(", "atomic_write_text(", "stat.S_ISREG", "adapter_used")),
+        ("Benchmark API", api_source, ('profile_name: str | None', 'BenchmarkProfileStore().create(', '@router.get("/benchmark-profiles")', '@router.get("/benchmark-profiles/compare")')),
+        ("Benchmark CLI", cli_source, ('"--profile-name"', '@engine_app.command("benchmark-profiles")', '@engine_app.command("benchmark-compare")', 'BenchmarkProfileStore().create(')),
+        ("Typed API client", client_source, ("AxiomEngineBenchmarkProfile", "AxiomEngineBenchmarkProfileComparison", "axiomEngineBenchmarkProfiles:", "compareAxiomEngineBenchmarkProfiles:", "profile_name?: string")),
+        ("Runtime GUI", panel_source, ('aria-label="Benchmark profile name"', "profile_name: benchmarkProfileName.trim()", "Saved hardware-specific profiles", "Compare selected profiles", "Descriptive comparison only", "Prompt content and model paths are never saved")),
+        ("Core regression tests", core_tests, ("test_profile_store_records_reproducible_provenance_without_prompt_or_model_paths", "test_profiles_compare_metrics_only_when_hardware_software_model_and_workload_match", "test_profile_store_rejects_duplicate_names_and_invalid_profile_inputs", "test_profile_store_rejects_tampering_unknown_fields_and_future_schema", "test_profile_store_rejects_symlinked_store_paths", "test_profile_comparison_requires_two_distinct_existing_ids")),
+        ("API regression tests", api_tests, ("test_native_benchmark_endpoint_saves_profile_only_when_requested", "test_native_benchmark_endpoint_does_not_create_profile_by_default", "test_native_benchmark_profile_routes_list_and_compare_workspace_records", "test_native_benchmark_profile_name_is_validated_before_execution")),
+        ("CLI regression tests", cli_tests, ("test_native_benchmark_profile_list_cli_uses_workspace_store", "test_native_benchmark_profile_compare_cli_reports_comparability", "test_native_benchmark_cli_saves_named_profile_when_requested")),
+        ("Browser acceptance", e2e_source, ("Benchmark profile name", "Qwen CPU baseline", "profile_name", "/api/engine/benchmark-profiles", "/api/engine/benchmark-profiles/compare", "Saved reproducibility profile", "Controlled comparison")),
+        ("Benchmark documentation", docs_source, ("axiom engine benchmark --profile-name", "axiom engine benchmark-profiles", "axiom engine benchmark-compare", "prompt fingerprint", "hardware and software", "model paths are not persisted")),
+    )
+    failures: list[str] = []
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                failures.append(f"Hardware-specific benchmark profile {label} is missing: " + token)
+    return failures
+
 def inference_benchmark_issues(core_source: str, api_source: str, client_source: str, panel_source: str, e2e_source: str) -> list[str]:
     """Check benchmark implementation connects the measured loopback runtime to Runtime UI."""
     issues: list[str] = []
@@ -956,6 +977,16 @@ def inspect(root: Path) -> dict[str, Any]:
     inference_panel = (root / "src/components/LocalInferencePanel.tsx").read_text(encoding="utf-8")
     inference_e2e = (root / "e2e/inference-benchmark.spec.ts").read_text(encoding="utf-8")
     failures.extend(inference_benchmark_issues(inference_core, inference_api, client, inference_panel, inference_e2e))
+    benchmark_profiles_core = (root / "axiom/core/benchmark_profiles.py").read_text(encoding="utf-8")
+    benchmark_profiles_api_tests = (root / "tests/test_benchmark_profiles_api.py").read_text(encoding="utf-8")
+    benchmark_profiles_cli_tests = (root / "tests/test_axiom_engine_cli.py").read_text(encoding="utf-8")
+    benchmark_profiles_core_tests = (root / "tests/test_benchmark_profiles.py").read_text(encoding="utf-8")
+    benchmark_profiles_docs = (root / "docs/Inference-Benchmarking.md").read_text(encoding="utf-8")
+    failures.extend(benchmark_profile_issues(
+        benchmark_profiles_core, engine_api, engine_cli, client, engine_panel,
+        benchmark_profiles_core_tests, benchmark_profiles_api_tests,
+        benchmark_profiles_cli_tests, engine_e2e, benchmark_profiles_docs,
+    ))
     ollama_service = (root / "axiom/core/ollama_service.py").read_text(encoding="utf-8")
     ollama_cli = (root / "axiom/cli/inference.py").read_text(encoding="utf-8")
     ollama_e2e = (root / "e2e/ollama-service.spec.ts").read_text(encoding="utf-8")
