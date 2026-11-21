@@ -17,6 +17,7 @@ from axiom.core.engine_fabric import EngineFabricBenchmarkRequirementError, Engi
 from axiom.core.engine_fabric_profiles import EngineFabricProfileError, EngineFabricProfileStore
 from axiom.core.benchmark_profiles import BenchmarkProfileError, BenchmarkProfileStore
 from axiom.core.resource_telemetry import ResourceTelemetryError, ResourceTelemetryOptInRequired, ResourceTelemetryStore
+from axiom.core.embeddings import EmbeddingEngineError, embed_local_texts, unload_local_embeddings
 
 from axiom.core.engine import (
     AxiomEngineError,
@@ -849,3 +850,60 @@ def engine_backend_benchmark(request: EngineFabricBenchmarkRequest) -> dict[str,
         raise HTTPException(status_code=409, detail=str(exc)) from None
     except EngineFabricError:
         raise HTTPException(status_code=503, detail="The selected local backend could not complete the benchmark.") from None
+
+
+class LocalEmbeddingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    model_path: str = Field(min_length=1, max_length=4096)
+    texts: list[str] = Field(min_length=1, max_length=32)
+    batch_size: int = Field(default=8, ge=1, le=16, strict=True)
+    max_length: int = Field(default=256, ge=8, le=512, strict=True)
+    chunk_size_chars: int = Field(default=2048, ge=256, le=8192, strict=True)
+    chunk_overlap_chars: int = Field(default=128, ge=0, le=1024, strict=True)
+    device: str = Field(default="auto", pattern="^(auto|cpu|cuda|rocm|mps|xpu)$")
+    normalize: bool = True
+
+    @field_validator("model_path", mode="before")
+    @classmethod
+    def embedding_model_path_must_be_trusted(cls, value: Any) -> Any:
+        return _validated_path(value, "Base model")
+
+    @field_validator("texts")
+    @classmethod
+    def texts_must_be_bounded_and_nonblank(cls, value: list[str]) -> list[str]:
+        from axiom.core.embeddings import MAX_EMBEDDING_TEXT_CHARS, MAX_EMBEDDING_TOTAL_CHARS
+        if any(not isinstance(text, str) or not text.strip() for text in value):
+            raise ValueError("Every text input must contain non-whitespace characters.")
+        if any(len(text) > MAX_EMBEDDING_TEXT_CHARS for text in value):
+            raise ValueError("A text input exceeds the per-input character limit.")
+        if sum(len(text) for text in value) > MAX_EMBEDDING_TOTAL_CHARS:
+            raise ValueError("Combined text inputs exceed the request character limit.")
+        return value
+
+    @model_validator(mode="after")
+    def chunk_overlap_must_be_smaller_than_chunk_size(self) -> "LocalEmbeddingsRequest":
+        if self.chunk_overlap_chars >= self.chunk_size_chars:
+            raise ValueError("Chunk overlap must be smaller than chunk size.")
+        return self
+
+
+@router.post("/embeddings")
+def engine_embeddings(request: LocalEmbeddingsRequest) -> dict[str, Any]:
+    """Embed bounded local text using a trusted safetensors model; no cloud or storage."""
+    try:
+        return embed_local_texts(
+            request.model_path, request.texts, batch_size=request.batch_size,
+            max_length=request.max_length, chunk_size_chars=request.chunk_size_chars,
+            chunk_overlap_chars=request.chunk_overlap_chars, device=request.device,
+            normalize=request.normalize,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except EmbeddingEngineError:
+        raise HTTPException(status_code=503, detail="The local embedding model could not complete this request.") from None
+
+
+@router.post("/embeddings/unload")
+def engine_embeddings_unload() -> dict[str, Any]:
+    """Unload AXIOM's cached embedding model without changing checkpoint files."""
+    return unload_local_embeddings()
