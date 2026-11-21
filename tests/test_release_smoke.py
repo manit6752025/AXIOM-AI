@@ -310,7 +310,7 @@ def test_generated_api_example_smoke_detects_missing_secret_redaction_or_gui_bin
     e2e = (ROOT / "e2e/api-playground.spec.ts").read_text(encoding="utf-8")
     tests = (ROOT / "tests/test_api_examples.py").read_text(encoding="utf-8")
     docs = (ROOT / "docs/API.md").read_text(encoding="utf-8")
-    broken_core = core.replace("x-axiom-redacted", "x-no-redaction", 1)
+    broken_core = core.replace("x-axiom-redacted", "x-no-redaction")
     issues = release_smoke.api_contract_examples_issues(
         broken_core, api, server, cli, cli_main, client, component, e2e, tests, docs,
     )
@@ -351,7 +351,7 @@ def test_hardware_snapshot_release_smoke_detects_missing_opt_in_contract() -> No
     e2e = (ROOT / "e2e/hardware-snapshots.spec.ts").read_text(encoding="utf-8")
     tests = (ROOT / "tests/test_hardware_snapshots.py").read_text(encoding="utf-8")
     docs = (ROOT / "docs/API.md").read_text(encoding="utf-8")
-    broken_core = core.replace("raise HardwareSnapshotOptInRequired(", "raise MissingOptInGuard(", 1)
+    broken_core = core.replace("raise HardwareSnapshotOptInRequired(", "raise MissingOptInGuard(")
     issues = release_smoke.hardware_snapshot_issues(
         broken_core, api, server, cli_main, client, panel, app, e2e, tests, docs,
     )
