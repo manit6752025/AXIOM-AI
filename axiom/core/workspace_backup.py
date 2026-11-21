@@ -424,7 +424,7 @@ def restore_workspace_backup(archive_source: BinaryIO, staging_root: str | Path)
         if any(root.iterdir()):
             raise WorkspaceBackupError("Restore staging destination must be empty.")
         root_info = root.stat()
-        if root_info.st_mode & 0o077:
+        if os.name == "posix" and root_info.st_mode & 0o077:
             raise WorkspaceBackupError("Restore staging destination must be private to the current user.")
     except WorkspaceBackupError:
         raise
