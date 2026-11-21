@@ -20,6 +20,14 @@ export const DEFAULT_BASE_URL = "http://127.0.0.1:40507";
 
 type HTTPMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+interface PendingResponse {
+  response: Response;
+  requestId: string;
+  cleanup: () => void;
+  timedOut: () => boolean;
+  externallyAborted: () => boolean;
+}
+
 function requestId(): string {
   const cryptoApi = globalThis.crypto;
   if (cryptoApi && typeof cryptoApi.randomUUID === "function") {
@@ -120,7 +128,7 @@ export class AxiomClient {
     method: HTTPMethod,
     path: string,
     options: AxiomRequestOptions & { body?: BodyInit | null; jsonBody?: unknown; contentType?: string } = {},
-  ): Promise<Response> {
+  ): Promise<PendingResponse> {
     if (this.closed) throw new AxiomConfigurationError("AxiomClient is closed.");
     if (options.body != null && options.jsonBody !== undefined) {
       throw new AxiomConfigurationError("Supply body or jsonBody, not both.");
@@ -162,44 +170,73 @@ export class AxiomClient {
       throw new AxiomConfigurationError("timeoutMs must be an integer between 1 and 900000.");
     }
     const controller = new AbortController();
-    let timedOut = false;
+    let didTimeOut = false;
+    let cleaned = false;
     const timer = setTimeout(() => {
-      timedOut = true;
+      didTimeOut = true;
       controller.abort();
     }, timeoutMs);
     const externalSignal = options.signal;
     const abortExternal = () => controller.abort(externalSignal?.reason);
     if (externalSignal?.aborted) abortExternal();
     else externalSignal?.addEventListener("abort", abortExternal, { once: true });
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      clearTimeout(timer);
+      externalSignal?.removeEventListener("abort", abortExternal);
+    };
     try {
-      return await this.fetchImpl(this.url(path, options.params), {
+      const response = await this.fetchImpl(this.url(path, options.params), {
         method,
         headers,
         body,
         redirect: "error",
         signal: controller.signal,
       });
+      return {
+        response,
+        requestId: id,
+        cleanup,
+        timedOut: () => didTimeOut,
+        externallyAborted: () => Boolean(externalSignal?.aborted),
+      };
     } catch (cause) {
-      const message = timedOut
+      cleanup();
+      const message = didTimeOut
         ? "AXIOM request timed out."
         : externalSignal?.aborted
           ? "AXIOM request was cancelled."
           : "AXIOM service could not be reached.";
       throw new AxiomNetworkError(message, id, { cause });
-    } finally {
-      clearTimeout(timer);
-      externalSignal?.removeEventListener("abort", abortExternal);
     }
+  }
+
+  private responseReadError(pending: PendingResponse, cause: unknown): AxiomNetworkError {
+    const message = pending.timedOut()
+      ? "AXIOM request timed out while reading the response."
+      : pending.externallyAborted()
+        ? "AXIOM request was cancelled while reading the response."
+        : "AXIOM response body could not be read.";
+    return new AxiomNetworkError(message, pending.requestId, { cause });
   }
 
   private async checkedResponse(
     method: HTTPMethod,
     path: string,
     options: AxiomRequestOptions & { body?: BodyInit | null; jsonBody?: unknown; contentType?: string } = {},
-  ): Promise<Response> {
-    const response = await this.send(method, path, options);
+  ): Promise<PendingResponse> {
+    const pending = await this.send(method, path, options);
+    const response = pending.response;
     if (!response.ok) {
-      const text = await response.text();
+      let text: string;
+      try {
+        text = await response.text();
+      } catch (cause) {
+        pending.cleanup();
+        throw this.responseReadError(pending, cause);
+      }
+      pending.cleanup();
       let payload: AxiomErrorEnvelope = {};
       try {
         payload = text ? JSON.parse(text) as AxiomErrorEnvelope : {};
@@ -212,11 +249,11 @@ export class AxiomClient {
         message,
         response.status,
         error.code ?? null,
-        response.headers.get("X-Request-ID") ?? payload.request_id ?? null,
+        response.headers.get("X-Request-ID") ?? payload.request_id ?? pending.requestId,
         error.details,
       );
     }
-    return response;
+    return pending;
   }
 
   async request<TResponse>(
@@ -224,17 +261,39 @@ export class AxiomClient {
     path: string,
     options: AxiomRequestOptions & { jsonBody?: unknown; body?: BodyInit | null; contentType?: string } = {},
   ): Promise<TResponse> {
-    const response = await this.checkedResponse(method, path, options);
-    if (response.status === 204) return undefined as TResponse;
-    const text = await response.text();
+    const pending = await this.checkedResponse(method, path, options);
+    const response = pending.response;
+    if (response.status === 204) {
+      pending.cleanup();
+      return undefined as TResponse;
+    }
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (cause) {
+      pending.cleanup();
+      throw this.responseReadError(pending, cause);
+    }
+    pending.cleanup();
     if (!text) return undefined as TResponse;
     try {
       return JSON.parse(text) as TResponse;
     } catch {
       throw new AxiomNetworkError(
         "AXIOM returned a successful response that was not valid JSON.",
-        response.headers.get("X-Request-ID"),
+        response.headers.get("X-Request-ID") ?? pending.requestId,
       );
+    }
+  }
+
+  private async requestBytes(method: HTTPMethod, path: string, options: AxiomRequestOptions = {}): Promise<Uint8Array> {
+    const pending = await this.checkedResponse(method, path, options);
+    try {
+      return new Uint8Array(await pending.response.arrayBuffer());
+    } catch (cause) {
+      throw this.responseReadError(pending, cause);
+    } finally {
+      pending.cleanup();
     }
   }
 
@@ -292,13 +351,43 @@ export class AxiomClient {
     workspaceId: string,
     options: { timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<ReadableStream<Uint8Array>> {
-    const response = await this.checkedResponse(
+    const pending = await this.checkedResponse(
       "GET",
       `/api/workspaces/${encodeURIComponent(workspaceId)}/backup`,
       { ...options, timeoutMs: options.timeoutMs ?? 900_000 },
     );
-    if (!response.body) throw new AxiomNetworkError("AXIOM returned an empty backup stream.");
-    return response.body;
+    const body = pending.response.body;
+    if (!body) {
+      pending.cleanup();
+      throw new AxiomNetworkError("AXIOM returned an empty backup stream.", pending.requestId);
+    }
+    const reader = body.getReader();
+    return new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const chunk = await reader.read();
+          if (chunk.done) {
+            pending.cleanup();
+            controller.close();
+          } else {
+            controller.enqueue(chunk.value);
+          }
+        } catch (cause) {
+          pending.cleanup();
+          controller.error(new AxiomNetworkError(
+            pending.timedOut()
+              ? "AXIOM backup download timed out."
+              : "AXIOM backup stream failed.",
+            pending.requestId,
+            { cause },
+          ));
+        }
+      },
+      async cancel(reason) {
+        pending.cleanup();
+        await reader.cancel(reason);
+      },
+    });
   }
 
   restoreWorkspaceBackup(
