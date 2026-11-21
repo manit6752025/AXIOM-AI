@@ -131,6 +131,20 @@ def test_model_provenance_returns_explicit_no_weight_status(tmp_path):
     assert report["hash_evidence"]["checkpoint_sha256"] is None
 
 
+def test_model_provenance_rejects_symlinked_ancestor_components(tmp_path):
+    real_parent = tmp_path / "real-parent"
+    real_model = real_parent / "model"
+    real_model.mkdir(parents=True)
+    (real_model / "model.gguf").write_bytes(b"weights")
+    linked_parent = tmp_path / "linked-parent"
+    try:
+        linked_parent.symlink_to(real_parent, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    with pytest.raises(ModelProvenanceError, match="symbolic links"):
+        inspect_model_provenance(linked_parent / "model")
+
+
 def test_model_provenance_rejects_files_and_symlinked_roots(tmp_path):
     not_directory = tmp_path / "not-a-directory"
     not_directory.write_text("not a model folder", encoding="utf-8")
@@ -195,6 +209,17 @@ def test_model_provenance_api_enforces_workspace_paths_and_labels_registry_claim
             "model_id": "0" * 32,
         })
         assert missing.status_code == 404
+
+        linked = tmp_path / "models" / "linked"
+        try:
+            linked.symlink_to(model, target_is_directory=True)
+        except OSError:
+            pytest.skip("symlink creation is unavailable")
+        linked_response = client.post("/api/workspace/models/provenance", json={"path": "linked"})
+        assert linked_response.status_code == 422
+        for invalid_path in ("../demo", "demo/../demo", "demo//model", "demo\\\\model", "/models/demo"):
+            invalid_response = client.post("/api/workspace/models/provenance", json={"path": invalid_path})
+            assert invalid_response.status_code == 422
 
 
 def test_model_provenance_cli_emits_machine_readable_hash_evidence(tmp_path, monkeypatch):
