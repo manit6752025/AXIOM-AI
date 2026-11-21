@@ -329,6 +329,7 @@ the active tab session) remain intact. A healthy GUI API already bound to the
 configured port is reused; no second API process or duplicate tab is needed.
 Keep the port stable (default 40507) to retain the origin's sign-in state.
 Packaged installs without frontend source should use a release update instead.
+If the build preflight reports that `lucide-react` declarations are missing from `node_modules`, run `npm ci` at the repository root to restore the exact lockfile contents. Do not add a separate `@types/lucide-react` package; the installed Lucide package supplies its own declarations.
 
 
 ## Local text embeddings
