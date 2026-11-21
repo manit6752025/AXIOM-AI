@@ -287,7 +287,7 @@ def structured_inference_issues(
             "test_infer_run_rejects_symlinked_schema_files",
         )),
         ("browser acceptance", e2e_source, (
-            "schema-constrained local inference", '"/api/inference/generate/structured"',
+            "schema-constrained local inference", '"**/api/inference/generate/structured"',
             "SCHEMA VALIDATED", "JSON Schema for structured output",
         )),
         ("documentation", docs_source, (
