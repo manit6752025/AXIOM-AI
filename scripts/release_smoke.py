@@ -977,16 +977,6 @@ def inspect(root: Path) -> dict[str, Any]:
     inference_panel = (root / "src/components/LocalInferencePanel.tsx").read_text(encoding="utf-8")
     inference_e2e = (root / "e2e/inference-benchmark.spec.ts").read_text(encoding="utf-8")
     failures.extend(inference_benchmark_issues(inference_core, inference_api, client, inference_panel, inference_e2e))
-    benchmark_profiles_core = (root / "axiom/core/benchmark_profiles.py").read_text(encoding="utf-8")
-    benchmark_profiles_api_tests = (root / "tests/test_benchmark_profiles_api.py").read_text(encoding="utf-8")
-    benchmark_profiles_cli_tests = (root / "tests/test_axiom_engine_cli.py").read_text(encoding="utf-8")
-    benchmark_profiles_core_tests = (root / "tests/test_benchmark_profiles.py").read_text(encoding="utf-8")
-    benchmark_profiles_docs = (root / "docs/Inference-Benchmarking.md").read_text(encoding="utf-8")
-    failures.extend(benchmark_profile_issues(
-        benchmark_profiles_core, engine_api, engine_cli, client, engine_panel,
-        benchmark_profiles_core_tests, benchmark_profiles_api_tests,
-        benchmark_profiles_cli_tests, engine_e2e, benchmark_profiles_docs,
-    ))
     ollama_service = (root / "axiom/core/ollama_service.py").read_text(encoding="utf-8")
     ollama_cli = (root / "axiom/cli/inference.py").read_text(encoding="utf-8")
     ollama_e2e = (root / "e2e/ollama-service.spec.ts").read_text(encoding="utf-8")
@@ -1041,6 +1031,17 @@ def inspect(root: Path) -> dict[str, Any]:
     engine_api = (root / "axiom/api/engine.py").read_text(encoding="utf-8")
     engine_panel = (root / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
     engine_e2e = (root / "e2e/axiom-engine.spec.ts").read_text(encoding="utf-8")
+    engine_cli = (root / "axiom/cli/engine.py").read_text(encoding="utf-8")
+    benchmark_profiles_core = (root / "axiom/core/benchmark_profiles.py").read_text(encoding="utf-8")
+    benchmark_profiles_api_tests = (root / "tests/test_benchmark_profiles_api.py").read_text(encoding="utf-8")
+    benchmark_profiles_cli_tests = (root / "tests/test_axiom_engine_cli.py").read_text(encoding="utf-8")
+    benchmark_profiles_core_tests = (root / "tests/test_benchmark_profiles.py").read_text(encoding="utf-8")
+    benchmark_profiles_docs = (root / "docs/Inference-Benchmarking.md").read_text(encoding="utf-8")
+    failures.extend(benchmark_profile_issues(
+        benchmark_profiles_core, engine_api, engine_cli, client, engine_panel,
+        benchmark_profiles_core_tests, benchmark_profiles_api_tests,
+        benchmark_profiles_cli_tests, engine_e2e, benchmark_profiles_docs,
+    ))
     failures.extend(engine_security_and_lifecycle_issues(engine_source, native_source, engine_api, client, engine_panel, engine_e2e))
     native_model_studio = (root / "axiom/core/model_studio.py").read_text(encoding="utf-8")
     native_model_studio_api = (root / "axiom/api/model_studio.py").read_text(encoding="utf-8")
