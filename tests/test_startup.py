@@ -11,6 +11,7 @@ from axiom.cli.startup import (
     render_startup,
     show_startup,
     suppress_for_arguments,
+    _default_marker_dir,
 )
 
 
@@ -188,3 +189,12 @@ def test_cli_logo_matches_the_first_readme_svg():
     assert "LOCAL-FIRST AI ENGINEERING" in logo
     assert "BUILD AI. OWN AI." in logo
     assert "M36 91" in logo
+
+
+
+def test_default_marker_directory_fallback_is_a_path(tmp_path, monkeypatch):
+    monkeypatch.setattr("axiom.cli.startup.tempfile.gettempdir", lambda: str(tmp_path))
+    marker_dir = _default_marker_dir({})
+    assert isinstance(marker_dir, Path)
+    assert marker_dir.parent == tmp_path
+    assert marker_dir.name.startswith("axiom-startup-")
