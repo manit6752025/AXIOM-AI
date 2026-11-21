@@ -7,17 +7,19 @@ from __future__ import annotations
 
 import hashlib
 import io
-from contextlib import nullcontext
 import json
 import os
+import secrets
 import stat
 import tempfile
 import zipfile
+from contextlib import ExitStack, contextmanager, nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, Iterator
 
 from axiom.core.workspace_context import active_workspace_root
-from typing import Any
+from axiom.path_safety import open_regular_file
 
 from axiom.core.agent_profiles import AgentProfileStore
 from axiom.core.experiments import ExperimentStore
@@ -44,6 +46,14 @@ _COLLECTION_FILES = {
     "evaluations": "evaluations.json",
     "agent_profiles": "agent-profiles.json",
 }
+_METADATA_LOCK_FILES = (
+    ".agent-profiles.lock",
+    ".evaluations.lock",
+    ".experiments.lock",
+    ".metadata-transfer.lock",
+    ".models.lock",
+    ".workflows.lock",
+)
 _EXCLUDED = [
     "axiom.yaml and all project configuration",
     "credentials, environment variables, API keys, and tokens",
@@ -79,6 +89,210 @@ def _metadata_directory(root: Path, *, create: bool = False) -> Path:
     return directory
 
 
+@contextmanager
+def _locked_metadata_directory(root: Path, *, create: bool) -> Iterator[int | None]:
+    """Lock every supported metadata collection in a stable order.
+
+    POSIX operations use a no-follow directory descriptor so an attacker cannot
+    redirect a lock or registry operation by swapping the .axiom path. Other
+    platforms use the existing cross-process file-lock primitive after the
+    same symlink checks.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    supports_dir_fd = (
+        os.name == "posix"
+        and hasattr(os, "O_DIRECTORY")
+        and hasattr(os, "O_NOFOLLOW")
+        and os.open in getattr(os, "supports_dir_fd", set())
+        and os.mkdir in getattr(os, "supports_dir_fd", set())
+    )
+    directory = root / ".axiom"
+    if not supports_dir_fd:
+        _metadata_directory(root, create=create)
+        if not directory.exists():
+            yield None
+            return
+        with ExitStack() as stack:
+            for name in _METADATA_LOCK_FILES:
+                lock_path = directory / name
+                if lock_path.is_symlink():
+                    raise ValueError(f"Workspace metadata lock must not be a symbolic link: {name}")
+                stack.enter_context(file_lock(lock_path))
+            yield None
+        return
+
+    try:
+        root_fd = os.open(str(root), flags | getattr(os, "O_CLOEXEC", 0))
+    except OSError as exc:
+        raise ValueError("Workspace root could not be opened safely for metadata transfer.") from exc
+    directory_fd: int | None = None
+    lock_descriptors: list[int] = []
+    try:
+        try:
+            directory_fd = os.open(".axiom", flags | getattr(os, "O_CLOEXEC", 0), dir_fd=root_fd)
+        except FileNotFoundError:
+            if not create:
+                yield None
+                return
+            try:
+                os.mkdir(".axiom", mode=0o700, dir_fd=root_fd)
+            except FileExistsError:
+                pass
+            directory_fd = os.open(".axiom", flags | getattr(os, "O_CLOEXEC", 0), dir_fd=root_fd)
+        import fcntl
+        for name in _METADATA_LOCK_FILES:
+            descriptor = os.open(
+                name,
+                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=directory_fd,
+            )
+            try:
+                info = os.fstat(descriptor)
+                if not stat.S_ISREG(info.st_mode):
+                    raise ValueError(f"Workspace metadata lock must be a regular file: {name}")
+                if info.st_mode & 0o077:
+                    os.fchmod(descriptor, 0o600)
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+            except BaseException:
+                os.close(descriptor)
+                raise
+            lock_descriptors.append(descriptor)
+        yield directory_fd
+    except OSError as exc:
+        raise ValueError("Workspace metadata locks could not be acquired safely.") from exc
+    finally:
+        try:
+            if directory_fd is not None:
+                try:
+                    import fcntl
+                    for descriptor in reversed(lock_descriptors):
+                        try:
+                            fcntl.flock(descriptor, fcntl.LOCK_UN)
+                        finally:
+                            os.close(descriptor)
+                finally:
+                    os.close(directory_fd)
+        finally:
+            os.close(root_fd)
+
+
+def _read_existing_collection_file(
+    directory: Path,
+    filename: str,
+    *,
+    directory_fd: int | None,
+) -> bytes | None:
+    descriptor: int | None = None
+    try:
+        if directory_fd is not None:
+            descriptor = os.open(
+                filename,
+                os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                dir_fd=directory_fd,
+            )
+            with os.fdopen(descriptor, "rb") as stream:
+                descriptor = None
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_COLLECTION_BYTES:
+                    raise ValueError(f"Workspace metadata file is not a bounded regular file: {filename}")
+                payload = stream.read(MAX_COLLECTION_BYTES + 1)
+        else:
+            path = directory / filename
+            if path.is_symlink():
+                raise ValueError(f"Workspace metadata file must not be a symbolic link: {filename}")
+            with open_regular_file(path) as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_COLLECTION_BYTES:
+                    raise ValueError(f"Workspace metadata file is not a bounded regular file: {filename}")
+                payload = stream.read(MAX_COLLECTION_BYTES + 1)
+        if len(payload) > MAX_COLLECTION_BYTES:
+            raise ValueError(f"Workspace metadata file exceeds the 4 MiB limit: {filename}")
+        return payload
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ValueError(f"Workspace metadata file could not be read safely: {filename}") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _write_collection_file(
+    directory: Path,
+    filename: str,
+    payload: bytes,
+    *,
+    directory_fd: int | None,
+    suffix: str = "import",
+) -> None:
+    temporary: str | None = None
+    descriptor: int | None = None
+    try:
+        if directory_fd is not None:
+            temporary = f".{filename}.{secrets.token_hex(16)}.{suffix}"
+            descriptor = os.open(
+                temporary,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=directory_fd,
+            )
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "wb") as stream:
+                descriptor = None
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(
+                temporary,
+                filename,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+            )
+            temporary = None
+            return
+        fd, temporary = tempfile.mkstemp(
+            prefix=f".{filename}.", suffix=f".{suffix}", dir=directory
+        )
+        descriptor = fd
+        with os.fdopen(descriptor, "wb") as stream:
+            descriptor = None
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.chmod(temporary, 0o600)
+        except OSError:
+            pass
+        os.replace(temporary, directory / filename)
+        temporary = None
+    except OSError as exc:
+        raise ValueError(f"Workspace metadata file could not be committed safely: {filename}") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if temporary is not None:
+            try:
+                if directory_fd is not None:
+                    os.unlink(temporary, dir_fd=directory_fd)
+                else:
+                    os.unlink(temporary)
+            except OSError:
+                pass
+
+
+def _remove_collection_file(directory: Path, filename: str, *, directory_fd: int | None) -> None:
+    try:
+        if directory_fd is not None:
+            os.unlink(filename, dir_fd=directory_fd)
+        else:
+            (directory / filename).unlink(missing_ok=True)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise ValueError(f"Workspace metadata file could not be removed safely: {filename}") from exc
+
+
 def _read_collection(root: Path, name: str) -> Any:
     directory = _metadata_directory(root)
     filename = _COLLECTION_FILES[name]
@@ -94,7 +308,7 @@ def _read_collection(root: Path, name: str) -> Any:
     if name == "evaluations":
         return EvaluationStore(directory)._read()
     if name == "agent_profiles":
-        return AgentProfileStore(root).load()
+        return AgentProfileStore(root)._load_unlocked()
     raise ValueError(f"Unsupported workspace metadata collection: {name}")
 
 
@@ -118,12 +332,7 @@ def export_workspace_metadata(
     if any(name not in _COLLECTION_FILES for name in selected):
         raise ValueError("One or more workspace metadata collections are unsupported.")
 
-    directory = _metadata_directory(root)
-    lock_path = directory / ".metadata-transfer.lock"
-    if lock_path.is_symlink():
-        raise ValueError("Workspace metadata transfer lock must not be a symbolic link.")
-    lock_context = file_lock(lock_path) if directory.exists() else nullcontext()
-    with lock_context:
+    with _locked_metadata_directory(root, create=False):
         members: dict[str, bytes] = {}
         collection_info: dict[str, dict[str, Any]] = {}
         total = 0
@@ -409,12 +618,8 @@ def import_workspace_metadata(
         raise ValueError("replace must be a boolean.")
     root = _workspace_root(workspace)
     incoming = _read_archive(data)
-    directory = _metadata_directory(root, create=True)
-    lock_path = directory / ".metadata-transfer.lock"
-    if lock_path.is_symlink():
-        raise ValueError("Workspace metadata transfer lock must not be a symbolic link.")
-
-    with file_lock(lock_path):
+    with _locked_metadata_directory(root, create=True) as directory_fd:
+        directory = _metadata_directory(root)
         before: dict[str, bytes | None] = {}
         after: dict[str, bytes] = {}
         for name, values in incoming.items():
@@ -427,71 +632,46 @@ def import_workspace_metadata(
             payload = _json_bytes(combined)
             if len(payload) > MAX_COLLECTION_BYTES:
                 raise ValueError(f"Imported '{name}' metadata exceeds the 4 MiB storage limit.")
-            before[filename] = destination.read_bytes() if destination.exists() else None
+            before[filename] = _read_existing_collection_file(
+                directory, filename, directory_fd=directory_fd
+            )
             after[filename] = payload
 
-        staged: dict[str, str] = {}
         replaced: list[str] = []
         try:
             for filename, payload in after.items():
-                descriptor, temporary = tempfile.mkstemp(
-                    prefix=f".{filename}.", suffix=".import", dir=directory
+                _write_collection_file(
+                    directory, filename, payload, directory_fd=directory_fd, suffix="import"
                 )
-                staged[filename] = temporary
-                with os.fdopen(descriptor, "wb") as handle:
-                    handle.write(payload)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                try:
-                    os.chmod(temporary, 0o600)
-                except OSError:
-                    pass
-            for filename, temporary in staged.items():
-                os.replace(temporary, directory / filename)
                 replaced.append(filename)
-            try:
-                directory_fd = os.open(directory, os.O_RDONLY)
-                try:
-                    os.fsync(directory_fd)
-                finally:
-                    os.close(directory_fd)
-            except OSError:
-                pass
+            if directory_fd is not None:
+                os.fsync(directory_fd)
         except BaseException as exc:
             rollback_errors: list[str] = []
             for filename in reversed(replaced):
-                destination = directory / filename
                 previous = before[filename]
                 try:
                     if previous is None:
-                        destination.unlink(missing_ok=True)
+                        _remove_collection_file(directory, filename, directory_fd=directory_fd)
                     else:
-                        descriptor, rollback_temp = tempfile.mkstemp(
-                            prefix=f".{filename}.", suffix=".rollback", dir=directory
+                        _write_collection_file(
+                            directory, filename, previous, directory_fd=directory_fd, suffix="rollback"
                         )
-                        with os.fdopen(descriptor, "wb") as handle:
-                            handle.write(previous)
-                            handle.flush()
-                            os.fsync(handle.fileno())
-                        os.replace(rollback_temp, destination)
-                except OSError:
+                except (OSError, ValueError):
                     rollback_errors.append(filename)
+            if directory_fd is not None:
+                try:
+                    os.fsync(directory_fd)
+                except OSError:
+                    rollback_errors.extend(filename for filename in replaced if filename not in rollback_errors)
             if rollback_errors:
                 raise OSError(
                     "Workspace metadata import failed and rollback could not restore: "
-                    + ", ".join(rollback_errors)
+                    + ", ".join(dict.fromkeys(rollback_errors))
                 ) from exc
             if isinstance(exc, OSError):
                 raise ValueError("Workspace metadata import could not be committed; prior files were restored.") from exc
             raise
-        finally:
-            for temporary in staged.values():
-                try:
-                    os.unlink(temporary)
-                except FileNotFoundError:
-                    pass
-                except OSError:
-                    pass
 
     return {
         "imported": {
