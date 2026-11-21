@@ -2036,32 +2036,22 @@ export type SoftwareBillOfMaterials = {
   SPDXID: "SPDXRef-DOCUMENT";
   name: string;
   documentNamespace: string;
-  creationInfo: { creators: string[]; created: string; comment: string };
+  creationInfo: { creators: string[]; created: string; comment?: string };
   documentDescribes: string[];
   packages: Array<{
     name: string;
     SPDXID: string;
-    versionInfo: string;
+    versionInfo?: string;
     downloadLocation: "NOASSERTION";
     filesAnalyzed: false;
-    licenseConcluded: "NOASSERTION";
-    licenseDeclared: "NOASSERTION";
-    copyrightText: "NOASSERTION";
-    primaryPackagePurpose: "LIBRARY";
-    externalRefs: Array<{ referenceCategory: "PACKAGE-MANAGER"; referenceType: "purl"; referenceLocator: string }>;
+    licenseConcluded?: "NOASSERTION";
+    licenseDeclared?: "NOASSERTION";
+    copyrightText?: "NOASSERTION";
+    primaryPackagePurpose?: "LIBRARY";
+    externalRefs?: Array<{ referenceCategory: "PACKAGE-MANAGER"; referenceType: "purl"; referenceLocator: string }>;
   }>;
   relationships: Array<{ spdxElementId: string; relationshipType: "DESCRIBES" | "DEPENDS_ON"; relatedSpdxElement: string }>;
-  annotations: Array<{ annotationDate: string; annotationType: "OTHER"; annotator: string; comment: string }>;
-  axiom: {
-    schema_version: 1;
-    package_count: number;
-    relationship_count: number;
-    content_sha256: string;
-    scope: string;
-    file_contents_collected: false;
-    host_paths_collected: false;
-    network_access_performed: false;
-  };
+  annotations?: Array<{ annotationDate: string; annotationType: "OTHER"; annotator: string; comment: string }>;
 };
 
 export type DependencyVulnerabilityReport = {
