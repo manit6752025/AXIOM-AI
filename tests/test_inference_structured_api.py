@@ -83,6 +83,17 @@ def test_structured_inference_rejects_unsupported_schema_before_runtime(monkeypa
     assert "Unsupported JSON Schema keyword" in response.text
 
 
+def test_structured_inference_rejects_boolean_token_count(monkeypatch):
+    monkeypatch.setattr(
+        inference, "run_local_inference",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("runtime must not run")),
+    )
+    payload = _payload()
+    payload["num_predict"] = True
+    response = _client().post("/api/inference/generate/structured", json=payload)
+    assert response.status_code == 422
+
+
 def test_structured_inference_rejects_unbounded_token_request(monkeypatch):
     monkeypatch.setattr(
         inference, "run_local_inference",
