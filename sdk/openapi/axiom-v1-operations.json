@@ -1,0 +1,146 @@
+{
+  "api_contract_version": 1,
+  "description": "Versioned operation surface exposed by the independent AXIOM Python and TypeScript SDKs. Each operation is checked against the live FastAPI OpenAPI document.",
+  "operations": [
+    {
+      "name": "health",
+      "method": "GET",
+      "path": "/api/health",
+      "python": "health",
+      "typescript": "health"
+    },
+    {
+      "name": "meta",
+      "method": "GET",
+      "path": "/api/meta",
+      "python": "meta",
+      "typescript": "meta"
+    },
+    {
+      "name": "runtime",
+      "method": "GET",
+      "path": "/api/workspace/runtime",
+      "python": "runtime",
+      "typescript": "runtime"
+    },
+    {
+      "name": "models",
+      "method": "GET",
+      "path": "/api/workspace/models",
+      "python": "models",
+      "typescript": "models"
+    },
+    {
+      "name": "datasets",
+      "method": "GET",
+      "path": "/api/workspace/datasets",
+      "python": "datasets",
+      "typescript": "datasets"
+    },
+    {
+      "name": "workspaces",
+      "method": "GET",
+      "path": "/api/workspaces",
+      "python": "workspaces",
+      "typescript": "workspaces"
+    },
+    {
+      "name": "create_workspace",
+      "method": "POST",
+      "path": "/api/workspaces",
+      "python": "create_workspace",
+      "typescript": "createWorkspace"
+    },
+    {
+      "name": "rename_workspace",
+      "method": "PATCH",
+      "path": "/api/workspaces/{workspace_id}",
+      "python": "rename_workspace",
+      "typescript": "renameWorkspace"
+    },
+    {
+      "name": "workspace_backup",
+      "method": "GET",
+      "path": "/api/workspaces/{workspace_id}/backup",
+      "python": "download_workspace_backup",
+      "typescript": "downloadWorkspaceBackup"
+    },
+    {
+      "name": "workspace_restore",
+      "method": "POST",
+      "path": "/api/workspaces/backup/restore",
+      "python": "restore_workspace_backup",
+      "typescript": "restoreWorkspaceBackup"
+    },
+    {
+      "name": "engine_status",
+      "method": "GET",
+      "path": "/api/engine/status",
+      "python": "engine_status",
+      "typescript": "engineStatus"
+    },
+    {
+      "name": "engine_telemetry",
+      "method": "GET",
+      "path": "/api/engine/telemetry",
+      "python": "engine_telemetry",
+      "typescript": "engineTelemetry"
+    },
+    {
+      "name": "telemetry_history",
+      "method": "GET",
+      "path": "/api/engine/telemetry-history",
+      "python": "telemetry_history",
+      "typescript": "telemetryHistory"
+    },
+    {
+      "name": "configure_telemetry_history",
+      "method": "PUT",
+      "path": "/api/engine/telemetry-history/settings",
+      "python": "configure_telemetry_history",
+      "typescript": "configureTelemetryHistory"
+    },
+    {
+      "name": "record_telemetry_sample",
+      "method": "POST",
+      "path": "/api/engine/telemetry-history",
+      "python": "record_telemetry_sample",
+      "typescript": "recordTelemetrySample"
+    },
+    {
+      "name": "clear_telemetry_history",
+      "method": "DELETE",
+      "path": "/api/engine/telemetry-history",
+      "python": "clear_telemetry_history",
+      "typescript": "clearTelemetryHistory"
+    },
+    {
+      "name": "knowledge_bases",
+      "method": "GET",
+      "path": "/api/knowledge",
+      "python": "knowledge_bases",
+      "typescript": "knowledgeBases"
+    },
+    {
+      "name": "create_knowledge_base",
+      "method": "POST",
+      "path": "/api/knowledge",
+      "python": "create_knowledge_base",
+      "typescript": "createKnowledgeBase"
+    },
+    {
+      "name": "search_knowledge_base",
+      "method": "POST",
+      "path": "/api/knowledge/{base_id}/search",
+      "python": "search_knowledge_base",
+      "typescript": "searchKnowledgeBase"
+    },
+    {
+      "name": "plugin_manifests",
+      "method": "GET",
+      "path": "/api/security/plugins",
+      "python": "plugin_manifests",
+      "typescript": "pluginManifests"
+    }
+  ]
+}
