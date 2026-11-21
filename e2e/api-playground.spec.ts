@@ -226,9 +226,12 @@ test("API Playground exposes bounded read-only endpoints and Deep Analysis", asy
 
   await select.selectOption("/api/meta");
   await page.getByRole("button", { name: "Run read-only request" }).click();
-  await expect(page.locator(".api-playground-json")).toContainText(
-    '"api_contract_version": 1',
-  );
+  const readOnlyResponse = page
+    .locator("section.surface")
+    .filter({ has: page.getByRole("button", { name: "Run read-only request" }) })
+    .locator(".api-playground-json");
+  await expect(readOnlyResponse).toHaveCount(1);
+  await expect(readOnlyResponse).toContainText('"api_contract_version": 1');
 
   const beforeDeepAnalysis = requests.length;
   await page.getByRole("button", { name: /Run Deep Analysis/i }).click();
