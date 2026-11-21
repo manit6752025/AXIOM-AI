@@ -320,7 +320,7 @@ class AxiomClient:
         )
 
     def record_telemetry_sample(self) -> dict[str, Any]:
-        return self.request_json("POST", "/api/engine/telemetry-history", json_body={})
+        return self.request_json("POST", "/api/engine/telemetry-history")
 
     def clear_telemetry_history(self) -> TelemetryHistory:
         return self.request_json("DELETE", "/api/engine/telemetry-history")
