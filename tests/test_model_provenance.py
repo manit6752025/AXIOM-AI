@@ -202,6 +202,14 @@ def test_model_provenance_api_enforces_workspace_paths_and_labels_registry_claim
         assert report["license_evidence"]["declared_license"] == "Apache-2.0"
         assert report["license_evidence"]["registry_review_state"] == "unreviewed"
 
+        other_model = tmp_path / "models" / "other"
+        other_model.mkdir()
+        mismatch = client.post("/api/workspace/models/provenance", json={
+            "path": "other",
+            "model_id": model_id,
+        })
+        assert mismatch.status_code == 409
+
         unsafe = client.post("/api/workspace/models/provenance", json={"path": "../outside"})
         assert unsafe.status_code == 422
         missing = client.post("/api/workspace/models/provenance", json={
@@ -220,6 +228,29 @@ def test_model_provenance_api_enforces_workspace_paths_and_labels_registry_claim
         for invalid_path in ("../demo", "demo/../demo", "demo//model", "demo\\\\model", "/models/demo"):
             invalid_response = client.post("/api/workspace/models/provenance", json={"path": invalid_path})
             assert invalid_response.status_code == 422
+
+
+def test_model_provenance_cli_rejects_registry_claims_for_a_different_model_path(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from typer.testing import CliRunner
+
+    from axiom.cli.main import app
+
+    model = tmp_path / "models" / "demo"
+    model.mkdir(parents=True)
+    (model / "model.gguf").write_bytes(b"gguf test bytes")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "axiom.cli.main.ModelRegistry",
+        lambda: SimpleNamespace(get=lambda _model_id: SimpleNamespace(source="models/other")),
+    )
+
+    result = CliRunner().invoke(app, [
+        "--no-banner", "model", "provenance", str(model), "--model-id", "a" * 32, "--json",
+    ])
+    assert result.exit_code != 0
+    assert "does not refer to the selected local model directory" in result.output
 
 
 def test_model_provenance_cli_emits_machine_readable_hash_evidence(tmp_path, monkeypatch):
