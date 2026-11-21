@@ -8,7 +8,6 @@ import os
 import re
 import sys
 import tempfile
-from pathlib import Path
 from collections.abc import Iterable, Mapping
 from importlib.resources import files as resource_files
 from typing import TextIO
