@@ -9,11 +9,11 @@ import os
 import re
 import subprocess
 import sys
-from urllib.parse import quote
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Thread
 from typing import Any, Iterable
+from urllib.parse import quote
 
 MAX_DISTRIBUTIONS = 4096
 MAX_RELATIONSHIPS = 20_000
@@ -297,7 +297,7 @@ def _consume_bounded_pipe(stream: Any, maximum_bytes: int, result: dict[str, Any
                 captured.extend(block[:remaining])
             if total > maximum_bytes:
                 result["overflow"] = True
-    except OSError:
+    except (OSError, ValueError):
         result["read_error"] = True
     result["content"] = bytes(captured)
 
