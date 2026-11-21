@@ -55,7 +55,6 @@ serving_profile_app = typer.Typer(
     help="Create and validate bounded AXIOM Native Engine serving profiles.",
     no_args_is_help=True,
 )
-engine_app.add_typer(serving_profile_app, name="profile")
 
 
 @serving_profile_app.command("create")
@@ -257,6 +256,8 @@ def serving_profile_delete(
         "model_files_deleted": False,
     }, ensure_ascii=False))
 
+
+engine_app.add_typer(serving_profile_app, name="profile")
 
 @engine_app.command("discover")
 def engine_discover(
