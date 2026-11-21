@@ -19,6 +19,7 @@ export interface AxiomClientOptions {
 
 export interface AxiomRequestOptions {
   params?: Record<string, string | number | boolean | null | undefined>;
+  headers?: Record<string, string>;
   timeoutMs?: number;
   signal?: AbortSignal;
 }
