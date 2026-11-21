@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -296,6 +297,67 @@ class WorkspaceRegistry:
                 self._write_state(state)
             except Exception:
                 root.rmdir()
+                raise
+        return self._as_workspace(record).public_dict(default_workspace_id=state["default_workspace_id"])
+
+    def create_restore_staging_directory(self) -> Path:
+        """Create a private same-filesystem staging directory for verified restore."""
+        base = self._prepare_managed_root()
+        return Path(tempfile.mkdtemp(prefix=".axiom-restore-", dir=base))
+
+    def create_from_staging_directory(self, name: str, staging_root: str | Path) -> dict[str, Any]:
+        """Atomically publish a fully populated staging tree as a new managed workspace."""
+        normalized = self._validate_name(name)
+        self._prepare_home()
+        base = self._prepare_managed_root()
+        source = Path(staging_root)
+        if source.is_symlink():
+            raise WorkspaceCatalogError("Restore staging directory must not be a symbolic link.")
+        try:
+            resolved_source = source.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise WorkspaceCatalogError("Restore staging directory is unavailable.") from exc
+        if (
+            not resolved_source.is_dir()
+            or resolved_source.parent != base
+            or not resolved_source.name.startswith(".axiom-restore-")
+        ):
+            raise WorkspaceCatalogError("Restore staging directory must be a direct child of the managed workspace root.")
+
+        with file_lock(self.lock_file):
+            state = self._read_state()
+            if not state["workspaces"]:
+                default = self._default_record(self._default_root())
+                state["workspaces"].append(default)
+                state["default_workspace_id"] = default["id"]
+            if len(state["workspaces"]) >= _MAX_WORKSPACES:
+                raise WorkspaceCatalogError(f"AXIOM supports at most {_MAX_WORKSPACES} workspaces.")
+            if any(item["name"].casefold() == normalized.casefold() for item in state["workspaces"]):
+                raise WorkspaceCatalogError("A workspace with that name already exists.")
+
+            workspace_id = "ws-" + uuid.uuid4().hex
+            destination = base / workspace_id
+            if destination.exists() or destination.is_symlink():
+                raise WorkspaceCatalogError("A managed workspace destination already exists.")
+            os.rename(resolved_source, destination)
+            now = self._now()
+            record = {
+                "id": workspace_id,
+                "name": normalized,
+                "root": str(destination.resolve(strict=True)),
+                "created_at": now,
+                "updated_at": now,
+                "managed": True,
+            }
+            state["workspaces"].append(record)
+            try:
+                self._write_state(state)
+            except Exception:
+                try:
+                    os.rename(destination, resolved_source)
+                except OSError:
+                    # Keep an unregistered directory rather than deleting restored user data.
+                    pass
                 raise
         return self._as_workspace(record).public_dict(default_workspace_id=state["default_workspace_id"])
 
