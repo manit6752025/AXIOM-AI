@@ -177,10 +177,17 @@ def _validated_report(report: Any) -> dict[str, Any]:
     expected_sampling = {"temperature", "top_p", "top_k", "min_p", "repetition_penalty", "seed"}
     if set(sampling) != expected_sampling:
         raise BenchmarkProfileError("Benchmark sampling configuration has unsupported fields.")
-    for key in expected_sampling - {"seed"}:
+    sampling_bounds = {
+        "temperature": (0.0, 2.0),
+        "top_p": (0.000001, 1.0),
+        "top_k": (0, 100_000),
+        "min_p": (0.0, 1.0),
+        "repetition_penalty": (0.1, 5.0),
+    }
+    for key, (minimum, maximum) in sampling_bounds.items():
         value = sampling[key]
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= float(value) <= 100_000:
-            raise BenchmarkProfileError("Benchmark sampling configuration contains an invalid number.")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not minimum <= float(value) <= maximum:
+            raise BenchmarkProfileError(f"Benchmark sampling configuration contains an invalid {key} value.")
     if sampling["seed"] is not None and (isinstance(sampling["seed"], bool) or not isinstance(sampling["seed"], int) or sampling["seed"] < 0):
         raise BenchmarkProfileError("Benchmark sampling seed is invalid.")
     memory_stats = report.get("memory_stats")
