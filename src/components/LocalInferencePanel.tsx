@@ -3,6 +3,37 @@ import type { FormEvent } from "react";
 import { Activity, BarChart3, Download, Info, Play, Power, RefreshCcw, Square } from "lucide-react";
 import { axiomApi, type LocalInferenceBenchmark, type LocalInferenceResult, type LocalInferenceStatus, type OllamaPullJob, type OllamaModelDetails, type OllamaRunningModels, type LocalInferenceStreamEvent } from "../api/client";
 
+function applyDefaultDenyToObjectSchemas(
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  let visitedNodes = 0;
+
+  const visit = (value: unknown, depth: number): unknown => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+    visitedNodes += 1;
+    if (depth > 8 || visitedNodes > 128) return value;
+
+    const node = value as Record<string, unknown>;
+    const normalized: Record<string, unknown> = { ...node };
+    if (node.type === "object") {
+      if (!Object.prototype.hasOwnProperty.call(node, "additionalProperties")) {
+        normalized.additionalProperties = false;
+      }
+      if (node.properties && typeof node.properties === "object" && !Array.isArray(node.properties)) {
+        normalized.properties = Object.fromEntries(
+          Object.entries(node.properties as Record<string, unknown>)
+            .map(([name, child]) => [name, visit(child, depth + 1)]),
+        );
+      }
+    } else if (node.type === "array" && Object.prototype.hasOwnProperty.call(node, "items")) {
+      normalized.items = visit(node.items, depth + 1);
+    }
+    return normalized;
+  };
+
+  return visit(schema, 0) as Record<string, unknown>;
+}
+
 export default function LocalInferencePanel() {
   const [status, setStatus] = useState<LocalInferenceStatus | null>(null);
   const [model, setModel] = useState("");
@@ -185,7 +216,7 @@ export default function LocalInferencePanel() {
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
           throw new Error("JSON Schema must be an object.");
         }
-        responseSchema = parsed as Record<string, unknown>;
+        responseSchema = applyDefaultDenyToObjectSchemas(parsed as Record<string, unknown>);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Enter a valid JSON Schema object.");
         return;
