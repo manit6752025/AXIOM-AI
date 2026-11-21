@@ -20,6 +20,12 @@ from axiom.core.benchmark_profiles import BenchmarkProfileError, BenchmarkProfil
 from axiom.core.resource_telemetry import ResourceTelemetryError, ResourceTelemetryOptInRequired, ResourceTelemetryStore
 from axiom.core.embeddings import EmbeddingEngineError, embed_local_texts, unload_local_embeddings
 from axiom.core.reranking import RerankerError, rerank_local_documents, unload_local_reranker
+from axiom.core.request_admission import (
+    BoundedRequestAdmission,
+    RequestAdmissionCancelled,
+    RequestAdmissionQueueFull,
+    RequestAdmissionTimeout,
+)
 from axiom.core.serving_profiles import (
     ServingProfileError,
     ServingProfileStore,
@@ -47,6 +53,7 @@ from axiom.core.engine import (
 )
 
 router = APIRouter(prefix="/api/engine", tags=["axiom-engine"])
+NATIVE_PROFILE_ADMISSION = BoundedRequestAdmission(max_active=1, max_queue=32)
 
 
 def _validated_path(value: Any, label: str) -> Any:
@@ -1060,19 +1067,68 @@ async def generate_with_engine_serving_profile(
 
     readiness = readiness_probe(profile)
     if readiness.get("ready") is not True:
-        raise HTTPException(
-            status_code=409,
-            detail={"message": "Serving profile is not ready.", "readiness": readiness},
-        )
+        raise HTTPException(409, detail={"message": "Serving profile is not ready.", "readiness": readiness})
     try:
         budget = validate_serving_prompt(profile, request.prompt, request.max_new_tokens)
     except ServingProfileError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
+    admission_cancel = Event()
+    started = time.monotonic()
+
+    async def watch_queue_disconnect() -> None:
+        while not admission_cancel.is_set():
+            if await raw_request.is_disconnected():
+                admission_cancel.set()
+                return
+            await asyncio.sleep(0.05)
+
+    disconnect_monitor = asyncio.create_task(watch_queue_disconnect())
     try:
-        reserve_profile_request(profile_id)
-    except ServingProfileError as exc:
-        raise HTTPException(status_code=429, detail=str(exc), headers={"Retry-After": "1"}) from None
+        admission = await asyncio.to_thread(
+            NATIVE_PROFILE_ADMISSION.acquire,
+            queue_limit=profile["max_queued_requests"],
+            timeout_seconds=profile["request_timeout_seconds"],
+            cancel_event=admission_cancel,
+        )
+    except RequestAdmissionQueueFull as exc:
+        disconnect_monitor.cancel()
+        try:
+            await disconnect_monitor
+        except asyncio.CancelledError:
+            pass
+        raise HTTPException(429, detail=str(exc), headers={"Retry-After": "1"}) from None
+    except RequestAdmissionTimeout as exc:
+        disconnect_monitor.cancel()
+        try:
+            await disconnect_monitor
+        except asyncio.CancelledError:
+            pass
+        raise HTTPException(status_code=504, detail=str(exc)) from None
+    except RequestAdmissionCancelled as exc:
+        disconnect_monitor.cancel()
+        try:
+            await disconnect_monitor
+        except asyncio.CancelledError:
+            pass
+        raise HTTPException(status_code=499, detail=str(exc)) from None
+    except (OSError, RuntimeError, ValueError) as exc:
+        disconnect_monitor.cancel()
+        try:
+            await disconnect_monitor
+        except asyncio.CancelledError:
+            pass
+        raise HTTPException(status_code=503, detail="Native request admission failed safely.") from exc
+    else:
+        disconnect_monitor.cancel()
+        try:
+            await disconnect_monitor
+        except asyncio.CancelledError:
+            pass
+
+    if admission_cancel.is_set() or await raw_request.is_disconnected():
+        NATIVE_PROFILE_ADMISSION.release()
+        raise HTTPException(status_code=499, detail="Serving profile request disconnected while queued.")
 
     cancel_event = Event()
     worker = asyncio.create_task(asyncio.to_thread(
@@ -1091,17 +1147,16 @@ async def generate_with_engine_serving_profile(
         prompt_budget=budget,
     ))
     release_scheduled = False
-    started = time.monotonic()
     try:
         while not worker.done():
             if await raw_request.is_disconnected():
                 cancel_event.set()
-                worker.add_done_callback(lambda _task: release_profile_request(profile_id))
+                worker.add_done_callback(lambda _task: NATIVE_PROFILE_ADMISSION.release())
                 release_scheduled = True
                 raise HTTPException(status_code=499, detail="Serving profile generation cancelled after client disconnect.")
             if time.monotonic() - started >= profile["request_timeout_seconds"]:
                 cancel_event.set()
-                worker.add_done_callback(lambda _task: release_profile_request(profile_id))
+                worker.add_done_callback(lambda _task: NATIVE_PROFILE_ADMISSION.release())
                 release_scheduled = True
                 raise HTTPException(status_code=504, detail="Serving profile request exceeded its configured timeout.")
             await asyncio.sleep(0.05)
@@ -1110,6 +1165,13 @@ async def generate_with_engine_serving_profile(
             "schema_version": 1,
             "profile": {"id": profile["id"], "name": profile["name"]},
             "request_budget": budget,
+            "admission": {
+                "queue_position": admission["queue_position"],
+                "queued": admission["queue_position"] > 0,
+                "waited_ms": admission["waited_ms"],
+                "concurrency_limit": profile["max_concurrent_requests"],
+                "queue_limit": profile["max_queued_requests"],
+            },
             "result": result,
             "scope": {"local_only": True, "network_used": False, "profile_persisted": False},
         }
@@ -1122,11 +1184,10 @@ async def generate_with_engine_serving_profile(
     finally:
         if not release_scheduled:
             if worker.done():
-                release_profile_request(profile_id)
+                NATIVE_PROFILE_ADMISSION.release()
             else:
                 cancel_event.set()
-                worker.add_done_callback(lambda _task: release_profile_request(profile_id))
-
+                worker.add_done_callback(lambda _task: NATIVE_PROFILE_ADMISSION.release())
 
 class LocalRerankingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
