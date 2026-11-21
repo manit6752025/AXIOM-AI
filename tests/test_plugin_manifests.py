@@ -125,6 +125,34 @@ def test_manifest_semver_rejects_empty_segments_and_compares_numeric_prerelease_
     assert first_hash != second_hash
 
 
+def test_manifest_registry_lock_and_registry_symlinks_are_rejected_without_writes(tmp_path):
+    store = PluginManifestStore(tmp_path / ".axiom")
+    registered = store.register(manifest())
+    lock_target = tmp_path / "outside-lock-target"
+    lock_target.write_text("outside sentinel", encoding="utf-8")
+    store.lock_file.unlink()
+    try:
+        store.lock_file.symlink_to(lock_target)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    with pytest.raises(PluginManifestError, match="lock"):
+        store.grant(
+            "com.example.research",
+            expected_sha256=registered["sha256"],
+            tools=[{"name": "search", "scopes": ["read"]}],
+        )
+    assert lock_target.read_text(encoding="utf-8") == "outside sentinel"
+
+    store.lock_file.unlink()
+    registry_target = tmp_path / "outside-registry-target"
+    registry_target.write_text("outside registry sentinel", encoding="utf-8")
+    store.registry_file.unlink()
+    store.registry_file.symlink_to(registry_target)
+    with pytest.raises(PluginManifestError):
+        store.list()
+    assert registry_target.read_text(encoding="utf-8") == "outside registry sentinel"
+
+
 def test_manifest_store_fails_closed_for_tampered_registry_and_symlinks(tmp_path):
     root = tmp_path / ".axiom"
     store = PluginManifestStore(root)
@@ -351,3 +379,16 @@ def test_plugin_manifest_cli_rejects_duplicate_json_keys_and_symlink_files(tmp_p
         pytest.skip("symlink creation is unavailable")
     with pytest.raises(PluginManifestError, match="non-symlink"):
         _read_manifest(str(linked))
+
+def test_published_manifest_schema_and_example_match_runtime_validator(tmp_path):
+    from pathlib import Path
+
+    from axiom.core.plugin_manifests import _PLUGIN_VERSION
+
+    repository = Path(__file__).resolve().parents[1]
+    schema = json.loads((repository / "docs/schemas/plugin-manifest-v1.schema.json").read_text(encoding="utf-8"))
+    example = json.loads((repository / "examples/plugin-manifest.example.json").read_text(encoding="utf-8"))
+    assert schema["properties"]["version"]["pattern"] == _PLUGIN_VERSION.pattern
+    normalized, _digest = validate_plugin_manifest(example)
+    assert normalized["id"] == "com.example.research"
+    assert schema["properties"]["tools"]["maxItems"] == 32
