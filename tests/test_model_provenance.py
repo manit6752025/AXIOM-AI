@@ -103,11 +103,18 @@ def test_model_provenance_returns_explicit_no_weight_status(tmp_path):
     assert report["hash_evidence"]["checkpoint_sha256"] is None
 
 
-@pytest.mark.parametrize("bad_path", ["", "."])
-def test_model_provenance_rejects_non_model_directories(tmp_path, bad_path):
-    if bad_path == ".":
-        with pytest.raises(ModelProvenanceError, match="directory"):
-            inspect_model_provenance(tmp_path / "missing")
-    else:
-        with pytest.raises((ModelProvenanceError, OSError, ValueError)):
-            inspect_model_provenance(bad_path)
+def test_model_provenance_rejects_files_and_symlinked_roots(tmp_path):
+    not_directory = tmp_path / "not-a-directory"
+    not_directory.write_text("not a model folder", encoding="utf-8")
+    with pytest.raises(ModelProvenanceError, match="directory"):
+        inspect_model_provenance(not_directory)
+
+    real = tmp_path / "real-model"
+    real.mkdir()
+    linked = tmp_path / "linked-model"
+    try:
+        linked.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    with pytest.raises(ModelProvenanceError, match="symbolic link"):
+        inspect_model_provenance(linked)
