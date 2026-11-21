@@ -169,6 +169,7 @@ export class AxiomClient {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 900_000) {
       throw new AxiomConfigurationError("timeoutMs must be an integer between 1 and 900000.");
     }
+    const url = this.url(path, options.params);
     const controller = new AbortController();
     let didTimeOut = false;
     let cleaned = false;
@@ -295,11 +296,6 @@ export class AxiomClient {
     } finally {
       pending.cleanup();
     }
-  }
-
-  private async requestBytes(method: HTTPMethod, path: string, options: AxiomRequestOptions = {}): Promise<Uint8Array> {
-    const response = await this.checkedResponse(method, path, options);
-    return new Uint8Array(await response.arrayBuffer());
   }
 
   health(): Promise<AxiomHealth> {
