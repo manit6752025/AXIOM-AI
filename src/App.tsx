@@ -5220,7 +5220,7 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
               </div>)}
             </div>
             <div className="integration-form-actions">
-              <button type="button" className="button primary-button" onClick={() => void savePluginGrant()} disabled={pluginSaving}>{pluginSaving ? "Saving…" : "Save scoped grants"}</button>
+              <button type="button" className="button primary-button" onClick={() => void savePluginGrant()} disabled={pluginSaving || !Object.values(pluginGrantDraft).some((scopes) => scopes.length > 0)}>{pluginSaving ? "Saving…" : "Save scoped grants"}</button>
               <button type="button" className="button secondary-button" onClick={() => void revokePluginGrant()} disabled={pluginSaving || selected.permission_status === "default_deny"}>Revoke all grants</button>
             </div>
           </>;
