@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import stat
 import zipfile
 from pathlib import Path
@@ -137,7 +136,11 @@ def test_workspace_restore_rejects_path_traversal_and_removes_partial_staging(tm
             "special_files": 0,
             "excluded_directories": 0,
         },
-        "limits": {},
+        "limits": {
+            "maximum_files": workspace_backup.MAX_BACKUP_FILES,
+            "maximum_file_bytes": workspace_backup.MAX_BACKUP_FILE_BYTES,
+            "maximum_total_bytes": workspace_backup.MAX_BACKUP_TOTAL_BYTES,
+        },
         "scope_note": "test",
     }
     archive = io.BytesIO()
