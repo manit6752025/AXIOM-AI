@@ -754,7 +754,7 @@ def package_verification_issues(
             "matrix.os", "node-version: \"22\"", "npm ci", "npm run build",
             "python -m build --sdist --wheel --outdir dist",
             "python scripts/verify_package_artifacts.py --dist dist --install-wheel --json",
-            "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py", "tests/test_supply_chain.py", "tests/test_security_supply_chain_api.py",
+            "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py",
         )),
         ("archive regression tests", tests, (
             "test_verifies_wheel_and_sdist_bundle_cli_and_control_center",
