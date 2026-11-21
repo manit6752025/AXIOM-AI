@@ -126,7 +126,7 @@ from axiom.cli.agent_profiles import register as register_agent_profiles
 from axiom.cli.prompt_templates import register as register_prompt_templates
 from axiom.cli.model_studio import register_model_studio
 from axiom.cli.fine_tuning import register as register_fine_tuning_cli
-from axiom.cli.workspace_metadata import register as register_workspace_metadata_cli
+from axiom.cli.workspace_metadata import register as register_workspace_metadata_cli, workspace_app
 from axiom.cli.knowledge import register as register_knowledge_cli
 from axiom.cli.plugins import register as register_plugins_cli
 from axiom.cli.workspace_backup import register as register_workspace_backup_cli
