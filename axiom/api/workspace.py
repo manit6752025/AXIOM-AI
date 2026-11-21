@@ -29,6 +29,7 @@ from axiom.models.registry import Model, ModelRegistry
 from axiom.models.compatibility import estimate_model_compatibility
 from axiom.models.discovery import discover_local_model_folders
 from axiom.models.inspector import inspect_model
+from axiom.models.provenance import inspect_model_provenance
 from axiom.models.runtime_matrix import probe_local_runtime_matrix
 from axiom.api.model_paths import validate_model_path
 from axiom.path_safety import (
@@ -146,6 +147,13 @@ class WorkspaceModelInspectInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: str = Field(min_length=1, max_length=512)
+
+
+class WorkspaceModelProvenanceInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    path: str = Field(min_length=1, max_length=512)
+    model_id: str | None = Field(default=None, min_length=32, max_length=32, pattern=r"^[a-f0-9]{32}$")
 
 
 class WorkspaceTrainingPlanInput(BaseModel):
@@ -464,6 +472,27 @@ def workspace_inspect_model(request: WorkspaceModelInspectInput) -> dict[str, An
             "status": inspection.status,
         },
     }
+
+
+@router.post("/models/provenance")
+def workspace_model_provenance(request: WorkspaceModelProvenanceInput) -> dict[str, Any]:
+    """Hash local model weights and report source/license evidence without network access."""
+    try:
+        model_path = validate_model_path(str(active_workspace_root() / "models" / request.path))
+        registry_metadata = None
+        if request.model_id:
+            registered = ModelRegistry().get(request.model_id)
+            if registered is None:
+                raise HTTPException(status_code=404, detail="Registered model metadata was not found.")
+            registry_metadata = registered.to_dict()
+        report = inspect_model_provenance(model_path, registry_metadata=registry_metadata)
+    except HTTPException:
+        raise
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Model provenance inspection rejected the selected path or files.") from exc
+    report["model_directory"] = model_path.relative_to(active_workspace_root().resolve()).as_posix()
+    record_workspace_event("models.provenance", f"Inspected local model provenance for {request.path}")
+    return {"provenance": report}
 
 
 @router.post("/models/import", status_code=201)
