@@ -73,7 +73,7 @@ def test_spdx_sbom_validates_against_the_official_23_json_schema():
         generated_at=datetime(2026, 11, 22, 0, 0, tzinfo=UTC),
     )
     validator = jsonschema.Draft201909Validator(schema)
-    errors = sorted(validator.iter_errors(report), key=lambda item: list(item.absolute_path))
+    errors = sorted(validator.iter_errors(report), key=lambda item: tuple(str(part) for part in item.absolute_path))
     assert not errors, [error.message for error in errors]
     assert "axiom" not in report
 
@@ -327,7 +327,7 @@ def test_vulnerability_scan_rejects_duplicate_json_object_keys(monkeypatch: pyte
 
     class DuplicateJSONProcess:
         def __init__(self, *_args, **_kwargs):
-            self.stdout = io.BytesIO(b'{"dependencies":[],"dependencies":[]}') 
+            self.stdout = io.BytesIO(b'{"dependencies":[],"dependencies":[]}')
             self.stderr = io.BytesIO()
             self.returncode = 0
 
