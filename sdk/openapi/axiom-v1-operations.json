@@ -117,21 +117,21 @@
     {
       "name": "knowledge_bases",
       "method": "GET",
-      "path": "/api/knowledge",
+      "path": "/api/workspace/knowledge-bases",
       "python": "knowledge_bases",
       "typescript": "knowledgeBases"
     },
     {
       "name": "create_knowledge_base",
       "method": "POST",
-      "path": "/api/knowledge",
+      "path": "/api/workspace/knowledge-bases",
       "python": "create_knowledge_base",
       "typescript": "createKnowledgeBase"
     },
     {
       "name": "search_knowledge_base",
       "method": "POST",
-      "path": "/api/knowledge/{base_id}/search",
+      "path": "/api/workspace/knowledge-bases/{base_id}/search",
       "python": "search_knowledge_base",
       "typescript": "searchKnowledgeBase"
     },
