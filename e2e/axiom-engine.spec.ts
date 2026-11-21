@@ -165,6 +165,7 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await page.route("**/api/engine/benchmark-profiles**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith("/compare")) {
+      expect(route.request().url()).toContain("/api/engine/benchmark-profiles/compare");
       expect(url.searchParams.get("left_id")).toBe(savedProfileId);
       expect(url.searchParams.get("right_id")).toBe(comparisonProfileId);
       await route.fulfill({ json: {

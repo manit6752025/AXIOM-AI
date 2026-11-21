@@ -66,3 +66,5 @@ and 4 MiB, uses a lock plus atomic replacement, and applies restrictive file
 permissions on POSIX systems. Profile JSON is local metadata, not a signed
 remote attestation; its content fingerprint detects accidental/tampered
 changes but does not protect against an attacker able to rewrite the store.
+
+The stored prompt fingerprint is a SHA-256 digest rather than prompt text. Each record captures hardware and software provenance; model paths are not persisted in the profile document.
