@@ -77,6 +77,32 @@ def test_schema_rejects_unsupported_or_unbounded_keywords(schema):
         validate_json_schema(schema)
 
 
+@pytest.mark.parametrize("schema", [
+    {"type": "integer", "const": True},
+    {"type": "integer", "enum": [1, True]},
+    {"type": "integer", "const": 11, "maximum": 10},
+    {"type": "string", "enum": ["ok", 1]},
+])
+def test_schema_rejects_const_and_enum_values_that_violate_declared_constraints(schema):
+    with pytest.raises(JsonSchemaError, match="const and enum values"):
+        validate_json_schema(schema)
+
+
+def test_large_integer_values_are_validated_without_float_overflow():
+    value = 10**400
+    validate_json_instance(value, {"type": "integer"})
+    with pytest.raises(JsonSchemaError, match="outside the configured range"):
+        validate_json_instance(value, {"type": "integer", "maximum": 100})
+
+
+def test_object_validation_rejects_non_string_python_keys_cleanly():
+    with pytest.raises(JsonSchemaError, match="property names must be strings"):
+        validate_json_instance(
+            {"name": "AXIOM", 1: "unexpected"},
+            {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+        )
+
+
 def test_schema_rejects_oversized_input_and_excessive_nesting():
     oversized = {"type": "string", "description": "x" * MAX_SCHEMA_BYTES}
     with pytest.raises(JsonSchemaError, match="byte limit"):
