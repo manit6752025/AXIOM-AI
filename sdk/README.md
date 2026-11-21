@@ -60,6 +60,19 @@ npm install --prefix sdk/typescript
 npm pack --prefix sdk/typescript
 ```
 
-Publish only after the SDK quality workflow and full repository quality gates
-pass. The package metadata is prepared for PyPI and the public npm registry;
-credentials and the actual publish action remain release-environment duties.
+The gated publisher is `.github/workflows/sdk-release.yml`. It is
+`workflow_dispatch` only and runs the contract checks, Python SDK tests,
+TypeScript build/tests, and package builds before any publish job starts. It
+accepts `both`, `python`, or `typescript`; ordinary pushes never publish.
+
+Before publishing, configure a PyPI Trusted Publisher for repository
+`manit6752025/AXIOM-AI`, workflow `sdk-release.yml`, environment `pypi`.
+Create the GitHub `pypi` deployment environment. For npm, configure the
+`npm` deployment environment and add a package-scoped publish token as the
+`NPM_TOKEN` repository/environment secret. The workflow uses npm provenance
+and publishes `@axiom-ai/sdk` with public access.
+
+The workflow does not run until a maintainer explicitly dispatches it, and
+registry credentials are never committed to the repository. The packages
+remain unpublished until the external PyPI/npm publisher configuration and
+release action are completed successfully.
