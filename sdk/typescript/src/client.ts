@@ -222,7 +222,7 @@ export class AxiomClient {
   async request<TResponse>(
     method: HTTPMethod,
     path: string,
-    options: AxiomRequestOptions & { jsonBody?: unknown } = {},
+    options: AxiomRequestOptions & { jsonBody?: unknown; body?: BodyInit | null; contentType?: string } = {},
   ): Promise<TResponse> {
     const response = await this.checkedResponse(method, path, options);
     if (response.status === 204) return undefined as TResponse;
