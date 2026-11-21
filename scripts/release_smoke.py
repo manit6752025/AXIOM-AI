@@ -684,9 +684,6 @@ def supply_chain_issues(
             '"DEPENDS_ON"', "MAX_DISTRIBUTIONS = 4096",
             "host_paths_collected", "network_access_performed",
         )),
-        ("Optional scanner installation", (Path("pyproject.toml").read_text(encoding="utf-8") if Path("pyproject.toml").is_file() else ""), (
-            "security-audit", "pip-audit>=2.10.1,<3",
-        )),
         ("Dependency audit", core, (
             "def audit_dependency_vulnerabilities(", "allow_network: bool",
             "explicit network authorization", "MAX_AUDIT_OUTPUT_BYTES",
@@ -729,9 +726,9 @@ def supply_chain_issues(
             'page.waitForEvent("dialog")', "axiom-installed-environment.spdx.json",
             "axiom-dependency-vulnerability-report.json", "allow_network: true",
         )),
-        ("Security documentation", docs, (
+        ("Security documentation and optional scanner", docs, (
             "SPDX 2.3", "pip-audit", "network authorization",
-            "unavailable", "installed Python",
+            "unavailable", "installed Python", "security-audit", "pip-audit>=2.10.1,<3",
         )),
     )
     failures: list[str] = []
