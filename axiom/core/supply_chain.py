@@ -410,7 +410,7 @@ def _scanner_failure(generated_at: str, scanner_version: str | None, message: st
     }
 
 
-def audit_dependency_vulnerabilities(
+def _audit_dependency_vulnerabilities_unlocked(
     *,
     allow_network: bool,
     timeout_seconds: int = MAX_SCAN_SECONDS,
