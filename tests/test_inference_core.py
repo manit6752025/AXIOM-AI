@@ -216,6 +216,9 @@ def test_structured_generation_passes_validated_schema_to_ollama_format(monkeypa
     assert observed["payload"]["format"]["type"] == "object"
     assert observed["payload"]["format"]["additionalProperties"] is False
     assert observed["payload"]["format"]["required"] == ["name", "count"]
+    assert "$schema" not in observed["payload"]["format"]
+    assert observed["payload"]["prompt"].startswith("Return a product object.")
+    assert "Return only one JSON value" in observed["payload"]["prompt"]
     assert result["response"] == '{"name":"AXIOM","count":3}'
 
 
