@@ -10,6 +10,7 @@ import LocalEngineFabricPanel from "./components/LocalEngineFabricPanel";
 import LocalInferencePanel from "./components/LocalInferencePanel";
 import LLMClientPanel from "./components/LLMClientPanel";
 import AgentProfiles from "./components/AgentProfiles";
+import PromptStudioPanel from "./components/PromptStudioPanel";
 import ModelStudioPanel from "./components/ModelStudioPanel";
 import LocalFineTuningPanel from "./components/LocalFineTuningPanel";
 import { downloadBlob } from "./utils/browserDownload";
@@ -155,6 +156,7 @@ type Page =
   | "diagnostics"
   | "api-playground"
   | "agent-profiles"
+  | "prompt-studio"
   | "roadmap"
   | "modules"
   | "logs"
@@ -289,6 +291,12 @@ const navItems: NavItem[] = [
     icon: ShieldCheck,
   },
   {
+    id: "prompt-studio",
+    label: "Prompt Studio",
+    description: "Typed prompt templates and revision history",
+    icon: FileCode2,
+  },
+  {
     id: "roadmap",
     label: "Roadmap",
     description: "Scoped feature status and integrity",
@@ -383,6 +391,11 @@ const pageMeta: Record<
     label: "Agent Profiles",
     kicker: "VERSIONED TASK METADATA",
     description: "Create local task profiles while keeping tool permissions and execution scopes separate.",
+  },
+  "prompt-studio": {
+    label: "Prompt Studio",
+    kicker: "VERSIONED PROMPT TEMPLATES",
+    description: "Create typed, validated workspace prompts, inspect revisions, and preview literal substitution without invoking a model.",
   },
   roadmap: {
     label: "Roadmap",
@@ -2061,6 +2074,8 @@ function WorkspacePage({
       return <ApiPlayground />;
     case "agent-profiles":
       return <FeaturePage page="agent-profiles"><AgentProfiles /></FeaturePage>;
+    case "prompt-studio":
+      return <FeaturePage page="prompt-studio"><PromptStudioPanel /></FeaturePage>;
     case "logs":
       return <LogsPage />;
     case "settings":
@@ -4924,6 +4939,7 @@ function ModulesPage({ setPage }: { setPage: (page: Page) => void }) {
     { id: "diagnostics", title: "Diagnostics and support", description: "Check API and machine connectivity and access workspace warnings and support actions that are enabled.", scope: "Operations", availability: "GUI", tone: "success", icon: Wrench, page: "diagnostics", command: "axiom doctor --help" },
     { id: "api-playground", title: "API Playground", description: "Inspect a bounded allowlist of read-only HTTP endpoints and copy JSON responses.", scope: "Developer API", availability: "GUI · GET only", tone: "success", icon: Network, page: "api-playground" },
     { id: "agent-profiles", title: "Agent task profiles", description: "Version descriptive task labels without changing MCP grants or execution permissions.", scope: "Agent engineering", availability: "GUI + CLI metadata", tone: "success", icon: ShieldCheck, page: "agent-profiles", command: "axiom agent-profile --help" },
+    { id: "prompt-studio", title: "Prompt Studio", description: "Manage typed prompt templates, safe rendering, and immutable revisions.", scope: "Applied AI", availability: "GUI + API + CLI", tone: "success", icon: FileCode2, page: "prompt-studio", command: "axiom prompt --help" },
     { id: "logs", title: "Workspace event stream", description: "Filter recent workspace actions; this is not a claim of full OS or process telemetry.", scope: "Observability", availability: "GUI", tone: "success", icon: TerminalSquare, page: "logs" },
     { id: "settings", title: "Preferences and local security", description: "Manage available GUI preferences and administrator-session settings.", scope: "System", availability: "GUI", tone: "success", icon: Settings, page: "settings" },
     { id: "tools", title: "Developer tool catalog", description: "Discover supported external developer tools and review setup plans before explicit installs.", scope: "CLI extensions", availability: "CLI surface", tone: "neutral", icon: Wrench, command: "axiom tools --help" },
