@@ -1,6 +1,6 @@
 # Cross-platform Python package verification
 
-AXIOM currently publishes a platform-independent Python wheel and a source distribution. The same build contract is exercised on `ubuntu-latest`, `windows-latest`, and `macos-latest` by the `cross-platform-smoke` job in `.github/workflows/quality-gates.yml`.
+AXIOM currently publishes a platform-independent Python wheel and a source distribution. The same build contract is exercised on Ubuntu (`ubuntu-latest`), Windows (`windows-latest`), and macOS (`macos-latest`) by the `cross-platform-smoke` job in `.github/workflows/quality-gates.yml`.
 
 For each operating system the job:
 
