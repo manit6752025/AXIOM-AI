@@ -29,20 +29,20 @@ class ToolProfileInput(BaseModel):
 
 
 class PluginManifestRegistrationInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     manifest: dict[str, Any]
 
 
 class PluginToolGrantInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     name: str = Field(min_length=1, max_length=64)
     scopes: list[str] = Field(min_length=1, max_length=5)
 
 
 class PluginPermissionsInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     manifest_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     tools: list[PluginToolGrantInput] = Field(max_length=32)
@@ -67,7 +67,7 @@ class ReviewSecurityEventInput(BaseModel):
 def _record_action_event(event_type: str) -> None:
     try:
         record_security_event(event_type)
-    except SecurityEventError as exc:
+    except (SecurityEventError, OSError, TimeoutError) as exc:
         raise HTTPException(
             status_code=503,
             detail="The policy change may already have taken effect, but the security journal could not record it. Inspect the registry and journal before retrying.",
