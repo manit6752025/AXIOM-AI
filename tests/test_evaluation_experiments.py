@@ -102,6 +102,19 @@ def test_api_compares_repeated_evaluations_linked_to_saved_plan_snapshots(tmp_pa
         assert comparison["statistical_test"]["status"] == "computed"
         assert 0 <= comparison["statistical_test"]["p_value"] <= 1
 
+        from typer.testing import CliRunner
+        from axiom.cli.main import app
+
+        cli_result = CliRunner().invoke(app, [
+            "evaluation", "compare-experiments", baseline_id, candidate_id,
+            "--metric", "exact_match", "--json",
+        ])
+        assert cli_result.exit_code == 0, cli_result.stdout
+        cli_comparison = json.loads(cli_result.stdout)
+        assert cli_comparison["baseline"]["replicate_count"] == 2
+        assert cli_comparison["candidate"]["replicate_count"] == 2
+        assert cli_comparison["statistical_test"]["p_value"] is not None
+
         missing = client.post("/api/evaluation/experiment-comparisons", json={
             "baseline_experiment_id": "0" * 32,
             "candidate_experiment_id": candidate_id,
