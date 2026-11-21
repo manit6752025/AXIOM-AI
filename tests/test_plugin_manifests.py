@@ -109,6 +109,7 @@ def test_manifest_versions_follow_semver_and_duplicate_ids_are_rejected(tmp_path
     store = PluginManifestStore(tmp_path / ".axiom")
     store.register(manifest("1.0.0-alpha.1"))
     store.register(manifest("1.0.0-alpha.2"))
+    store.register(manifest("1.0.0-alpha.10"))
     store.register(manifest("1.0.0"))
     with pytest.raises(PluginManifestError, match="newer"):
         store.register(manifest("1.0.0-beta.1"))
@@ -123,6 +124,37 @@ def test_manifest_semver_rejects_empty_segments_and_compares_numeric_prerelease_
     _, first_hash = validate_plugin_manifest(manifest("1.0.0-alpha.2"))
     _, second_hash = validate_plugin_manifest(manifest("1.0.0-alpha.10"))
     assert first_hash != second_hash
+
+
+def test_manifest_store_serializes_concurrent_registrations_without_lost_updates(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    root = tmp_path / ".axiom"
+
+    def register(index: int) -> str:
+        candidate = manifest()
+        candidate["id"] = f"org.example.plugin{index}"
+        return PluginManifestStore(root).register(candidate)["manifest"]["id"]
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        registered = list(executor.map(register, range(16)))
+
+    assert len(set(registered)) == 16
+    records = PluginManifestStore(root).list()["manifests"]
+    assert {record["manifest"]["id"] for record in records} == set(registered)
+
+
+def test_manifest_store_files_and_directory_use_private_permissions(tmp_path):
+    import os
+    import stat
+
+    if os.name != "posix":
+        pytest.skip("POSIX permission bits are not portable to this platform")
+    store = PluginManifestStore(tmp_path / ".axiom")
+    store.register(manifest())
+    assert stat.S_IMODE(store.root.stat().st_mode) == 0o700
+    assert stat.S_IMODE(store.registry_file.stat().st_mode) == 0o600
+    assert stat.S_IMODE(store.lock_file.stat().st_mode) == 0o600
 
 
 def test_manifest_registry_lock_and_registry_symlinks_are_rejected_without_writes(tmp_path):
