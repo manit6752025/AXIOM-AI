@@ -336,12 +336,9 @@ def test_serving_profile_api_applies_busy_admission_without_queueing(tmp_path, m
             tmp_path, model_path=str(model), name="Busy profile",
         )).json()["profile"]
         monkeypatch.setattr(engine_api.NATIVE_PROFILE_ADMISSION, "acquire", lambda **kwargs: (_ for _ in ()).throw(engine_api.RequestAdmissionQueueFull("The native request queue is full.")))
-        try:
-            busy = client.post(f"/api/engine/serving-profiles/{profile['id']}/generate", json={"prompt": "hi"})
-            assert busy.status_code == 429
-            assert busy.headers["retry-after"] == "1"
-        finally:
-            engine_api.NATIVE_PROFILE_ADMISSION = engine_api.NATIVE_PROFILE_ADMISSION
+        busy = client.post(f"/api/engine/serving-profiles/{profile['id']}/generate", json={"prompt": "hi"})
+        assert busy.status_code == 429
+        assert busy.headers["retry-after"] == "1"
 
 
 
@@ -395,3 +392,11 @@ def test_serving_profile_cli_creates_probes_runs_lists_and_deletes(tmp_path, mon
     ])
     assert removed.exit_code == 0, removed.output
     assert json.loads(removed.stdout)["model_files_deleted"] is False
+
+
+def test_serving_profile_schema_accepts_bounded_queue_depth(tmp_path):
+    profile = ServingProfileStore(tmp_path / ".axiom").save(
+        _config(tmp_path, max_queued_requests=8)
+    )
+    assert profile["max_concurrent_requests"] == 1
+    assert profile["max_queued_requests"] == 8
