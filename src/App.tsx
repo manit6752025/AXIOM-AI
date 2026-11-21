@@ -51,6 +51,7 @@ import {
   type ReproduciblePlanSnapshot,
   type SavedPlanDiff,
   type WorkspaceEvaluationRun,
+  type EvaluationExperimentComparison,
   type WorkspaceEvent,
   type WorkspaceDiagnostics,
   type SecurityAudit,
@@ -3416,6 +3417,12 @@ function Evaluation({ onNotify }: { onNotify: (message: string, tone?: Tone) => 
   const [modelLabel, setModelLabel] = useState("");
   const [markBaseline, setMarkBaseline] = useState(false);
   const [baselineRunId, setBaselineRunId] = useState("");
+  const [evaluationExperimentId, setEvaluationExperimentId] = useState("");
+  const [comparisonBaselineExperimentId, setComparisonBaselineExperimentId] = useState("");
+  const [comparisonCandidateExperimentId, setComparisonCandidateExperimentId] = useState("");
+  const [comparisonMetric, setComparisonMetric] = useState<"exact_match" | "normalized_exact_match" | "token_f1_micro">("token_f1_micro");
+  const [experimentComparison, setExperimentComparison] = useState<EvaluationExperimentComparison | null>(null);
+  const [comparisonBusy, setComparisonBusy] = useState(false);
   const [regressionMetric, setRegressionMetric] = useState<"exact_match" | "normalized_exact_match" | "token_f1_micro">("token_f1_micro");
   const [regressionTolerance, setRegressionTolerance] = useState("0.05");
   const [evaluationBusy, setEvaluationBusy] = useState(false);
@@ -3539,6 +3546,7 @@ function Evaluation({ onNotify }: { onNotify: (message: string, tone?: Tone) => 
         split_field: splitField.trim() || undefined,
         split_value: splitValue.trim() || undefined,
         model_label: modelLabel.trim() || undefined,
+        experiment_id: evaluationExperimentId || undefined,
         baseline: markBaseline,
         baseline_run_id: baselineRunId || undefined,
         regression_metric: regressionMetric,
@@ -3559,6 +3567,25 @@ function Evaluation({ onNotify }: { onNotify: (message: string, tone?: Tone) => 
       setError(cause instanceof Error ? cause.message : "Offline evaluation could not be completed.");
     } finally {
       setEvaluationBusy(false);
+    }
+  };
+
+  const compareSavedExperiments = async () => {
+    if (!comparisonBaselineExperimentId || !comparisonCandidateExperimentId) return;
+    setComparisonBusy(true);
+    setError("");
+    setExperimentComparison(null);
+    try {
+      const result = await axiomApi.compareEvaluationExperiments({
+        baseline_experiment_id: comparisonBaselineExperimentId,
+        candidate_experiment_id: comparisonCandidateExperimentId,
+        metric: comparisonMetric,
+      });
+      setExperimentComparison(result.comparison);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Experiment statistics could not be compared.");
+    } finally {
+      setComparisonBusy(false);
     }
   };
 
@@ -3601,6 +3628,7 @@ function Evaluation({ onNotify }: { onNotify: (message: string, tone?: Tone) => 
         </div>
         <div>
           <label className="field"><span className="field-label-row"><span>Model label (optional)</span></span><input value={modelLabel} onChange={(event) => setModelLabel(event.target.value)} maxLength={256} placeholder="candidate model" /></label>
+          <label className="field"><span className="field-label-row"><span>Link to saved experiment (optional)</span></span><select aria-label="Link to saved experiment" value={evaluationExperimentId} onChange={(event) => setEvaluationExperimentId(event.target.value)}><option value="">Unlinked evaluation</option>{experiments.map((experiment) => <option value={experiment.id} key={experiment.id}>{experiment.name} · {experiment.id.slice(0, 8)}</option>)}</select></label>
           <label className="field"><span className="field-label-row"><span>Compare against baseline</span></span><select value={baselineRunId} onChange={(event) => setBaselineRunId(event.target.value)}><option value="">No baseline comparison</option>{baselineRuns.map((run) => <option value={run.id} key={run.id}>{run.name} · {run.report.metrics.token_f1_micro.toFixed(3)} token F1</option>)}</select></label>
           <label className="field"><span className="field-label-row"><span>Regression metric</span></span><select value={regressionMetric} onChange={(event) => setRegressionMetric(event.target.value as typeof regressionMetric)}><option value="token_f1_micro">Token F1 (micro)</option><option value="exact_match">Exact match</option><option value="normalized_exact_match">Normalized exact match</option></select></label>
           <label className="field"><span className="field-label-row"><span>Allowed score drop</span></span><input type="number" min="0" max="1" step="0.01" value={regressionTolerance} onChange={(event) => setRegressionTolerance(event.target.value)} /></label>
@@ -3619,6 +3647,48 @@ function Evaluation({ onNotify }: { onNotify: (message: string, tone?: Tone) => 
         <button type="button" className="icon-button danger-icon-button" aria-label={"Delete " + run.name + " evaluation report"} onClick={() => setDeletingRun(run)}><Trash2 size={15} /></button>
       </div>)}</div> : <EmptyState icon={BarChart3} title="No evaluation reports" description="Select a local JSONL file containing precomputed prediction and reference fields. AXIOM does not run model inference here." action={<CliReference command="axiom evaluation run ./data/eval.jsonl --prediction-field prediction --reference-field reference" />} />}
       {evaluationTotal > 20 && <div className="pagination-actions"><button type="button" className="button secondary-button" disabled={evaluationOffset === 0} onClick={() => void refreshEvaluationRuns(Math.max(0, evaluationOffset - 20))}>Previous</button><small>{evaluationOffset + 1}–{Math.min(evaluationOffset + evaluationRuns.length, evaluationTotal)} of {evaluationTotal}</small><button type="button" className="button secondary-button" disabled={evaluationOffset + evaluationRuns.length >= evaluationTotal} onClick={() => void refreshEvaluationRuns(evaluationOffset + 20)}>Next</button></div>}
+    </Surface>
+    <Surface title="Repeated experiment comparison" eyebrow="CORPUS-MATCHED STATISTICS">
+      <p className="quiet-note">Link offline evaluation reports to saved experiment snapshots, then compare repeated scores on the same fully fingerprinted reference corpus. A p-value is only shown when both groups have at least two complete replicates.</p>
+      <div className="two-column-grid">
+        <label className="field">
+          <span className="field-label-row"><span>Baseline experiment</span></span>
+          <select aria-label="Baseline experiment" value={comparisonBaselineExperimentId} onChange={(event) => setComparisonBaselineExperimentId(event.target.value)}>
+            <option value="">Choose baseline experiment</option>
+            {experiments.map((experiment) => <option key={experiment.id} value={experiment.id}>{experiment.name} · {experiment.id.slice(0, 8)}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span className="field-label-row"><span>Candidate experiment</span></span>
+          <select aria-label="Candidate experiment" value={comparisonCandidateExperimentId} onChange={(event) => setComparisonCandidateExperimentId(event.target.value)}>
+            <option value="">Choose candidate experiment</option>
+            {experiments.map((experiment) => <option key={experiment.id} value={experiment.id}>{experiment.name} · {experiment.id.slice(0, 8)}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span className="field-label-row"><span>Metric</span></span>
+          <select aria-label="Comparison metric" value={comparisonMetric} onChange={(event) => setComparisonMetric(event.target.value as typeof comparisonMetric)}>
+            <option value="token_f1_micro">Token F1 (micro)</option>
+            <option value="exact_match">Exact match</option>
+            <option value="normalized_exact_match">Normalized exact match</option>
+          </select>
+        </label>
+      </div>
+      <button type="button" className="button primary-button" onClick={() => void compareSavedExperiments()} disabled={comparisonBusy || !comparisonBaselineExperimentId || !comparisonCandidateExperimentId || comparisonBaselineExperimentId === comparisonCandidateExperimentId}>
+        {comparisonBusy ? "Comparing replicates…" : "Compare saved experiments"}
+      </button>
+      {experimentComparison && <div className="comparison-report" role="status">
+        <StatusPill tone={experimentComparison.difference.direction === "regressed" ? "warning" : "success"}>{experimentComparison.difference.direction.toUpperCase()}</StatusPill>
+        <h3>{experimentComparison.metric.replaceAll("_", " ")}</h3>
+        <div className="two-column-grid">
+          <div><b>{experimentComparison.baseline.experiment_name}</b><p>{experimentComparison.baseline.replicate_count} complete replicates · mean {experimentComparison.baseline.mean.toFixed(4)} · SD {experimentComparison.baseline.sample_standard_deviation === null ? "n/a" : experimentComparison.baseline.sample_standard_deviation.toFixed(4)}</p></div>
+          <div><b>{experimentComparison.candidate.experiment_name}</b><p>{experimentComparison.candidate.replicate_count} complete replicates · mean {experimentComparison.candidate.mean.toFixed(4)} · SD {experimentComparison.candidate.sample_standard_deviation === null ? "n/a" : experimentComparison.candidate.sample_standard_deviation.toFixed(4)}</p></div>
+        </div>
+        <p>Candidate − baseline: <b>{(experimentComparison.difference.candidate_minus_baseline_mean >= 0 ? "+" : "") + experimentComparison.difference.candidate_minus_baseline_mean.toFixed(5)}</b></p>
+        <p>{experimentComparison.statistical_test.p_value === null ? "Welch test unavailable: at least two complete replicates per experiment are required." : "Welch two-sided p = " + experimentComparison.statistical_test.p_value.toFixed(6) + " · t = " + (experimentComparison.statistical_test.t_statistic === null ? "degenerate" : experimentComparison.statistical_test.t_statistic.toFixed(4)) + " · df = " + (experimentComparison.statistical_test.degrees_of_freedom === null ? "n/a" : experimentComparison.statistical_test.degrees_of_freedom.toFixed(2))}</p>
+        <p className="quiet-note">Corpus SHA-256 {experimentComparison.corpus.comparison_corpus_sha256.slice(0, 16)}… · {experimentComparison.corpus.sample_count.toLocaleString()} samples</p>
+        <p className="quiet-note">{experimentComparison.scope_note}</p>
+      </div>}
     </Surface>
     <Surface title="Experiment history" eyebrow="PERSISTENT / LOCAL">
       {error && <InlineAlert tone="warning" role="alert">{error}</InlineAlert>}
