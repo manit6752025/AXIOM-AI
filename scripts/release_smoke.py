@@ -1568,7 +1568,7 @@ def inspect(root: Path) -> dict[str, Any]:
         "e2e/evaluation.spec.ts", "e2e/api-playground.spec.ts",
         "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts", "e2e/engine-fabric.spec.ts",
         "e2e/model-registry-filters.spec.ts", "e2e/inference-benchmark.spec.ts",
-        "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/hardware-snapshots.spec.ts", "e2e/ollama-service.spec.ts", "e2e/settings-retention.spec.ts", "e2e/datasets.spec.ts", "e2e/embeddings.spec.ts", "e2e/security-supply-chain.spec.ts",
+        "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/hardware-snapshots.spec.ts", "e2e/ollama-service.spec.ts", "e2e/settings-retention.spec.ts", "e2e/datasets.spec.ts", "e2e/embeddings.spec.ts", "e2e/reranking.spec.ts", "e2e/security-supply-chain.spec.ts",
     ):
         target = root / relative
         if not target.is_file():
