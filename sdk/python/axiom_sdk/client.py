@@ -36,7 +36,7 @@ class AxiomClient:
         headers: Mapping[str, str] | None = None,
         user_agent: str = "axiom-ai-sdk-python/1.0.0",
     ) -> None:
-        self.base_url = self._validate_base_url(base_url)
+        self._base_url = self._validate_base_url(base_url)
         if token is not None and (not isinstance(token, str) or not token.strip()):
             raise AxiomConfigurationError("Bearer token must be a non-empty string when supplied.")
         if workspace_id is not None and (
@@ -54,6 +54,11 @@ class AxiomClient:
         self.headers = self._validate_extra_headers(headers or {})
         self._closed = False
         self._opener = urllib.request.build_opener(_NoRedirectHandler())
+
+    @property
+    def base_url(self) -> str:
+        """Return the validated API origin; callers cannot replace it in-place."""
+        return self._base_url
 
     @staticmethod
     def _validate_base_url(value: str) -> str:
