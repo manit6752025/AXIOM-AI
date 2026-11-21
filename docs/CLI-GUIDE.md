@@ -360,3 +360,22 @@ compatible tokenizer. One-logit models use sigmoid scores; two-logit models
 use the positive-class softmax score. Ties preserve input order. Scores are
 ranking signals rather than calibrated relevance probabilities. See
 [Local Reranking](Local-Reranking.md).
+
+
+## Workspace knowledge bases
+
+~~~bash
+axiom knowledge base create "Engineering notes"
+axiom knowledge base list
+axiom knowledge ingest BASE_ID documents/guide.md --json
+axiom knowledge documents BASE_ID --json
+axiom knowledge remove-document BASE_ID DOCUMENT_ID --yes
+axiom knowledge base remove BASE_ID --yes
+~~~
+
+Knowledge bases are scoped to the active workspace. Ingestion supports UTF-8
+TXT, Markdown, RST, CSV, JSON, and JSONL files (up to 8 MiB each); source
+paths must be workspace-relative, symlinks and traversal are rejected, and
+the original source file is never changed. Private copies and SHA-256 metadata
+live under the workspace's .axiom/knowledge directory. See
+[Workspace Knowledge](Local-Knowledge.md).
