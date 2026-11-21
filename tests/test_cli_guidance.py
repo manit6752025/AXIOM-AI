@@ -98,6 +98,7 @@ def test_refresh_control_center_runs_lint_then_build_without_deleting_ui(tmp_pat
     import axiom.cli.main as main_cli
 
     (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "package-lock.json").write_text('{"lockfileVersion":3,"packages":{"":{}}}', encoding="utf-8")
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts/copy_webui.mjs").write_text("// copy", encoding="utf-8")
     (tmp_path / "axiom/webui").mkdir(parents=True)
