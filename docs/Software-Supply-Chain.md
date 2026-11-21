@@ -17,9 +17,14 @@ only when the referenced dependency is also installed.
 
 The export includes no package file contents, host installation paths,
 credentials, or network-derived data. It does not import or execute installed
-package code. The content fingerprint is deterministic for the same package
-metadata. License fields use `NOASSERTION`: package metadata is not sufficient
-to grant or verify redistribution rights.
+package code. Its document contains only fields defined by the SPDX 2.3 JSON
+format; AXIOM-specific scope and content-fingerprint details are carried in a
+standard SPDX annotation comment rather than non-standard top-level keys.
+The content fingerprint is deterministic for the same package metadata.
+License fields use `NOASSERTION`: package metadata is not sufficient to grant
+or verify redistribution rights. The generated document is validated in CI
+against the official SPDX 2.3.1 JSON schema, the maintenance schema compatible
+with SPDX 2.3.
 
 The export target is create-only. AXIOM refuses to overwrite an existing file,
 follow symbolic-link parent components, or write through an output symlink;
