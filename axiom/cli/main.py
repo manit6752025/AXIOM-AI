@@ -437,6 +437,36 @@ def _frontend_dependency_mismatches(source_root: Path) -> list[str]:
                 mismatches.append(
                     f"{name}: installed {installed_version or 'unknown'}, locked {locked_version}"
                 )
+                continue
+            if name == "lucide-react":
+                declaration = (
+                    installed.get("types")
+                    or installed.get("typings")
+                    or installed.get("exports", {}).get(".", {}).get("types")
+                )
+                package_root = installed_path.parent.resolve()
+                if (
+                    not isinstance(declaration, str)
+                    or not declaration
+                    or Path(declaration).is_absolute()
+                    or ".." in Path(declaration).parts
+                ):
+                    mismatches.append(
+                        "lucide-react: bundled TypeScript declaration metadata is missing"
+                    )
+                    continue
+                try:
+                    declaration_path = (package_root / declaration).resolve(strict=True)
+                    declaration_path.relative_to(package_root)
+                except (OSError, ValueError):
+                    mismatches.append(
+                        "lucide-react: bundled TypeScript declarations are missing or outside the package"
+                    )
+                    continue
+                if not declaration_path.is_file():
+                    mismatches.append(
+                        "lucide-react: bundled TypeScript declarations are missing; restore node_modules with npm ci"
+                    )
         return mismatches
     except (OSError, UnicodeError, ValueError, TypeError) as exc:
         return [f"could not validate package-lock.json ({exc})"]
