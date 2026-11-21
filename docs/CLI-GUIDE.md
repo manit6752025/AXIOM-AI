@@ -388,3 +388,16 @@ Search uses bounded BM25 lexical scoring by default. Supplying a trusted local
 embedding model path enables dense-vector fusion. Results carry source paths,
 SHA-256 hashes, chunk numbers, and character offsets; no hosted embedding API
 is used. See [Workspace Knowledge and Retrieval](Local-Knowledge.md).
+
+
+## Native local serving profiles
+
+~~~bash
+axiom engine profile create workstation --model-path ~/models/qwen2.5-7b --device auto --memory-mode layer_streaming --precision bf16 --context-length 8192 --max-new-tokens 512 --json
+axiom engine profile list --json
+axiom engine profile probe PROFILE_ID --json
+axiom engine profile run PROFILE_ID --prompt "Explain the local inference boundary." --json
+axiom engine profile delete PROFILE_ID --yes
+~~~
+
+Profiles persist trusted local model configuration, request limits and an optional LoRA adapter. Readiness checks do not load model weights or start a listener. The first profile run uses the existing AXIOM Native Engine; current admission is one active request and zero queued requests, with bounded prompt/output/context limits and cooperative timeout cancellation. See [Local Serving Profiles](Local-Serving-Profiles.md).
