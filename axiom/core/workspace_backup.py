@@ -357,8 +357,11 @@ def _validate_manifest(manifest: Any) -> tuple[list[dict[str, Any]], dict[str, A
     if (
         not isinstance(limits, dict)
         or set(limits) != {"maximum_files", "maximum_file_bytes", "maximum_total_bytes"}
+        or type(limits.get("maximum_files")) is not int
         or limits.get("maximum_files") != MAX_BACKUP_FILES
+        or type(limits.get("maximum_file_bytes")) is not int
         or limits.get("maximum_file_bytes") != MAX_BACKUP_FILE_BYTES
+        or type(limits.get("maximum_total_bytes")) is not int
         or limits.get("maximum_total_bytes") != MAX_BACKUP_TOTAL_BYTES
     ):
         raise WorkspaceBackupError("Backup manifest limits do not match the supported format version.")
