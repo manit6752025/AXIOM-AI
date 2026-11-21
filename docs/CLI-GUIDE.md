@@ -401,3 +401,16 @@ axiom engine profile delete PROFILE_ID --yes
 ~~~
 
 Profiles persist trusted local model configuration, request limits and an optional LoRA adapter. Readiness checks do not load model weights or start a listener. The first profile run uses the existing AXIOM Native Engine; current admission is one active request and zero queued requests, with bounded prompt/output/context limits and cooperative timeout cancellation. See [Local Serving Profiles](Local-Serving-Profiles.md).
+
+
+## Engine Fabric connector profiles
+
+Engine Fabric connector profiles are separate from native model-serving profiles. They store only a fixed local backend ID and exact model ID; credentials and custom endpoints are not persisted.
+
+```bash
+axiom engine fabric-profile list --json
+axiom engine fabric-profile save workstation-ollama --backend ollama --model qwen2.5:0.5b --json
+axiom engine fabric-profile connect PROFILE_ID --json
+```
+
+`axiom engine profile` remains the native AXIOM serving-profile interface (`create`, `list`, `show`, `probe`, `run`, and `delete`).

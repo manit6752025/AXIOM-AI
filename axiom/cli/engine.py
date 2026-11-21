@@ -843,8 +843,8 @@ def engine_batch(
 __all__ = ["engine_app"]
 
 
-engine_profile_app = typer.Typer(help="Manage secret-free workspace profiles for fixed local Engine Fabric adapters.", no_args_is_help=True)
-engine_app.add_typer(engine_profile_app, name="profile")
+engine_profile_app = typer.Typer(help="Manage secret-free Engine Fabric connector profiles for fixed local adapters.", no_args_is_help=True)
+engine_app.add_typer(engine_profile_app, name="fabric-profile")
 
 
 @engine_app.command("backends")
@@ -927,7 +927,7 @@ def engine_profile_save(
 
 @engine_profile_app.command("connect")
 def engine_profile_connect(
-    profile_id: str = typer.Argument(..., help="Exact profile ID from axiom engine profile list."),
+    profile_id: str = typer.Argument(..., help="Exact profile ID from axiom engine fabric-profile list."),
     json_output: bool = typer.Option(False, "--json", help="Print the verification result as JSON."),
 ) -> None:
     """Verify the local backend and exact model from a saved profile; no socket is retained."""

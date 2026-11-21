@@ -50,6 +50,10 @@ axiom evaluation list --json
 axiom evaluation run ./data/eval.jsonl --prediction-field prediction --reference-field reference --experiment-id <experiment-id> --json
 axiom evaluation compare-experiments <baseline-experiment-id> <candidate-experiment-id> --metric token_f1_micro --json
 axiom engine discover --json
+axiom engine profile create workstation --model-path ./models/qwen --device auto --context-length 8192 --max-new-tokens 512 --json
+axiom engine fabric-profile list --json
+axiom engine fabric-profile save workstation-ollama --backend ollama --model qwen2.5:0.5b --json
+axiom engine fabric-profile connect PROFILE_ID --json
 axiom update --check
 axiom update --auto
 axiom gui --refresh
