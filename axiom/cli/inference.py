@@ -44,6 +44,8 @@ def _load_json_schema_file(path: Path) -> dict:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     if hasattr(os, "O_BINARY"):
         flags |= os.O_BINARY
+    if path.is_symlink():
+        raise JsonSchemaError("JSON Schema path may not be a symlink.")
     descriptor = os.open(path, flags)
     try:
         info = os.fstat(descriptor)
@@ -301,6 +303,8 @@ def infer_run(
         if stop_sequences: sampling["stop_sequences"] = stop_sequences
         response_schema = _load_json_schema_file(schema_file) if schema_file is not None else None
         if response_schema is not None:
+            if num_predict > 512:
+                _fail("Structured output is limited to 512 generated tokens; reduce --num-predict.")
             sampling["response_format"] = response_schema
         result = run_local_inference(model, prompt, num_predict=num_predict, temperature=temperature, **sampling)
         if response_schema is not None:
