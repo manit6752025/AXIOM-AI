@@ -986,6 +986,65 @@ export type WorkspaceModelInspection = {
   status: string;
 };
 
+export type WorkspaceModelProvenance = {
+  schema_version: 1;
+  model_directory: string;
+  registry_metadata: {
+    status: "supplied" | "not_linked";
+    evidence_origin: "user_supplied_workspace_registry" | null;
+    source?: string | null;
+    source_url?: string | null;
+    source_revision?: string | null;
+    source_attribution?: string | null;
+    license?: string | null;
+    license_review?: "unreviewed" | "approved" | "restricted" | "unknown" | null;
+    license_review_notes?: string | null;
+  };
+  source_evidence: {
+    status: "registry_claim_not_verified" | "not_independently_verified";
+    declared_source: string | null;
+    source_url: string | null;
+    source_revision: string | null;
+    source_attribution: string | null;
+    network_used: false;
+    note: string;
+  };
+  format_evidence: {
+    detected_formats: string[];
+    weight_file_count: number;
+    weight_size_bytes: number;
+    format_file_counts: Record<string, number>;
+    pickle_capable_weight_files_present: boolean;
+    files: Array<{ path: string; format: string; size_bytes: number }>;
+  };
+  hash_evidence: {
+    algorithm: "SHA-256";
+    status: "complete" | "no_weight_files" | "skipped_size_or_file_count_limit";
+    checkpoint_sha256: string | null;
+    hashed_file_count: number;
+    files: Array<{ path: string; format: string; size_bytes: number; sha256: string }>;
+    maximum_total_weight_bytes: number;
+    maximum_weight_files: number;
+  };
+  license_evidence: {
+    status: "local_files_found" | "no_local_license_file_found";
+    human_review_required: true;
+    declared_license: string | null;
+    registry_review_state: "unreviewed" | "approved" | "restricted" | "unknown" | null;
+    registry_review_notes: string | null;
+    files: Array<{ path: string; size_bytes: number; sha256: string | null; hash_status: "complete" | "file_size_limit" }>;
+    note: string;
+  };
+  security_evidence: {
+    symlink_files_skipped: number;
+    symlink_directories_skipped: number;
+    remote_code_executed: false;
+    network_used: false;
+    model_weights_loaded: false;
+  };
+  scope_note: string;
+};
+
 export type ModelMemoryRange = { low: number; high: number };
 export type WorkspaceMemoryFit = {
   status: "likely" | "tight" | "unlikely" | "unknown";
@@ -2336,6 +2395,12 @@ export const axiomApi = {
     method: "POST",
     body: JSON.stringify({ path }),
   }),
+
+  inspectModelProvenance: (path: string, modelId?: string) =>
+    requestJson<{ provenance: WorkspaceModelProvenance }>("/api/workspace/models/provenance", {
+      method: "POST",
+      body: JSON.stringify({ path, ...(modelId ? { model_id: modelId } : {}) }),
+    }),
 
   modelCompatibility: (id: string) =>
     requestJson<{ report: WorkspaceModelCompatibility }>(`/api/workspace/models/${encodeURIComponent(id)}/compatibility`),
