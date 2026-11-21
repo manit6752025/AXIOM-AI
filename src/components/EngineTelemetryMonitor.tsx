@@ -3,7 +3,6 @@ import { Activity, Download, Pause, Play, Trash2 } from "lucide-react";
 import { axiomApi, type AxiomEngineResourceTelemetryMetrics, type AxiomEngineResourceTelemetryRecord, type AxiomEngineSystemTelemetry } from "../api/client";
 
 const MAX_BROWSER_SAMPLES = 120;
-const MAX_PERSISTED_SAMPLES = 500;
 const INTERVAL_OPTIONS = [1, 2, 5, 10] as const;
 
 type ResourceMonitorSample = AxiomEngineResourceTelemetryMetrics & {
