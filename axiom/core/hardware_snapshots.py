@@ -185,8 +185,6 @@ class HardwareSnapshotStore:
             self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self.root.is_symlink() or self.path.is_symlink() or self.lock_path.is_symlink():
             raise HardwareSnapshotError("The hardware snapshot store path changed unsafely.")
-        if self.root.exists() and os.name != "nt":
-
     def _read(self) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         self._check_paths()
         if not self.path.exists():
