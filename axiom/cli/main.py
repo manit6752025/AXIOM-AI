@@ -2553,6 +2553,24 @@ def model_provenance(
                 code="model_provenance_model_not_found",
                 json_output=json_output,
             )
+        try:
+            from axiom.api.model_paths import validate_model_path
+            from axiom.core.workspace_context import active_workspace_root
+
+            selected_path = validate_model_path(path)
+            registered_path = validate_model_path(str(active_workspace_root() / registered.source))
+        except (OSError, ValueError, RuntimeError) as exc:
+            _cli_command_error(
+                f"Registered model source could not be resolved safely: {exc}",
+                code="model_provenance_path_mismatch",
+                json_output=json_output,
+            )
+        if selected_path != registered_path:
+            _cli_command_error(
+                "Registered model metadata does not refer to the selected local model directory.",
+                code="model_provenance_path_mismatch",
+                json_output=json_output,
+            )
         registry_metadata = registered.to_dict()
     try:
         report = inspect_model_provenance(path, registry_metadata=registry_metadata)
