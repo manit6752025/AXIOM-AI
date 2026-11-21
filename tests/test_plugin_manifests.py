@@ -145,3 +145,100 @@ def test_manifest_store_enforces_workspace_registry_capacity(tmp_path, monkeypat
     other["id"] = "org.example.second"
     with pytest.raises(PluginManifestError, match="at most"):
         store.register(other)
+
+def test_plugin_manifest_api_keeps_registration_default_deny_and_invalidates_grants(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from axiom.api.server import create_app
+
+    monkeypatch.chdir(tmp_path)
+    with TestClient(create_app()) as client:
+        initial = client.get("/api/security/plugins")
+        assert initial.status_code == 200
+        assert initial.json()["manifests"] == []
+        assert "does not load plugin code" in initial.json()["execution_note"]
+
+        registered = client.post("/api/security/plugins/manifests", json={"manifest": manifest()})
+        assert registered.status_code == 201, registered.text
+        digest = registered.json()["sha256"]
+        plugin_id = registered.json()["manifest"]["id"]
+        inventory = client.get("/api/security/plugins").json()
+        assert inventory["manifests"][0]["permission_status"] == "default_deny"
+
+        denied = client.put(
+            f"/api/security/plugins/{plugin_id}/permissions",
+            json={
+                "manifest_sha256": digest,
+                "tools": [{"name": "search", "scopes": ["write"]}],
+            },
+        )
+        assert denied.status_code == 422
+
+        grant = client.put(
+            f"/api/security/plugins/{plugin_id}/permissions",
+            json={
+                "manifest_sha256": digest,
+                "tools": [{"name": "search", "scopes": ["read"]}],
+            },
+        )
+        assert grant.status_code == 200, grant.text
+        assert client.get("/api/security/plugins").json()["manifests"][0]["permission_status"] == "granted"
+
+        wrong_type = client.put(
+            f"/api/security/plugins/{plugin_id}/permissions",
+            json={"manifest_sha256": digest, "tools": [{"name": "search", "scopes": ["read"], "extra": True}]},
+        )
+        assert wrong_type.status_code == 422
+
+        changed_manifest = manifest("1.1.0")
+        changed = client.post("/api/security/plugins/manifests", json={"manifest": changed_manifest})
+        assert changed.status_code == 201, changed.text
+        assert changed.json()["sha256"] != digest
+        assert client.get("/api/security/plugins").json()["manifests"][0]["permission_status"] == "stale_manifest"
+
+        stale_grant = client.put(
+            f"/api/security/plugins/{plugin_id}/permissions",
+            json={
+                "manifest_sha256": digest,
+                "tools": [{"name": "search", "scopes": ["read"]}],
+            },
+        )
+        assert stale_grant.status_code == 422
+
+        current_grant = client.put(
+            f"/api/security/plugins/{plugin_id}/permissions",
+            json={
+                "manifest_sha256": changed.json()["sha256"],
+                "tools": [{"name": "search", "scopes": ["read"]}],
+            },
+        )
+        assert current_grant.status_code == 200
+        revoked = client.delete(f"/api/security/plugins/{plugin_id}/permissions")
+        assert revoked.status_code == 200
+        assert revoked.json()["revoked"] is True
+        assert client.get("/api/security/plugins").json()["manifests"][0]["permission_status"] == "default_deny"
+
+        events = client.get("/api/security/events/export").json()["events"]
+        plugin_events = [event["event_type"] for event in events if event["event_type"].startswith("plugin.")]
+        assert plugin_events == [
+            "plugin.manifest.registered",
+            "plugin.permissions.granted",
+            "plugin.manifest.registered",
+            "plugin.permissions.granted",
+            "plugin.permissions.revoked",
+        ]
+
+
+def test_plugin_manifest_api_rejects_non_object_and_extra_envelope_fields(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from axiom.api.server import create_app
+
+    monkeypatch.chdir(tmp_path)
+    with TestClient(create_app()) as client:
+        assert client.post("/api/security/plugins/manifests", json={"manifest": []}).status_code == 422
+        assert client.post(
+            "/api/security/plugins/manifests",
+            json={"manifest": manifest(), "execute": True},
+        ).status_code == 422
+        assert client.delete("/api/security/plugins/INVALID/permissions").status_code == 422
