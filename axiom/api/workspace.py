@@ -516,6 +516,12 @@ def workspace_model_provenance(request: WorkspaceModelProvenanceInput) -> dict[s
             registered = ModelRegistry().get(request.model_id)
             if registered is None:
                 raise HTTPException(status_code=404, detail="Registered model metadata was not found.")
+            registered_path = validate_model_path(str(active_workspace_root() / registered.source))
+            if registered_path != model_path:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Registered model metadata does not refer to the selected local model directory.",
+                )
             registry_metadata = registered.to_dict()
         report = inspect_model_provenance(model_path, registry_metadata=registry_metadata)
     except HTTPException:
