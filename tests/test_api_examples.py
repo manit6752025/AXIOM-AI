@@ -112,39 +112,38 @@ def test_cli_emits_json_and_markdown_from_the_contract(monkeypatch) -> None:
     assert markdown_result.exit_code == 0, markdown_result.output
     assert "GET /api/health" in markdown_result.stdout
 
- 
- 
- def test_response_examples_omit_sensitive_schema_properties() -> None:
-     report = build_api_examples({
-         "openapi": "3.1.0",
-         "info": {"version": "test"},
-         "components": {"schemas": {}},
-         "paths": {
-             "/api/test": {
-                 "get": {
-                     "operationId": "testResponseRedaction",
-                     "responses": {
-                         "200": {
-                             "description": "Synthetic response",
-                             "content": {
-                                 "application/json": {
-                                     "schema": {
-                                         "type": "object",
-                                         "required": ["id", "access_token"],
-                                         "properties": {
-                                             "id": {"type": "string"},
-                                             "access_token": {"type": "string"},
-                                         },
-                                     },
-                                 },
-                             },
-                         },
-                     },
-                 },
-             },
-         },
-     })
-     operation = report["operations"][0]
-     assert operation["response"]["example"] == {"id": "example"}
-     assert "$.response.access_token" in operation["response"]["redacted_fields"]
- 
+
+
+def test_response_examples_omit_sensitive_schema_properties() -> None:
+    report = build_api_examples({
+        "openapi": "3.1.0",
+        "info": {"version": "test"},
+        "components": {"schemas": {}},
+        "paths": {
+            "/api/test": {
+                "get": {
+                    "operationId": "testResponseRedaction",
+                    "responses": {
+                        "200": {
+                            "description": "Synthetic response",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "required": ["id", "access_token"],
+                                        "properties": {
+                                            "id": {"type": "string"},
+                                            "access_token": {"type": "string"},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    })
+    operation = report["operations"][0]
+    assert operation["response"]["example"] == {"id": "example"}
+    assert "$.response.access_token" in operation["response"]["redacted_fields"]
