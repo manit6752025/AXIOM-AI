@@ -44,7 +44,9 @@ def test_spdx_sbom_contains_package_urls_versions_and_installed_dependency_relat
 
     assert report["spdxVersion"] == "SPDX-2.3"
     assert report["creationInfo"]["created"] == "2026-11-21T00:00:00Z"
-    assert report["axiom"]["package_count"] == 3
+    assert len(report["packages"]) == 3
+    annotation = report["annotations"][0]["comment"]
+    assert "content_sha256=" in annotation
     packages = {item["name"]: item for item in report["packages"]}
     assert packages["AXIOM_Core"]["externalRefs"][0]["referenceLocator"] == "pkg:pypi/axiom-core@1.2.3"
     assert packages["fastapi"]["versionInfo"] == "0.115.0"
@@ -54,8 +56,26 @@ def test_spdx_sbom_contains_package_urls_versions_and_installed_dependency_relat
     assert (packages["AXIOM_Core"]["SPDXID"], packages["fastapi"]["SPDXID"], "DEPENDS_ON") in links
     assert (packages["fastapi"]["SPDXID"], packages["starlette"]["SPDXID"], "DEPENDS_ON") in links
     assert not any("missing-extra" in str(item) for item in report["relationships"])
-    assert report["axiom"]["network_access_performed"] is False
-    assert report["axiom"]["host_paths_collected"] is False
+    assert "network_access_performed=false" in annotation
+    assert "host_paths_collected=false" in annotation
+
+
+def test_spdx_sbom_validates_against_the_official_23_json_schema():
+    import jsonschema
+
+    root = Path(__file__).resolve().parents[1]
+    schema = json.loads((root / "docs/schemas/spdx-2.3.1.schema.json").read_text(encoding="utf-8"))
+    report = generate_spdx_sbom(
+        distributions=[
+            distribution("axiom-core", "1.2.3", ["fastapi>=0.100"]),
+            distribution("fastapi", "0.115.0"),
+        ],
+        generated_at=datetime(2026, 11, 22, 0, 0, tzinfo=UTC),
+    )
+    validator = jsonschema.Draft201909Validator(schema)
+    errors = sorted(validator.iter_errors(report), key=lambda item: list(item.absolute_path))
+    assert not errors, [error.message for error in errors]
+    assert "axiom" not in report
 
 
 def test_spdx_sbom_is_stable_for_the_same_packages_and_timestamp():
@@ -157,7 +177,6 @@ def test_security_api_exports_spdx_and_requires_strict_network_authorization(mon
     sbom = {
         "spdxVersion": "SPDX-2.3",
         "SPDXID": "SPDXRef-DOCUMENT",
-        "axiom": {"package_count": 1},
     }
     monkeypatch.setattr("axiom.api.security.generate_spdx_sbom", lambda: sbom)
     from axiom.core.supply_chain import audit_dependency_vulnerabilities as run_audit
@@ -348,7 +367,6 @@ def test_vulnerability_scan_bounds_captured_streams(monkeypatch: pytest.MonkeyPa
 def test_security_cli_exports_spdx_sbom_to_a_create_only_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     report = {
         "spdxVersion": "SPDX-2.3",
-        "axiom": {"package_count": 2},
     }
     monkeypatch.setattr("axiom.cli.extended.generate_spdx_sbom", lambda: report)
     output = tmp_path / "sbom.spdx.json"
