@@ -1330,3 +1330,60 @@ def test_local_embeddings_unload_api_releases_only_cached_runtime(monkeypatch):
     response = _client().post("/api/engine/embeddings/unload")
     assert response.status_code == 200
     assert response.json() == expected
+
+
+
+def test_local_reranking_api_returns_stable_ranked_metadata_without_source_text(tmp_path, monkeypatch):
+    model = tmp_path / "reranker"
+    model.mkdir()
+    (model / "config.json").write_text('{"model_type":"bert"}', encoding="utf-8")
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(tmp_path))
+    captured = {}
+    expected = {
+        "schema_version": 1, "engine": "axiom-local-cross-encoder",
+        "model": {"name": "reranker", "score_mode": "sigmoid"}, "device": "cpu",
+        "request": {"document_count": 2, "batch_size": 8, "max_length": 256},
+        "results": [
+            {"rank": 1, "document_index": 2, "score": 0.9, "document_characters": 6},
+            {"rank": 2, "document_index": 1, "score": 0.2, "document_characters": 5},
+        ],
+        "privacy": {"query_returned": False, "documents_returned": False,
+                    "text_persisted": False, "model_files_uploaded": False, "network_used": False},
+    }
+
+    def fake_rerank(model_path, query, documents, **kwargs):
+        captured.update(model_path=model_path, query=query, documents=documents, **kwargs)
+        return expected
+
+    monkeypatch.setattr(engine_api, "rerank_local_documents", fake_rerank)
+    response = _client().post("/api/engine/rerank", json={
+        "model_path": str(model), "query": "private query",
+        "documents": ["secret one", "secret two"], "device": "cpu",
+    })
+    assert response.status_code == 200, response.text
+    assert response.json() == expected
+    assert "private query" not in response.text
+    assert "secret one" not in response.text
+    assert captured == {
+        "model_path": str(model.resolve()), "query": "private query",
+        "documents": ["secret one", "secret two"], "batch_size": 8, "max_length": 256, "device": "cpu",
+    }
+
+
+def test_local_reranking_api_rejects_oversized_documents(tmp_path, monkeypatch):
+    model = tmp_path / "reranker"
+    model.mkdir()
+    (model / "config.json").write_text('{"model_type":"bert"}', encoding="utf-8")
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(tmp_path))
+    response = _client().post("/api/engine/rerank", json={
+        "model_path": str(model), "query": "q", "documents": ["x" * 8193],
+    })
+    assert response.status_code == 422
+
+
+def test_local_reranking_unload_api_releases_only_cached_runtime(monkeypatch):
+    expected = {"schema_version": 1, "unloaded": True, "scope_note": "Reranker released."}
+    monkeypatch.setattr(engine_api, "unload_local_reranker", lambda: expected)
+    response = _client().post("/api/engine/rerank/unload")
+    assert response.status_code == 200
+    assert response.json() == expected
