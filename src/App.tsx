@@ -71,6 +71,7 @@ import {
   type WorkflowTemplate,
   type WorkspaceModelCandidate,
   type WorkspaceModelInspection,
+  type WorkspaceModelProvenance,
   type WorkspaceRuntimeMatrix,
   type LocalEmbeddingsReport,
   type LocalRerankingReport,
@@ -2312,6 +2313,9 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
   const [discovery, setDiscovery] = useState<{ candidates: WorkspaceModelCandidate[]; truncated: boolean } | null>(null);
   const [inspection, setInspection] = useState<WorkspaceModelInspection | null>(null);
+  const [provenance, setProvenance] = useState<WorkspaceModelProvenance | null>(null);
+  const [provenanceBusyPath, setProvenanceBusyPath] = useState<string | null>(null);
+  const [provenanceError, setProvenanceError] = useState("");
   const [compatibilityReport, setCompatibilityReport] = useState<WorkspaceModelCompatibility | null>(null);
   const [compatibilityBusyId, setCompatibilityBusyId] = useState<string | null>(null);
   const [compatibilityError, setCompatibilityError] = useState("");
@@ -2433,6 +2437,8 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
   const discoverLocalModels = async () => {
     setDiscoveryBusy(true);
     setInspection(null);
+    setProvenance(null);
+    setProvenanceError("");
     try {
       const result = await axiomApi.discoverModels();
       setDiscovery(result);
@@ -2452,6 +2458,23 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
     } catch (cause) {
       onNotify(cause instanceof Error ? cause.message : "Model inspection failed.", "warning");
       return null;
+    }
+  };
+
+  const inspectCandidateProvenance = async (candidate: WorkspaceModelCandidate) => {
+    setProvenanceBusyPath(candidate.path);
+    setProvenanceError("");
+    setProvenance(null);
+    try {
+      const registered = models.find((model) =>
+        model.source === candidate.path || model.source === `models/${candidate.path}`,
+      );
+      const result = await axiomApi.inspectModelProvenance(candidate.path, registered?.id);
+      setProvenance(result.provenance);
+    } catch (cause) {
+      setProvenanceError(cause instanceof Error ? cause.message : "Model provenance inspection failed.");
+    } finally {
+      setProvenanceBusyPath(null);
     }
   };
 
@@ -2689,12 +2712,28 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
       {discovery.truncated && <Callout tone="warning" title="Discovery was bounded">Some folders may not be listed. Narrow the models/ tree and retry.</Callout>}
       {discovery.candidates.length ? <div className="module-list">{discovery.candidates.map((candidate) => <div className="module-row" key={candidate.path}>
         <span className="module-icon"><HardDrive size={17} /></span><span className="module-copy"><b>{candidate.path === "." ? "models/" : `models/${candidate.path}`}</b><small>{candidate.format} · {candidate.weight_file_count} weight files · {formatBytes(candidate.weight_size_bytes)}{candidate.has_config ? " · config.json" : " · no config"}</small></span>
-        <button type="button" className="button secondary-button" onClick={() => void inspectCandidate(candidate)}>Inspect</button><button type="button" className="button secondary-button" onClick={() => void useCandidateMetadata(candidate)}>Use metadata</button>
+        <button type="button" className="button secondary-button" onClick={() => void inspectCandidate(candidate)}>Inspect</button><button type="button" className="button secondary-button" onClick={() => void inspectCandidateProvenance(candidate)} disabled={provenanceBusyPath !== null}>{provenanceBusyPath === candidate.path ? "Hashing weights…" : "Inspect provenance"}</button><button type="button" className="button secondary-button" onClick={() => void useCandidateMetadata(candidate)}>Use metadata</button>
       </div>)}</div> : <EmptyState icon={Search} title="No candidate folders found" description="Create a local model folder under models/ with config.json or supported weight files." />}
     </Surface>}
     {inspection && <Surface title="Model inspection summary" eyebrow="LOCAL FILE METADATA" action={<button type="button" className="icon-text-button" onClick={() => setInspection(null)}>Dismiss</button>}>
       <p className="quiet-note">{inspection.path} · {inspection.status}</p>
       <div className="info-grid"><InfoCard icon={BrainCircuit} label="Architecture" value={inspection.architecture || inspection.model_type || "Unknown"} detail={inspection.capabilities.join(" · ")} tone="neutral" /><InfoCard icon={HardDrive} label="Format / weights" value={inspection.model_format} detail={`${formatBytes(inspection.weight_size_bytes)} · ${inspection.has_tokenizer ? "Tokenizer found" : "No tokenizer detected"}`} tone={inspection.weight_size_bytes ? "success" : "warning"} /><InfoCard icon={Cpu} label="Estimated VRAM" value={inspection.estimated_vram_gb === null ? "Unknown" : `${inspection.estimated_vram_gb} GB`} detail={inspection.parameter_count ? `${inspection.parameter_count.toLocaleString()} parameters · estimate only` : "No parameter count available"} tone="info" /></div>
+    </Surface>}
+    {provenanceError && <InlineAlert tone="warning" role="alert">{provenanceError}</InlineAlert>}
+    {provenance && <Surface title="Model provenance and security evidence" eyebrow="LOCAL / READ ONLY" action={<button type="button" className="icon-text-button" onClick={() => setProvenance(null)}>Dismiss</button>}>
+      <p className="quiet-note">{provenance.model_directory} · hash status {provenance.hash_evidence.status.replaceAll("_", " ")}</p>
+      <div className="info-grid">
+        <InfoCard icon={Fingerprint} label="Checkpoint SHA-256" value={provenance.hash_evidence.checkpoint_sha256 ? provenance.hash_evidence.checkpoint_sha256.slice(0, 16) + "…" : "Unavailable"} detail={provenance.hash_evidence.checkpoint_sha256 ? `${provenance.hash_evidence.hashed_file_count} weight files hashed` : `Bound: ${formatBytes(provenance.hash_evidence.maximum_total_weight_bytes)} total / ${provenance.hash_evidence.maximum_weight_files} files`} tone={provenance.hash_evidence.status === "complete" ? "success" : "warning"} />
+        <InfoCard icon={FileCode2} label="Detected formats" value={provenance.format_evidence.detected_formats.join(", ") || "Unknown"} detail={`${provenance.format_evidence.weight_file_count} weight files · ${formatBytes(provenance.format_evidence.weight_size_bytes)}`} tone="neutral" />
+        <InfoCard icon={FileText} label="License evidence" value={provenance.license_evidence.status.replaceAll("_", " ")} detail={provenance.license_evidence.declared_license ? `Registry claim: ${provenance.license_evidence.declared_license}` : "No declared license"} tone={provenance.license_evidence.files.length ? "success" : "warning"} />
+        <InfoCard icon={ShieldCheck} label="Pickle-capable weights" value={provenance.format_evidence.pickle_capable_weight_files_present ? "Present" : "Not detected"} detail="Binary formats are flagged; no weight files were loaded." tone={provenance.format_evidence.pickle_capable_weight_files_present ? "warning" : "neutral"} />
+      </div>
+      <p className="quiet-note">{provenance.source_evidence.status.replaceAll("_", " ")} · {provenance.source_evidence.note}</p>
+      <p className="quiet-note">{provenance.license_evidence.note}</p>
+      {provenance.hash_evidence.files.length > 0 && <div className="module-list">{provenance.hash_evidence.files.slice(0, 8).map((file) => <div className="module-row" key={file.path}><span className="module-icon"><Fingerprint size={16} /></span><span className="module-copy"><b>{file.path}</b><small>{file.format} · {formatBytes(file.size_bytes)} · SHA-256 {file.sha256}</small></span></div>)}</div>}
+      {provenance.license_evidence.files.length > 0 && <p className="quiet-note">Local license/notice files: {provenance.license_evidence.files.map((file) => file.path).join(", ")}</p>}
+      <p className="quiet-note">Symlinks skipped: {provenance.security_evidence.symlink_files_skipped} files / {provenance.security_evidence.symlink_directories_skipped} directories · network used: no · code executed: no · model weights loaded: no.</p>
+      <Callout tone="info" title="Evidence is not authenticity or legal approval">{provenance.scope_note} {provenance.registry_metadata.status === "supplied" ? "Registry source and license fields are user-supplied claims, not independently authenticated." : "Attach registry metadata to the model record to include its declared source and license claims."}</Callout>
     </Surface>}
     {compatibilityError && <InlineAlert tone="warning" role="alert">{compatibilityError}</InlineAlert>}
     {compatibilityReport && <Surface title={`Hardware fit · ${compatibilityReport.model.name}`} eyebrow="MEMORY ESTIMATE · NOT A BENCHMARK" action={<button type="button" className="icon-text-button" onClick={() => setCompatibilityReport(null)}>Dismiss</button>}>
