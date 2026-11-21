@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 MAX_DISTRIBUTIONS = 4096
 MAX_RELATIONSHIPS = 20_000
+MAX_AUDIT_FINDINGS = 20_000
 MAX_AUDIT_OUTPUT_BYTES = 8 * 1024 * 1024
 MAX_AUDIT_STDERR_BYTES = 1 * 1024 * 1024
 MAX_SCAN_SECONDS = 90
@@ -50,13 +51,20 @@ def _distribution_values(distribution: Any) -> tuple[str, str, list[str]]:
         metadata = distribution.metadata
         name = str(metadata.get("Name", "")).strip()
         version = str(distribution.version).strip()
-        requirements = list(distribution.requires or ())
+        raw_requirements = distribution.requires or ()
+        requirements: list[str] = []
+        for item in raw_requirements:
+            if len(requirements) >= 4096:
+                raise SupplyChainError(f"Dependency metadata for {name} exceeds its supported bounds.")
+            if not isinstance(item, str) or len(item) > 2048:
+                raise SupplyChainError(f"Dependency metadata for {name} exceeds its supported bounds.")
+            requirements.append(item)
+    except SupplyChainError:
+        raise
     except Exception as exc:
         raise SupplyChainError("Installed distribution metadata could not be read safely.") from exc
     if not _NAME_PATTERN.fullmatch(name) or not _VERSION_PATTERN.fullmatch(version):
         raise SupplyChainError("An installed distribution has an invalid or unsupported name/version.")
-    if len(requirements) > 4096 or any(not isinstance(item, str) or len(item) > 2048 for item in requirements):
-        raise SupplyChainError(f"Dependency metadata for {name} exceeds its supported bounds.")
     return name, version, requirements
 
 
@@ -67,11 +75,16 @@ def generate_spdx_sbom(
 ) -> dict[str, Any]:
     """Build an SPDX 2.3 JSON SBOM from installed package metadata, without running packages."""
     try:
-        found = list(distributions if distributions is not None else importlib.metadata.distributions())
+        source = distributions if distributions is not None else importlib.metadata.distributions()
+        found: list[Any] = []
+        for distribution in source:
+            if len(found) >= MAX_DISTRIBUTIONS:
+                raise SupplyChainError(f"Installed package inventory exceeds {MAX_DISTRIBUTIONS} distributions.")
+            found.append(distribution)
+    except SupplyChainError:
+        raise
     except Exception as exc:
         raise SupplyChainError("Installed package inventory could not be enumerated safely.") from exc
-    if len(found) > MAX_DISTRIBUTIONS:
-        raise SupplyChainError(f"Installed package inventory exceeds {MAX_DISTRIBUTIONS} distributions.")
 
     packages_by_name: dict[str, dict[str, Any]] = {}
     requirements_by_name: dict[str, list[str]] = {}
@@ -115,24 +128,31 @@ def generate_spdx_sbom(
         })
     for canonical in sorted(requirements_by_name):
         package = packages_by_name[canonical]
-        for requirement in requirements_by_name[canonical]:
+        dependency_ids: set[str] = set()
+        for requirement in sorted(requirements_by_name[canonical], key=str.casefold):
             match = _DEPENDENCY_NAME_PATTERN.match(requirement)
             if not match:
                 continue
             dependency = packages_by_name.get(_canonical_name(match.group(1)))
-            if dependency is None:
-                continue
+            if dependency is not None:
+                dependency_ids.add(dependency["SPDXID"])
+        for dependency_id in sorted(dependency_ids):
             relationships.append({
                 "spdxElementId": package["SPDXID"],
                 "relationshipType": "DEPENDS_ON",
-                "relatedSpdxElement": dependency["SPDXID"],
+                "relatedSpdxElement": dependency_id,
             })
             if len(relationships) > MAX_RELATIONSHIPS:
                 raise SupplyChainError(f"Dependency relationship inventory exceeds {MAX_RELATIONSHIPS} entries.")
 
     created = _utc_timestamp(generated_at)
     content_fingerprint = hashlib.sha256(
-        json.dumps(packages, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        json.dumps(
+            {"packages": packages, "relationships": relationships},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
     ).hexdigest()
     namespace = f"https://spdx.org/spdxdocs/axiom-{content_fingerprint}-{created.replace(':', '-')}"
     return {
@@ -254,6 +274,10 @@ def _parse_pip_audit_output(payload: Any, *, generated_at: str, scanner_version:
                 "aliases": safe_aliases,
                 "fix_versions": safe_fixes,
             })
+            if len(findings) > MAX_AUDIT_FINDINGS:
+                raise SupplyChainError(
+                    f"Dependency audit finding inventory exceeds {MAX_AUDIT_FINDINGS} entries."
+                )
 
     findings.sort(key=lambda item: (item["package"].casefold(), item["id"]))
     vulnerable_packages = {(item["package"], item["installed_version"]) for item in findings}
