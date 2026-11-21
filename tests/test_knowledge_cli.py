@@ -50,3 +50,34 @@ def test_knowledge_cli_rejects_duplicate_names_and_unsafe_ingest(tmp_path, monke
     base = json.loads(first.stdout)["knowledge_base"]
     unsafe = runner.invoke(app, ["--no-banner", "knowledge", "ingest", base["id"], "../notes.txt"])
     assert unsafe.exit_code != 0
+
+
+
+def test_knowledge_cli_search_returns_local_citations_and_honours_filters(tmp_path, monkeypatch):
+    import json
+
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "runtime.md").write_text(
+        "AXIOM local inference runtime stays on this workstation.", encoding="utf-8",
+    )
+    (tmp_path / "notes.txt").write_text("Cooking notes are unrelated to local model serving.", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    created = runner.invoke(app, ["--no-banner", "knowledge", "base", "create", "Search", "--json"])
+    assert created.exit_code == 0, created.output
+    base = json.loads(created.stdout)["knowledge_base"]
+    for path in ("docs/runtime.md", "notes.txt"):
+        ingested = runner.invoke(app, ["--no-banner", "knowledge", "ingest", base["id"], path, "--json"])
+        assert ingested.exit_code == 0, ingested.output
+
+    searched = runner.invoke(app, [
+        "--no-banner", "knowledge", "search", base["id"], "--query", "AXIOM local inference",
+        "--format", "md", "--source-prefix", "docs", "--json",
+    ])
+    assert searched.exit_code == 0, searched.output
+    payload = json.loads(searched.stdout)
+    assert payload["engine"] == "axiom-lexical-knowledge-search"
+    assert len(payload["results"]) == 1
+    assert payload["results"][0]["citation"]["source_path"] == "docs/runtime.md"
+    assert payload["results"][0]["citation"]["content_sha256"]
+    assert payload["privacy"]["full_source_documents_returned"] is False
