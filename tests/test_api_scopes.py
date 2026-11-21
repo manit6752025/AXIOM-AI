@@ -22,6 +22,7 @@ def test_scope_classifier_defaults_mutations_to_write() -> None:
     assert _required_api_scope("POST", "/api/workflows") == "write"
     assert _required_api_scope("POST", "/api/fine-tuning/jobs") == "write"
     assert _required_api_scope("POST", "/api/engine/generate") == "write"
+    assert _required_api_scope("POST", "/api/inference/generate/structured") == "write"
     assert _required_api_scope("POST", "/v1/chat/completions") == "write"
     assert _required_api_scope("PUT", "/api/workflows/workflow_123") == "write"
     assert _required_api_scope("DELETE", "/api/workspace/models/model_123") == "write"
