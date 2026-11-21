@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -194,8 +196,8 @@ class PluginManifestStore:
         self._assert_safe_paths()
         try:
             with open_regular_file(self.registry_file) as stream:
-                info = __import__("os").fstat(stream.fileno())
-                if not __import__("stat").S_ISREG(info.st_mode) or info.st_size > MAX_PLUGIN_STORE_BYTES:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_PLUGIN_STORE_BYTES:
                     raise PluginManifestError("Plugin manifest registry is not a bounded regular file.")
                 raw_bytes = stream.read(MAX_PLUGIN_STORE_BYTES + 1)
             if len(raw_bytes) > MAX_PLUGIN_STORE_BYTES:
