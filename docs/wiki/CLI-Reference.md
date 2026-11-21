@@ -142,3 +142,10 @@ The Dashboard provides the same opt-in, capture, retention and clear operations.
 - `axiom api` prints a Markdown reference derived from the installed OpenAPI schema.
 - `axiom api --format json` prints machine-readable request/response schemas and synthetic examples.
 - `axiom api --output ./api-examples.md` creates a new file and refuses to overwrite an existing file. Generation never submits requests.
+
+
+## Engine resource telemetry
+
+- `axiom engine telemetry --json` returns one privacy-bounded point-in-time sample.
+- `axiom engine telemetry --watch --interval-seconds 2 --samples 30` explicitly opts into a bounded series of samples.
+- Add `--output ./resource-samples.jsonl` to write a new JSONL file; an existing file is never overwritten. `--output` is rejected unless `--watch` is enabled.

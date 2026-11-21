@@ -223,3 +223,12 @@ Hardware history is disabled by default and stores only explicit point-in-time c
 CLI equivalents are `axiom system snapshots enable|disable|capture|list|clear`; use `--yes` for destructive CLI clear. The Dashboard exposes the same controls. No background or periodic sampler is started. The allowlisted record contains OS, architecture, CPU cores, system RAM, GPU/VRAM and CUDA availability only. It excludes hostname, usernames, machine IDs, network identifiers, filesystem paths, environment values, credentials, model/dataset content and arbitrary detector fields.
 
 The store rejects symlinks, future/malformed schemas, unknown fields and oversized documents; updates are serialized with a file lock and atomic replacement. A newly created POSIX metadata directory uses mode `0700`; the snapshot file uses mode `0600`. An existing shared `.axiom` directory is not chmodded as a side effect. Snapshot fingerprints are SHA-256 content identifiers, not signed attestations or proof of hardware performance.
+
+
+## Point-in-time engine telemetry (R112)
+
+`GET /api/engine/telemetry` returns the current local system/process resource snapshot, available accelerator memory/allocator counters, loaded-engine state and free/total capacity for trusted model-storage roots. Root labels are returned; absolute paths are not. The response contains no prompt text, generated output, model paths, environment values or credentials.
+
+The Runtime panel exposes this snapshot and the resource monitor. Monitoring is off until the user starts it, keeps at most 120 samples in browser memory, and ends when stopped or when the page is left. JSON export and clear operate on this browser-local history only; no server-side time-series store is created by this endpoint.
+
+The CLI `axiom engine telemetry --json` returns a point-in-time JSON sample. `--watch` explicitly opts into a bounded sample run (`--interval-seconds 0.5..60`, `--samples 1..300`) and may write JSONL to a new `--output` path; existing files are never overwritten. Output files must only be created in operator-controlled locations.
