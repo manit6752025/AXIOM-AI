@@ -106,6 +106,51 @@ def test_vulnerability_scan_requires_explicit_network_authorization():
         audit_dependency_vulnerabilities(allow_network=False)
 
 
+def test_security_api_exports_spdx_and_requires_strict_network_authorization(monkeypatch: pytest.MonkeyPatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from axiom.api.security import router as security_router
+
+    sbom = {
+        "spdxVersion": "SPDX-2.3",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "axiom": {"package_count": 1},
+    }
+    monkeypatch.setattr("axiom.api.security.generate_spdx_sbom", lambda: sbom)
+    calls = []
+
+    def fake_audit(*, allow_network: bool, timeout_seconds: int):
+        calls.append((allow_network, timeout_seconds))
+        return {
+            "schema_version": 1,
+            "status": "unavailable",
+            "network_accessed": False,
+            "dependency_count": 0,
+            "vulnerable_dependency_count": 0,
+            "vulnerability_count": 0,
+            "findings": [],
+            "message": "No scanner available; no conclusion.",
+        }
+
+    monkeypatch.setattr("axiom.api.security.audit_dependency_vulnerabilities", fake_audit)
+    application = FastAPI()
+    application.include_router(security_router)
+    client = TestClient(application)
+
+    exported = client.get("/api/security/sbom")
+    assert exported.status_code == 200
+    assert exported.json() == sbom
+
+    denied = client.post("/api/security/dependency-audit", json={"allow_network": False})
+    assert denied.status_code == 200
+    assert denied.json()["status"] == "unavailable"
+    assert calls == [(False, 90)] or calls == [(False, 90)]  # patched below: route forwards explicit false
+
+    malformed = client.post("/api/security/dependency-audit", json={"allow_network": "true"})
+    assert malformed.status_code == 422
+
+
 def test_vulnerability_scan_reports_unavailable_scanner_without_claiming_clean(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(supply_chain.importlib.util, "find_spec", lambda _name: None)
     report = audit_dependency_vulnerabilities(allow_network=True)
