@@ -14,7 +14,7 @@ https://github.com/manit6752025/AXIOM-AI/blob/main/SECURITY.md
 
 ## Software bill of materials and dependency advisories
 
-Diagnostics can export an SPDX 2.3 SBOM for the active Python environment.
+Diagnostics can export an SPDX 2.3 (validated against the official 2.3.1 JSON schema; AXIOM scope and fingerprint metadata live in standard SPDX annotations) SBOM for the active Python environment.
 It reads installed distribution metadata only and does not execute package
 code, collect host paths or contact a network service. The inventory contains
 package names, versions, Python package URLs and dependency relationships
