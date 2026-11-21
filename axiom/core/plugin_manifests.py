@@ -508,8 +508,8 @@ class PluginManifestStore:
             raise PluginManifestError("Plugin ID is invalid.")
         if not isinstance(expected_sha256, str) or not _SHA256.fullmatch(expected_sha256):
             raise PluginManifestError("The current manifest SHA-256 is required to grant permissions.")
-        if not isinstance(tools, list) or len(tools) > MAX_TOOLS_PER_MANIFEST:
-            raise PluginManifestError("Plugin grant tool list is invalid.")
+        if not isinstance(tools, list) or not 1 <= len(tools) <= MAX_TOOLS_PER_MANIFEST:
+            raise PluginManifestError("Plugin grant must select at least one and at most 32 tools.")
         with self._locked_directory() as directory_fd:
             stored = self._read(directory_fd)
             record = next(
