@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://axiom-ai.net/schemas/plugin-manifest-v1.schema.json",
+  "$id": "urn:axiom-ai:plugin-manifest:schema:1",
   "title": "AXIOM Declarative Plugin Manifest v1",
   "description": "Metadata-only plugin manifest. It does not define an executable entry point.",
   "type": "object",
