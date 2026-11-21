@@ -338,6 +338,10 @@ def _parse_pip_audit_output(payload: Any, *, generated_at: str, scanner_version:
                     f"Dependency audit finding inventory exceeds {MAX_AUDIT_FINDINGS} entries."
                 )
 
+    if (exit_code == 0 and findings) or (exit_code == 1 and not findings):
+        raise SupplyChainError(
+            "Dependency scanner exit status conflicts with its vulnerability inventory; no complete conclusion was produced."
+        )
     findings.sort(key=lambda item: (item["package"].casefold(), item["id"]))
     vulnerable_packages = {(item["package"], item["installed_version"]) for item in findings}
     return {
