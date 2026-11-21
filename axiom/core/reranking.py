@@ -39,7 +39,7 @@ def validate_rerank_inputs(query: str, documents, *, batch_size=8, max_length=25
         if not isinstance(document, str) or not document.strip():
             raise ValueError(f"Document {index} must contain non-whitespace characters.")
         if len(document) > MAX_RERANK_TEXT_CHARS:
-            raise ValueError(f"Document {index} exceeds the {MAX_RERANK_TEXT_CHARS}-character limit.")
+            raise ValueError(f"Document {index} exceeds the per-document {MAX_RERANK_TEXT_CHARS}-character limit.")
         total += len(document)
     if total > MAX_RERANK_TOTAL_CHARS:
         raise ValueError(f"Combined query and documents exceed {MAX_RERANK_TOTAL_CHARS} characters.")
