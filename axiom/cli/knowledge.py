@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from axiom.cli.errors import emit_error
-from axiom.cli.interactive import confirm as safe_confirm
+from axiom.cli.interactive import safe_confirm
 from axiom.core.knowledge import KnowledgeBaseStore, KnowledgeStoreCapacityError, KnowledgeStoreError
 
 console = Console()
