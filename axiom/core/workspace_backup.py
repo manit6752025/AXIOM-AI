@@ -120,7 +120,7 @@ def _hash_workspace_file(path: Path, expected: os.stat_result) -> str:
     return digest.hexdigest()
 
 
-def _inventory_workspace(root: Path, exclude_path: Path | None) -> tuple[list[dict[str, Any]], dict[str, int], int]:
+def _inventory_workspace(root: Path, exclude_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str, int], int]:
     entries: list[dict[str, Any]] = []
     skipped = {
         "symlink_files": 0,
@@ -130,7 +130,7 @@ def _inventory_workspace(root: Path, exclude_path: Path | None) -> tuple[list[di
     }
     total_bytes = 0
     folded_paths: set[str] = set()
-    excluded_output = exclude_path.resolve(strict=False) if exclude_path is not None else None
+    excluded_outputs = {path.resolve(strict=False) for path in exclude_paths}
 
     def walk_error(_error: OSError) -> None:
         raise WorkspaceBackupError("A workspace directory could not be scanned safely.") from None
@@ -159,12 +159,11 @@ def _inventory_workspace(root: Path, exclude_path: Path | None) -> tuple[list[di
 
             for name in filenames:
                 path = current_path / name
-                if excluded_output is not None:
-                    try:
-                        if path.resolve(strict=False) == excluded_output:
-                            continue
-                    except (OSError, RuntimeError):
-                        raise WorkspaceBackupError("The backup output path could not be checked safely.") from None
+                try:
+                    if path.resolve(strict=False) in excluded_outputs:
+                        continue
+                except (OSError, RuntimeError):
+                    raise WorkspaceBackupError("A backup exclusion path could not be checked safely.") from None
                 try:
                     info = path.lstat()
                 except OSError:
@@ -204,13 +203,23 @@ def _inventory_workspace(root: Path, exclude_path: Path | None) -> tuple[list[di
     return entries, skipped, total_bytes
 
 
-def create_workspace_backup(workspace: str | Path, output: BinaryIO, *, exclude_output: str | Path | None = None) -> dict[str, Any]:
+def create_workspace_backup(
+    workspace: str | Path,
+    output: BinaryIO,
+    *,
+    exclude_output: str | Path | None = None,
+    exclude_paths: list[str | Path] | None = None,
+) -> dict[str, Any]:
     """Write a ZIP64 backup to a caller-owned seekable binary stream."""
     root = _workspace_root(workspace)
-    entries, skipped, total_bytes = _inventory_workspace(
-        root,
-        Path(exclude_output).expanduser() if exclude_output is not None else None,
-    )
+    exclusions = [Path(item).expanduser() for item in (exclude_paths or [])]
+    if exclude_output is not None:
+        exclusions.append(Path(exclude_output).expanduser())
+    try:
+        output_start = output.tell()
+    except (OSError, AttributeError):
+        raise WorkspaceBackupError("Backup output stream must be seekable.") from None
+    entries, skipped, total_bytes = _inventory_workspace(root, exclusions)
     manifest = {
         "schema_version": BACKUP_SCHEMA_VERSION,
         "backup_id": uuid.uuid4().hex,
@@ -294,12 +303,16 @@ def create_workspace_backup(workspace: str | Path, output: BinaryIO, *, exclude_
     except (OSError, ValueError, zipfile.LargeZipFile, zipfile.BadZipFile):
         raise WorkspaceBackupError("Workspace backup archive could not be created safely.") from None
 
+    archive_bytes = output.tell() - output_start
+    if archive_bytes <= 0 or archive_bytes > MAX_BACKUP_ARCHIVE_BYTES:
+        raise WorkspaceBackupError("Workspace backup archive exceeds the 105 GiB compressed-size limit.")
     return {
         "schema_version": BACKUP_SCHEMA_VERSION,
         "backup_id": manifest["backup_id"],
         "workspace_label": manifest["workspace_label"],
         "file_count": len(entries),
         "total_bytes": total_bytes,
+        "archive_bytes": archive_bytes,
         "manifest_sha256": manifest_sha256,
         "skipped": skipped,
         "limits": manifest["limits"],
