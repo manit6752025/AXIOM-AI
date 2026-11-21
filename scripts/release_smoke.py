@@ -912,6 +912,7 @@ def inspect(root: Path) -> dict[str, Any]:
 
 
     app_source = (root / "src/App.tsx").read_text(encoding="utf-8")
+    client = (root / "src/api/client.ts").read_text(encoding="utf-8")
     failures.extend(page_registration_issues(app_source, "api-playground"))
     failures.extend(page_registration_issues(app_source, "agent-profiles"))
     failures.extend(module_catalog_issues(app_source))
@@ -930,7 +931,6 @@ def inspect(root: Path) -> dict[str, Any]:
         snapshot_core_tests, snapshot_api_tests, snapshot_cli_tests, snapshot_e2e, snapshot_docs,
     ))
     component = (root / "src/components/ApiPlayground.tsx").read_text(encoding="utf-8")
-    client = (root / "src/api/client.ts").read_text(encoding="utf-8")
 
     supply_chain_core = (root / "axiom/core/supply_chain.py").read_text(encoding="utf-8")
     supply_chain_api = (root / "axiom/api/security.py").read_text(encoding="utf-8")

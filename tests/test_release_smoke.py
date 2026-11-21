@@ -601,3 +601,23 @@ def test_dataset_snapshot_release_contract_requires_immutable_store_and_lineage_
         api, cli, client, gui, core_tests, api_tests, cli_tests, e2e, docs,
     )
     assert any("file_lock(" in failure for failure in failures)
+
+
+
+def test_release_smoke_initializes_shared_api_client_before_snapshot_contract(monkeypatch, tmp_path) -> None:
+    import ast
+
+    source = (ROOT / "scripts/release_smoke.py").read_text(encoding="utf-8")
+    module = ast.parse(source)
+    inspect_fn = next(node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == "inspect")
+    assignments = {}
+    for node in inspect_fn.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "client":
+                    assignments[target.id] = node.lineno
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "snapshot_client":
+                    snapshot_line = node.lineno
+    assert assignments["client"] < snapshot_line
