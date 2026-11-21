@@ -130,6 +130,7 @@ Downloads and checksums are on [GitHub Releases](https://github.com/manit6752025
 | **AXIOM Engine** | Direct local inference on PyTorch, no Ollama needed | `axiom engine status` |
 | **Ollama** | Service control, model pulls, streaming, benchmarking | `axiom infer status` |
 | **Model Studio** | Search and install GGUF models, convert to GGUF | `axiom model studio wizard` |
+| **Prompt Studio** | Build typed, versioned prompt templates and safely preview literal substitutions | `axiom prompt list` |
 | **Agent Optimizer** | Eight workload profiles that pick quantization and build a runtime bundle | `axiom optimize profiles` |
 | **Evaluation** | Score predictions offline and gate regressions against a baseline | `axiom evaluation run` |
 | **Unified LLM client** | One client for the native engine, Ollama, and cloud providers | `axiom llm providers` |
@@ -464,7 +465,7 @@ Opens in your browser, served from your computer on port `40507`. Use `--port` o
 
 ![AXIOM Control Center](docs/assets/webui.svg)
 
-Panels: Models, Runtime, AXIOM Engine, Fine-tuning, Model Studio, Agent Optimizer and Quantizer, Agent Profiles, and an API Playground. The local API has interactive docs at `/api/docs`. See [API.md](docs/API.md).
+Panels: Models, Runtime, AXIOM Engine, Fine-tuning, Model Studio, Agent Optimizer and Quantizer, Agent Profiles, Prompt Studio, and an API Playground. The local API has interactive docs at `/api/docs`. See [API.md](docs/API.md).
 
 ## How it fits together
 
@@ -541,7 +542,7 @@ axiom doctor --json
 ## Documentation
 
 - **Start here:** [My First AI](examples/my-first-ai/README.md) · [Installers](installers/README.md) · [CLI guide](docs/CLI-GUIDE.md) · [Wiki](https://github.com/manit6752025/AXIOM-AI/wiki)
-- **Features:** [Model Registry](docs/Model-Registry.md) · [Model Studio](docs/Model-Studio.md) · [Fine-tuning](docs/Local-Fine-Tuning.md) · [Engine](docs/Local-Engine.md) · [Local Inference](docs/Local-Inference.md) · [Evaluation](docs/Evaluation.md) · [Unified LLM client](docs/Unified-LLM-Client.md) · [MCP](#mcp-server-for-ai-agents)
+- **Features:** [Model Registry](docs/Model-Registry.md) · [Model Studio](docs/Model-Studio.md) · [Fine-tuning](docs/Local-Fine-Tuning.md) · [Engine](docs/Local-Engine.md) · [Local Inference](docs/Local-Inference.md) · [Prompt Studio](docs/wiki/Prompt-Studio.md) · [Evaluation](docs/Evaluation.md) · [Unified LLM client](docs/Unified-LLM-Client.md) · [MCP](#mcp-server-for-ai-agents)
 - **Reference:** [API](docs/API.md) · [Data retention](docs/DATA-RETENTION.md) · [Diagnostics](docs/Diagnostics-and-Support.md) · [Security](SECURITY.md) · [Governance](docs/GOVERNANCE.md) · [Accessibility](docs/ACCESSIBILITY.md)
 - **Project:** [Changelog](docs/CHANGELOG.md) · [Roadmap](ROADMAP.md) · [Releases](docs/releases.md)
 
