@@ -124,6 +124,13 @@ version are distinct. API v1 allows additive fields; breaking changes require
 a parallel API version and a migration window. Call `meta()` before relying
 on a newly introduced operation.
 
+A maintainer can publish the independently versioned packages through the
+manual `Publish AXIOM SDK packages` workflow. It validates and builds both
+packages before the selected publish jobs run. PyPI must have a Trusted
+Publisher configured for this repository/workflow and the `pypi` environment;
+npm requires an `NPM_TOKEN` secret in the `npm` environment and publishes
+with provenance. Pushes and pull requests do not publish packages.
+
 The 20-operation registry in
 [`sdk/openapi/axiom-v1-operations.json`](../sdk/openapi/axiom-v1-operations.json)
 is validated against the application's live FastAPI OpenAPI document and both
