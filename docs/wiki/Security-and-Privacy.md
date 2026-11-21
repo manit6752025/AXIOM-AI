@@ -31,6 +31,8 @@ fix versions. No package upgrades are performed. If the scanner is not
 installed, times out or cannot complete, the report is marked unavailable or
 error; that outcome is never described as a clean scan.
 
+Install the optional scanner with `python -m pip install "axiom-all[security-audit]"`; this extra provides `pip-audit` while keeping the scanner out of AXIOM's default local-first runtime dependencies.
+
 CLI equivalents are `axiom security sbom --output axiom.spdx.json` and
 `axiom security vulnerabilities --allow-network --json`. Export files are
 created without overwriting existing files and use restrictive local

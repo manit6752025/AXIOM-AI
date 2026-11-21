@@ -41,3 +41,12 @@ def test_security_supply_chain_api_runs_only_authorized_bounded_dependency_scan(
     assert extra.status_code == 422
     assert out_of_range.status_code == 422
     assert calls == [(True, 25)]
+
+
+def test_security_supply_chain_api_rejects_coerced_network_authorization_values():
+    app = FastAPI()
+    app.include_router(security_api.router)
+    client = TestClient(app)
+    for value in ("true", "false", 1, 0, None):
+        response = client.post("/api/security/dependency-audit", json={"allow_network": value})
+        assert response.status_code == 422

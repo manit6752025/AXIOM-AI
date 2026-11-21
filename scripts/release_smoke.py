@@ -684,6 +684,9 @@ def supply_chain_issues(
             '"DEPENDS_ON"', "MAX_DISTRIBUTIONS = 4096",
             "host_paths_collected", "network_access_performed",
         )),
+        ("Optional scanner installation", (Path("pyproject.toml").read_text(encoding="utf-8") if Path("pyproject.toml").is_file() else ""), (
+            "security-audit", "pip-audit>=2.10.1,<3",
+        )),
         ("Dependency audit", core, (
             "def audit_dependency_vulnerabilities(", "allow_network: bool",
             "explicit network authorization", "MAX_AUDIT_OUTPUT_BYTES",
@@ -821,6 +824,7 @@ def inspect(root: Path) -> dict[str, Any]:
     supply_chain_tests = (root / "tests/test_supply_chain.py").read_text(encoding="utf-8")
     supply_chain_api_tests = (root / "tests/test_security_supply_chain_api.py").read_text(encoding="utf-8")
     supply_chain_docs = (root / "docs/wiki/Security-and-Privacy.md").read_text(encoding="utf-8")
+    supply_chain_docs += "\\n" + (root / "pyproject.toml").read_text(encoding="utf-8")
     failures.extend(supply_chain_issues(
         supply_chain_core, supply_chain_api, supply_chain_cli, client,
         app_source, supply_chain_tests, supply_chain_api_tests,
