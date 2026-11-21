@@ -4,20 +4,31 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from queue import Empty, Queue
+from threading import Event, Thread
 
 import typer
 
 from axiom.cli.errors import emit_error
+from axiom.cli.interactive import confirm as safe_confirm
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from axiom.core.engine import AxiomEngineError, benchmark_local, discover_local_engine_assets, estimate_native_quantization, generate_local, generate_local_batch, generate_local_stream, runtime_status, runtime_telemetry
+from axiom.core.engine import AxiomEngineError, benchmark_local, discover_local_engine_assets, estimate_native_quantization, generate_local, generate_local_batch, generate_local_stream, inspect_native_model_context, resolve_local_model_directory, runtime_status, runtime_telemetry
 from axiom.core import model_studio
 from axiom.core.engine_fabric import EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
 from axiom.core.engine_fabric_profiles import EngineFabricProfileError, EngineFabricProfileStore
+from axiom.core.serving_profiles import (
+    ServingProfileError,
+    ServingProfileStore,
+    generate_from_profile,
+    readiness_probe,
+    release_profile_request,
+    reserve_profile_request,
+)
 from axiom.core.embeddings import EmbeddingEngineError, MAX_EMBEDDING_TOTAL_CHARS, embed_local_texts, unload_local_embeddings
 from axiom.core.reranking import MAX_RERANK_TOTAL_CHARS, RerankerError, rerank_local_documents, unload_local_reranker
 from axiom.core.benchmark_profiles import BenchmarkProfileError, BenchmarkProfileStore
@@ -28,6 +39,223 @@ console = Console()
 
 def _fail(message: str) -> None:
     emit_error(message, code="engine_error")
+
+
+def _serving_profile(profile_id: str) -> dict:
+    try:
+        profile = ServingProfileStore().get(profile_id)
+    except ServingProfileError as exc:
+        _fail(str(exc))
+    if profile is None:
+        _fail(f"Serving profile not found: {profile_id}")
+    return profile
+
+
+serving_profile_app = typer.Typer(
+    help="Create and validate bounded AXIOM Native Engine serving profiles.",
+    no_args_is_help=True,
+)
+engine_app.add_typer(serving_profile_app, name="profile")
+
+
+@serving_profile_app.command("create")
+def serving_profile_create(
+    name: str = typer.Argument(..., help="Unique local profile name."),
+    model_path: Path = typer.Option(..., "--model-path", exists=True, file_okay=False, readable=True),
+    adapter_path: Path | None = typer.Option(None, "--adapter-path", exists=True, file_okay=False, readable=True),
+    device: str = typer.Option("auto", "--device", help="auto, cpu, cuda, rocm, mps, or xpu."),
+    memory_mode: str = typer.Option("auto", "--memory-mode", help="auto, full, layer_streaming, or disk_streaming."),
+    precision: str = typer.Option("auto", "--precision", help="auto, fp32, fp16, or bf16."),
+    context_length: int = typer.Option(4096, min=1, max=131072),
+    max_new_tokens: int = typer.Option(256, min=1, max=2048),
+    max_prompt_chars: int = typer.Option(12000, min=1, max=12000),
+    request_timeout_seconds: int = typer.Option(300, min=5, max=900),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Save a local serving configuration without loading weights or starting a listener."""
+    try:
+        trusted_model = resolve_local_model_directory(str(model_path), "Base model")
+        context = inspect_native_model_context(trusted_model)
+        if context_length > context["effective_max_position_embeddings"]:
+            _fail(
+                f"Context length exceeds the checkpoint limit of "
+                f"{context['effective_max_position_embeddings']} tokens."
+            )
+        trusted_adapter = (
+            resolve_local_model_directory(str(adapter_path), "LoRA adapter")
+            if adapter_path is not None else None
+        )
+        profile = ServingProfileStore().save({
+            "name": name,
+            "model_path": trusted_model,
+            "adapter_path": trusted_adapter,
+            "device_preference": device,
+            "memory_mode": memory_mode,
+            "precision": precision,
+            "context_length": context_length,
+            "max_new_tokens": max_new_tokens,
+            "max_prompt_chars": max_prompt_chars,
+            "max_concurrent_requests": 1,
+            "max_queued_requests": 0,
+            "request_timeout_seconds": request_timeout_seconds,
+        })
+    except (OSError, RuntimeError, ValueError) as exc:
+        _fail(str(exc))
+    if json_output:
+        typer.echo(json.dumps({
+            "profile": profile,
+            "model_context": context,
+            "scope": {"weights_loaded": False, "service_started": False, "network_used": False},
+        }, ensure_ascii=False, separators=(",", ":")))
+        return
+    console.print(f"[green]Saved serving profile[/green] {profile['name']} · {profile['id']}")
+    console.print(f"Model: {context['architecture']} · context {context['effective_max_position_embeddings']:,} tokens")
+    console.print("Admission: one active native request · no queued requests")
+
+
+@serving_profile_app.command("list")
+def serving_profile_list(json_output: bool = typer.Option(False, "--json")) -> None:
+    """List saved local serving profiles without probing or loading model weights."""
+    try:
+        report = ServingProfileStore().list()
+    except ServingProfileError as exc:
+        _fail(str(exc))
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
+        return
+    if not report["profiles"]:
+        console.print("No local serving profiles.")
+        return
+    table = Table(title="AXIOM Native Engine serving profiles")
+    table.add_column("Name")
+    table.add_column("ID", style="cyan")
+    table.add_column("Device")
+    table.add_column("Context", justify="right")
+    table.add_column("Output", justify="right")
+    table.add_column("Model")
+    for profile in report["profiles"]:
+        table.add_row(
+            profile["name"], profile["id"][:12], profile["device_preference"],
+            f"{profile['context_length']:,}", str(profile["max_new_tokens"]),
+            Path(profile["model_path"]).name,
+        )
+    console.print(table)
+
+
+@serving_profile_app.command("show")
+def serving_profile_show(
+    profile_id: str,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Show one saved serving profile."""
+    profile = _serving_profile(profile_id)
+    if json_output:
+        typer.echo(json.dumps({"profile": profile}, ensure_ascii=False, separators=(",", ":")))
+        return
+    console.print_json(json.dumps(profile, ensure_ascii=False))
+
+
+@serving_profile_app.command("probe")
+def serving_profile_probe(
+    profile_id: str,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Check local dependencies, device and checkpoint readiness without loading weights."""
+    profile = _serving_profile(profile_id)
+    try:
+        report = readiness_probe(profile)
+    except (OSError, RuntimeError, ValueError) as exc:
+        _fail(str(exc))
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
+    else:
+        tone = "green" if report["ready"] else "yellow"
+        console.print(f"[{tone}]{'READY' if report['ready'] else 'NOT READY'}[/{tone}] · {report['profile_name']}")
+        for name, check in report["checks"].items():
+            state = check.get("available", check.get("ready", False)) if isinstance(check, dict) else False
+            console.print(f"{'✓' if state else '✗'} {name}: {check}")
+        for problem in report["problems"]:
+            console.print(f"[yellow]• {problem}[/yellow]")
+        console.print(report["scope_note"])
+    if not report["ready"]:
+        raise typer.Exit(code=1)
+
+
+@serving_profile_app.command("run")
+def serving_profile_run(
+    profile_id: str,
+    prompt: str = typer.Option(..., "--prompt"),
+    max_new_tokens: int | None = typer.Option(None, "--max-new-tokens", min=1, max=2048),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Generate through a saved serving profile and enforce its request limits."""
+    profile = _serving_profile(profile_id)
+    readiness = readiness_probe(profile)
+    if not readiness["ready"]:
+        _fail("Serving profile is not ready: " + "; ".join(readiness["problems"]))
+    try:
+        reserve_profile_request(profile_id)
+    except ServingProfileError as exc:
+        _fail(str(exc))
+    output: Queue = Queue(maxsize=1)
+    cancel_event = Event()
+
+    def worker() -> None:
+        try:
+            output.put(("result", generate_from_profile(
+                profile, prompt, max_new_tokens=max_new_tokens, cancel_event=cancel_event,
+            )))
+        except BaseException as exc:
+            output.put(("error", exc))
+        finally:
+            release_profile_request(profile_id)
+
+    thread = Thread(target=worker, name="axiom-serving-profile", daemon=True)
+    thread.start()
+    thread.join(profile["request_timeout_seconds"])
+    if thread.is_alive():
+        cancel_event.set()
+        _fail("Serving profile request exceeded its configured timeout; cooperative cancellation was requested.")
+    try:
+        kind, value = output.get_nowait()
+    except Empty:
+        _fail("Serving profile worker exited without a result.")
+    if kind == "error":
+        if isinstance(value, (OSError, RuntimeError, ValueError)):
+            _fail(str(value))
+        raise value
+    if json_output:
+        typer.echo(json.dumps({
+            "profile": {"id": profile["id"], "name": profile["name"]},
+            "result": value,
+            "local_only": True,
+        }, ensure_ascii=False, separators=(",", ":")))
+    else:
+        console.print(value["response"])
+        console.print(
+            f"{value['completion_tokens']:,} tokens · {value['generation_tokens_per_second']:.2f} tok/s · "
+            f"{value['elapsed_ms']:.1f} ms"
+        )
+
+
+@serving_profile_app.command("delete")
+def serving_profile_delete(
+    profile_id: str,
+    yes: bool = typer.Option(False, "--yes", help="Delete without an interactive confirmation."),
+) -> None:
+    """Delete profile metadata only; keep model and adapter files untouched."""
+    profile = _serving_profile(profile_id)
+    if not yes and not safe_confirm(f"Delete serving profile {profile['name']}?", default=False):
+        console.print("Cancelled.")
+        return
+    try:
+        deleted = ServingProfileStore().delete(profile_id)
+    except ServingProfileError as exc:
+        _fail(str(exc))
+    console.print_json(json.dumps({
+        "deleted": deleted,
+        "model_files_deleted": False,
+    }, ensure_ascii=False))
 
 
 @engine_app.command("discover")
