@@ -51,7 +51,7 @@ jobs:
       - name: Install cross-platform security test dependency
         run: python -m pip install pytest packaging
       - name: Run packaging, path, artifact, and security-journal regression tests
-        run: python -m pytest -q tests/test_package_artifact_verification.py tests/test_persisted_schema_inventory.py tests/test_path_safety.py tests/test_mcp_paths.py tests/test_artifact_security.py tests/test_security_events.py
+        run: python -m pytest -q tests/test_package_artifact_verification.py tests/test_persisted_schema_inventory.py tests/test_path_safety.py tests/test_mcp_paths.py tests/test_artifact_security.py tests/test_security_events.py tests/test_supply_chain.py tests/test_security_supply_chain_api.py
 
   full-validation:
     name: Python, lint, production build and browser E2E

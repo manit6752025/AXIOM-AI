@@ -22,8 +22,8 @@ where both installed distributions are present. Unavailable license metadata
 is represented as `NOASSERTION`; AXIOM does not guess license data.
 
 The separate dependency vulnerability scan invokes `pip-audit --local`
-against the active Python environment only after the operator selects the
-action and confirms network access. It may contact external advisory services.
+against the installed Python environment only after the operator selects the
+action and confirms network authorization for network access. It may contact external advisory services.
 AXIOM restricts the subprocess environment so arbitrary API tokens and private
 package-index URLs are not passed to the scanner, applies a hard timeout and
 output-size bound, and returns structured advisory IDs, aliases and available

@@ -326,7 +326,7 @@ def audit_dependency_vulnerabilities(
         "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE",
     )
     environment = {key: os.environ[key] for key in allowed_environment if key in os.environ}
-    args = [executable, "-m", "pip_audit", "--format", "json", "--progress-spinner", "off"]
+    args = [executable, "-m", "pip_audit", "--local", "--format", "json", "--progress-spinner", "off"]
     try:
         with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
             completed = subprocess.run(
