@@ -176,7 +176,7 @@ feature exists or a delivery-date promise.
 - [R133 · Planned] Add bounded, cancellable, resumable batch inference jobs with progress checkpoints.
 - [R134 · Planned] Add request admission queues with concurrency caps, backpressure, and cancellation.
 - [R135 · Planned] Add model provenance and security inspection with source, license, hash, and format evidence.
-- [R136 · Planned] Add software bill of materials generation and dependency vulnerability reports with export.
+- [R136 · In progress; validation pending] Added SPDX 2.3 installed-Python-environment SBOM generation with PURLs, installed dependency relationships and no code execution; exposed create-only CLI export, Diagnostics download, and a separate explicit-confirmation pip-audit --local online scan with sanitized JSON findings, network authorization, reduced subprocess environment, timeout/output bounds, and unavailable/error states. Unit/API/CLI/browser tests and release-smoke contracts are added; full CI and scanner runtime verification remain pending.
 - [R137 · Planned] Add versioned, default-deny plugin manifests and permission validation.
 - [R138 · Planned] Add workspace backup and restore with manifests, checksums, and safe path validation.
 - [R139 · In progress; validation pending] CLI bounded watch/JSONL export remains available; Runtime now supports browser-memory fallback and optional workspace-persistent samples through typed API routes, with explicit enable/disable, configurable count/age retention, JSON/CSV export, clear and privacy allowlisting. Core/API/browser tests and release-smoke contracts are added; full CI verification is pending.

@@ -319,7 +319,7 @@ def audit_dependency_vulnerabilities(
     if not isinstance(executable, str) or not executable or len(executable) > 4096:
         raise SupplyChainError("Python scanner executable is invalid.")
 
-    # Do not pass arbitrary environment variables (notably index URLs or tokens)
+    # Do not pass arbitrary environment variables (notably PIP_INDEX_URL, private index URLs, or tokens)
     # into the network scanner. Standard OS/temp/certificate paths are retained.
     allowed_environment = (
         "PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE",
