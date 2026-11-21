@@ -560,7 +560,7 @@ def persisted_schema_inventory_issues(docs: str, sources: dict[str, str]) -> lis
         ".axiom/hardware-snapshots.json", "~/.axiom/workspaces.json",
         ".axiom/prediction_jobs.json", "Fine-tuning jobs", "Model Studio jobs",
         "manifest.json", "Runtime traces are in-memory only", "browser-memory-only",
-        "Model Studio reader does not yet reject every future version explicitly", "default-deny",
+        'Model Studio's reader does not yet reject every future version explicitly', "default-deny",
     )
     failures = [
         f"Persisted-schema documentation is missing: {token}"
