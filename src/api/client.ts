@@ -1144,6 +1144,23 @@ export type HardwareSnapshotHistory = {
   scope_note: string;
 };
 
+export type KnowledgeBaseSummary = {
+  id: string; name: string; description: string; created_at: string; updated_at: string;
+  document_count: number; total_bytes: number;
+};
+export type KnowledgeDocumentRecord = {
+  id: string; source_path: string; file_name: string; format: string;
+  content_sha256: string; size_bytes: number; character_count: number; ingested_at: string;
+};
+export type KnowledgeBaseList = {
+  schema_version: number; knowledge_bases: KnowledgeBaseSummary[]; total: number;
+  limits: { max_knowledge_bases: number; max_documents_per_base: number };
+};
+export type KnowledgeDocumentList = {
+  schema_version: number; knowledge_base: KnowledgeBaseSummary;
+  documents: KnowledgeDocumentRecord[]; total: number;
+};
+
 export type RuntimeSnapshot = {
   status: string;
   hardware: HardwareSnapshot;
@@ -2465,6 +2482,28 @@ export const axiomApi = {
     "/api/engine/rerank/unload", { method: "POST" },
   ),
 
+
+  knowledgeBases: () => requestJson<KnowledgeBaseList>("/api/workspace/knowledge-bases"),
+  createKnowledgeBase: (input: { name: string; description?: string }) =>
+    requestJson<{ schema_version: number; knowledge_base: KnowledgeBaseSummary }>(
+      "/api/workspace/knowledge-bases", { method: "POST", body: JSON.stringify(input) },
+    ),
+  knowledgeDocuments: (baseId: string) =>
+    requestJson<KnowledgeDocumentList>(\`/api/workspace/knowledge-bases/\${encodeURIComponent(baseId)}/documents\`),
+  ingestKnowledgeDocument: (baseId: string, path: string) =>
+    requestJson<{ schema_version: number; document: KnowledgeDocumentRecord; source_text_returned: false; source_text_persisted: true; network_used: false }>(
+      \`/api/workspace/knowledge-bases/\${encodeURIComponent(baseId)}/documents\`,
+      { method: "POST", body: JSON.stringify({ path }) },
+    ),
+  removeKnowledgeDocument: (baseId: string, documentId: string) =>
+    requestJson<{ schema_version: number; removed: KnowledgeDocumentRecord; source_file_modified: false }>(
+      \`/api/workspace/knowledge-bases/\${encodeURIComponent(baseId)}/documents/\${encodeURIComponent(documentId)}\`,
+      { method: "DELETE" },
+    ),
+  removeKnowledgeBase: (baseId: string) =>
+    requestJson<{ schema_version: number; removed: KnowledgeBaseSummary; source_files_modified: false }>(
+      \`/api/workspace/knowledge-bases/\${encodeURIComponent(baseId)}\`, { method: "DELETE" },
+    ),
 
   runtime: () => requestJson<RuntimeSnapshot>("/api/workspace/runtime"),
   hardwareSnapshots: () => requestJson<HardwareSnapshotHistory>("/api/workspace/hardware-snapshots"),
