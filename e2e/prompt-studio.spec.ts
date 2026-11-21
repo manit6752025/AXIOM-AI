@@ -102,7 +102,7 @@ test("Prompt Studio creates, edits, renders, versions and deletes workspace temp
     if (request.method() === "POST" && segments[3] === "render") {
       if (!current) { await route.fulfill({ status: 404, json: { detail: "Not found" } }); return; }
       const input = request.postDataJSON() as { values: Record<string, string | number | boolean> };
-      const rendered = current.body.replace(/\\{\\{\\s*([A-Za-z][A-Za-z0-9_]*)\\s*\\}\\}/g, (_match, key: string) =>
+      const rendered = current.body.replace(/\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}/g, (_match, key: string) =>
         String(input.values[key] ?? ""));
       await route.fulfill({
         json: {
