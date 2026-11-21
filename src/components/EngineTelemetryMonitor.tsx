@@ -1,9 +1,45 @@
 import { useEffect, useState } from "react";
 import { Activity, Download, Pause, Play, Trash2 } from "lucide-react";
-import { axiomApi, type AxiomEngineSystemTelemetry } from "../api/client";
+import { axiomApi, type AxiomEngineResourceTelemetryMetrics, type AxiomEngineResourceTelemetryRecord, type AxiomEngineSystemTelemetry } from "../api/client";
 
-const MAX_SAMPLES = 120;
+const MAX_BROWSER_SAMPLES = 120;
+const MAX_PERSISTED_SAMPLES = 500;
 const INTERVAL_OPTIONS = [1, 2, 5, 10] as const;
+
+type ResourceMonitorSample = AxiomEngineResourceTelemetryMetrics & {
+  id?: string;
+  fingerprint?: string;
+};
+
+function fromRuntimeSample(sample: AxiomEngineSystemTelemetry): ResourceMonitorSample {
+  return {
+    sampled_at: sample.sampled_at,
+    sample_type: sample.sample_type,
+    cpu: sample.cpu,
+    memory: sample.memory,
+    process: {
+      rss_bytes: sample.process.rss_bytes,
+      peak_rss_bytes: sample.process.peak_rss_bytes,
+      threads: sample.process.threads,
+    },
+    devices: sample.devices.map((device) => ({
+      available: device.available,
+      memory_free_gib: device.memory_free_gib,
+      memory_total_gib: device.memory_total_gib,
+    })),
+    loaded_runtime: {
+      loaded: sample.loaded_runtime.loaded,
+      device: sample.loaded_runtime.device,
+      memory_mode: sample.loaded_runtime.memory_mode,
+      precision: sample.loaded_runtime.precision,
+      device_allocator: sample.loaded_runtime.device_allocator,
+    },
+  };
+}
+
+function fromHistoryRecord(record: AxiomEngineResourceTelemetryRecord): ResourceMonitorSample {
+  return { ...record.metrics, id: record.id, fingerprint: record.fingerprint };
+}
 
 function formatBytes(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return "not exposed";
@@ -27,15 +63,36 @@ function formatSampleTime(value: string): string {
 }
 
 export default function EngineTelemetryMonitor() {
-  const [samples, setSamples] = useState<AxiomEngineSystemTelemetry[]>([]);
+  const [samples, setSamples] = useState<ResourceMonitorSample[]>([]);
   const [recording, setRecording] = useState(false);
   const [intervalSeconds, setIntervalSeconds] = useState<number>(2);
+  const [persistentHistoryEnabled, setPersistentHistoryEnabled] = useState(false);
+  const [maxSamples, setMaxSamples] = useState(120);
+  const [maxAgeDays, setMaxAgeDays] = useState(30);
+  const [historyReady, setHistoryReady] = useState(false);
+  const [historyBusy, setHistoryBusy] = useState(false);
   const [includeCpu, setIncludeCpu] = useState(true);
   const [includeMemory, setIncludeMemory] = useState(true);
   const [includeProcess, setIncludeProcess] = useState(true);
   const [includeDevice, setIncludeDevice] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void axiomApi.axiomEngineTelemetryHistory().then((history) => {
+      if (!active) return;
+      setPersistentHistoryEnabled(history.settings.enabled);
+      setMaxSamples(history.settings.max_samples);
+      setMaxAgeDays(history.settings.max_age_days);
+      setSamples(history.samples.map(fromHistoryRecord));
+    }).catch((cause) => {
+      if (active) setError(cause instanceof Error ? cause.message : "Persistent resource history could not be loaded.");
+    }).finally(() => {
+      if (active) setHistoryReady(true);
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (!recording) return undefined;
@@ -46,9 +103,15 @@ export default function EngineTelemetryMonitor() {
       if (inFlight || disposed) return;
       inFlight = true;
       try {
-        const sample = await axiomApi.axiomEngineTelemetry();
+        const sample = persistentHistoryEnabled
+          ? (await axiomApi.recordAxiomEngineTelemetryHistory()).sample
+          : null;
+        const value = sample
+          ? fromHistoryRecord(sample)
+          : fromRuntimeSample(await axiomApi.axiomEngineTelemetry());
         if (!disposed) {
-          setSamples((current) => [...current, sample].slice(-MAX_SAMPLES));
+          const retentionLimit = persistentHistoryEnabled ? maxSamples : MAX_BROWSER_SAMPLES;
+          setSamples((current) => [...current, value].slice(-retentionLimit));
           setError("");
         }
       } catch (cause) {
@@ -66,11 +129,13 @@ export default function EngineTelemetryMonitor() {
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [recording, intervalSeconds]);
+  }, [recording, intervalSeconds, persistentHistoryEnabled, maxSamples]);
 
   const exportHistory = () => {
     if (samples.length === 0) return;
     const exportedSamples = samples.map((sample) => ({
+      id: sample.id ?? null,
+      fingerprint: sample.fingerprint ?? null,
       sampled_at: sample.sampled_at,
       sample_type: sample.sample_type,
       cpu: includeCpu ? sample.cpu : null,
@@ -114,7 +179,12 @@ export default function EngineTelemetryMonitor() {
       schema_version: 1,
       sample_count: samples.length,
       interval_seconds: intervalSeconds,
-      retention: { mode: "browser-memory-only", maximum_samples: MAX_SAMPLES },
+      retention: {
+        mode: samples.some((sample) => sample.id) ? "workspace-persistent" : "browser-memory-only",
+        enabled: persistentHistoryEnabled,
+        maximum_samples: persistentHistoryEnabled ? maxSamples : MAX_BROWSER_SAMPLES,
+        max_age_days: persistentHistoryEnabled ? maxAgeDays : null,
+      },
       privacy: {
         prompt_content_included: false,
         generated_content_included: false,
@@ -181,11 +251,44 @@ export default function EngineTelemetryMonitor() {
     setNotice("Exported the selected resource metrics as CSV.");
   };
 
-  const clearHistory = () => {
-    setRecording(false);
-    setSamples([]);
+  const saveHistorySettings = async () => {
+    setHistoryBusy(true);
     setError("");
-    setNotice("Cleared the browser's in-memory resource history.");
+    try {
+      const history = await axiomApi.configureAxiomEngineTelemetryHistory({
+        enabled: persistentHistoryEnabled,
+        max_samples: maxSamples,
+        max_age_days: maxAgeDays,
+      });
+      setPersistentHistoryEnabled(history.settings.enabled);
+      setSamples(history.samples.map(fromHistoryRecord));
+      setNotice(history.settings.enabled
+        ? "Persistent resource history is enabled for this workspace."
+        : "Persistent resource history is disabled; existing samples are retained until cleared or expired.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Persistent resource history settings could not be saved.");
+    } finally {
+      setHistoryBusy(false);
+    }
+  };
+
+  const clearHistory = async () => {
+    setRecording(false);
+    setHistoryBusy(true);
+    setError("");
+    try {
+      if (persistentHistoryEnabled || samples.some((sample) => sample.id)) {
+        await axiomApi.clearAxiomEngineTelemetryHistory();
+        setNotice("Cleared persistent workspace resource history.");
+      } else {
+        setNotice("Cleared the browser's in-memory resource history.");
+      }
+      setSamples([]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Resource history could not be cleared.");
+    } finally {
+      setHistoryBusy(false);
+    }
   };
 
   const latest = samples.length > 0 ? samples[samples.length - 1] : undefined;
@@ -212,15 +315,30 @@ export default function EngineTelemetryMonitor() {
               {INTERVAL_OPTIONS.map((seconds) => <option key={seconds} value={seconds}>{seconds} second{seconds === 1 ? "" : "s"}</option>)}
             </select>
           </label>
-          <button type="button" className="button primary-button" onClick={() => { setError(""); setNotice(""); setRecording((value) => !value); }}>
+          <button type="button" className="button primary-button" onClick={() => { setError(""); setNotice(""); setRecording((value) => !value); }} disabled={!historyReady || historyBusy}>
             {recording ? <><Pause size={14} />Stop monitoring</> : <><Play size={14} />Start monitoring</>}
           </button>
           <button type="button" className="button secondary-button" onClick={exportHistory} disabled={samples.length === 0}><Download size={14} />Export JSON</button>
           <button type="button" className="button secondary-button" onClick={exportCsv} disabled={samples.length === 0}><Download size={14} />Export CSV</button>
-          <button type="button" className="button danger-button" onClick={clearHistory} disabled={samples.length === 0 && !recording}><Trash2 size={14} />Clear history</button>
+          <button type="button" className="button danger-button" onClick={clearHistory} disabled={samples.length === 0 && !recording || historyBusy}><Trash2 size={14} />Clear history</button>
         </div>
       </div>
-      <p className="quiet-note">Monitoring starts only when you select Start. The browser retains at most {MAX_SAMPLES} recent samples while this page is open; stopping or leaving the page ends sampling. No server-side history is created. Prompt text, generated content, model paths, environment values, and credentials are excluded by the telemetry API.</p>
+      <p className="quiet-note">Monitoring starts only when you select Start. Without persistent history, the browser retains at most {MAX_BROWSER_SAMPLES} recent samples while this page is open. Enabling workspace history stores only allowlisted resource metrics with sample-count and age retention; stopping or leaving the page still ends sampling. Prompt text, generated content, model names and paths, process IDs, environment values, and credentials are excluded.</p>
+      <div className="telemetry-export-privacy" role="group" aria-label="Persistent resource history settings">
+        <label><input type="checkbox" aria-label="Persist resource history in workspace" checked={persistentHistoryEnabled} onChange={(event) => setPersistentHistoryEnabled(event.target.checked)} disabled={recording || historyBusy || !historyReady} /> Enable persistent resource history for this workspace</label>
+        <label>Maximum stored samples
+          <select aria-label="Persistent history sample limit" value={maxSamples} onChange={(event) => setMaxSamples(Number(event.target.value))} disabled={recording || historyBusy || !historyReady}>
+            {[120, 250, 500].map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+        </label>
+        <label>Maximum history age
+          <select aria-label="Persistent history retention days" value={maxAgeDays} onChange={(event) => setMaxAgeDays(Number(event.target.value))} disabled={recording || historyBusy || !historyReady}>
+            {[7, 30, 90, 365].map((value) => <option key={value} value={value}>{value} days</option>)}
+          </select>
+        </label>
+        <button type="button" className="button secondary-button" onClick={() => void saveHistorySettings()} disabled={!historyReady || historyBusy || recording}>Save persistent history settings</button>
+        {historyBusy && <span role="status">Updating workspace history…</span>}
+      </div>
       <div className="telemetry-export-privacy" role="group" aria-label="Telemetry export privacy controls">
         <strong>Export field controls</strong>
         <label><input type="checkbox" checked={includeCpu} onChange={(event) => setIncludeCpu(event.target.checked)} /> Include CPU metrics</label>
@@ -249,7 +367,7 @@ export default function EngineTelemetryMonitor() {
         </div>
         <div className="panel-surface" style={{ padding: 14 }}>
           <p className="surface-eyebrow">RETAINED SAMPLES</p>
-          <strong style={{ fontSize: 22 }}>{samples.length}/{MAX_SAMPLES}</strong>
+          <strong style={{ fontSize: 22 }}>{samples.length}/{persistentHistoryEnabled ? maxSamples : MAX_BROWSER_SAMPLES}</strong>
           <p className="quiet-note">{recording ? "Sampling is active" : "Sampling is stopped"}</p>
         </div>
       </div>
