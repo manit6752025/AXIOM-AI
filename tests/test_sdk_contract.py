@@ -25,16 +25,13 @@ def test_sdk_operation_manifest_paths_and_methods_exist_in_openapi():
         assert operation["method"].lower() in paths[operation["path"]]
 
 
-def test_sdk_contract_rejects_manifest_drift(monkeypatch):
+def test_sdk_contract_rejects_manifest_drift(monkeypatch, tmp_path):
     import scripts.verify_sdk_contract as verifier
 
     malformed = json.loads(original)
     malformed["operations"][0]["path"] = "/api/not-a-real-route"
-    from tempfile import NamedTemporaryFile
-
-    with NamedTemporaryFile("w", encoding="utf-8", suffix=".json") as temporary:
-        json.dump(malformed, temporary)
-        temporary.flush()
-        monkeypatch.setattr(verifier, "MANIFEST_PATH", Path(temporary.name))
-        with pytest.raises(SDKContractError, match="OpenAPI"):
-            verifier.verify_sdk_contract()
+    temporary = tmp_path / "drifted-operations.json"
+    temporary.write_text(json.dumps(malformed), encoding="utf-8")
+    monkeypatch.setattr(verifier, "MANIFEST_PATH", temporary)
+    with pytest.raises(SDKContractError, match="OpenAPI"):
+        verifier.verify_sdk_contract()
