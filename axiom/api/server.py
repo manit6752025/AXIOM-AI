@@ -89,6 +89,7 @@ def _required_api_scope(method: str, path: str) -> str:
     if normalized_method == "POST" and (
         path in _READ_ONLY_POST_PATHS
         or re.fullmatch(r"/api/workflows/[A-Za-z0-9_-]{1,64}/dry-run", path)
+        or re.fullmatch(r"/api/prompt-templates/[a-f0-9]{32}/render", path)
     ):
         return "read"
     return "write"
