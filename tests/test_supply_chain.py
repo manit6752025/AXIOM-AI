@@ -310,6 +310,38 @@ def test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_s
     assert kwargs["env"]["PIP_CONFIG_FILE"] == os.devnull
 
 
+def test_vulnerability_scan_is_single_flight_and_does_not_spawn_concurrent_scanners():
+    assert supply_chain._AUDIT_LOCK.acquire(blocking=False)
+    try:
+        report = audit_dependency_vulnerabilities(allow_network=True)
+    finally:
+        supply_chain._AUDIT_LOCK.release()
+    assert report["status"] == "error"
+    assert report["network_accessed"] is False
+    assert "already active" in report["message"]
+
+
+def test_vulnerability_scan_rejects_duplicate_json_object_keys(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(supply_chain.importlib.util, "find_spec", lambda _name: object())
+    monkeypatch.setattr(supply_chain.importlib.metadata, "version", lambda _name: "2.10.1")
+
+    class DuplicateJSONProcess:
+        def __init__(self, *_args, **_kwargs):
+            self.stdout = io.BytesIO(b'{"dependencies":[],"dependencies":[]}') 
+            self.stderr = io.BytesIO()
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(supply_chain.subprocess, "Popen", DuplicateJSONProcess)
+    with pytest.raises(SupplyChainError, match="ambiguous JSON"):
+        audit_dependency_vulnerabilities(allow_network=True)
+
+
 def test_vulnerability_scan_does_not_report_clean_on_timeout(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(supply_chain.importlib.util, "find_spec", lambda _name: object())
     monkeypatch.setattr(supply_chain.importlib.metadata, "version", lambda _name: "2.9.0")
