@@ -4210,6 +4210,97 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
   </FeaturePage>;
 }
 
+function LocalRerankerPanel() {
+  const [modelPath, setModelPath] = useState("");
+  const [query, setQuery] = useState("");
+  const [candidateText, setCandidateText] = useState("");
+  const [device, setDevice] = useState<"auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu">("auto");
+  const [report, setReport] = useState<LocalRerankingReport | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const documents = candidateText.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+    setBusy(true);
+    setError("");
+    setReport(null);
+    try {
+      setReport(await axiomApi.rerankLocalDocuments({
+        model_path: modelPath.trim(), query, documents, device,
+      }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Local reranking could not be completed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unload() {
+    setBusy(true);
+    setError("");
+    try {
+      await axiomApi.unloadLocalReranker();
+      setReport(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The local reranker could not be unloaded.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <Surface
+    title="Local cross-encoder reranking"
+    eyebrow="DETERMINISTIC LOCAL SCORING"
+    action={<button type="button" className="button secondary-button" onClick={() => void unload()} disabled={busy}>{busy ? "Working…" : "Unload reranker"}</button>}
+  >
+    <form className="integration-form" onSubmit={(event) => void submit(event)}>
+      <label className="field">
+        <span className="field-label-row"><span>Local reranker model path</span></span>
+        <input value={modelPath} onChange={(event) => setModelPath(event.target.value)} placeholder="models/my-reranker" maxLength={4096} required />
+      </label>
+      <label className="field">
+        <span className="field-label-row"><span>Query</span><span>{query.length.toLocaleString()} / 8,192</span></span>
+        <input value={query} onChange={(event) => setQuery(event.target.value)} maxLength={8192} required />
+      </label>
+      <label className="field">
+        <span className="field-label-row"><span>Candidate documents (one per line)</span></span>
+        <textarea value={candidateText} onChange={(event) => setCandidateText(event.target.value)} rows={5} placeholder={"First candidate document\nSecond candidate document"} required />
+      </label>
+      <label className="field">
+        <span className="field-label-row"><span>Execution device</span></span>
+        <select value={device} onChange={(event) => setDevice(event.target.value as typeof device)}>
+          <option value="auto">Automatic</option>
+          <option value="cpu">CPU</option>
+          <option value="cuda">CUDA</option>
+          <option value="rocm">ROCm</option>
+          <option value="mps">Metal / MPS</option>
+          <option value="xpu">Intel XPU</option>
+        </select>
+      </label>
+      <div className="integration-form-actions">
+        <button type="submit" className="button primary-button" disabled={busy || !modelPath.trim() || !query.trim() || !candidateText.trim()}>{busy ? "Scoring…" : "Rerank candidates locally"}</button>
+        <span className="quiet-note">Stable score ties preserve input order; text is not saved.</span>
+      </div>
+    </form>
+    {error && <InlineAlert tone="warning" role="alert">{error}</InlineAlert>}
+    {report && <div className="reranking-result" role="status">
+      <StatusPill tone="success">RERANKING COMPLETE</StatusPill>
+      <h3>{report.model.name}</h3>
+      <p>{report.results.length} candidates · {report.device} · {report.model.score_mode.replaceAll("_", " ")}</p>
+      <div className="module-list">
+        {report.results.map((item) => <div className="module-row" key={item.document_index}>
+          <span className="module-icon">{item.rank}</span>
+          <span className="module-copy"><b>Candidate {item.document_index}</b><small>{item.document_characters.toLocaleString()} characters</small></span>
+          <StatusPill tone="neutral">{item.score.toFixed(6)}</StatusPill>
+        </div>)}
+      </div>
+      <p className="quiet-note">Scores are ranking signals, not calibrated relevance probabilities. Query and document text are not returned or saved.</p>
+    </div>}
+  </Surface>;
+}
+
+
 function LocalEmbeddingsPanel() {
   const [modelPath, setModelPath] = useState("");
   const [sourceText, setSourceText] = useState("");
@@ -4320,6 +4411,7 @@ function Runtime() {
     <LocalEngineFabricPanel />
     <LocalInferencePanel />
     <LocalEmbeddingsPanel />
+    <LocalRerankerPanel />
     <LLMClientPanel />
     <RuntimeTracePanel />
     <EngineTelemetryMonitor />
