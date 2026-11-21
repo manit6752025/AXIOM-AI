@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from axiom.core.tool_permissions import ToolPermissionStore
+from axiom.core.plugin_manifests import PluginManifestError, PluginManifestStore
 from axiom.core.security_audit import audit_security_posture
 from axiom.core.workspace_context import active_workspace_root
 from axiom.core.security_events import SecurityEventError, SecurityEventStore, record_security_event
@@ -25,6 +26,26 @@ class ToolProfileInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     allowed_tools: list[str] = Field(max_length=32)
+
+
+class PluginManifestRegistrationInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    manifest: dict[str, Any]
+
+
+class PluginToolGrantInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=64)
+    scopes: list[str] = Field(min_length=1, max_length=5)
+
+
+class PluginPermissionsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    manifest_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    tools: list[PluginToolGrantInput] = Field(max_length=32)
 
 
 class ActiveProfileInput(BaseModel):
@@ -104,6 +125,59 @@ def set_active_profile(request: ActiveProfileInput) -> dict[str, str]:
     record_workspace_event("mcp.profile.activated", "Changed the active MCP profile")
     _record_action_event("mcp.profile.activated")
     return {"active_profile": request.name}
+
+
+@router.get("/plugins")
+def list_plugin_manifests() -> dict[str, Any]:
+    """Return declarative plugin manifests and their hash-bound permission state."""
+    try:
+        return PluginManifestStore().list()
+    except (OSError, PluginManifestError):
+        raise HTTPException(status_code=409, detail="Plugin manifest registry could not be read safely.") from None
+
+
+@router.post("/plugins/manifests", status_code=201)
+def register_plugin_manifest(request: PluginManifestRegistrationInput) -> dict[str, Any]:
+    """Validate and register a declarative manifest; registration never grants access."""
+    try:
+        result = PluginManifestStore().register(request.manifest)
+    except PluginManifestError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (OSError, TimeoutError):
+        raise HTTPException(status_code=500, detail="Plugin manifest could not be registered safely.") from None
+    _record_action_event("plugin.manifest.registered")
+    return result
+
+
+@router.put("/plugins/{plugin_id}/permissions")
+def grant_plugin_permissions(plugin_id: str, request: PluginPermissionsInput) -> dict[str, Any]:
+    """Grant a subset of a registered manifest's declared tool scopes."""
+    try:
+        result = PluginManifestStore().grant(
+            plugin_id,
+            expected_sha256=request.manifest_sha256,
+            tools=[item.model_dump() for item in request.tools],
+        )
+    except PluginManifestError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (OSError, TimeoutError):
+        raise HTTPException(status_code=500, detail="Plugin permissions could not be saved safely.") from None
+    _record_action_event("plugin.permissions.granted")
+    return result
+
+
+@router.delete("/plugins/{plugin_id}/permissions")
+def revoke_plugin_permissions(plugin_id: str) -> dict[str, Any]:
+    """Revoke all grants for one manifest while leaving its metadata intact."""
+    try:
+        revoked = PluginManifestStore().revoke(plugin_id)
+    except PluginManifestError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (OSError, TimeoutError):
+        raise HTTPException(status_code=500, detail="Plugin permissions could not be revoked safely.") from None
+    if revoked:
+        _record_action_event("plugin.permissions.revoked")
+    return {"plugin_id": plugin_id, "revoked": revoked}
 
 
 @router.get("/audit")
