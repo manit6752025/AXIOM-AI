@@ -11,8 +11,8 @@ Each snapshot has a versioned manifest containing its 32-character snapshot
 ID, creation time, workspace-relative source name, JSONL format, byte length,
 SHA-256 digest and content-addressed object name. No JSONL row values are
 copied into the manifest. A snapshot can reference only an earlier snapshot
-in the same workspace; the child records the parent's snapshot ID and
-manifest hash.
+in the same workspace; the child records the parent's `parent_snapshot_id`
+and parent manifest hash.
 
 The index is append-only through AXIOM's application interface and is
 hash-chained. Each record hashes its manifest and previous record, while the
