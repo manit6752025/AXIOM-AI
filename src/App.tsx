@@ -71,6 +71,7 @@ import {
   type WorkspaceModelInspection,
   type WorkspaceRuntimeMatrix,
   type LocalEmbeddingsReport,
+  type LocalRerankingReport,
 } from "./api/client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode } from "react";
