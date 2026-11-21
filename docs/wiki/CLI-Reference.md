@@ -28,7 +28,7 @@ final authority for those details.
 | Data and workflows | `axiom dataset`, `axiom workflow` |
 | Training and evaluation | `axiom train`, `axiom experiment`, `axiom evaluation` |
 | Local inference and providers | `axiom infer`, `axiom engine`, `axiom llm`, `axiom ai`, `axiom optimize`, `axiom supercompress` |
-| Agent, tools, and integrations | `axiom agent-profile`, `axiom mcp`, `axiom integration`, `axiom tools`, `axiom session`, `axiom headroom`, `axiom mobile-bridge` |
+| Agent, tools, and integrations | `axiom agent-profile`, `axiom prompt`, `axiom mcp`, `axiom integration`, `axiom tools`, `axiom session`, `axiom headroom`, `axiom mobile-bridge` |
 | Host and application lifecycle | `axiom system`, `axiom version`, `axiom update`, `axiom init`, `axiom daemon`, `axiom gui`, `axiom ui`, `axiom completion` |
 
 Useful command examples:
@@ -68,6 +68,7 @@ control. The API remains bounded by its route schemas and permission policy.
 | Local inference and engine | `infer`, `engine`, `system`, `headroom` | `/api/inference/generate`, `/api/inference/status`, `/api/engine/status`, `/api/engine/telemetry` | Runtime |
 | LLM providers and optimization | `llm`, `ai`, `optimize`, `supercompress` | `/api/llm/providers`, `/api/llm/models`, `/api/llm/chat`, `/api/optimizer/plan` | Runtime, Model Studio |
 | Agents, permissions, and connectors | `agent-profile`, `mcp`, `security`, `integration`, `tools`, `session`, `mobile-bridge` | `/api/agent-profiles`, `/api/security/audit`, `/api/security/tool-permissions`, `/api/diagnostics/runtime-connectors` | Agent Profiles, Settings, API Playground |
+| Prompt engineering | `prompt` | `/api/prompt-templates` | Prompt Studio |
 
 ## Update and GUI refresh
 
