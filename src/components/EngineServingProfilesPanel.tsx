@@ -19,6 +19,7 @@ export default function EngineServingProfilesPanel() {
   const [contextLength, setContextLength] = useState("4096");
   const [maxTokens, setMaxTokens] = useState("256");
   const [timeout, setTimeout] = useState("300");
+  const [maxQueuedRequests, setMaxQueuedRequests] = useState("2");
   const [prompt, setPrompt] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [readiness, setReadiness] = useState<Record<string, AxiomEngineServingReadiness>>({});
@@ -69,7 +70,7 @@ export default function EngineServingProfilesPanel() {
         max_new_tokens: Number(maxTokens),
         max_prompt_chars: 12000,
         max_concurrent_requests: 1,
-        max_queued_requests: 0,
+        max_queued_requests: Number(maxQueuedRequests),
         request_timeout_seconds: Number(timeout),
       });
       setSelectedId(result.profile.id);
@@ -193,7 +194,8 @@ export default function EngineServingProfilesPanel() {
             <label className="field"><span className="field-label-row"><span>Maximum output tokens</span></span><input aria-label="Serving maximum output tokens" type="number" min="1" max="2048" value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} /></label>
           </div>
           <label className="field"><span className="field-label-row"><span>Request timeout (seconds)</span></span><input aria-label="Serving request timeout" type="number" min="5" max="900" value={timeout} onChange={(event) => setTimeout(event.target.value)} /></label>
-          <p className="quiet-note">Admission is deliberately capped at one active native inference request and zero queued requests. This matches the current single-runtime lock and prevents unbounded waiting workers.</p>
+          <label className="field"><span className="field-label-row"><span>Maximum queued requests</span></span><input aria-label="Serving profile queue depth" type="number" min="0" max="32" step="1" value={maxQueuedRequests} onChange={(event) => setMaxQueuedRequests(event.target.value)} /><small>FIFO queue while the single native worker is busy. Set 0 to reject immediately.</small></label>
+          <p className="quiet-note">Native execution remains single-worker. Queue depth is bounded to 32, queue waits count toward the profile timeout, and disconnects remove waiting requests.</p>
           <button type="button" className="button primary-button" onClick={() => void createProfile()} disabled={busy !== "" || !modelPath || !name.trim()}>
             <Plus size={15} /> {busy === "create" ? "Saving profile…" : "Save serving profile"}
           </button>

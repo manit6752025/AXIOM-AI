@@ -88,6 +88,7 @@ test("Runtime creates, probes, uses, and deletes a bounded native serving profil
   await page.getByLabel("Serving device").selectOption("cpu");
   await page.getByLabel("Serving context length").fill("4096");
   await page.getByLabel("Serving maximum output tokens").fill("64");
+  await page.getByLabel("Serving profile queue depth").fill("3");
   await page.getByRole("button", { name: "Save serving profile" }).click();
 
   await expect.poll(() => createPayload).not.toBeNull();
@@ -98,7 +99,7 @@ test("Runtime creates, probes, uses, and deletes a bounded native serving profil
     context_length: 4096,
     max_new_tokens: 64,
     max_concurrent_requests: 1,
-    max_queued_requests: 0,
+    max_queued_requests: 3,
   });
   await expect(page.getByText("Runtime smoke", { exact: true })).toBeVisible();
 
