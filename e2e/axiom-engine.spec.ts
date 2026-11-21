@@ -401,6 +401,77 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(batchResults).toContainText("First batch result.");
   await expect(batchResults).toContainText("Second batch result.");
 
+  let predictionRequest: Record<string, unknown> | null = null;
+  let predictionJob = {
+    id: "f".repeat(32),
+    status: "running",
+    created_at: "2026-11-21T00:00:00+00:00",
+    started_at: "2026-11-21T00:00:01+00:00",
+    finished_at: null,
+    dataset_path: "data/evaluation.jsonl",
+    output_path: "data/predictions.jsonl",
+    artifact_ready: false,
+    rows_total: 5,
+    rows_completed: 2,
+    prompts_truncated: 1,
+    evaluation_run_ids: [],
+    error_code: null,
+    scope: {
+      prompts_returned: false,
+      predictions_returned: false,
+      logs_returned: false,
+      absolute_paths_returned: false,
+      output_file_published_only_after_completion: true,
+      job_state_persisted: true,
+      server_restart_clears_job_state: false,
+      generation_resumed_after_restart: false,
+    },
+  };
+  await page.route("**/api/prediction-jobs", async (route) => {
+    if (route.request().method() === "POST") {
+      predictionRequest = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({ status: 202, json: {
+        schema_version: 1,
+        job: predictionJob,
+        limits: { rows: 100, input_bytes: 50331648, input_line_bytes: 786432,
+          prompt_characters: 8000, generated_tokens_per_row: 64, batch_rows: 4,
+          prediction_characters_per_row: 16000, output_bytes: 67108864, output_line_bytes: 1048576 },
+        scope: { network_accessed: false, model_downloaded: false, prompts_returned: false,
+          predictions_returned: false, logs_returned: false, job_state_persisted: true,
+          output_published_only_after_completion: true },
+      } });
+      return;
+    }
+    await route.fulfill({ json: {
+      schema_version: 1, jobs: [predictionJob], limit: 20,
+      scope: { prompts_returned: false, predictions_returned: false, logs_returned: false,
+        absolute_paths_returned: false, job_state_persisted: true },
+    } });
+  });
+  await page.route("**/api/prediction-jobs/*/cancel", async (route) => {
+    predictionJob = { ...predictionJob, status: "cancelling" };
+    await route.fulfill({ json: {
+      schema_version: 1, job: predictionJob, cancellation_accepted: true,
+      note: "Cancellation is cooperative.",
+    } });
+  });
+  await engine.getByLabel("Prediction dataset path").fill("data/evaluation.jsonl");
+  await engine.getByLabel("Prediction output path").fill("data/predictions.jsonl");
+  await engine.getByRole("button", { name: "Start checkpointed prediction job" }).click();
+  const predictionJobs = engine.getByRole("region", { name: "Saved prediction job history" });
+  await expect.poll(() => predictionRequest).not.toBeNull();
+  expect(predictionRequest).toMatchObject({
+    model_path: "/models/llama-test",
+    dataset_path: "data/evaluation.jsonl",
+    output_path: "data/predictions.jsonl",
+    max_new_tokens: 64,
+    device: "cpu",
+  });
+  await expect(predictionJobs).toContainText("2 / 5 rows");
+  await expect(predictionJobs).toContainText("Output not published until completion");
+  await predictionJobs.getByRole("button", { name: "Cancel prediction job " + "f".repeat(32) }).click();
+  await expect(predictionJobs).toContainText("CANCELLING");
+
   await engine.getByRole("button", { name: "Unload model" }).click();
   await expect(engine.getByRole("status")).toContainText("released its loaded model and tokenizer references");
   await expect(engine.getByRole("button", { name: "Unload model" })).toHaveCount(0);
