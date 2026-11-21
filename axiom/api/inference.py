@@ -101,6 +101,13 @@ class StructuredGenerateRequest(GenerateRequest):
     def schema_must_be_bounded_and_supported(cls, value: dict[str, Any]) -> dict[str, Any]:
         return validate_json_schema(value)
 
+    @field_validator("num_predict")
+    @classmethod
+    def structured_output_token_limit(cls, value: int) -> int:
+        if value > 512:
+            raise ValueError("Structured output is limited to 512 generated tokens.")
+        return value
+
 
 class PullModelRequest(BaseModel):
     model: str = Field(min_length=1, max_length=120)
