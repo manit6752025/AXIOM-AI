@@ -148,7 +148,7 @@ def test_schema_allows_ordinary_property_names_containing_x_zero_and_backslash()
     )
 
 
-@pytest.mark.parametrize("property_name", ["", "\\x00".encode().decode("unicode_escape"), "n" * 129])
+@pytest.mark.parametrize("property_name", ["", chr(0), "n" * 129])
 def test_schema_rejects_empty_nul_and_oversized_property_names(property_name):
     with pytest.raises(JsonSchemaError, match="Property names"):
         validate_json_schema({
