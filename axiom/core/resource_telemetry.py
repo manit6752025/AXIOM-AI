@@ -6,13 +6,16 @@ import json
 import math
 import os
 import re
+import secrets
 import stat
 import uuid
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from axiom.core.storage import atomic_write_text, file_lock
+from axiom.path_safety import open_regular_file
 from axiom.core.workspace_context import workspace_metadata_dir
 
 SCHEMA_VERSION = 1
@@ -185,23 +188,148 @@ def _normalize_settings(value: Any) -> dict[str, Any]:
     return {"enabled": enabled, "max_samples": max_samples, "max_age_days": max_age_days}
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Resource telemetry JSON contains duplicate object keys.")
+        result[key] = value
+    return result
+
+
 class ResourceTelemetryStore:
     """Workspace-local history containing only allowlisted resource metrics."""
 
     def __init__(self, root: Path | None = None) -> None:
-        self.root = Path(root) if root is not None else workspace_metadata_dir()
+        selected = Path(root).expanduser() if root is not None else Path(workspace_metadata_dir())
+        if not selected.is_absolute():
+            selected = Path.cwd() / selected
+        self.root = selected
         self.path = self.root / "resource-telemetry.json"
         self.lock_path = self.root / _LOCK_NAME
 
+    @staticmethod
+    def _supports_directory_descriptors() -> bool:
+        return (
+            os.name == "posix"
+            and hasattr(os, "O_DIRECTORY")
+            and hasattr(os, "O_NOFOLLOW")
+            and os.open in getattr(os, "supports_dir_fd", set())
+            and os.mkdir in getattr(os, "supports_dir_fd", set())
+            and os.unlink in getattr(os, "supports_dir_fd", set())
+            and os.replace in getattr(os, "supports_dir_fd", set())
+        )
+
     def _check_paths(self, *, create: bool = False) -> None:
-        if self.root.is_symlink() or self.path.is_symlink() or self.lock_path.is_symlink():
-            raise ResourceTelemetryError("The resource telemetry store must not use symbolic links.")
+        current = Path(self.root.anchor)
+        for component in self.root.parts[1:]:
+            current = current / component
+            if current.is_symlink():
+                raise ResourceTelemetryError("The resource telemetry metadata path must not contain symbolic links.")
         if self.root.exists() and not self.root.is_dir():
             raise ResourceTelemetryError("The workspace metadata location is not a directory.")
+        if self.path.is_symlink() or self.lock_path.is_symlink():
+            raise ResourceTelemetryError("The resource telemetry store and lock must not be symbolic links.")
+        if self.path.exists():
+            try:
+                info = self.path.lstat()
+            except OSError:
+                raise ResourceTelemetryError("The resource telemetry store could not be inspected safely.") from None
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_STORE_BYTES:
+                raise ResourceTelemetryError("The resource telemetry store is not a bounded regular file.")
         if create:
             self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self.root.is_symlink() or self.path.is_symlink() or self.lock_path.is_symlink():
             raise ResourceTelemetryError("The resource telemetry store path changed unsafely.")
+
+    def _open_directory(self, *, create: bool) -> int | None:
+        if not self._supports_directory_descriptors():
+            self._check_paths(create=create)
+            return None if not self.root.exists() else -1
+        flags = (
+            os.O_RDONLY
+            | os.O_DIRECTORY
+            | os.O_NOFOLLOW
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        descriptor = os.open(self.root.anchor, flags)
+        try:
+            for component in self.root.parts[1:]:
+                try:
+                    next_descriptor = os.open(component, flags, dir_fd=descriptor)
+                except FileNotFoundError:
+                    if not create:
+                        return None
+                    try:
+                        os.mkdir(component, mode=0o700, dir_fd=descriptor)
+                    except FileExistsError:
+                        pass
+                    next_descriptor = os.open(component, flags, dir_fd=descriptor)
+                os.close(descriptor)
+                descriptor = next_descriptor
+            info = os.fstat(descriptor)
+            if not stat.S_ISDIR(info.st_mode):
+                raise ResourceTelemetryError("The workspace metadata location is not a directory.")
+            if info.st_mode & 0o077:
+                os.fchmod(descriptor, 0o700)
+            result = descriptor
+            descriptor = -1
+            return result
+        except ResourceTelemetryError:
+            raise
+        except OSError:
+            raise ResourceTelemetryError("The workspace metadata directory contains an unsafe or unavailable path.") from None
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
+    @contextmanager
+    def _locked_directory(self, *, create: bool) -> Iterator[int | None]:
+        """Lock history while anchoring POSIX file operations to a no-follow directory."""
+        if not self._supports_directory_descriptors():
+            self._check_paths(create=create)
+            if not self.root.exists():
+                yield None
+                return
+            try:
+                with file_lock(self.lock_path):
+                    yield None
+            except (OSError, TimeoutError):
+                raise ResourceTelemetryError("The resource telemetry history lock could not be acquired safely.") from None
+            return
+
+        directory_fd = self._open_directory(create=create)
+        if directory_fd is None:
+            yield None
+            return
+        lock_fd: int | None = None
+        try:
+            lock_fd = os.open(
+                self.lock_path.name,
+                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=directory_fd,
+            )
+            lock_info = os.fstat(lock_fd)
+            if not stat.S_ISREG(lock_info.st_mode):
+                raise ResourceTelemetryError("The resource telemetry lock must be a regular file.")
+            if lock_info.st_mode & 0o077:
+                os.fchmod(lock_fd, 0o600)
+            import fcntl
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            yield directory_fd
+        except ResourceTelemetryError:
+            raise
+        except OSError:
+            raise ResourceTelemetryError("The resource telemetry history lock could not be acquired safely.") from None
+        finally:
+            if lock_fd is not None:
+                try:
+                    import fcntl
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                finally:
+                    os.close(lock_fd)
+            os.close(directory_fd)
 
     @staticmethod
     def _retained(samples: list[dict[str, Any]], settings: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
@@ -210,19 +338,44 @@ class ResourceTelemetryStore:
         retained.sort(key=lambda sample: sample["sampled_at"], reverse=True)
         return retained[:settings["max_samples"]]
 
-    def _read(self) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        self._check_paths()
-        if not self.path.exists():
+    def _read(self, directory_fd: int | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        owns_directory = directory_fd is None
+        selected_fd = self._open_directory(create=False) if owns_directory else directory_fd
+        if selected_fd is None:
             return _default_settings(), []
         try:
-            info = self.path.stat()
-            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_STORE_BYTES:
-                raise ResourceTelemetryError("The resource telemetry store is not a bounded regular file.")
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except ResourceTelemetryError:
-            raise
-        except (OSError, UnicodeError, json.JSONDecodeError, RecursionError):
-            raise ResourceTelemetryError("The resource telemetry store could not be read safely.") from None
+            try:
+                if selected_fd >= 0:
+                    descriptor = os.open(
+                        self.path.name,
+                        os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                        dir_fd=selected_fd,
+                    )
+                    with os.fdopen(descriptor, "rb") as stream:
+                        info = os.fstat(stream.fileno())
+                        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_STORE_BYTES:
+                            raise ResourceTelemetryError("The resource telemetry store is not a bounded regular file.")
+                        raw_bytes = stream.read(MAX_STORE_BYTES + 1)
+                else:
+                    self._check_paths()
+                    with open_regular_file(self.path) as stream:
+                        info = os.fstat(stream.fileno())
+                        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_STORE_BYTES:
+                            raise ResourceTelemetryError("The resource telemetry store is not a bounded regular file.")
+                        raw_bytes = stream.read(MAX_STORE_BYTES + 1)
+                if len(raw_bytes) > MAX_STORE_BYTES:
+                    raise ResourceTelemetryError("The resource telemetry store exceeds its 4 MiB size limit.")
+                raw = json.loads(raw_bytes.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys)
+            except FileNotFoundError:
+                return _default_settings(), []
+            except ResourceTelemetryError:
+                raise
+            except (OSError, UnicodeError, json.JSONDecodeError, RecursionError, ValueError):
+                raise ResourceTelemetryError("The resource telemetry store could not be read safely.") from None
+        finally:
+            if owns_directory and selected_fd >= 0:
+                os.close(selected_fd)
+
         if not isinstance(raw, dict) or set(raw) != {"schema_version", "settings", "samples"}:
             raise ResourceTelemetryError("The resource telemetry document is malformed.")
         if type(raw.get("schema_version")) is not int or raw["schema_version"] != SCHEMA_VERSION:
@@ -250,22 +403,75 @@ class ResourceTelemetryStore:
             if hashlib.sha256(canonical.encode("utf-8")).hexdigest() != fingerprint:
                 raise ResourceTelemetryError("A resource telemetry fingerprint does not match its content.")
             identities.add(identity)
-            normalized.append({"id": identity, "sampled_at": sampled_at, "fingerprint": fingerprint, "metrics": metrics})
+            normalized.append({
+                "id": identity,
+                "sampled_at": sampled_at,
+                "fingerprint": fingerprint,
+                "metrics": metrics,
+            })
         return settings, self._retained(normalized, settings, datetime.now(UTC))
 
-    def _write(self, settings: dict[str, Any], samples: list[dict[str, Any]]) -> None:
+    def _write(
+        self,
+        settings: dict[str, Any],
+        samples: list[dict[str, Any]],
+        directory_fd: int | None,
+    ) -> None:
         payload = json.dumps(
             {"schema_version": SCHEMA_VERSION, "settings": settings, "samples": samples},
-            ensure_ascii=False, indent=2, allow_nan=False,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
         ) + "\n"
-        if len(payload.encode("utf-8")) > MAX_STORE_BYTES:
+        encoded = payload.encode("utf-8")
+        if len(encoded) > MAX_STORE_BYTES:
             raise ResourceTelemetryError("The resource telemetry store exceeds its 4 MiB size limit.")
-        atomic_write_text(self.path, payload)
-        if os.name != "nt":
-            try:
-                os.chmod(self.path, 0o600)
-            except OSError:
-                raise ResourceTelemetryError("Could not secure resource telemetry file permissions.") from None
+        if directory_fd is None or directory_fd < 0:
+            self._check_paths(create=True)
+            atomic_write_text(self.path, payload)
+            if os.name != "nt":
+                try:
+                    os.chmod(self.path, 0o600)
+                except OSError:
+                    raise ResourceTelemetryError("Could not secure resource telemetry file permissions.") from None
+            return
+
+        temporary_name = f".resource-telemetry.{secrets.token_hex(16)}.tmp"
+        descriptor: int | None = None
+        created = False
+        try:
+            descriptor = os.open(
+                temporary_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=directory_fd,
+            )
+            created = True
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "wb") as stream:
+                descriptor = None
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(
+                temporary_name,
+                self.path.name,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+            )
+            created = False
+            os.fsync(directory_fd)
+        except OSError:
+            raise ResourceTelemetryError("The resource telemetry store could not be written atomically and safely.") from None
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            if created:
+                try:
+                    os.unlink(temporary_name, dir_fd=directory_fd)
+                except OSError:
+                    pass
 
     def _report(self, settings: dict[str, Any], samples: list[dict[str, Any]], *, limit: int) -> dict[str, Any]:
         retained = self._retained(samples, settings, datetime.now(UTC))
@@ -292,15 +498,24 @@ class ResourceTelemetryStore:
         settings, samples = self._read()
         return self._report(settings, samples, limit=limit)
 
-    def configure(self, *, enabled: bool, max_samples: int = DEFAULT_MAX_SAMPLES, max_age_days: int = DEFAULT_MAX_AGE_DAYS) -> dict[str, Any]:
-        settings = _normalize_settings({"enabled": enabled, "max_samples": max_samples, "max_age_days": max_age_days})
-        self._check_paths(create=True)
+    def configure(
+        self,
+        *,
+        enabled: bool,
+        max_samples: int = DEFAULT_MAX_SAMPLES,
+        max_age_days: int = DEFAULT_MAX_AGE_DAYS,
+    ) -> dict[str, Any]:
+        settings = _normalize_settings({
+            "enabled": enabled,
+            "max_samples": max_samples,
+            "max_age_days": max_age_days,
+        })
         try:
-            with file_lock(self.lock_path):
-                self._check_paths(create=True)
-                _current, samples = self._read()
+            with self._locked_directory(create=True) as directory_fd:
+                current, samples = self._read(directory_fd)
+                del current
                 retained = self._retained(samples, settings, datetime.now(UTC))
-                self._write(settings, retained)
+                self._write(settings, retained, directory_fd)
         except ResourceTelemetryError:
             raise
         except (OSError, TimeoutError):
@@ -309,17 +524,14 @@ class ResourceTelemetryStore:
 
     def record(self, sample: Any) -> dict[str, Any]:
         # Do not create workspace state until opt-in has been saved explicitly.
-        self._check_paths()
         settings, _samples = self._read()
         if not settings["enabled"]:
             raise ResourceTelemetryOptInRequired(
                 "Persistent resource history is disabled. Enable it explicitly before recording samples."
             )
-        self._check_paths(create=True)
         try:
-            with file_lock(self.lock_path):
-                self._check_paths(create=True)
-                settings, samples = self._read()
+            with self._locked_directory(create=True) as directory_fd:
+                settings, samples = self._read(directory_fd)
                 if not settings["enabled"]:
                     raise ResourceTelemetryOptInRequired(
                         "Persistent resource history is disabled. Enable it explicitly before recording samples."
@@ -333,7 +545,7 @@ class ResourceTelemetryStore:
                     "metrics": metrics,
                 }
                 retained = self._retained([*samples, record], settings, datetime.now(UTC))
-                self._write(settings, retained)
+                self._write(settings, retained, directory_fd)
         except ResourceTelemetryError:
             raise
         except (OSError, TimeoutError):
@@ -346,10 +558,11 @@ class ResourceTelemetryStore:
         if not self.path.exists():
             return self._report(_default_settings(), [], limit=MAX_SAMPLES)
         try:
-            with file_lock(self.lock_path):
-                self._check_paths()
-                settings, _samples = self._read()
-                self._write(settings, [])
+            with self._locked_directory(create=False) as directory_fd:
+                if directory_fd is None:
+                    return self._report(_default_settings(), [], limit=MAX_SAMPLES)
+                settings, _samples = self._read(directory_fd)
+                self._write(settings, [], directory_fd)
         except ResourceTelemetryError:
             raise
         except (OSError, TimeoutError):
