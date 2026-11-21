@@ -83,10 +83,18 @@ def inspect_model_provenance(
 ) -> dict[str, Any]:
     """Return bounded SHA-256, weight-format, and license-file evidence."""
     requested = Path(path).expanduser()
-    if requested.is_symlink():
-        raise ModelProvenanceError("Model directory must not be a symbolic link.")
+    absolute_requested = Path(os.path.abspath(requested))
+    current = Path(absolute_requested.anchor)
+    for component in absolute_requested.parts[1:]:
+        current = current / component
+        try:
+            component_info = current.lstat()
+        except OSError:
+            raise ModelProvenanceError("Model directory is unavailable.") from None
+        if stat.S_ISLNK(component_info.st_mode):
+            raise ModelProvenanceError("Model directory paths must not contain symbolic links.")
     try:
-        root = requested.resolve(strict=True)
+        root = absolute_requested.resolve(strict=True)
     except (OSError, RuntimeError):
         raise ModelProvenanceError("Model directory is unavailable.") from None
     if not root.is_dir():
