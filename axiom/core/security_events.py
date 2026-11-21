@@ -43,6 +43,9 @@ _EVENT_SUMMARIES = {
     "mcp.profile.created": "Created a default-deny MCP profile",
     "mcp.permissions.saved": "Updated an MCP tool permission profile",
     "mcp.profile.activated": "Changed the active MCP permission profile",
+    "plugin.manifest.registered": "Registered a declarative plugin manifest",
+    "plugin.permissions.granted": "Granted scoped plugin permissions",
+    "plugin.permissions.revoked": "Revoked plugin permissions",
     _TOOL_DECISION_EVENT: "Recorded a redacted MCP tool permission decision",
 }
 _REVIEW_EVENT = "security.event.reviewed"
