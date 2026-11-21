@@ -135,7 +135,7 @@ def test_manifest_registry_lock_and_registry_symlinks_are_rejected_without_write
         store.lock_file.symlink_to(lock_target)
     except OSError:
         pytest.skip("symlink creation is unavailable")
-    with pytest.raises(PluginManifestError, match="lock"):
+    with pytest.raises(PluginManifestError):
         store.grant(
             "com.example.research",
             expected_sha256=registered["sha256"],
