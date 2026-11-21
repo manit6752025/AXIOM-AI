@@ -1577,12 +1577,13 @@ export type EvaluationExperimentComparison = {
   };
   statistical_test: {
     method: string;
-    status: "computed" | "insufficient_replicates";
+    status: "computed" | "insufficient_replicates" | "degenerate_zero_variance";
     minimum_replicates_per_group: 2;
     t_statistic: number | null;
     degrees_of_freedom: number | null;
     p_value: number | null;
     degenerate_zero_variance?: boolean;
+    note?: string;
   };
   generated_at: string;
   scope_note: string;
