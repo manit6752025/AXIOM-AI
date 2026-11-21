@@ -127,6 +127,8 @@ class KnowledgeBaseStore:
             raise KnowledgeStoreError("Knowledge index has an unsupported schema.")
         seen_bases: set[str] = set()
         seen_names: set[str] = set()
+        seen_document_ids: set[str] = set()
+        total_document_bytes = 0
         records = []
         for base in payload["bases"]:
             if not isinstance(base, dict) or set(base) != {
@@ -165,7 +167,8 @@ class KnowledgeBaseStore:
                 file_name = doc.get("file_name")
                 suffix = Path(file_name).suffix.lower() if isinstance(file_name, str) else ""
                 if (
-                    not isinstance(doc_id, str) or not _DOCUMENT_ID.fullmatch(doc_id) or doc_id in seen_docs
+                    not isinstance(doc_id, str) or not _DOCUMENT_ID.fullmatch(doc_id)
+                    or doc_id in seen_docs or doc_id in seen_document_ids
                     or not isinstance(source_path, str) or source_path != _workspace_path(source_path)
                     or not isinstance(file_name, str) or not file_name or len(file_name) > 255
                     or "/" in file_name or "\\" in file_name or suffix not in _ALLOWED_SUFFIXES
@@ -180,6 +183,10 @@ class KnowledgeBaseStore:
                 ):
                     raise KnowledgeStoreError("Knowledge index contains an invalid document entry.")
                 seen_docs.add(doc_id)
+                seen_document_ids.add(doc_id)
+                total_document_bytes += doc["size_bytes"]
+                if total_document_bytes > MAX_TOTAL_DOCUMENT_BYTES:
+                    raise KnowledgeStoreCapacityError("Workspace knowledge documents exceed the 1 GiB storage limit.")
                 normalized_docs.append(doc)
             records.append({**base, "documents": normalized_docs})
         return records
