@@ -257,12 +257,25 @@ def _validate_document(raw: Any) -> list[dict[str, Any]]:
                 raise BenchmarkProfileError("A benchmark profile digest is invalid.")
         if isinstance(item["prompt_chars"], bool) or not isinstance(item["prompt_chars"], int) or not 1 <= item["prompt_chars"] <= 12000:
             raise BenchmarkProfileError("A benchmark profile prompt length is invalid.")
-        if not isinstance(item["workload"], dict) or set(item["workload"]) != {"prompt_sha256", "prompt_chars", "config"}:
+        if not isinstance(item["workload"], dict) or set(item["workload"]) != {"prompt_sha256", "prompt_chars", "config", "metrics"}:
             raise BenchmarkProfileError("A benchmark profile workload is malformed.")
         if item["workload"]["prompt_sha256"] != item["prompt_sha256"] or item["workload"]["prompt_chars"] != item["prompt_chars"]:
             raise BenchmarkProfileError("A benchmark profile workload fingerprint is inconsistent.")
+        config = item["workload"]["config"]
+        required_config = {"model", "architecture", "model_type", "checkpoint_format", "warmup_runs", "iterations", "max_new_tokens", "sampling", "device", "memory_mode", "precision", "adapter_used"}
+        if not isinstance(config, dict) or set(config) != required_config or type(config["adapter_used"]) is not bool or not isinstance(config["sampling"], dict):
+            raise BenchmarkProfileError("A benchmark profile workload configuration is malformed.")
+        metrics = item["workload"]["metrics"]
+        if not isinstance(metrics, dict) or set(metrics) != set(_METRICS):
+            raise BenchmarkProfileError("A benchmark profile metrics record is malformed.")
+        for metric in _METRICS:
+            value = metrics[metric]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= float(value) < 1e15:
+                raise BenchmarkProfileError("A benchmark profile metric is invalid.")
         if not isinstance(item["hardware"], dict) or set(item["hardware"]) != {"os_name", "os_release", "architecture", "cpu_cores", "ram_bytes", "gpu_name", "vram_bytes", "cuda_available"}:
             raise BenchmarkProfileError("A benchmark profile hardware record is malformed.")
+        if type(item["hardware"]["cuda_available"]) is not bool or isinstance(item["hardware"]["cpu_cores"], bool) or not isinstance(item["hardware"]["cpu_cores"], int) or not 1 <= item["hardware"]["cpu_cores"] <= 4096:
+            raise BenchmarkProfileError("A benchmark profile hardware record has invalid values.")
         if not isinstance(item["software"], dict) or set(item["software"]) != {"axiom_version", "python_version", "torch_version"}:
             raise BenchmarkProfileError("A benchmark profile software record is malformed.")
         ids.add(identity); names.add(name.casefold()); output.append(item)
@@ -322,7 +335,7 @@ class BenchmarkProfileStore:
         return {"schema_version": SCHEMA_VERSION, "total": len(profiles), "profiles": profiles[:limit],
                 "privacy": {"prompt_content_included": False, "model_paths_included": False, "credentials_included": False}}
 
-    def create(self, name: str, report: dict[str, Any], prompt: str, model_path: str | Path) -> dict[str, Any]:
+    def create(self, name: str, report: dict[str, Any], prompt: str, model_path: str | Path, *, adapter_used: bool = False) -> dict[str, Any]:
         if not isinstance(name, str) or not _NAME.fullmatch(name.strip()):
             raise BenchmarkProfileError("Benchmark profile names must be 1–64 safe ASCII characters.")
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 12000:
@@ -330,11 +343,13 @@ class BenchmarkProfileStore:
         workload = _validated_report(report)
         prompt_digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         workload_record = {"prompt_sha256": prompt_digest, "prompt_chars": len(prompt), "config": {
+            "model": workload["model"], "architecture": workload["architecture"], "model_type": workload["model_type"],
+            "checkpoint_format": workload["checkpoint_format"],
             "warmup_runs": workload["warmup_runs_requested"], "iterations": workload["iterations_requested"],
             "max_new_tokens": workload["max_new_tokens"], "sampling": workload["sampling"],
             "device": workload["device"], "memory_mode": workload["memory_mode"], "precision": workload["precision"],
-            "adapter_used": False,
-        }}
+            "adapter_used": bool(adapter_used),
+        }, "metrics": workload["metrics"]}
         hardware = _hardware_record()
         software = _software_record()
         payload = {
@@ -361,7 +376,8 @@ class BenchmarkProfileStore:
     def compare(self, left_id: str, right_id: str) -> dict[str, Any]:
         if not re.fullmatch(r"[0-9a-f]{32}", left_id or "") or not re.fullmatch(r"[0-9a-f]{32}", right_id or "") or left_id == right_id:
             raise BenchmarkProfileError("Two distinct valid benchmark profile IDs are required.")
-        profiles = self._read()
+        with file_lock(self.lock_path):
+            profiles = self._read()
         by_id = {item["id"]: item for item in profiles}
         if left_id not in by_id or right_id not in by_id:
             raise BenchmarkProfileError("One or both benchmark profiles were not found in this workspace.")
@@ -369,14 +385,16 @@ class BenchmarkProfileStore:
         same = {
             "hardware": left["hardware"] == right["hardware"],
             "software": left["software"] == right["software"],
-            "model_metadata": left["model_config_sha256"] == right["model_config_sha256"] and left["workload"]["config"] == right["workload"]["config"],
+            "model": left["workload"]["config"]["model"] == right["workload"]["config"]["model"],
+            "model_metadata": left["model_config_sha256"] == right["model_config_sha256"],
+            "workload": left["workload"]["config"] == right["workload"]["config"],
             "same_prompt": left["prompt_sha256"] == right["prompt_sha256"],
         }
         comparable = all(same.values())
         metrics = {}
         for key in ("median_elapsed_ms", "p95_elapsed_ms", "median_generation_tokens_per_second", "aggregate_tokens_per_second"):
-            before = left["workload"].get("metrics", {}).get(key)
-            after = right["workload"].get("metrics", {}).get(key)
+            before = left["workload"]["metrics"].get(key)
+            after = right["workload"]["metrics"].get(key)
             # Metrics are stored within the summary below, so keep report-vs-report diffs explicit.
             if isinstance(before, (int, float)) and isinstance(after, (int, float)):
                 metrics[key] = {"left": before, "right": after, "delta": round(after - before, 4)}
