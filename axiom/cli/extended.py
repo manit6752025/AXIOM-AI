@@ -558,18 +558,30 @@ def register(app, model_app, dataset_app) -> None:
     app.add_typer(project_app, name="project")
 
     @project_app.command("info")
-    def project_info() -> None:
+    def project_info(
+        json_output: bool = typer.Option(False, "--json", help="Emit a versioned machine-readable project summary."),
+    ) -> None:
         """Show local project markers in the current directory."""
         root = Path.cwd()
+        config_exists = (root / "axiom.yaml").is_file()
+        readme_exists = (root / "README.md").is_file()
+        if json_output:
+            typer.echo(json.dumps({
+                "schema_version": 1,
+                "path": str(root),
+                "config": {"path": "axiom.yaml", "exists": config_exists},
+                "readme": {"path": "README.md", "exists": readme_exists},
+            }, ensure_ascii=False, sort_keys=True))
+            return
 
         console.print(
             Panel.fit(
                 f"[bold cyan]AXIOM PROJECT[/bold cyan]\n\n"
                 f"Path: {root}\n"
                 f"Config: "
-                f"{'found' if (root / 'axiom.yaml').exists() else 'missing'}\n"
+                f"{'found' if config_exists else 'missing'}\n"
                 f"README: "
-                f"{'found' if (root / 'README.md').exists() else 'missing'}",
+                f"{'found' if readme_exists else 'missing'}",
                 title="AXIOM",
             )
         )

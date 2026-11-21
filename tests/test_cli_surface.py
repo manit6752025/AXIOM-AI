@@ -108,6 +108,15 @@ def test_init_creates_a_project_that_project_commands_can_use(
     assert "Config:" in info_result.stdout
     assert "found" in info_result.stdout
     assert "README:" in info_result.stdout
+    info_json = runner.invoke(app, ["project", "info", "--json"])
+    assert info_json.exit_code == 0, info_json.stdout
+    summary = json.loads(info_json.stdout)
+    assert summary == {
+        "schema_version": 1,
+        "path": str(project_root),
+        "config": {"path": "axiom.yaml", "exists": True},
+        "readme": {"path": "README.md", "exists": True},
+    }
     assert validate_result.exit_code == 0, validate_result.stdout
     assert "valid" in validate_result.stdout.lower()
 
