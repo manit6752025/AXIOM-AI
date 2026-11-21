@@ -28,7 +28,7 @@ Structured local JSON output, schema limits, and API examples are in the [Struct
 |---|---|
 | Workspace and diagnostics | `axiom doctor`, `axiom info`, `axiom status`, `axiom summary`, `axiom guide`, `axiom check`, `axiom project`, `axiom config`, `axiom roadmap`, `axiom support-bundle`, `axiom workspace` |
 | Model lifecycle and access | `axiom model`, `axiom hf` |
-| Data and workflows | `axiom dataset`, `axiom workflow` |
+| Data and workflows | `axiom dataset`, `axiom workflow`, `axiom knowledge` |
 | Training and evaluation | `axiom train`, `axiom experiment`, `axiom evaluation` |
 | Local inference and providers | `axiom infer`, `axiom engine`, `axiom llm`, `axiom ai`, `axiom optimize`, `axiom supercompress` |
 | Agent, tools, and integrations | `axiom agent-profile`, `axiom prompt`, `axiom mcp`, `axiom integration`, `axiom tools`, `axiom session`, `axiom headroom`, `axiom mobile-bridge` |
@@ -39,6 +39,9 @@ Useful command examples:
 ```bash
 axiom model list --json
 axiom dataset inspect ./data/train.jsonl --json
+axiom knowledge base create "Engineering notes"
+axiom knowledge ingest BASE_ID documents/guide.md
+axiom knowledge search BASE_ID --query "local inference" --json
 axiom train plan 7 --method qlora --json
 axiom workflow list --limit 20 --page-json
 axiom experiment print <experiment-id>
@@ -67,6 +70,7 @@ control. The API remains bounded by its route schemas and permission policy.
 | Workspace and diagnostics | `doctor`, `info`, `status`, `summary`, `guide`, `check`, `project`, `config`, `roadmap`, `support-bundle`, `workspace` | `/api/health`, `/api/diagnostics/workspace`, `/api/diagnostics/roadmap` | Overview, Roadmap, Settings |
 | Models and model acquisition | `model`, `hf` | `/api/workspace/models`, `/api/models/studio/remote/models`, `/api/models/studio/jobs` | Models, Model Studio |
 | Datasets and data quality | `dataset` | `/api/workspace/datasets`, `/api/workspace/dataset-cleaning-preview`, `/api/workspace/dataset-quality` | Datasets |
+| Workspace knowledge and retrieval | `knowledge base`, `knowledge ingest`, `knowledge search` | `/api/workspace/knowledge-bases` and document/search routes | Runtime |
 | Training plans and saved workflows | `train`, `workflow`, `experiment` | `/api/fine-tuning/jobs`, `/api/workflows`, `/api/workspace/experiments` | Training, Evaluation |
 | Offline evaluation | `evaluation`, `experiment` | `/api/evaluation/runs`, `/api/workspace/experiments` | Evaluation |
 | Local inference and engine | `infer`, `engine`, `system`, `headroom` | `/api/inference/generate`, `/api/inference/generate/structured`, `/api/inference/status`, `/api/engine/status`, `/api/engine/telemetry` | Runtime |
