@@ -349,10 +349,19 @@ export class AxiomClient {
   }
 
   createWorkspace(name: string): Promise<{ workspace: AxiomWorkspaceSummary }> {
+    if (!name.trim() || name.length > 64 || /[\u0000-\u001f\u007f]/.test(name)) {
+      throw new AxiomConfigurationError("Workspace name must contain 1 to 64 printable characters.");
+    }
     return this.request("POST", "/api/workspaces", { jsonBody: { name } });
   }
 
   renameWorkspace(workspaceId: string, name: string): Promise<{ workspace: AxiomWorkspaceSummary }> {
+    if (!workspaceId.trim() || workspaceId.length > 128 || /[\u0000-\u001f\u007f]/.test(workspaceId)) {
+      throw new AxiomConfigurationError("Workspace ID must contain 1 to 128 printable characters.");
+    }
+    if (!name.trim() || name.length > 64 || /[\u0000-\u001f\u007f]/.test(name)) {
+      throw new AxiomConfigurationError("Workspace name must contain 1 to 64 printable characters.");
+    }
     return this.request("PATCH", `/api/workspaces/${encodeURIComponent(workspaceId)}`, {
       jsonBody: { name },
     });
@@ -415,6 +424,9 @@ export class AxiomClient {
   ): Promise<AxiomWorkspaceBackupRestoreResult> {
     if (!(archive instanceof Blob) || archive.size === 0) {
       throw new AxiomConfigurationError("Backup archive must be a non-empty Blob.");
+    }
+    if (!name.trim() || name.length > 64 || /[\u0000-\u001f\u007f]/.test(name)) {
+      throw new AxiomConfigurationError("Restored workspace name must contain 1 to 64 printable characters.");
     }
     return this.request("POST", "/api/workspaces/backup/restore", {
       params: { name },
