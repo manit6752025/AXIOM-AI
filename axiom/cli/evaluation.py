@@ -23,6 +23,7 @@ from axiom.evaluation.jsonl import (
     evaluate_jsonl_stream,
 )
 from axiom.evaluation.service import persist_evaluation_run
+from axiom.evaluation.experiments import compare_experiment_evaluations
 from axiom.evaluation.store import EvaluationStore
 from axiom.path_safety import open_regular_file
 
@@ -41,6 +42,7 @@ def register_evaluation_cli(app: typer.Typer) -> None:
         model_label: str | None = typer.Option(None, "--model-label"),
         baseline: bool = typer.Option(False, "--baseline", help="Mark this immutable run as a comparison baseline."),
         baseline_run_id: str | None = typer.Option(None, "--baseline-run-id"),
+        experiment_id: str | None = typer.Option(None, "--experiment-id", help="Link this evaluation to a saved experiment snapshot."),
         metric: str = typer.Option("token_f1_micro", "--regression-metric"),
         tolerance: float = typer.Option(0.05, "--regression-tolerance", min=0, max=1),
         max_bytes: int = typer.Option(DEFAULT_MAX_BYTES, min=1, max=256 * 1024 * 1024),
@@ -102,6 +104,7 @@ def register_evaluation_cli(app: typer.Typer) -> None:
                 baseline_run_id=baseline_run_id,
                 regression_metric=metric,
                 regression_tolerance=tolerance,
+                experiment_id=experiment_id,
             )
         except (OSError, TimeoutError, ValueError, RuntimeError) as exc:
             _error(f"Evaluation report could not be saved: {exc}")
@@ -119,6 +122,50 @@ def register_evaluation_cli(app: typer.Typer) -> None:
             else:
                 console.print(f"Baseline gate: {comparison['status']} ({comparison['delta']:+.4f})")
         console.print("No model inference was run; only precomputed outputs were scored.")
+
+    @app.command("compare-experiments")
+    def evaluation_compare_experiments(
+        baseline_experiment_id: str,
+        candidate_experiment_id: str,
+        metric: str = typer.Option("token_f1_micro", "--metric"),
+        json_output: bool = typer.Option(False, "--json", help="Emit the complete statistical comparison as JSON."),
+    ) -> None:
+        """Statistically compare repeated offline evaluation runs linked to two saved experiments."""
+        try:
+            report = compare_experiment_evaluations(
+                baseline_experiment_id,
+                candidate_experiment_id,
+                metric=metric,
+            )
+        except (OSError, ValueError, RuntimeError) as exc:
+            _error(str(exc))
+        if json_output:
+            console.print_json(json.dumps(report, ensure_ascii=False, allow_nan=False))
+            return
+        table = Table(title=f"Experiment comparison · {report['metric']}")
+        table.add_column("Group")
+        table.add_column("Replicates", justify="right")
+        table.add_column("Mean", justify="right")
+        table.add_column("Std dev", justify="right")
+        table.add_column("Range")
+        for label, entry in (("Baseline", report["baseline"]), ("Candidate", report["candidate"])):
+            deviation = "n/a" if entry["sample_standard_deviation"] is None else f"{entry['sample_standard_deviation']:.6f}"
+            table.add_row(
+                label,
+                str(entry["replicate_count"]),
+                f"{entry['mean']:.6f}",
+                deviation,
+                f"{entry['minimum']:.4f}–{entry['maximum']:.4f}",
+            )
+        console.print(table)
+        difference = report["difference"]
+        console.print(f"Candidate − baseline mean: {difference['candidate_minus_baseline_mean']:+.6f} ({difference['direction']}).")
+        test = report["statistical_test"]
+        if test["p_value"] is None:
+            console.print("Statistical test: insufficient replicates (at least two per group are required).")
+        else:
+            console.print(f"Welch two-sided p-value: {test['p_value']:.6g}")
+        console.print(report["scope_note"])
 
     @app.command("list")
     def evaluation_list(
