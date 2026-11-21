@@ -16,7 +16,7 @@ const formatEstimatedMemory = (gib: number): string => {
 };
 
 import BenchmarkResourceTrends, { type BenchmarkResourceSample } from "./BenchmarkResourceTrends";
-import { axiomApi, type AxiomEngineAdapterCompatibility, type AxiomEngineAssets, type AxiomEngineBatchResult, type AxiomEngineBenchmark, type AxiomEngineBenchmarkProfile, type AxiomEngineBenchmarkProfileComparison, type AxiomEngineLiveTelemetry, type AxiomEngineResult, type AxiomEngineStatus, type AxiomEngineStreamEvent, type AxiomEngineSystemTelemetry, type AxiomQuantizationEstimate } from "../api/client";
+import { axiomApi, type AxiomEngineAdapterCompatibility, type AxiomEngineAssets, type AxiomEngineBatchResult, type AxiomEngineBenchmark, type AxiomEngineBenchmarkProfile, type AxiomEngineBenchmarkProfileComparison, type AxiomEngineLiveTelemetry, type AxiomEngineResult, type AxiomEngineStatus, type AxiomPredictionJob, type AxiomEngineStreamEvent, type AxiomEngineSystemTelemetry, type AxiomQuantizationEstimate } from "../api/client";
 
 export default function LocalAxiomEnginePanel() {
   const [status, setStatus] = useState<AxiomEngineStatus | null>(null);
@@ -54,6 +54,16 @@ export default function LocalAxiomEnginePanel() {
   const [unloading, setUnloading] = useState(false);
   const [lifecycleNotice, setLifecycleNotice] = useState("");
   const [error, setError] = useState("");
+  const [predictionJobs, setPredictionJobs] = useState<AxiomPredictionJob[]>([]);
+  const [predictionDatasetPath, setPredictionDatasetPath] = useState("data/evaluation.jsonl");
+  const [predictionOutputPath, setPredictionOutputPath] = useState("data/predictions.jsonl");
+  const [predictionPromptField, setPredictionPromptField] = useState("prompt");
+  const [predictionReferenceField, setPredictionReferenceField] = useState("reference");
+  const [predictionField, setPredictionField] = useState("prediction");
+  const [predictionMaxTokens, setPredictionMaxTokens] = useState("64");
+  const [predictionSeed, setPredictionSeed] = useState("");
+  const [predictionBusy, setPredictionBusy] = useState(false);
+  const [predictionError, setPredictionError] = useState("");
   const [quantContextLength, setQuantContextLength] = useState("4096");
   const [quantBatchSize, setQuantBatchSize] = useState("1");
   const [ramBudgetGiB, setRamBudgetGiB] = useState("16");
@@ -105,6 +115,31 @@ export default function LocalAxiomEnginePanel() {
 
   useEffect(() => {
     let active = true;
+    void axiomApi.axiomPredictionJobs().then((page) => {
+      if (active) setPredictionJobs(page.jobs);
+    }).catch((cause) => {
+      if (active) setPredictionError(cause instanceof Error ? cause.message : "Prediction job history is unavailable.");
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const activeStatuses = new Set(["queued", "running", "cancelling", "finalizing", "publishing"]);
+    if (!predictionJobs.some((job) => activeStatuses.has(job.status))) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void axiomApi.axiomPredictionJobs().then((page) => {
+        if (active) setPredictionJobs(page.jobs);
+      }).catch((cause) => {
+        if (active) setPredictionError(cause instanceof Error ? cause.message : "Prediction job progress could not be refreshed.");
+      });
+    }, 1200);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [predictionJobs]);
+
+
+  useEffect(() => {
+    let active = true;
     void axiomApi.axiomEngineBenchmarkProfiles().then((result) => {
       if (active) setBenchmarkProfiles(result.profiles);
     }).catch((cause) => {
@@ -112,6 +147,86 @@ export default function LocalAxiomEnginePanel() {
     });
     return () => { active = false; };
   }, []);
+
+  const refreshPredictionJobs = async () => {
+    setPredictionError("");
+    try {
+      const page = await axiomApi.axiomPredictionJobs();
+      setPredictionJobs(page.jobs);
+    } catch (cause) {
+      setPredictionError(cause instanceof Error ? cause.message : "Prediction job history is unavailable.");
+    }
+  };
+
+  const startPredictionJob = async () => {
+    setPredictionError("");
+    const tokenLimit = Number(predictionMaxTokens);
+    const temperatureValue = Number(temperature);
+    const seedValue = predictionSeed.trim() === "" ? null : Number(predictionSeed);
+    if (!modelPath.trim()) { setPredictionError("Choose a supported local native model first."); return; }
+    if (!predictionDatasetPath.trim() || !predictionOutputPath.trim()) { setPredictionError("Dataset and output paths are required."); return; }
+    if (!predictionDatasetPath.startsWith("data/") || !predictionOutputPath.startsWith("data/")) {
+      setPredictionError("Prediction input and output must be workspace-relative paths under data/.");
+      return;
+    }
+    if (!predictionDatasetPath.toLowerCase().endsWith(".jsonl") || !predictionOutputPath.toLowerCase().endsWith(".jsonl")) {
+      setPredictionError("Prediction input and output must use the .jsonl format.");
+      return;
+    }
+    if (!Number.isInteger(tokenLimit) || tokenLimit < 1 || tokenLimit > 64) {
+      setPredictionError("Prediction jobs are capped at 64 generated tokens per row.");
+      return;
+    }
+    if (!Number.isFinite(temperatureValue) || temperatureValue < 0 || temperatureValue > 2) {
+      setPredictionError("Temperature must be between 0 and 2.");
+      return;
+    }
+    if (predictionSeed.trim() !== "" && (!Number.isSafeInteger(seedValue) || seedValue! < 0)) {
+      setPredictionError("Seed must be a non-negative safe integer or blank.");
+      return;
+    }
+    if (![predictionPromptField, predictionReferenceField, predictionField].every((value) => /^[A-Za-z_][A-Za-z0-9_.-]{0,159}$/.test(value))) {
+      setPredictionError("Field names must use letters, digits, underscores, dots or hyphens.");
+      return;
+    }
+    setPredictionBusy(true);
+    try {
+      const result = await axiomApi.startAxiomPredictionJob({
+        model_path: modelPath.trim(),
+        adapter_path: adapterPath.trim() || undefined,
+        dataset_path: predictionDatasetPath.trim(),
+        output_path: predictionOutputPath.trim(),
+        prompt_field: predictionPromptField.trim(),
+        reference_field: predictionReferenceField.trim(),
+        prediction_field: predictionField.trim(),
+        max_new_tokens: tokenLimit,
+        temperature: temperatureValue,
+        seed: seedValue,
+        device: devicePreference,
+        precision,
+      });
+      setPredictionJobs((current) => [result.job, ...current.filter((job) => job.id !== result.job.id)].slice(0, 20));
+      await refreshPredictionJobs();
+      setLifecycleNotice("Prediction job started. Its output remains unpublished until every row completes and the artifact is verified.");
+    } catch (cause) {
+      setPredictionError(cause instanceof Error ? cause.message : "Prediction job could not be started.");
+    } finally {
+      setPredictionBusy(false);
+    }
+  };
+
+  const cancelPredictionJob = async (jobId: string) => {
+    setPredictionError("");
+    try {
+      const result = await axiomApi.cancelAxiomPredictionJob(jobId);
+      setPredictionJobs((current) => current.map((job) => job.id === jobId ? result.job : job));
+      if (!result.cancellation_accepted) setPredictionError(result.note);
+      else setLifecycleNotice("Cancellation requested. AXIOM will stop at the next safe generation boundary.");
+      await refreshPredictionJobs();
+    } catch (cause) {
+      setPredictionError(cause instanceof Error ? cause.message : "Prediction job cancellation failed.");
+    }
+  };
 
   const unload = async () => {
     setUnloading(true);
@@ -625,6 +740,74 @@ export default function LocalAxiomEnginePanel() {
         {!result && streamTokenCount > 0 && <span className="quiet-note"><Activity size={14} /> {streamTokenCount} token(s) streamed</span>}
       </div>
     </form>
+    <section className="panel-surface prediction-job-panel" aria-label="Resumable prediction jobs" style={{ padding: 14, marginTop: 14 }}>
+      <div className="surface-head">
+        <div>
+          <p className="surface-eyebrow">AXIOM ENGINE · CHECKPOINTED JSONL JOBS</p>
+          <h3>Prediction jobs</h3>
+          <p className="quiet-note">Run bounded local inference over a workspace JSONL dataset. Jobs persist row progress, never persist prompts or generated text, and publish a new output file only after the complete artifact has been verified.</p>
+        </div>
+        <button type="button" className="button secondary-button" onClick={() => void refreshPredictionJobs()}><RefreshCcw size={14} /> Refresh jobs</button>
+      </div>
+      <div className="two-column-grid">
+        <label className="field">
+          <span className="field-label-row"><span>Input JSONL path</span></span>
+          <input aria-label="Prediction dataset path" value={predictionDatasetPath} onChange={(event) => setPredictionDatasetPath(event.target.value)} maxLength={512} />
+        </label>
+        <label className="field">
+          <span className="field-label-row"><span>New output JSONL path</span></span>
+          <input aria-label="Prediction output path" value={predictionOutputPath} onChange={(event) => setPredictionOutputPath(event.target.value)} maxLength={512} />
+        </label>
+        <label className="field">
+          <span className="field-label-row"><span>Prompt field</span></span>
+          <input aria-label="Prediction prompt field" value={predictionPromptField} onChange={(event) => setPredictionPromptField(event.target.value)} maxLength={160} />
+        </label>
+        <label className="field">
+          <span className="field-label-row"><span>Reference field</span></span>
+          <input aria-label="Prediction reference field" value={predictionReferenceField} onChange={(event) => setPredictionReferenceField(event.target.value)} maxLength={160} />
+        </label>
+        <label className="field">
+          <span className="field-label-row"><span>Prediction output field</span></span>
+          <input aria-label="Prediction output field" value={predictionField} onChange={(event) => setPredictionField(event.target.value)} maxLength={160} />
+        </label>
+        <label className="field">
+          <span className="field-label-row"><span>Tokens per row (maximum 64)</span></span>
+          <input aria-label="Prediction tokens per row" type="number" min={1} max={64} step={1} value={predictionMaxTokens} onChange={(event) => setPredictionMaxTokens(event.target.value)} />
+        </label>
+        <label className="field">
+          <span className="field-label-row"><span>Prediction seed (optional)</span></span>
+          <input aria-label="Prediction job seed" type="number" min={0} max={Number.MAX_SAFE_INTEGER} step={1} value={predictionSeed} onChange={(event) => setPredictionSeed(event.target.value)} placeholder="Use a non-fixed seed" />
+        </label>
+      </div>
+      <p className="quiet-note">Hard limits: 100 rows · 48 MiB source · 4 prompts per generation batch · 64 generated tokens per row · 64 MiB output. Uses the selected model, adapter, device and precision above. Output paths must be new files under data/.</p>
+      <div className="integration-form-actions">
+        <button type="button" className="button primary-button" onClick={() => void startPredictionJob()} disabled={predictionBusy || running || benchmarking || unloading || !status?.ready || !modelPath.trim()}>
+          {predictionBusy ? "Starting prediction job…" : "Start checkpointed prediction job"}
+        </button>
+      </div>
+      {predictionError && <div className="inline-alert warning" role="alert">{predictionError}</div>}
+      {predictionJobs.length ? <div className="module-list" aria-label="Saved prediction job history">
+        {predictionJobs.map((job) => {
+          const active = ["queued", "running", "cancelling", "finalizing", "publishing"].includes(job.status);
+          const progress = job.rows_total > 0 ? Math.min(100, Math.round(job.rows_completed / job.rows_total * 100)) : 0;
+          return <article className="module-row prediction-job-row" key={job.id} aria-label={"Prediction job " + job.id}>
+            <span className="module-icon"><Activity size={17} /></span>
+            <span className="module-copy">
+              <b>{job.output_path} · {job.status.replaceAll("_", " ")}</b>
+              <small>{job.rows_completed.toLocaleString()} / {job.rows_total.toLocaleString()} rows · {job.prompts_truncated} prompt truncation(s) · {job.id.slice(0, 12)}</small>
+              <progress aria-label={"Progress for prediction job " + job.id} value={job.rows_completed} max={Math.max(1, job.rows_total)} style={{ width: "100%", maxWidth: 440 }} />
+              {job.artifact_ready
+                ? <small>Verified output published · run axiom evaluation using {job.output_path} and its prediction/reference fields</small>
+                : <small>Output not published until completion{job.error_code ? " · safe error: " + job.error_code : ""}</small>}
+              {job.recovery_note && <small>{job.recovery_note}</small>}
+            </span>
+            <span className={"status-pill " + (job.status === "completed" ? "success" : active ? "warning" : job.status === "failed" || job.status === "interrupted" ? "warning" : "neutral")}>{job.status.toUpperCase().replaceAll("_", " ")}</span>
+            {active && <button type="button" className="icon-button danger-icon-button" aria-label={"Cancel prediction job " + job.id} onClick={() => void cancelPredictionJob(job.id)}><Unplug size={15} /></button>}
+          </article>;
+        })}
+      </div> : <p className="quiet-note">No prediction jobs have been saved in this workspace.</p>}
+      <p className="quiet-note">Job progress is persisted, but this version does not resume generation after an owning worker process exits. Interrupted jobs are explicitly marked; no partial output is presented as complete.</p>
+    </section>
     {batchResult && <section className="panel-surface" aria-label="Native batch results" style={{ padding: 14, marginTop: 14 }}>
       <div className="surface-head">
         <div><p className="surface-eyebrow">AXIOM ENGINE · NATIVE BATCH</p><h3>{batchResult.batch_size} prompt results</h3></div>
