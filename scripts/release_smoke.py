@@ -246,7 +246,10 @@ def structured_inference_issues(
         )),
         ("runtime", inference_core, (
             "response_format: dict[str, Any] | None = None",
-            'payload["format"] = validate_json_schema(response_format)',
+            "normalized_schema = validate_json_schema(response_format)",
+            'normalized_schema.pop("$schema", None)',
+            'payload["format"] = normalized_schema',
+            "Return only one JSON value",
         )),
         ("API", inference_api, (
             'class StructuredGenerateRequest(GenerateRequest):',
