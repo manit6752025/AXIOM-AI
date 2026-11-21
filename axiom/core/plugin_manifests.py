@@ -168,7 +168,9 @@ class PluginManifestStore:
     """Workspace-local manifest inventory with explicit hash-bound grants."""
 
     def __init__(self, root: Path | None = None) -> None:
-        metadata_root = Path(root) if root is not None else workspace_metadata_dir()
+        metadata_root = Path(root).expanduser() if root is not None else Path(workspace_metadata_dir())
+        if not metadata_root.is_absolute():
+            metadata_root = Path.cwd() / metadata_root
         self.root = metadata_root / "plugins"
         self.registry_file = self.root / "registry.json"
         self.lock_file = self.root / ".registry.lock"
@@ -471,7 +473,6 @@ class PluginManifestStore:
     def register(self, document: Any) -> dict[str, Any]:
         manifest, digest = validate_plugin_manifest(document)
         self._assert_safe_paths()
-        self.root.mkdir(parents=True, exist_ok=True)
         with self._locked_directory() as directory_fd:
             stored = self._read(directory_fd)
             existing_index = next(
