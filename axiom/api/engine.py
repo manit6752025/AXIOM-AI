@@ -880,7 +880,7 @@ class LocalEmbeddingsRequest(BaseModel):
     chunk_size_chars: int = Field(default=2048, ge=256, le=8192, strict=True)
     chunk_overlap_chars: int = Field(default=128, ge=0, le=1024, strict=True)
     device: str = Field(default="auto", pattern="^(auto|cpu|cuda|rocm|mps|xpu)$")
-    normalize: bool = True
+    normalize: bool = Field(default=True, strict=True)
 
     @field_validator("model_path", mode="before")
     @classmethod
