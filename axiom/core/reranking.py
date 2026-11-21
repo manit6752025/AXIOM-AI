@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import gc
+import math
 import threading
 from typing import Any
 from pathlib import Path
@@ -117,6 +118,20 @@ def unload_local_reranker() -> dict[str, Any]:
             "scope_note": "Only AXIOM's cached reranker was unloaded; model files were not changed."}
 
 
+def _ranked_results(scores: list[float], documents: list[str]) -> list[dict[str, Any]]:
+    """Return score metadata in descending order with stable ties."""
+    if len(scores) != len(documents):
+        raise RerankerError("The reranker returned a different number of scores than input documents.")
+    if any(not isinstance(score, (int, float)) or not math.isfinite(score) for score in scores):
+        raise RerankerError("The reranker produced an invalid score.")
+    order = sorted(range(len(scores)), key=lambda index: (-scores[index], index))
+    return [
+        {"rank": rank, "document_index": index + 1, "score": round(float(scores[index]), 8),
+         "document_characters": len(documents[index])}
+        for rank, index in enumerate(order, start=1)
+    ]
+
+
 def rerank_local_documents(
     model_path: str,
     query: str,
@@ -173,7 +188,6 @@ def rerank_local_documents(
         except (OSError, RuntimeError, ValueError, TypeError, KeyError, IndexError):
             raise RerankerError("Local reranking failed; query and document text were not retained.") from None
 
-    order = sorted(range(len(documents)), key=lambda index: (-scores[index], index))
     return {
         "schema_version": 1,
         "engine": "axiom-local-cross-encoder",
@@ -181,11 +195,7 @@ def rerank_local_documents(
         "device": str(selected_device),
         "request": {"document_count": len(documents), "batch_size": batch_size, "max_length": max_length,
                     "query_characters": len(query), "total_document_characters": sum(len(value) for value in documents)},
-        "results": [
-            {"rank": rank, "document_index": index + 1, "score": round(scores[index], 8),
-             "document_characters": len(documents[index])}
-            for rank, index in enumerate(order, start=1)
-        ],
+        "results": _ranked_results(scores, documents),
         "privacy": {"query_returned": False, "documents_returned": False, "text_persisted": False,
                     "model_files_uploaded": False, "network_used": False},
         "scope_note": (
