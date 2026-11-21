@@ -573,6 +573,52 @@ export type AxiomEngineStatus = {
   supported_model_types?: string[]; supported_weights?: string[]; remote_code: false;
   setup_note: string; scope_note: string; checked_at: string;
 };
+export type AxiomEngineServingProfile = {
+  id: string;
+  name: string;
+  model_path: string;
+  adapter_path: string | null;
+  device_preference: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu";
+  memory_mode: "auto" | "full" | "layer_streaming" | "disk_streaming";
+  precision: "auto" | "fp32" | "fp16" | "bf16";
+  context_length: number;
+  max_new_tokens: number;
+  max_prompt_chars: number;
+  max_concurrent_requests: 1;
+  max_queued_requests: 0;
+  request_timeout_seconds: number;
+  created_at: string;
+  updated_at: string;
+};
+export type AxiomEngineServingProfileList = {
+  schema_version: 1;
+  profiles: AxiomEngineServingProfile[];
+  total: number;
+  max_profiles: number;
+  credentials_persisted: false;
+  network_used: false;
+  weights_loaded: false;
+};
+export type AxiomEngineServingReadiness = {
+  schema_version: 1;
+  profile_id: string;
+  profile_name: string;
+  ready: boolean;
+  checks: Record<string, unknown>;
+  problems: string[];
+  weights_loaded: false;
+  service_started: false;
+  network_used: false;
+  probed_at: string;
+  scope_note: string;
+};
+export type AxiomEngineServingGeneration = {
+  schema_version: 1;
+  profile: { id: string; name: string };
+  request_budget: { prompt_characters: number; prompt_tokens: number; max_new_tokens: number; requested_context_tokens: number; context_limit_tokens: number };
+  result: AxiomEngineResult;
+  scope: { local_only: true; network_used: false; profile_persisted: false };
+};
 export type AxiomEngineSampling = {
   temperature: number; top_p: number; top_k: number; min_p: number;
   repetition_penalty: number; seed: number | null;
@@ -2906,6 +2952,29 @@ export const axiomApi = {
     requestJson<AxiomEngineBenchmarkProfileList>("/api/engine/benchmark-profiles?limit=" + limit),
   compareAxiomEngineBenchmarkProfiles: (leftId: string, rightId: string) =>
     requestJson<AxiomEngineBenchmarkProfileComparison>("/api/engine/benchmark-profiles/compare?" + new URLSearchParams({ left_id: leftId, right_id: rightId })),
+  axiomEngineServingProfiles: () =>
+    requestJson<AxiomEngineServingProfileList>("/api/engine/serving-profiles"),
+  createAxiomEngineServingProfile: (input: {
+    name: string; model_path: string; adapter_path?: string | null;
+    device_preference: AxiomEngineServingProfile["device_preference"];
+    memory_mode: AxiomEngineServingProfile["memory_mode"];
+    precision: AxiomEngineServingProfile["precision"];
+    context_length: number; max_new_tokens: number; max_prompt_chars: number;
+    max_concurrent_requests: 1; max_queued_requests: 0; request_timeout_seconds: number;
+  }) => requestJson<{ profile: AxiomEngineServingProfile; scope: { weights_loaded: false; service_started: false; network_used: false } }>(
+    "/api/engine/serving-profiles", { method: "POST", body: JSON.stringify(input) },
+  ),
+  probeAxiomEngineServingProfile: (id: string) =>
+    requestJson<AxiomEngineServingReadiness>("/api/engine/serving-profiles/" + encodeURIComponent(id) + "/readiness", { method: "POST" }),
+  generateAxiomEngineServingProfile: (id: string, input: { prompt: string; max_new_tokens?: number }) =>
+    requestJson<AxiomEngineServingGeneration>(
+      "/api/engine/serving-profiles/" + encodeURIComponent(id) + "/generate",
+      { method: "POST", body: JSON.stringify(input) }, 900_000,
+    ),
+  deleteAxiomEngineServingProfile: (id: string) =>
+    requestJson<{ deleted: AxiomEngineServingProfile; model_files_deleted: false }>(
+      "/api/engine/serving-profiles/" + encodeURIComponent(id), { method: "DELETE" },
+    ),
   axiomEngineStatus: () => requestJson<AxiomEngineStatus>("/api/engine/status"),
   engineBackends: (profile: EngineFabricProfile = "balanced") => requestJson<EngineFabricReport>("/api/engine/backends?" + new URLSearchParams({ profile })),
   engineBackendProfiles: () => requestJson<EngineFabricProfileReport>("/api/engine/backends/profiles"),
