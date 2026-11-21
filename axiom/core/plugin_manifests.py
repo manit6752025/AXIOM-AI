@@ -26,7 +26,8 @@ MAX_TOOL_DESCRIPTION_CHARS = 2048
 _PLUGIN_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+){1,7}$")
 _PLUGIN_VERSION = re.compile(
     r"^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)"
-    r"(?:-([0-9A-Za-z.-]+))?(?:\\+[0-9A-Za-z.-]+)?$"
+    r"(?:-([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?"
+    r"(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
 )
 _TOOL_NAME = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
@@ -307,7 +308,7 @@ class PluginManifestStore:
         for record in document["manifests"]:
             manifest = record["manifest"]
             grant = document["grants"].get(manifest["id"])
-            if not grant:
+            if not grant or not grant["tools"]:
                 status = "default_deny"
             elif grant["manifest_sha256"] != record["sha256"]:
                 status = "stale_manifest"
