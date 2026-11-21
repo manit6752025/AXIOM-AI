@@ -440,6 +440,92 @@ def _frontend_dependency_mismatches(source_root: Path) -> list[str]:
         return [f"could not validate package-lock.json ({exc})"]
 
 
+
+def _frontend_runtime_typescript_mismatches(source_root: Path) -> list[str]:
+    """Check the TypeScript version actually resolved by typescript-eslint's parser."""
+    lock_path = source_root / "package-lock.json"
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        packages = lock.get("packages") if isinstance(lock, dict) else None
+        if not isinstance(packages, dict):
+            return []
+        locked_typescript = packages.get("node_modules/typescript")
+        locked_version = locked_typescript.get("version") if isinstance(locked_typescript, dict) else None
+        if not isinstance(locked_version, str) or "node_modules/typescript-eslint" not in packages:
+            return []
+
+        node = shutil.which("node") or shutil.which("nodejs")
+        if node is None:
+            return ["Node.js is required to verify the TypeScript runtime used by ESLint."]
+
+        resolver = r"""
+const fs = require("node:fs");
+const path = require("node:path");
+const { createRequire } = require("node:module");
+const rootRequire = createRequire(path.join(process.cwd(), "package.json"));
+const eslintEntry = rootRequire.resolve("typescript-eslint");
+const eslintRequire = createRequire(eslintEntry);
+const results = [];
+for (const name of ["@typescript-eslint/parser", "@typescript-eslint/typescript-estree"]) {
+  let entry;
+  try {
+    entry = eslintRequire.resolve(name);
+  } catch {
+    results.push({ importer: name, version: null });
+    continue;
+  }
+  let resolved;
+  try {
+    resolved = createRequire(entry).resolve("typescript");
+  } catch {
+    results.push({ importer: name, version: null });
+    continue;
+  }
+  let directory = path.dirname(resolved);
+  let version = null;
+  while (directory !== path.dirname(directory)) {
+    try {
+      const metadata = JSON.parse(fs.readFileSync(path.join(directory, "package.json"), "utf8"));
+      if (metadata.name === "typescript") {
+        version = typeof metadata.version === "string" ? metadata.version : null;
+        break;
+      }
+    } catch {}
+    directory = path.dirname(directory);
+  }
+  results.push({ importer: name, version });
+}
+process.stdout.write(JSON.stringify(results));
+"""
+        completed = subprocess.run(
+            [node, "-e", resolver],
+            cwd=source_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        if completed.returncode != 0:
+            return ["could not resolve the TypeScript version used by typescript-eslint."]
+        resolved_packages = json.loads(completed.stdout)
+        if not isinstance(resolved_packages, list) or not resolved_packages:
+            return ["could not resolve the TypeScript version used by typescript-eslint."]
+
+        mismatches = []
+        for item in resolved_packages:
+            if not isinstance(item, dict):
+                continue
+            importer = item.get("importer", "typescript-eslint")
+            version = item.get("version")
+            if version != locked_version:
+                actual = version if isinstance(version, str) else "unresolved"
+                mismatches.append(
+                    f"{importer} resolves TypeScript {actual}, but package-lock.json pins {locked_version}"
+                )
+        return mismatches
+    except (OSError, UnicodeError, ValueError, TypeError, subprocess.SubprocessError):
+        return ["could not verify the TypeScript runtime used by typescript-eslint."]
+
 def _refresh_control_center(root: Path | None = None) -> None:
     """Repair locked frontend dependencies, then lint and rebuild without touching browser storage."""
     source_root = root or Path(__file__).resolve().parents[2]
@@ -450,6 +536,7 @@ def _refresh_control_center(root: Path | None = None) -> None:
         _cli_error("npm is required for axiom gui --refresh; install Node.js/npm and retry.")
 
     mismatches = _frontend_dependency_mismatches(source_root)
+    mismatches.extend(_frontend_runtime_typescript_mismatches(source_root))
     if mismatches:
         console.print("[yellow]Frontend dependencies differ from package-lock.json:[/yellow]")
         for mismatch in mismatches[:5]:
@@ -471,6 +558,7 @@ def _refresh_control_center(root: Path | None = None) -> None:
                 "the previous bundled UI remains available."
             )
         remaining = _frontend_dependency_mismatches(source_root)
+        remaining.extend(_frontend_runtime_typescript_mismatches(source_root))
         if remaining:
             _cli_error(
                 "Frontend dependencies still differ from package-lock.json after npm ci: "
@@ -2528,7 +2616,7 @@ def mcp_serve():
 
 def main() -> None:
     """Run the public CLI using its stable executable name in every help screen."""
-    app(prog_name="axiom")
+    get_command(app).main(prog_name="axiom")
 
 
 if __name__ == "__main__":
