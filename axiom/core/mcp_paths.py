@@ -49,6 +49,20 @@ def _is_link_like(path: Path) -> bool:
     return bool(is_junction and is_junction())
 
 
+def _workspace_root(root: Path) -> Path:
+    """Resolve a real workspace directory without accepting a symlink/junction root."""
+    supplied = Path(root)
+    if _is_link_like(supplied):
+        raise ValueError("The MCP workspace root must not be a symbolic link.")
+    try:
+        workspace = supplied.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError("The MCP workspace root is unavailable.") from exc
+    if not workspace.is_dir():
+        raise ValueError("The MCP workspace root must be a directory.")
+    return workspace
+
+
 def _fallback_workspace_path(
     raw: str,
     root: Path,
@@ -56,7 +70,7 @@ def _fallback_workspace_path(
     allow_existing_output: bool = False,
 ) -> Path:
     parts = _parts(raw)
-    workspace = Path(root).resolve(strict=True)
+    workspace = _workspace_root(root)
     candidate = workspace
     for index, part in enumerate(parts):
         candidate = candidate / part
@@ -77,7 +91,7 @@ def _fallback_workspace_path(
 def _open_parent(root: Path, parts: tuple[str, ...]) -> tuple[Path, int, str]:
     descriptor: int | None = None
     try:
-        workspace = Path(root).resolve(strict=True)
+        workspace = _workspace_root(root)
         process_root = Path.cwd().resolve(strict=True)
         workspace_parts = workspace.relative_to(process_root).parts
         directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
