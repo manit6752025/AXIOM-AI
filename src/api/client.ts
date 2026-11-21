@@ -456,6 +456,28 @@ export type AxiomEngineAssets = {
   truncated: boolean; scope_note: string;
 };
 
+export type LocalEmbeddingsReport = {
+  schema_version: number;
+  engine: string;
+  model: { name: string; dimension: number };
+  device: string;
+  request: {
+    input_count: number; chunk_count: number; batch_size: number; max_length: number;
+    chunk_size_chars: number; chunk_overlap_chars: number; normalized: boolean; input_characters: number;
+  };
+  chunks: Array<{
+    input_index: number; chunk_index: number; start_char: number; end_char: number;
+    characters: number; embedding_index: number;
+  }>;
+  embeddings: number[][];
+  privacy: {
+    source_text_returned: false; source_text_persisted: false; model_files_uploaded: false;
+    network_used: false; results_persisted: false;
+  };
+  scope_note: string;
+  generated_at: string;
+};
+
 export type AxiomEngineAdapterDevice = {
   name: "CPU" | "CUDA" | "ROCm" | "Metal/MPS";
   available: boolean; compatible: boolean;
@@ -2403,6 +2425,17 @@ export const axiomApi = {
       window.clearTimeout(timeout);
     }
   },
+
+  embedLocalTexts: (input: {
+    model_path: string; texts: string[]; batch_size?: number; max_length?: number;
+    chunk_size_chars?: number; chunk_overlap_chars?: number;
+    device?: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu"; normalize?: boolean;
+  }) => requestJson<LocalEmbeddingsReport>("/api/engine/embeddings", {
+    method: "POST", body: JSON.stringify(input),
+  }),
+  unloadLocalEmbeddings: () => requestJson<{ schema_version: number; unloaded: boolean; scope_note: string }>(
+    "/api/engine/embeddings/unload", { method: "POST" },
+  ),
 
   runtime: () => requestJson<RuntimeSnapshot>("/api/workspace/runtime"),
   hardwareSnapshots: () => requestJson<HardwareSnapshotHistory>("/api/workspace/hardware-snapshots"),
