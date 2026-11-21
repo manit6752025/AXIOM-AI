@@ -230,6 +230,78 @@ def inference_benchmark_issues(core_source: str, api_source: str, client_source:
     return issues
 
 
+def structured_inference_issues(
+    schema_core: str, inference_core: str, inference_api: str, client_source: str,
+    cli_source: str, panel_source: str, schema_tests: str, core_tests: str,
+    api_tests: str, cli_tests: str, e2e_source: str, docs_source: str,
+) -> list[str]:
+    """Check JSON Schema constrained local inference across runtime, API, CLI and GUI."""
+    issues: list[str] = []
+    checks = (
+        ("schema validator", schema_core, (
+            "MAX_SCHEMA_BYTES = 32 * 1024", "MAX_SCHEMA_DEPTH = 8",
+            "MAX_SCHEMA_NODES = 128", "MAX_OUTPUT_CHARS = 65_536",
+            "def validate_json_schema(", "def parse_and_validate_json_output(",
+            "additionalProperties", "object_pairs_hook=unique_pairs",
+        )),
+        ("runtime", inference_core, (
+            "response_format: dict[str, Any] | None = None",
+            'payload["format"] = validate_json_schema(response_format)',
+        )),
+        ("API", inference_api, (
+            'class StructuredGenerateRequest(GenerateRequest):',
+            '@router.post("/generate/structured")',
+            "structured_output_token_limit", "parse_and_validate_json_output(",
+            '"structured_output_validated": True',
+        )),
+        ("typed client", client_source, (
+            "export type LocalInferenceStructuredInput",
+            "generateStructuredLocalInference:",
+            '"/api/inference/generate/structured"',
+        )),
+        ("CLI", cli_source, (
+            '"--schema-file"', "def _load_json_schema_file(", "os.O_NOFOLLOW",
+            "parse_and_validate_json_output(", "structured_output_validated",
+        )),
+        ("Runtime GUI", panel_source, (
+            "Structured JSON output · optional", "JSON Schema for structured output",
+            "generateStructuredLocalInference(", "SCHEMA VALIDATED",
+        )),
+        ("schema tests", schema_tests, (
+            "test_schema_subset_normalizes_to_supported_draft",
+            "test_schema_rejects_unsupported_or_unbounded_keywords",
+            "test_output_parser_rejects_duplicate_non_finite_invalid_or_wrong_type_values",
+        )),
+        ("core tests", core_tests, (
+            "test_structured_generation_passes_validated_schema_to_ollama_format",
+            "test_invalid_structured_schema_is_rejected_before_loopback",
+        )),
+        ("API tests", api_tests, (
+            "test_structured_inference_passes_schema_and_returns_validated_json",
+            "test_structured_inference_rejects_unsupported_schema_before_runtime",
+            "test_structured_inference_rejects_model_output_that_does_not_match_schema",
+        )),
+        ("CLI tests", cli_tests, (
+            "test_infer_run_supports_json_schema_constrained_local_output",
+            "test_infer_run_rejects_remote_reference_schemas_before_generation",
+            "test_infer_run_rejects_symlinked_schema_files",
+        )),
+        ("browser acceptance", e2e_source, (
+            "schema-constrained local inference", '"/api/inference/generate/structured"',
+            "SCHEMA VALIDATED", "JSON Schema for structured output",
+        )),
+        ("documentation", docs_source, (
+            "POST /api/inference/generate/structured", "--schema-file",
+            "512 requested output tokens", "additionalProperties",
+        )),
+    )
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                issues.append(f"Structured local inference {label} contract is missing: {token}")
+    return issues
+
+
 def runtime_trace_issues(trace_core: str, inference_api: str, diagnostics_api: str, client_source: str, app_source: str, panel_source: str, e2e_source: str) -> list[str]:
     """Check runtime request correlation, metadata-only storage, API controls and GUI wiring."""
     issues: list[str] = []
@@ -902,7 +974,8 @@ def inspect(root: Path) -> dict[str, Any]:
     required = [
         "pyproject.toml", "axiom/version.py", "ROADMAP.md", "src/App.tsx",
         "src/api/client.ts", "src/components/ApiPlayground.tsx", "src/components/RuntimeConnectorPanel.tsx", "src/components/AgentProfiles.tsx", "src/components/LocalInferencePanel.tsx", "src/components/RuntimeTracePanel.tsx", "src/components/EngineTelemetryMonitor.tsx", "src/components/LocalAxiomEnginePanel.tsx", "src/components/BenchmarkResourceTrends.tsx", "src/components/ModelStudioPanel.tsx", "src/styles.css",
-        "axiom/api/server.py", "axiom/api/workspace.py", "axiom/datasets/snapshots.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/api/model_studio.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/model_studio.py", "axiom/core/runtime_traces.py", "axiom/core/resource_telemetry.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/core/engine_fabric_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "axiom/cli/model_studio.py", "scripts/release_smoke.py", "scripts/verify_package_artifacts.py", "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py",
+        "axiom/core/json_schema.py", "tests/test_json_schema.py", "tests/test_inference_structured_api.py", "docs/wiki/Structured-Output.md",
+                "axiom/api/server.py", "axiom/api/workspace.py", "axiom/datasets/snapshots.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/api/model_studio.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/model_studio.py", "axiom/core/runtime_traces.py", "axiom/core/resource_telemetry.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/core/engine_fabric_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "axiom/cli/model_studio.py", "scripts/release_smoke.py", "scripts/verify_package_artifacts.py", "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py",
         "tests/test_release_smoke.py", "tests/test_ollama_service.py", "tests/test_ollama_service_api.py", "tests/test_ollama_model_operations.py", "tests/test_cli_inference.py", "tests/test_axiom_engine.py", "tests/test_axiom_engine_api.py", "axiom/core/benchmark_profiles.py", "tests/test_benchmark_profiles.py", "tests/test_benchmark_profiles_api.py", "tests/test_axiom_engine_cli.py", "tests/test_native_engine.py", "tests/test_model_studio.py", "tests/test_engine_runtime_status.py", "tests/test_cli_model_studio_jobs.py", "e2e/axiom-engine.spec.ts", "e2e/helpers/auth.ts", "e2e/modules.spec.ts", "e2e/workflows.spec.ts", "e2e/evaluation.spec.ts",
         "e2e/model-registry-filters.spec.ts", "e2e/ollama-service.spec.ts", "e2e/inference-benchmark.spec.ts", "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/dataset-snapshots.spec.ts", "e2e/axiom-engine.spec.ts", "tests/test_workspace_model_registry_filters.py", "tests/test_workflow_store_pagination.py", "tests/test_workflow_api_pagination.py", "tests/test_workflow_cli.py",
         "tests/test_model_compatibility.py", "tests/test_inference_benchmark.py", "tests/test_inference_benchmark_api.py", "tests/test_runtime_traces.py", "tests/test_runtime_traces_api.py", "tests/test_resource_telemetry.py", "tests/test_resource_telemetry_api.py", "tests/test_runtime_discovery.py", "tests/test_runtime_discovery_api.py", "tests/test_agent_profiles.py", "tests/test_agent_profiles_api.py", "tests/test_agent_profiles_cli.py", "tests/test_engine_fabric_profiles.py", "tests/test_engine_fabric_profiles_api.py", "tests/test_engine_fabric_profiles_cli.py", "e2e/api-playground.spec.ts", "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts", "e2e/engine-fabric.spec.ts",
@@ -1011,6 +1084,17 @@ def inspect(root: Path) -> dict[str, Any]:
     for token in ("test_advanced_sampling_options_are_forwarded", "test_invalid_sampling_options_are_rejected"):
         if token not in inference_core_tests:
             failures.append("Ollama advanced sampling core tests are missing: " + token)
+    schema_core = (root / "axiom/core/json_schema.py").read_text(encoding="utf-8")
+    schema_tests = (root / "tests/test_json_schema.py").read_text(encoding="utf-8")
+    structured_api_tests = (root / "tests/test_inference_structured_api.py").read_text(encoding="utf-8")
+    structured_docs = (root / "docs/wiki/Structured-Output.md").read_text(encoding="utf-8")
+    structured_docs += "\\n" + (root / "docs/Local-Inference.md").read_text(encoding="utf-8")
+    failures.extend(structured_inference_issues(
+        schema_core, inference_core, inference_api, client, ollama_cli,
+        inference_panel, schema_tests, inference_core_tests, structured_api_tests,
+        (root / "tests/test_cli_inference.py").read_text(encoding="utf-8"),
+        inference_stream_e2e, structured_docs,
+    ))
     inference_stream_e2e = (root / "e2e/inference.spec.ts").read_text(encoding="utf-8")
     for token in ("test_streaming_api_passes_advanced_sampling_options", "test_generate_api_rejects_oversized_context_and_stop_sequence_lists", "test_streaming_inference_emits_ndjson_token_deltas", "test_streaming_inference_sanitizes_runtime_failures"):
         if token not in ollama_api_tests:
