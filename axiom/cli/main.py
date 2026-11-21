@@ -468,10 +468,10 @@ const rootRequire = createRequire(path.join(process.cwd(), "package.json"));
 const eslintEntry = rootRequire.resolve("typescript-eslint");
 const eslintRequire = createRequire(eslintEntry);
 const results = [];
-for (const name of ["@typescript-eslint/parser", "@typescript-eslint/typescript-estree"]) {
+for (const name of ["typescript-eslint", "@typescript-eslint/parser", "@typescript-eslint/typescript-estree"]) {
   let entry;
   try {
-    entry = eslintRequire.resolve(name);
+    entry = name === "typescript-eslint" ? eslintEntry : eslintRequire.resolve(name);
   } catch {
     results.push({ importer: name, version: null });
     continue;
