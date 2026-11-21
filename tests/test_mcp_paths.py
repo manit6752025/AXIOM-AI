@@ -19,7 +19,7 @@ def _workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.chdir(tmp_path)
     root = tmp_path / "workspace"
     (root / "data").mkdir(parents=True)
-    (root / "data" / "sample.jsonl").write_text('{"text":"safe"}\\n', encoding="utf-8")
+    (root / "data" / "sample.jsonl").write_text('{"text":"safe"}\n', encoding="utf-8")
     return root
 
 
@@ -30,7 +30,7 @@ def test_open_workspace_file_reads_regular_file_in_both_path_modes(tmp_path, mon
 
     resolved, stream = mcp_paths.open_mcp_workspace_file("data/sample.jsonl", root)
     with stream:
-        assert stream.read() == b'{"text":"safe"}\\n'
+        assert stream.read() == b'{"text":"safe"}\n'
     assert resolved == root / "data" / "sample.jsonl"
 
 
