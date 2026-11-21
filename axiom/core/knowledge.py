@@ -203,6 +203,7 @@ class KnowledgeBaseStore:
         }
 
     def list_bases(self) -> dict[str, Any]:
+        self._ensure_layout(create=True)
         with file_lock(self.lock_path):
             records = self._read_index()
         return {
@@ -234,11 +235,13 @@ class KnowledgeBaseStore:
     def get_base(self, base_id: str) -> dict[str, Any] | None:
         if not isinstance(base_id, str) or not _BASE_ID.fullmatch(base_id):
             raise KnowledgeStoreError("Knowledge base ID is invalid.")
+        self._ensure_layout(create=True)
         with file_lock(self.lock_path):
             base = next((item for item in self._read_index() if item["id"] == base_id), None)
         return self._public_base(base) if base is not None else None
 
     def list_documents(self, base_id: str) -> dict[str, Any]:
+        self._ensure_layout(create=True)
         with file_lock(self.lock_path):
             base = next((item for item in self._read_index() if item["id"] == base_id), None)
         if base is None:
@@ -298,7 +301,14 @@ class KnowledgeBaseStore:
             atomic_write_text(destination, text)
             base["documents"].append(document)
             base["updated_at"] = document["ingested_at"]
-            self._write_index(records)
+            try:
+                self._write_index(records)
+            except BaseException:
+                try:
+                    destination.unlink()
+                except OSError:
+                    pass
+                raise
         return dict(document)
 
     def read_document(self, base_id: str, document_id: str) -> str:
@@ -343,11 +353,11 @@ class KnowledgeBaseStore:
             path = self.documents_root / f"{document_id}.txt"
             if path.is_symlink():
                 raise KnowledgeStoreError("Stored knowledge document is a symbolic link.")
-            if path.exists():
-                path.unlink()
             base["documents"] = [item for item in base["documents"] if item["id"] != document_id]
             base["updated_at"] = _now()
             self._write_index(records)
+            if path.exists():
+                path.unlink()
             return dict(document)
 
     def remove_base(self, base_id: str) -> dict[str, Any] | None:
@@ -359,12 +369,15 @@ class KnowledgeBaseStore:
             base = next((item for item in records if item["id"] == base_id), None)
             if base is None:
                 return None
+            paths = []
             for document in base["documents"]:
                 path = self.documents_root / f"{document['id']}.txt"
                 if path.is_symlink():
                     raise KnowledgeStoreError("Stored knowledge document is a symbolic link.")
-                if path.exists():
-                    path.unlink()
+                paths.append(path)
             records = [item for item in records if item["id"] != base_id]
             self._write_index(records)
+            for path in paths:
+                if path.exists():
+                    path.unlink()
             return self._public_base(base)
