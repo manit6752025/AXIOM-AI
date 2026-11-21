@@ -55,6 +55,7 @@ def _path(value: Any, label: str, *, optional: bool = False) -> str | None:
         or len(value) > 4096
         or not os.path.isabs(value)
         or any(ord(character) < 32 or ord(character) == 127 for character in value)
+        or ".." in Path(value).parts
     ):
         raise ServingProfileError(f"{label} must be an absolute trusted local path.")
     return value
@@ -313,11 +314,26 @@ def readiness_probe(profile: dict[str, Any]) -> dict[str, Any]:
 
         try:
             compatibility = check_local_adapter_compatibility(profile["model_path"], adapter_path)
-            compatible = compatibility.get("compatible") is True
+            compatibility_rows = compatibility.get("devices")
+            compatibility_rows = compatibility_rows if isinstance(compatibility_rows, list) else []
+            selected_compatibility = next(
+                (
+                    item for item in compatibility_rows
+                    if isinstance(item, dict) and item.get("id") == selected_device
+                ),
+                None,
+            )
+            compatible = (
+                compatibility.get("structurally_compatible") is True
+                and selected_compatibility is not None
+                and selected_compatibility.get("compatible") is True
+            )
             checks["adapter"] = {
                 "available": compatible,
                 "compatible": compatible,
-                "device_compatibility": compatibility.get("device_compatibility", []),
+                "structurally_compatible": compatibility.get("structurally_compatible") is True,
+                "selected_device": selected_device,
+                "device_compatibility": compatibility_rows,
             }
             if not compatible:
                 problems.append("Configured LoRA adapter is not compatible with the selected base model.")
@@ -416,11 +432,12 @@ def generate_from_profile(
     seed: int | None = None,
     stop_sequences: list[str] | tuple[str, ...] = (),
     cancel_event: threading.Event | None = None,
+    prompt_budget: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute one inference request under a saved profile's validated limits."""
     from axiom.core.engine import generate_local
 
-    budget = validate_serving_prompt(profile, prompt, max_new_tokens)
+    budget = prompt_budget or validate_serving_prompt(profile, prompt, max_new_tokens)
     return generate_local(
         profile["model_path"],
         prompt,
