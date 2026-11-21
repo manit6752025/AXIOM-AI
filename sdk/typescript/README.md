@@ -95,18 +95,13 @@ buffering the complete ZIP in a single `Uint8Array`:
 
 ```ts
 const stream = await axiom.downloadWorkspaceBackupStream("ws-example");
-const reader = stream.getReader();
-const file = await openDestinationFileSomehow();
-try {
-  while (true) {
-    const chunk = await reader.read();
-    if (chunk.done) break;
-    await file.write(chunk.value);
-  }
-} finally {
-  reader.releaseLock();
-  await file.close();
-}
+const destination = new WritableStream<Uint8Array>({
+  async write(chunk) {
+    // Persist this chunk to your file or object-store sink.
+    await persistChunk(chunk);
+  },
+});
+await stream.pipeTo(destination);
 ```
 
 The stream owns the request timeout and abort controller until it reaches EOF,
