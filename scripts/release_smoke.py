@@ -260,7 +260,7 @@ def structured_inference_issues(
             '"/api/inference/generate/structured"',
         )),
         ("CLI", cli_source, (
-            '"--schema-file"', "def _load_json_schema_file(", "os.O_NOFOLLOW",
+            '"--schema-file"', "def _load_json_schema_file(", "O_NOFOLLOW",
             "parse_and_validate_json_output(", "structured_output_validated",
         )),
         ("Runtime GUI", panel_source, (
