@@ -326,14 +326,14 @@ class AxiomClient:
         return self.request_json("DELETE", "/api/engine/telemetry-history")
 
     def knowledge_bases(self) -> dict[str, Any]:
-        return self.request_json("GET", "/api/knowledge")
+        return self.request_json("GET", "/api/workspace/knowledge-bases")
 
     def create_knowledge_base(self, name: str, description: str = "") -> dict[str, Any]:
-        return self.request_json("POST", "/api/knowledge", json_body={"name": name, "description": description})
+        return self.request_json("POST", "/api/workspace/knowledge-bases", json_body={"name": name, "description": description})
 
     def search_knowledge_base(self, base_id: str, query: str, **options: Any) -> dict[str, Any]:
         return self.request_json(
-            "POST", f"/api/knowledge/{quote(base_id, safe='')}/search",
+            "POST", f"/api/workspace/knowledge-bases/{quote(base_id, safe='')}/search",
             json_body={"query": query, **options},
         )
 
