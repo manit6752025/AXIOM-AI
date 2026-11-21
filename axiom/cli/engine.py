@@ -18,6 +18,7 @@ from axiom.core.engine import AxiomEngineError, benchmark_local, discover_local_
 from axiom.core import model_studio
 from axiom.core.engine_fabric import EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
 from axiom.core.engine_fabric_profiles import EngineFabricProfileError, EngineFabricProfileStore
+from axiom.core.embeddings import EmbeddingEngineError, MAX_EMBEDDING_TOTAL_CHARS, embed_local_texts, unload_local_embeddings
 from axiom.core.benchmark_profiles import BenchmarkProfileError, BenchmarkProfileStore
 
 engine_app = typer.Typer(help="Run causal language models directly through AXIOM's local engine.", no_args_is_help=True)
@@ -962,3 +963,63 @@ def engine_benchmark_requirements_cli(
         console.print(req["scope_note"])
     if not report["can_benchmark"]:
         raise typer.Exit(code=2)
+
+
+@engine_app.command("embed")
+def engine_embed(
+    model_path: Path = typer.Option(..., "--model-path", help="Local embedding checkpoint under a trusted model root."),
+    texts: list[str] = typer.Option([], "--text", help="Text to embed; repeat for multiple inputs."),
+    input_file: Path | None = typer.Option(None, "--input-file", help="Read one bounded UTF-8 text file instead of --text."),
+    batch_size: int = typer.Option(8, "--batch-size", min=1, max=16),
+    max_length: int = typer.Option(256, "--max-length", min=8, max=512),
+    chunk_size_chars: int = typer.Option(2048, "--chunk-size-chars", min=256, max=8192),
+    chunk_overlap_chars: int = typer.Option(128, "--chunk-overlap-chars", min=0, max=1024),
+    device: str = typer.Option("auto", "--device", help="Execution device: auto, cpu, cuda, rocm, mps, or xpu."),
+    normalize: bool = typer.Option(True, "--normalize/--no-normalize"),
+    json_output: bool = typer.Option(False, "--json", help="Return embedding vectors as JSON."),
+) -> None:
+    """Generate bounded local text embeddings; input text is never saved or returned."""
+    if input_file is not None and texts:
+        _fail("Supply repeated --text options or one --input-file, but not both.")
+    if input_file is not None:
+        try:
+            with input_file.open("rb") as handle:
+                raw = handle.read(MAX_EMBEDDING_TOTAL_CHARS * 4 + 1)
+            if len(raw) > MAX_EMBEDDING_TOTAL_CHARS * 4:
+                _fail("The input file exceeds the bounded UTF-8 input size.")
+            inputs = [raw.decode("utf-8")]
+        except (OSError, UnicodeError) as exc:
+            _fail(f"Could not read the UTF-8 input file: {exc}")
+    else:
+        inputs = texts
+    try:
+        report = embed_local_texts(
+            str(model_path), inputs, batch_size=batch_size, max_length=max_length,
+            chunk_size_chars=chunk_size_chars, chunk_overlap_chars=chunk_overlap_chars,
+            device=device, normalize=normalize,
+        )
+    except (ValueError, EmbeddingEngineError) as exc:
+        _fail(str(exc))
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
+        return
+    table = Table(title=f"Local embeddings · {report['model']['name']}")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Result")
+    table.add_row("Inputs", str(report["request"]["input_count"]))
+    table.add_row("Chunks / vectors", str(report["request"]["chunk_count"]))
+    table.add_row("Dimensions", str(report["model"]["dimension"]))
+    table.add_row("Batch size", str(report["request"]["batch_size"]))
+    table.add_row("Device", str(report["device"]))
+    table.add_row("Normalized", "yes" if report["request"]["normalized"] else "no")
+    console.print(table)
+    console.print(report["scope_note"])
+    console.print("Use --json only when you need the actual vector values.")
+
+
+@engine_app.command("embed-unload")
+def engine_embed_unload() -> None:
+    """Unload the cached local embedding model without deleting model files."""
+    report = unload_local_embeddings()
+    console.print("[green]Embedding model unloaded.[/green]" if report["unloaded"] else "No embedding model was loaded.")
+    console.print(report["scope_note"])
