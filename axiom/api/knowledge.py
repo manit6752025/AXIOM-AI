@@ -62,6 +62,8 @@ def list_knowledge_documents(base_id: str) -> dict[str, Any]:
     """List document metadata without returning ingested source content."""
     try:
         return _store().list_documents(base_id)
+    except KnowledgeSearchError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
     except (OSError, ValueError, KeyError) as exc:
         raise _translate_store_error(exc) from None
 
