@@ -83,7 +83,7 @@ test("Runtime creates, probes, uses, and deletes a bounded native serving profil
 
   await page.goto("/?page=runtime");
   await expect(page.getByRole("heading", { name: "Serving profiles" })).toBeVisible();
-  await page.getByLabel("Profile name").fill("Runtime smoke");
+  await page.getByLabel("Serving profile name").fill("Runtime smoke");
   await page.getByLabel("Serving model checkpoint").selectOption(model.path);
   await page.getByLabel("Serving device").selectOption("cpu");
   await page.getByLabel("Serving context length").fill("4096");

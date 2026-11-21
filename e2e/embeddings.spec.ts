@@ -32,7 +32,7 @@ test("Runtime embeds bounded local text and displays vector metadata only", asyn
   await expect(page.getByRole("heading", { name: "Local text embeddings", exact: true })).toBeVisible();
   await page.getByLabel("Local embedding model path").fill("models/tiny-encoder");
   await page.getByLabel("Text to embed").fill("AXIOM stays local.");
-  await page.getByLabel("Execution device", { exact: true }).selectOption("cpu");
+  await page.getByLabel("Local embedding execution device", { exact: true }).selectOption("cpu");
   await page.getByRole("button", { name: "Generate local embeddings" }).click();
 
   await expect(page.getByText("LOCAL EMBEDDINGS READY", { exact: true })).toBeVisible();
