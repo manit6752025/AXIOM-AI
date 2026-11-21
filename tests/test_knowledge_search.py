@@ -96,6 +96,7 @@ def test_knowledge_search_fuses_local_embedding_scores_when_model_is_supplied(tm
     {"chunk_overlap_chars": 1200},
     {"vector_weight": 1.5},
     {"device": "remote"},
+    {"device": []},
 ])
 def test_knowledge_search_rejects_unbounded_parameters(tmp_path, kwargs):
     store, base = _seed_store(tmp_path)
