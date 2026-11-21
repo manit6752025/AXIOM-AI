@@ -42,5 +42,7 @@ test("Runtime embeds bounded local text and displays vector metadata only", asyn
     texts: ["AXIOM stays local."],
     device: "cpu",
   });
-  expect(JSON.stringify(requestPayload)).not.toContain("AXIOM stays local.");
+  expect(JSON.stringify(requestPayload)).toContain("AXIOM stays local.");
+  const resultPanel = await page.locator(".embedding-result").innerText();
+  expect(resultPanel).not.toContain("AXIOM stays local.");
 });
