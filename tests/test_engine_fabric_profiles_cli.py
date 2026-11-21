@@ -21,7 +21,7 @@ def test_engine_fabric_profile_cli_save_list_connect_delete(tmp_path, monkeypatc
     })
 
     saved = runner.invoke(engine_cli.engine_app, [
-        "profile", "save", "Office local",
+        "fabric-profile", "save", "Office local",
         "--backend", "llama-cpp",
         "--model", "qwen2.5:7b-instruct",
         "--json",
@@ -34,11 +34,11 @@ def test_engine_fabric_profile_cli_save_list_connect_delete(tmp_path, monkeypatc
     assert saved_payload["credentials_persisted"] is False
     assert saved_payload["custom_endpoints_persisted"] is False
 
-    listed = runner.invoke(engine_cli.engine_app, ["profile", "list", "--json"])
+    listed = runner.invoke(engine_cli.engine_app, ["fabric-profile", "list", "--json"])
     assert listed.exit_code == 0, listed.stdout
     assert json.loads(listed.stdout)["total"] == 1
 
-    connected = runner.invoke(engine_cli.engine_app, ["profile", "connect", profile["id"], "--json"])
+    connected = runner.invoke(engine_cli.engine_app, ["fabric-profile", "connect", profile["id"], "--json"])
     assert connected.exit_code == 0, connected.stdout
     result = json.loads(connected.stdout)
     assert result["status"] == "verified"
@@ -50,10 +50,10 @@ def test_engine_fabric_profile_cli_save_list_connect_delete(tmp_path, monkeypatc
     assert set(persisted["profiles"][0]) == {"id", "name", "backend_id", "model", "created_at", "updated_at"}
     assert "api_key" not in saved_content and "endpoint" not in saved_content
 
-    deleted = runner.invoke(engine_cli.engine_app, ["profile", "delete", profile["id"], "--yes", "--json"])
+    deleted = runner.invoke(engine_cli.engine_app, ["fabric-profile", "delete", profile["id"], "--yes", "--json"])
     assert deleted.exit_code == 0, deleted.stdout
     assert json.loads(deleted.stdout)["deleted"]["id"] == profile["id"]
-    assert json.loads(runner.invoke(engine_cli.engine_app, ["profile", "list", "--json"]).stdout)["total"] == 0
+    assert json.loads(runner.invoke(engine_cli.engine_app, ["fabric-profile", "list", "--json"]).stdout)["total"] == 0
 
 
 def test_engine_fabric_profile_cli_connect_fails_closed_for_offline_or_missing_models(tmp_path, monkeypatch) -> None:
@@ -66,13 +66,13 @@ def test_engine_fabric_profile_cli_connect_fails_closed_for_offline_or_missing_m
     monkeypatch.setattr(engine_cli, "discover_engine_backends", lambda _profile: {
         "backends": [{"id": "llama-cpp", "status": "setup_required", "models": []}],
     })
-    offline = runner.invoke(engine_cli.engine_app, ["profile", "connect", profile["id"], "--json"])
+    offline = runner.invoke(engine_cli.engine_app, ["fabric-profile", "connect", profile["id"], "--json"])
     assert offline.exit_code != 0
     assert "not ready" in offline.output.lower()
 
     monkeypatch.setattr(engine_cli, "discover_engine_backends", lambda _profile: {
         "backends": [{"id": "llama-cpp", "status": "ready", "models": ["different-model"]}],
     })
-    missing = runner.invoke(engine_cli.engine_app, ["profile", "connect", profile["id"], "--json"])
+    missing = runner.invoke(engine_cli.engine_app, ["fabric-profile", "connect", profile["id"], "--json"])
     assert missing.exit_code != 0
     assert "exact saved model id" in missing.output.lower()

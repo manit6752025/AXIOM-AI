@@ -56,7 +56,7 @@ External backends are selected by a stable ID, not by a user-supplied URL. Each 
 
 ### Saved connector profiles and lifecycle
 
-The Control Center can save, apply, verify, disconnect and delete workspace-local Engine Fabric profiles. A profile contains only its display name, fixed backend ID and exact model ID. The store is capped at 25 profiles and 64 KiB, rejects unknown fields, and uses private workspace metadata permissions. It does not accept API keys, custom endpoint URLs, prompts, model files or conversation history. The same profiles are available through `axiom engine profile save/list/connect/delete` and the API routes listed above.
+The Control Center can save, apply, verify, disconnect and delete workspace-local Engine Fabric profiles. A profile contains only its display name, fixed backend ID and exact model ID. The store is capped at 25 profiles and 64 KiB, rejects unknown fields, and uses private workspace metadata permissions. It does not accept API keys, custom endpoint URLs, prompts, model files or conversation history. The same profiles are available through `axiom engine fabric-profile save/list/connect/delete` and the API routes listed above.
 
 **Connect** is a one-shot loopback health and exact model-inventory check. Engine Fabric HTTP adapters are stateless request clients, so AXIOM deliberately retains no socket or credential between calls. **Disconnect** clears the current prompt, model selection, generated result, benchmark samples and session verification while retaining the saved profile metadata for a later reconnect. It does not stop or unload the external service. Use the separate Ollama service controls when you explicitly want AXIOM to start or stop its own managed Ollama process.
 
