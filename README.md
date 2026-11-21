@@ -584,6 +584,14 @@ axiom doctor --json
 | Training or Engine commands fail | Run `python -m pip install -e '.[training]'`. |
 | Still stuck | Run `axiom support-bundle` and open an [issue](https://github.com/manit6752025/AXIOM-AI/issues). |
 
+## SDKs
+
+- **Python:** [`axiom-ai-sdk`](sdk/python) · `python -m pip install axiom-ai-sdk`
+- **TypeScript:** [`@axiom-ai/sdk`](sdk/typescript) · `npm install @axiom-ai/sdk`
+- **Contract and integration guide:** [SDK documentation](docs/SDKs.md)
+
+Both packages target API contract v1 and are verified against the live OpenAPI schema in CI.
+
 ## Documentation
 
 - **Start here:** [My First AI](examples/my-first-ai/README.md) · [Installers](installers/README.md) · [CLI guide](docs/CLI-GUIDE.md) · [Wiki](https://github.com/manit6752025/AXIOM-AI/wiki)
