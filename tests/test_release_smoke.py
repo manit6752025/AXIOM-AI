@@ -356,3 +356,35 @@ def test_hardware_snapshot_release_smoke_detects_missing_opt_in_contract() -> No
         broken_core, api, server, cli_main, client, panel, app, e2e, tests, docs,
     )
     assert any("HardwareSnapshotOptInRequired" in item for item in issues)
+
+
+def test_benchmark_resource_trend_release_contract_is_wired_end_to_end() -> None:
+    panel = (ROOT / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
+    chart = (ROOT / "src/components/BenchmarkResourceTrends.tsx").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/axiom-engine.spec.ts").read_text(encoding="utf-8")
+    assert release_smoke.benchmark_resource_trend_issues(panel, chart, e2e) == []
+
+
+def test_benchmark_resource_trend_release_contract_detects_unbounded_or_missing_charts() -> None:
+    panel = (ROOT / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
+    chart = (ROOT / "src/components/BenchmarkResourceTrends.tsx").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/axiom-engine.spec.ts").read_text(encoding="utf-8")
+    broken_chart = chart.replace("Not reported", "unknown metric")
+    failures = release_smoke.benchmark_resource_trend_issues(panel, broken_chart, e2e)
+    assert any("Not reported" in issue for issue in failures)
+
+
+def test_telemetry_export_privacy_release_contract_requires_json_csv_and_clear() -> None:
+    monitor = (ROOT / "src/components/EngineTelemetryMonitor.tsx").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/telemetry-monitor.spec.ts").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/API.md").read_text(encoding="utf-8")
+    assert release_smoke.telemetry_export_privacy_issues(monitor, e2e, docs) == []
+
+
+def test_telemetry_export_privacy_contract_detects_pid_or_missing_csv_controls() -> None:
+    monitor = (ROOT / "src/components/EngineTelemetryMonitor.tsx").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/telemetry-monitor.spec.ts").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/API.md").read_text(encoding="utf-8")
+    broken = monitor.replace('anchor.download = "axiom-resource-telemetry.csv"', "anchor.download = 'wrong.csv'")
+    failures = release_smoke.telemetry_export_privacy_issues(broken, e2e, docs)
+    assert any("axiom-resource-telemetry.csv" in issue for issue in failures)

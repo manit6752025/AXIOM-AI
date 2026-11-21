@@ -31,6 +31,42 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
     scope_note: "Passive discovery only.",
     connectors: [],
   } }));
+  let telemetryCalls = 0;
+  await page.route("**/api/engine/telemetry", (route) => {
+    telemetryCalls += 1;
+    return route.fulfill({ json: {
+      schema_version: 1,
+      sampled_at: `2026-11-21T00:00:${String(telemetryCalls).padStart(2, "0")}+00:00`,
+      sample_type: "point_in_time",
+      cpu: { logical_cores: 8, system_percent: null, process_percent: 2.5 },
+      memory: { total_bytes: 16 * 1024 ** 3, available_bytes: 8 * 1024 ** 3, used_bytes: (8 + telemetryCalls) * 1024 ** 3, percent: 50 },
+      process: { pid: 7, rss_bytes: (512 + telemetryCalls * 4) * 1024 ** 2, peak_rss_bytes: 640 * 1024 ** 2, threads: 4 },
+      devices: [],
+      loaded_runtime: {
+        loaded: engineLoaded, model: engineLoaded ? "llama-test" : null,
+        architecture: engineLoaded ? "LlamaForCausalLM" : null, device: engineLoaded ? "cpu" : null,
+        memory_mode: "full", precision: "fp32", last_generation: null,
+        device_allocator: {
+          backend: "cpu", current_allocated_bytes: telemetryCalls * 1024 ** 2,
+          current_reserved_bytes: telemetryCalls * 1024 ** 2,
+          peak_allocated_bytes: telemetryCalls * 1024 ** 2,
+          peak_reserved_bytes: telemetryCalls * 1024 ** 2, peak_increment_bytes: 0,
+          process_rss_bytes: (512 + telemetryCalls * 4) * 1024 ** 2,
+          process_rss_delta_bytes: 4 * 1024 ** 2, process_peak_rss_bytes: 640 * 1024 ** 2,
+          process_peak_rss_delta_bytes: 0, peak_reset_supported: false,
+          device_allocator_metrics_supported: false,
+        },
+      },
+      disks: [{ label: "Trusted models", total_bytes: 1000, free_bytes: 500, used_bytes: 500 }],
+      privacy_scope: {
+        prompt_content_included: false, generated_content_included: false,
+        model_paths_included: false, environment_values_included: false,
+        credentials_included: false, network_access_performed: false,
+      },
+      scope_note: "Mock point-in-time resource telemetry.",
+    } });
+  });
+
   await page.route("**/api/engine/status", (route) => route.fulfill({ json: {
     engine: "axiom-native-pytorch-llama", ready: true, packages: { torch: true, tokenizers: true, safetensors: true, gguf: true, numpy: true },
     versions: { torch: "2.9.0", tokenizers: "0.22.0", safetensors: "0.6.0", gguf: "0.19.0", numpy: "2.4.6" },
@@ -291,6 +327,13 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(transferTelemetry).toContainText("KV cache offloaded");
   await expect(transferTelemetry).toContainText("3.0 MiB");
   await expect(nativeBenchmark).not.toContainText("Say hello.");
+  const resourceTrends = engine.getByRole("region", { name: "Benchmark resource trends" });
+  await expect(resourceTrends).toContainText("Resource trends");
+  await expect(resourceTrends).toContainText("1/20 runs");
+  await expect(resourceTrends).toContainText("System CPU after benchmark");
+  await expect(resourceTrends).toContainText("Run 1: Not reported");
+  await expect(resourceTrends).toContainText("Process RSS change");
+  await expect(resourceTrends).toContainText("Device allocator change");
 
   await engine.getByRole("button", { name: "Benchmark native engine" }).click();
   await expect(engine.getByRole("button", { name: "Stop benchmark" })).toBeVisible();

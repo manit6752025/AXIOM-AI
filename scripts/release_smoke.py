@@ -499,12 +499,63 @@ def resource_monitoring_issues(cli_source: str, panel_source: str, app_source: s
     return issues
 
 
+def benchmark_resource_trend_issues(panel: str, chart: str, e2e: str) -> list[str]:
+    """Require benchmark-linked before/after samples, bounded trend charts and missing labels."""
+    checks = (
+        ("native benchmark panel", panel, (
+            "axiomApi.axiomEngineTelemetry()", "telemetryBefore", "telemetryAfter",
+            "setBenchmarkResourceSamples", "slice(-20)", "BenchmarkResourceTrends",
+        )),
+        ("resource trend charts", chart, (
+            "System CPU after benchmark", "Process RSS change", "System RAM used change",
+            "Device allocator change", "Not reported", "20 runs",
+        )),
+        ("browser acceptance", e2e, (
+            "Benchmark resource trends", "1/20 runs", "System CPU after benchmark",
+            "Run 1: Not reported", "Process RSS change", "Device allocator change",
+        )),
+    )
+    failures: list[str] = []
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                failures.append(f"Benchmark resource trend {label} is missing: {token}")
+    return failures
+
+
+def telemetry_export_privacy_issues(monitor: str, e2e: str, docs: str) -> list[str]:
+    """Require export formats, explicit field privacy controls and deterministic clear."""
+    checks = (
+        ("monitor UI", monitor, (
+            "Export JSON", "Export CSV", 'aria-label="Telemetry export privacy controls"',
+            "includeCpu", "includeMemory", "includeProcess", "includeDevice",
+            "anchor.download = \"axiom-resource-telemetry.csv\"",
+            "process_ids_included: false", "setSamples([])",
+        )),
+        ("browser acceptance", e2e, (
+            "Include process RSS/thread metrics", "axiom-resource-telemetry.csv",
+            "process_metrics_included", "process_ids_included", "system_cpu_percent",
+            "Clear history",
+        )),
+        ("documentation", docs, (
+            "JSON and CSV", "privacy controls", "Process IDs are never exported",
+            "browser-memory-only",
+        )),
+    )
+    failures: list[str] = []
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                failures.append(f"Telemetry export/privacy {label} is missing: {token}")
+    return failures
+
+
 def inspect(root: Path) -> dict[str, Any]:
     failures: list[str] = []
     warnings: list[str] = []
     required = [
         "pyproject.toml", "axiom/version.py", "ROADMAP.md", "src/App.tsx",
-        "src/api/client.ts", "src/components/ApiPlayground.tsx", "src/components/RuntimeConnectorPanel.tsx", "src/components/AgentProfiles.tsx", "src/components/LocalInferencePanel.tsx", "src/components/RuntimeTracePanel.tsx", "src/components/EngineTelemetryMonitor.tsx", "src/components/LocalAxiomEnginePanel.tsx", "src/components/ModelStudioPanel.tsx", "src/styles.css",
+        "src/api/client.ts", "src/components/ApiPlayground.tsx", "src/components/RuntimeConnectorPanel.tsx", "src/components/AgentProfiles.tsx", "src/components/LocalInferencePanel.tsx", "src/components/RuntimeTracePanel.tsx", "src/components/EngineTelemetryMonitor.tsx", "src/components/LocalAxiomEnginePanel.tsx", "src/components/BenchmarkResourceTrends.tsx", "src/components/ModelStudioPanel.tsx", "src/styles.css",
         "axiom/api/server.py", "axiom/api/workspace.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/api/model_studio.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/model_studio.py", "axiom/core/runtime_traces.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/core/engine_fabric_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "axiom/cli/model_studio.py", "scripts/release_smoke.py",
         "tests/test_release_smoke.py", "tests/test_ollama_service.py", "tests/test_ollama_service_api.py", "tests/test_ollama_model_operations.py", "tests/test_cli_inference.py", "tests/test_axiom_engine.py", "tests/test_axiom_engine_api.py", "tests/test_axiom_engine_cli.py", "tests/test_native_engine.py", "tests/test_model_studio.py", "tests/test_engine_runtime_status.py", "tests/test_cli_model_studio_jobs.py", "e2e/axiom-engine.spec.ts", "e2e/helpers/auth.ts", "e2e/modules.spec.ts", "e2e/workflows.spec.ts", "e2e/evaluation.spec.ts",
         "e2e/model-registry-filters.spec.ts", "e2e/ollama-service.spec.ts", "e2e/inference-benchmark.spec.ts", "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/axiom-engine.spec.ts", "tests/test_workspace_model_registry_filters.py", "tests/test_workflow_store_pagination.py", "tests/test_workflow_api_pagination.py", "tests/test_workflow_cli.py",
@@ -895,6 +946,18 @@ def inspect(root: Path) -> dict[str, Any]:
     telemetry_panel = (root / "src/components/EngineTelemetryMonitor.tsx").read_text(encoding="utf-8")
     telemetry_e2e = (root / "e2e/telemetry-monitor.spec.ts").read_text(encoding="utf-8")
     failures.extend(resource_monitoring_issues(engine_cli_source, telemetry_panel, app_source, telemetry_e2e))
+    benchmark_trend_panel = (root / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
+    benchmark_trend_chart = (root / "src/components/BenchmarkResourceTrends.tsx").read_text(encoding="utf-8")
+    benchmark_trend_e2e = (root / "e2e/axiom-engine.spec.ts").read_text(encoding="utf-8")
+    failures.extend(benchmark_resource_trend_issues(
+        benchmark_trend_panel, benchmark_trend_chart, benchmark_trend_e2e,
+    ))
+    telemetry_export_monitor = telemetry_panel
+    telemetry_export_e2e = (root / "e2e/telemetry-monitor.spec.ts").read_text(encoding="utf-8")
+    telemetry_export_docs = (root / "docs/API.md").read_text(encoding="utf-8")
+    failures.extend(telemetry_export_privacy_issues(
+        telemetry_export_monitor, telemetry_export_e2e, telemetry_export_docs,
+    ))
     for path in (
         "/api/health", "/api/meta", "/api/workspace/runtime",
         "/api/workspace/models?offset=0&limit=5", "/api/workspace/datasets",

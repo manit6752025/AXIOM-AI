@@ -232,3 +232,14 @@ The store rejects symlinks, future/malformed schemas, unknown fields and oversiz
 The Runtime panel exposes this snapshot and the resource monitor. Monitoring is off until the user starts it, keeps at most 120 samples in browser memory, and ends when stopped or when the page is left. JSON export and clear operate on this browser-local history only; no server-side time-series store is created by this endpoint.
 
 The CLI `axiom engine telemetry --json` returns a point-in-time JSON sample. `--watch` explicitly opts into a bounded sample run (`--interval-seconds 0.5..60`, `--samples 1..300`) and may write JSONL to a new `--output` path; existing files are never overwritten. Output files must only be created in operator-controlled locations.
+
+
+## Benchmark-linked resource trends (R113)
+
+After each successful native AXIOM Engine benchmark, the Runtime page requests one point-in-time resource sample immediately before and after the measured run. The last 20 benchmark-linked records are kept in browser memory only and shown as four trend charts: system CPU after the run, process RSS change, system RAM used change, and device allocator change. The chart labels each benchmark with its model/device/time context.
+
+A missing value remains null and is displayed as `Not reported`; the UI does not interpolate or invent metrics. Before/after deltas are host-wide measurements, not exclusive attribution to the benchmark, because other processes may use resources concurrently. Warm-up and failed/cancelled benchmark attempts do not generate history entries. No prompts or generated responses are recorded by the resource-history component.
+ 
+## Telemetry export, clear and privacy controls (R114)
+
+The Resource Monitoring panel offers browser-memory-only JSON and CSV exports, an explicit clear-history action, and export privacy switches for CPU, system RAM, process RSS/thread and device/allocator fields. The selected categories are projected into the export rather than mutating the live API response. Process IDs are never exported; disabled categories are omitted (JSON uses null for the category and CSV omits its columns). Prompt/response content, model paths, environment values and credentials are always excluded. Exports are created locally by the browser and are not uploaded to AXIOM or a cloud provider.

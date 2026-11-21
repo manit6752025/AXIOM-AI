@@ -30,6 +30,10 @@ export default function EngineTelemetryMonitor() {
   const [samples, setSamples] = useState<AxiomEngineSystemTelemetry[]>([]);
   const [recording, setRecording] = useState(false);
   const [intervalSeconds, setIntervalSeconds] = useState<number>(2);
+  const [includeCpu, setIncludeCpu] = useState(true);
+  const [includeMemory, setIncludeMemory] = useState(true);
+  const [includeProcess, setIncludeProcess] = useState(true);
+  const [includeDevice, setIncludeDevice] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -66,6 +70,45 @@ export default function EngineTelemetryMonitor() {
 
   const exportHistory = () => {
     if (samples.length === 0) return;
+    const exportedSamples = samples.map((sample) => ({
+      sampled_at: sample.sampled_at,
+      sample_type: sample.sample_type,
+      cpu: includeCpu ? sample.cpu : null,
+      memory: includeMemory ? sample.memory : null,
+      // Deliberately do not export the process PID.
+      process: includeProcess ? {
+        rss_bytes: sample.process.rss_bytes,
+        peak_rss_bytes: sample.process.peak_rss_bytes,
+        threads: sample.process.threads,
+      } : null,
+      devices: includeDevice ? sample.devices.map((device) => ({
+        available: device.available,
+        memory_free_gib: device.memory_free_gib,
+        memory_total_gib: device.memory_total_gib,
+      })) : null,
+      loaded_runtime: {
+        loaded: sample.loaded_runtime.loaded,
+        device: includeDevice ? sample.loaded_runtime.device : null,
+        memory_mode: includeDevice ? sample.loaded_runtime.memory_mode : null,
+        precision: includeDevice ? sample.loaded_runtime.precision : null,
+        device_allocator: includeDevice && sample.loaded_runtime.device_allocator ? {
+          backend: sample.loaded_runtime.device_allocator.backend,
+          current_allocated_bytes: sample.loaded_runtime.device_allocator.current_allocated_bytes,
+          current_reserved_bytes: sample.loaded_runtime.device_allocator.current_reserved_bytes,
+          peak_allocated_bytes: sample.loaded_runtime.device_allocator.peak_allocated_bytes,
+          peak_reserved_bytes: sample.loaded_runtime.device_allocator.peak_reserved_bytes,
+          peak_increment_bytes: sample.loaded_runtime.device_allocator.peak_increment_bytes,
+          peak_reset_supported: sample.loaded_runtime.device_allocator.peak_reset_supported,
+          device_allocator_metrics_supported: sample.loaded_runtime.device_allocator.device_allocator_metrics_supported,
+          ...(includeProcess ? {
+            process_rss_bytes: sample.loaded_runtime.device_allocator.process_rss_bytes,
+            process_rss_delta_bytes: sample.loaded_runtime.device_allocator.process_rss_delta_bytes,
+            process_peak_rss_bytes: sample.loaded_runtime.device_allocator.process_peak_rss_bytes,
+            process_peak_rss_delta_bytes: sample.loaded_runtime.device_allocator.process_peak_rss_delta_bytes,
+          } : {}),
+        } : null,
+      },
+    }));
     const payload = JSON.stringify({
       exported_at: new Date().toISOString(),
       schema_version: 1,
@@ -79,8 +122,13 @@ export default function EngineTelemetryMonitor() {
         environment_values_included: false,
         credentials_included: false,
         network_access_performed: false,
+        cpu_metrics_included: includeCpu,
+        memory_metrics_included: includeMemory,
+        process_metrics_included: includeProcess,
+        device_metrics_included: includeDevice,
+        process_ids_included: false,
       },
-      samples,
+      samples: exportedSamples,
     }, null, 2);
     const url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
     const anchor = document.createElement("a");
@@ -91,6 +139,46 @@ export default function EngineTelemetryMonitor() {
     anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     setNotice("Exported the current in-memory resource samples.");
+  };
+
+  const exportCsv = () => {
+    if (samples.length === 0) return;
+    const columns: Array<{ name: string; value: (sample: AxiomEngineSystemTelemetry) => string | number | null }> = [
+      { name: "sampled_at", value: (sample) => sample.sampled_at },
+      ...(includeCpu ? [
+        { name: "system_cpu_percent", value: (sample: AxiomEngineSystemTelemetry) => sample.cpu.system_percent },
+        { name: "process_cpu_percent", value: (sample: AxiomEngineSystemTelemetry) => sample.cpu.process_percent },
+      ] : []),
+      ...(includeMemory ? [
+        { name: "system_ram_total_bytes", value: (sample: AxiomEngineSystemTelemetry) => sample.memory.total_bytes },
+        { name: "system_ram_available_bytes", value: (sample: AxiomEngineSystemTelemetry) => sample.memory.available_bytes },
+        { name: "system_ram_used_bytes", value: (sample: AxiomEngineSystemTelemetry) => sample.memory.used_bytes },
+        { name: "system_ram_used_percent", value: (sample: AxiomEngineSystemTelemetry) => sample.memory.percent },
+      ] : []),
+      ...(includeProcess ? [
+        { name: "process_rss_bytes", value: (sample: AxiomEngineSystemTelemetry) => sample.process.rss_bytes },
+        { name: "process_peak_rss_bytes", value: (sample: AxiomEngineSystemTelemetry) => sample.process.peak_rss_bytes },
+        { name: "process_threads", value: (sample: AxiomEngineSystemTelemetry) => sample.process.threads },
+      ] : []),
+      ...(includeDevice ? [
+        { name: "device_allocator_current_bytes", value: (sample: AxiomEngineSystemTelemetry) => sample.loaded_runtime.device_allocator?.current_allocated_bytes ?? null },
+        { name: "device_allocator_reserved_bytes", value: (sample: AxiomEngineSystemTelemetry) => sample.loaded_runtime.device_allocator?.current_reserved_bytes ?? null },
+      ] : []),
+    ];
+    const quote = (value: string | number | null) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const contents = [
+      columns.map((column) => quote(column.name)).join(","),
+      ...samples.map((sample) => columns.map((column) => quote(column.value(sample))).join(",")),
+    ].join("\n") + "\n";
+    const url = URL.createObjectURL(new Blob([contents], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "axiom-resource-telemetry.csv";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setNotice("Exported the selected resource metrics as CSV.");
   };
 
   const clearHistory = () => {
@@ -128,10 +216,19 @@ export default function EngineTelemetryMonitor() {
             {recording ? <><Pause size={14} />Stop monitoring</> : <><Play size={14} />Start monitoring</>}
           </button>
           <button type="button" className="button secondary-button" onClick={exportHistory} disabled={samples.length === 0}><Download size={14} />Export JSON</button>
+          <button type="button" className="button secondary-button" onClick={exportCsv} disabled={samples.length === 0}><Download size={14} />Export CSV</button>
           <button type="button" className="button danger-button" onClick={clearHistory} disabled={samples.length === 0 && !recording}><Trash2 size={14} />Clear history</button>
         </div>
       </div>
       <p className="quiet-note">Monitoring starts only when you select Start. The browser retains at most {MAX_SAMPLES} recent samples while this page is open; stopping or leaving the page ends sampling. No server-side history is created. Prompt text, generated content, model paths, environment values, and credentials are excluded by the telemetry API.</p>
+      <div className="telemetry-export-privacy" role="group" aria-label="Telemetry export privacy controls">
+        <strong>Export field controls</strong>
+        <label><input type="checkbox" checked={includeCpu} onChange={(event) => setIncludeCpu(event.target.checked)} /> Include CPU metrics</label>
+        <label><input type="checkbox" checked={includeMemory} onChange={(event) => setIncludeMemory(event.target.checked)} /> Include system RAM metrics</label>
+        <label><input type="checkbox" checked={includeProcess} onChange={(event) => setIncludeProcess(event.target.checked)} /> Include process RSS/thread metrics</label>
+        <label><input type="checkbox" checked={includeDevice} onChange={(event) => setIncludeDevice(event.target.checked)} /> Include device/allocator metrics</label>
+      </div>
+      <p className="quiet-note">Export controls apply to JSON and CSV files. Process IDs are never exported. Disabling a category omits it from the export; it does not change the live API snapshot. Prompt/response content, model paths, environment values and credentials are always excluded.</p>
       {error && <div className="inline-alert warning" role="alert">{error}</div>}
       {notice && <div className="inline-alert success" role="status">{notice}</div>}
       <div className="info-grid">
