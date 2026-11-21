@@ -55,7 +55,7 @@ def _read_manifest(path: str) -> dict[str, Any]:
 def _record_plugin_event(event_type: str) -> None:
     try:
         record_security_event(event_type)
-    except SecurityEventError:
+    except (SecurityEventError, OSError, TimeoutError):
         emit_error(
             "The plugin policy change may have taken effect, but its security event could not be recorded. Inspect the registry and event journal before retrying.",
             code="security_event_record_failed",
