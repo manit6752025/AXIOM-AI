@@ -566,6 +566,28 @@ def persisted_schema_inventory_issues(docs: str, sources: dict[str, str]) -> lis
         f"Persisted-schema documentation is missing: {token}"
         for token in expected_doc_tokens if token not in docs
     ]
+    # A version token elsewhere in the document must not mask a stale row for a
+    # particular store (for example, workflows v1 while LLM profiles remain v2).
+    versioned_inventory_rows = (
+        ("workflows", ".axiom/workflows.json", "schema_version: 2"),
+        ("security_events", ".axiom/security-events.json", "schema_version: 2"),
+        ("llm_profiles", ".axiom/llm-provider-profiles.json", "schema_version: 2"),
+        ("hardware_snapshots", ".axiom/hardware-snapshots.json", "schema_version: 1"),
+        ("workspaces", "~/.axiom/workspaces.json", "schema_version: 1"),
+        ("prediction_jobs", ".axiom/prediction_jobs.json", "schema_version: 1"),
+    )
+    for name, store_path, expected_version in versioned_inventory_rows:
+        row = next(
+            (line for line in docs.splitlines() if line.startswith("|") and store_path in line),
+            "",
+        )
+        if not row:
+            failures.append(f"Persisted-schema documentation is missing the {name} inventory row: {store_path}")
+        elif expected_version not in row:
+            failures.append(
+                f"Persisted-schema documentation for {name} has a stale schema version; "
+                f"expected {expected_version} in the {store_path} inventory row."
+            )
     code_contracts = {
         "workflows": ("WORKFLOW_SCHEMA_VERSION = 2",),
         "llm_profiles": ("SCHEMA_VERSION = 2", "version not in {1, SCHEMA_VERSION}"),
