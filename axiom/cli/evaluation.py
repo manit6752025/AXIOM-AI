@@ -161,8 +161,15 @@ def register_evaluation_cli(app: typer.Typer) -> None:
         difference = report["difference"]
         console.print(f"Candidate − baseline mean: {difference['candidate_minus_baseline_mean']:+.6f} ({difference['direction']}).")
         test = report["statistical_test"]
-        if test["p_value"] is None:
-            console.print("Statistical test: insufficient replicates (at least two per group are required).")
+        if test["status"] == "degenerate_zero_variance":
+            note = test.get("note") or (
+                "Both groups have zero within-group variance; an inferential p-value is undefined."
+            )
+            console.print(f"Statistical test undefined: {note}")
+        elif test["status"] == "insufficient_replicates":
+            console.print("Statistical test unavailable: at least two complete replicates per group are required.")
+        elif test["p_value"] is None:
+            console.print("Statistical test unavailable: no inferential p-value is available.")
         else:
             console.print(f"Welch two-sided p-value: {test['p_value']:.6g}")
         console.print(report["scope_note"])
