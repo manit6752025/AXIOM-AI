@@ -132,10 +132,11 @@ def test_python_sdk_sends_request_id_auth_and_workspace_headers(api_server):
 
     health, meta, models = _Handler.requests
     for record in (health, meta, models):
-        assert len(record["headers"]["X-request-id"]) == 32
-        assert record["headers"]["Authorization"] == "Bearer read-token"
-        assert record["headers"]["X-axiom-workspace-id"] == "ws-123"
-        assert record["headers"]["X-client-name"] == "sdk-test"
+        headers = {name.casefold(): value for name, value in record["headers"].items()}
+        assert len(headers["x-request-id"]) == 32
+        assert headers["authorization"] == "Bearer read-token"
+        assert headers["x-axiom-workspace-id"] == "ws-123"
+        assert headers["x-client-name"] == "sdk-test"
     assert models["query"] == {"limit": ["12"], "offset": ["3"], "search": ["llama"]}
 
 
@@ -161,7 +162,7 @@ def test_python_sdk_uploads_and_downloads_workspace_backups(api_server):
     assert request["method"] == "POST"
     assert request["path"] == "/api/workspaces/backup/restore"
     assert request["query"] == {"name": ["Restored / test"]}
-    assert request["headers"]["Content-type"] == "application/zip"
+    assert {key.casefold(): value for key, value in request["headers"].items()}["content-type"] == "application/zip"
     assert request["body"] == archive
 
 
