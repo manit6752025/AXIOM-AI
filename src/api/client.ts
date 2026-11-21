@@ -478,6 +478,24 @@ export type LocalEmbeddingsReport = {
   generated_at: string;
 };
 
+export type LocalRerankingReport = {
+  schema_version: number;
+  engine: string;
+  model: { name: string; score_mode: string };
+  device: string;
+  request: {
+    document_count: number; batch_size: number; max_length: number;
+    query_characters: number; total_document_characters: number;
+  };
+  results: Array<{ rank: number; document_index: number; score: number; document_characters: number }>;
+  privacy: {
+    query_returned: false; documents_returned: false; text_persisted: false;
+    model_files_uploaded: false; network_used: false;
+  };
+  scope_note: string;
+};
+
+
 export type AxiomEngineAdapterDevice = {
   name: "CPU" | "CUDA" | "ROCm" | "Metal/MPS";
   available: boolean; compatible: boolean;
@@ -2436,6 +2454,17 @@ export const axiomApi = {
   unloadLocalEmbeddings: () => requestJson<{ schema_version: number; unloaded: boolean; scope_note: string }>(
     "/api/engine/embeddings/unload", { method: "POST" },
   ),
+
+  rerankLocalDocuments: (input: {
+    model_path: string; query: string; documents: string[]; batch_size?: number;
+    max_length?: number; device?: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu";
+  }) => requestJson<LocalRerankingReport>("/api/engine/rerank", {
+    method: "POST", body: JSON.stringify(input),
+  }),
+  unloadLocalReranker: () => requestJson<{ schema_version: number; unloaded: boolean; scope_note: string }>(
+    "/api/engine/rerank/unload", { method: "POST" },
+  ),
+
 
   runtime: () => requestJson<RuntimeSnapshot>("/api/workspace/runtime"),
   hardwareSnapshots: () => requestJson<HardwareSnapshotHistory>("/api/workspace/hardware-snapshots"),
