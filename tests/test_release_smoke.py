@@ -41,10 +41,17 @@ def test_resource_monitoring_contract_requires_opt_in_bounds_export_and_gui_hist
     panel = (ROOT / "src" / "components" / "EngineTelemetryMonitor.tsx").read_text(encoding="utf-8")
     app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
     e2e = (ROOT / "e2e" / "telemetry-monitor.spec.ts").read_text(encoding="utf-8")
+    core = (ROOT / "axiom" / "core" / "resource_telemetry.py").read_text(encoding="utf-8")
+    api = (ROOT / "axiom" / "api" / "engine.py").read_text(encoding="utf-8")
+    client = (ROOT / "src" / "api" / "client.ts").read_text(encoding="utf-8")
+    core_tests = (ROOT / "tests" / "test_resource_telemetry.py").read_text(encoding="utf-8")
+    api_tests = (ROOT / "tests" / "test_resource_telemetry_api.py").read_text(encoding="utf-8")
 
-    assert release_smoke.resource_monitoring_issues(cli, panel, app, e2e) == []
+    arguments = (cli, panel, app, e2e, core, api, client, core_tests, api_tests)
+    assert release_smoke.resource_monitoring_issues(*arguments) == []
     issues = release_smoke.resource_monitoring_issues(
-        cli, panel, app, e2e.replace('name: "Start monitoring"', 'name: "Begin monitoring"')
+        cli, panel, app, e2e.replace('name: "Start monitoring"', 'name: "Begin monitoring"'),
+        core, api, client, core_tests, api_tests,
     )
     assert any("Browser acceptance" in issue and "Start monitoring" in issue for issue in issues)
 
@@ -423,6 +430,7 @@ def test_persisted_schema_inventory_release_contract_matches_current_stores() ->
         "fine_tuning": "axiom/core/fine_tuning.py",
         "model_studio": "axiom/core/model_studio.py",
         "runtime_traces": "axiom/core/runtime_traces.py",
+        "resource_telemetry": "axiom/core/resource_telemetry.py",
     }
     sources = {name: (ROOT / path).read_text(encoding="utf-8") for name, path in paths.items()}
     docs = (ROOT / "docs/Storage-Schemas-and-Migrations.md").read_text(encoding="utf-8")
@@ -444,6 +452,7 @@ def test_persisted_schema_inventory_detects_stale_versions_and_missing_store_not
         "fine_tuning": "axiom/core/fine_tuning.py",
         "model_studio": "axiom/core/model_studio.py",
         "runtime_traces": "axiom/core/runtime_traces.py",
+        "resource_telemetry": "axiom/core/resource_telemetry.py",
     }
     sources = {name: (ROOT / path).read_text(encoding="utf-8") for name, path in paths.items()}
     docs = (ROOT / "docs/Storage-Schemas-and-Migrations.md").read_text(encoding="utf-8")

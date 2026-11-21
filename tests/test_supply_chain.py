@@ -185,7 +185,7 @@ def test_security_cli_exports_spdx_sbom_to_a_create_only_file(tmp_path: Path, mo
     assert json.loads(output.read_text(encoding="utf-8")) == report
     again = CliRunner().invoke(app, ["security", "sbom", "--output", str(output)])
     assert again.exit_code == 2
-    assert output.read_text(encoding="utf-8") == json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\\n"
+    assert output.read_text(encoding="utf-8") == json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
 def test_security_cli_requires_network_flag_for_vulnerability_scans():
