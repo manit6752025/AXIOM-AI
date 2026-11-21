@@ -30,9 +30,9 @@ through a bounded temporary file before publishing the content object. A
 source file that changes while it is being copied is rejected rather than
 committed as a potentially inconsistent snapshot.
 
-These checks provide local content-integrity and lineage evidence, not a
-signed attestation or protection against an attacker who can rewrite both the
-workspace index and every stored object. Back up the complete
+These checks provide local content-integrity and lineage evidence. They are
+**not a signed attestation** and do not protect against an attacker who can
+rewrite both the workspace index and every stored object. Back up the complete
 `.axiom/dataset-snapshots/` directory together; copying only the index or
 only the objects directory is not a complete snapshot archive.
 
