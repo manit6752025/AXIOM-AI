@@ -9,9 +9,11 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import stat
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from axiom.core.storage import atomic_write_text, file_lock
 from axiom.core.workspace_context import workspace_metadata_dir
@@ -189,17 +191,108 @@ class PluginManifestStore:
             raise PluginManifestError("Plugin manifest registry does not exist.")
 
     @staticmethod
+    def _supports_directory_descriptors() -> bool:
+        return (
+            os.name == "posix"
+            and hasattr(os, "O_DIRECTORY")
+            and hasattr(os, "O_NOFOLLOW")
+            and os.open in getattr(os, "supports_dir_fd", set())
+            and os.mkdir in getattr(os, "supports_dir_fd", set())
+            and os.unlink in getattr(os, "supports_dir_fd", set())
+        )
+
+    @staticmethod
+    def _open_directory(path: Path, *, create: bool) -> int:
+        """Traverse every directory component without following symlinks."""
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        descriptor = os.open(path.anchor, flags)
+        try:
+            for component in path.parts[1:]:
+                try:
+                    next_descriptor = os.open(component, flags, dir_fd=descriptor)
+                except FileNotFoundError:
+                    if not create:
+                        raise
+                    try:
+                        os.mkdir(component, mode=0o700, dir_fd=descriptor)
+                    except FileExistsError:
+                        pass
+                    next_descriptor = os.open(component, flags, dir_fd=descriptor)
+                os.close(descriptor)
+                descriptor = next_descriptor
+            result = descriptor
+            descriptor = -1
+            return result
+        except OSError:
+            raise PluginManifestError("Plugin metadata directory contains an unsafe or unavailable path.") from None
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
+    @contextmanager
+    def _locked_directory(self) -> Iterator[int | None]:
+        """Hold a no-follow lock and anchor registry writes to the opened directory."""
+        if not self._supports_directory_descriptors():
+            self._assert_safe_paths()
+            self.root.mkdir(parents=True, exist_ok=True)
+            with file_lock(self.lock_file):
+                yield None
+            return
+        directory_fd = self._open_directory(self.root, create=True)
+        lock_fd: int | None = None
+        try:
+            lock_fd = os.open(
+                self.lock_file.name,
+                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=directory_fd,
+            )
+            lock_info = os.fstat(lock_fd)
+            if not stat.S_ISREG(lock_info.st_mode):
+                raise PluginManifestError("Plugin registry lock must be a regular file.")
+            if lock_info.st_mode & 0o077:
+                os.fchmod(lock_fd, 0o600)
+            import fcntl
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            yield directory_fd
+        except OSError:
+            raise PluginManifestError("Plugin manifest registry lock could not be acquired safely.") from None
+        finally:
+            if lock_fd is not None:
+                try:
+                    import fcntl
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                finally:
+                    os.close(lock_fd)
+            os.close(directory_fd)
+
+    @staticmethod
     def _empty() -> dict[str, Any]:
         return {"store_schema_version": 1, "manifests": [], "grants": {}}
 
-    def _read(self) -> dict[str, Any]:
+    def _read(self, directory_fd: int | None = None) -> dict[str, Any]:
         self._assert_safe_paths()
+        descriptor: int | None = None
         try:
-            with open_regular_file(self.registry_file) as stream:
-                info = os.fstat(stream.fileno())
-                if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_PLUGIN_STORE_BYTES:
-                    raise PluginManifestError("Plugin manifest registry is not a bounded regular file.")
-                raw_bytes = stream.read(MAX_PLUGIN_STORE_BYTES + 1)
+            if directory_fd is not None:
+                descriptor = os.open(
+                    self.registry_file.name,
+                    os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                    dir_fd=directory_fd,
+                )
+                stream = os.fdopen(descriptor, "rb")
+                descriptor = None
+                with stream:
+                    info = os.fstat(stream.fileno())
+                    if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_PLUGIN_STORE_BYTES:
+                        raise PluginManifestError("Plugin manifest registry is not a bounded regular file.")
+                    raw_bytes = stream.read(MAX_PLUGIN_STORE_BYTES + 1)
+            else:
+                with open_regular_file(self.registry_file) as stream:
+                    info = os.fstat(stream.fileno())
+                    if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_PLUGIN_STORE_BYTES:
+                        raise PluginManifestError("Plugin manifest registry is not a bounded regular file.")
+                    raw_bytes = stream.read(MAX_PLUGIN_STORE_BYTES + 1)
             if len(raw_bytes) > MAX_PLUGIN_STORE_BYTES:
                 raise PluginManifestError("Plugin manifest registry exceeds its storage limit.")
             document = json.loads(
@@ -212,6 +305,9 @@ class PluginManifestStore:
             raise
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
             raise PluginManifestError("Plugin manifest registry could not be read safely.") from None
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
 
         if (
             not isinstance(document, dict)
@@ -290,9 +386,8 @@ class PluginManifestStore:
             "grants": document["grants"],
         }
 
-    def _write(self, document: dict[str, Any]) -> None:
+    def _write(self, document: dict[str, Any], directory_fd: int | None = None) -> None:
         self._assert_safe_paths()
-        self.root.mkdir(parents=True, exist_ok=True)
         serialized = json.dumps(
             document,
             ensure_ascii=False,
@@ -300,9 +395,48 @@ class PluginManifestStore:
             sort_keys=True,
             allow_nan=False,
         ) + "\n"
-        if len(serialized.encode("utf-8")) > MAX_PLUGIN_STORE_BYTES:
+        payload = serialized.encode("utf-8")
+        if len(payload) > MAX_PLUGIN_STORE_BYTES:
             raise PluginManifestError("Plugin manifest registry exceeds its storage limit.")
-        atomic_write_text(self.registry_file, serialized)
+        if directory_fd is None:
+            self.root.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(self.registry_file, serialized)
+            return
+        temporary_name = f".registry.{secrets.token_hex(16)}.tmp"
+        descriptor: int | None = None
+        created = False
+        try:
+            descriptor = os.open(
+                temporary_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=directory_fd,
+            )
+            created = True
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "wb") as stream:
+                descriptor = None
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(
+                temporary_name,
+                self.registry_file.name,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+            )
+            created = False
+            os.fsync(directory_fd)
+        except OSError:
+            raise PluginManifestError("Plugin manifest registry could not be written atomically and safely.") from None
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            if created:
+                try:
+                    os.unlink(temporary_name, dir_fd=directory_fd)
+                except OSError:
+                    pass
 
     def list(self) -> dict[str, Any]:
         document = self._read()
@@ -336,8 +470,8 @@ class PluginManifestStore:
         manifest, digest = validate_plugin_manifest(document)
         self._assert_safe_paths()
         self.root.mkdir(parents=True, exist_ok=True)
-        with file_lock(self.lock_file):
-            stored = self._read()
+        with self._locked_directory() as directory_fd:
+            stored = self._read(directory_fd)
             existing_index = next(
                 (
                     index for index, record in enumerate(stored["manifests"])
@@ -357,7 +491,7 @@ class PluginManifestStore:
                     )
                 stored["manifests"][existing_index] = {"manifest": manifest, "sha256": digest}
             stored["manifests"].sort(key=lambda item: item["manifest"]["id"])
-            self._write(stored)
+            self._write(stored, directory_fd)
         return {"manifest": manifest, "sha256": digest, "permission_status": "default_deny"}
 
     def grant(
@@ -413,7 +547,7 @@ class PluginManifestStore:
                 "manifest_sha256": expected_sha256,
                 "tools": sorted(normalized_grants, key=lambda item: item["name"]),
             }
-            self._write(stored)
+            self._write(stored, directory_fd)
         return {
             "plugin_id": plugin_id,
             "manifest_sha256": expected_sha256,
@@ -430,7 +564,7 @@ class PluginManifestStore:
             stored = self._read()
             existed = stored["grants"].pop(plugin_id, None) is not None
             if existed:
-                self._write(stored)
+                self._write(stored, directory_fd)
             return existed
 
     def is_allowed(self, plugin_id: str, tool_name: str, required_scopes: list[str]) -> bool:
