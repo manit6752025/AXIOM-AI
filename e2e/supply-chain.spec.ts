@@ -37,7 +37,12 @@ test("Diagnostics exports SPDX and requires explicit consent for dependency advi
       relationshipType: "DESCRIBES",
       relatedSpdxElement: "SPDXRef-Package-abc",
     }],
-    annotations: [],
+    annotations: [{
+      annotationDate: "2026-11-22T00:00:00Z",
+      annotationType: "OTHER",
+      annotator: "Tool: AXIOM-AI",
+      comment: "AXIOM inventory: schema_version=1; package_count=1; relationship_count=1; content_sha256=" + "a".repeat(64) + "; network_access_performed=false; host_paths_collected=false.",
+    }],
   };
   const vulnerabilityReport = {
     schema_version: 1,
