@@ -101,6 +101,8 @@ import {
   Cpu,
   Database,
   FileCode2,
+  FileText,
+  Fingerprint,
   GitBranch,
   Gauge,
   Hammer,
