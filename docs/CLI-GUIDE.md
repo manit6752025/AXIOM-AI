@@ -329,3 +329,19 @@ the active tab session) remain intact. A healthy GUI API already bound to the
 configured port is reused; no second API process or duplicate tab is needed.
 Keep the port stable (default 40507) to retain the origin's sign-in state.
 Packaged installs without frontend source should use a release update instead.
+
+
+## Local text embeddings
+
+~~~bash
+python -m pip install -e '.[embeddings]'
+axiom engine embed --model-path ./models/my-encoder --text "First document" --text "Second document" --json
+axiom engine embed --model-path ./models/my-encoder --input-file ./data/document.txt --device cpu
+axiom engine embed-unload
+~~~
+
+The optional adapter uses trusted local safetensors checkpoints, bounded
+character chunking, attention-mask mean pooling, and optional L2 normalization.
+It does not download models, execute remote code, or persist source text.
+The JSON response includes vectors and character offsets; see
+[Local Embeddings](Local-Embeddings.md) for device and request limits.
