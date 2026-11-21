@@ -311,6 +311,7 @@ def runtime_trace_issues(trace_core: str, inference_api: str, diagnostics_api: s
     for token in (
         "MAX_RUNTIME_TRACES = 200",
         "def record_runtime_trace(",
+        '"inference.generate.structured"',
         "def list_runtime_traces(",
         "def clear_runtime_traces(",
         '"prompt_bodies_stored": False',
@@ -322,6 +323,7 @@ def runtime_trace_issues(trace_core: str, inference_api: str, diagnostics_api: s
     for token in (
         'response.headers["X-Request-ID"] = request_id',
         'operation="inference.generate"',
+        'operation="inference.generate.structured"',
         'operation="inference.benchmark"',
         'error_code="runtime_unavailable"',
     ):
