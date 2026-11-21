@@ -33,6 +33,7 @@ import {
   getPendingApiRequestCount,
   type DatasetCleaningPreview,
   type DatasetManifest,
+  type DatasetSnapshotHistory,
   type DatasetProfile,
   type DatasetQualityResult,
   type HardwareStatus,
@@ -2407,6 +2408,20 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
   };
 
   useEffect(() => { void refresh(); }, []);
+  const refreshSnapshots = async () => {
+    setSnapshotLoading(true);
+    setSnapshotError("");
+    try {
+      setSnapshotHistory(await axiomApi.datasetSnapshots());
+    } catch (cause) {
+      setSnapshotError(cause instanceof Error ? cause.message : "Dataset snapshot history is unavailable.");
+    } finally {
+      setSnapshotLoading(false);
+    }
+  };
+
+  useEffect(() => { void refreshSnapshots(); }, []);
+
 
   const discoverLocalModels = async () => {
     setDiscoveryBusy(true);
@@ -2726,6 +2741,12 @@ function Datasets({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
   const [inventoryLoadingMore, setInventoryLoadingMore] = useState(false);
   const [profile, setProfile] = useState<DatasetProfile | null>(null);
   const [manifest, setManifest] = useState<DatasetManifest | null>(null);
+  const [snapshotHistory, setSnapshotHistory] = useState<DatasetSnapshotHistory | null>(null);
+  const [snapshotParentId, setSnapshotParentId] = useState("");
+  const [snapshotBusy, setSnapshotBusy] = useState<string | null>(null);
+  const [snapshotVerifyBusy, setSnapshotVerifyBusy] = useState<string | null>(null);
+  const [snapshotLoading, setSnapshotLoading] = useState(true);
+  const [snapshotError, setSnapshotError] = useState("");
   const [parentManifestSha256, setParentManifestSha256] = useState("");
   const [cleanPreview, setCleanPreview] = useState<DatasetCleaningPreview | null>(null);
   const [comparePaths, setComparePaths] = useState<string[]>([]);
@@ -2848,6 +2869,42 @@ function Datasets({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
     }
   };
 
+  const runSnapshot = async (path: string) => {
+    setSnapshotBusy(path);
+    setSnapshotError("");
+    try {
+      const result = await axiomApi.createDatasetSnapshot({
+        path,
+        max_bytes: datasetScanPresets[scanPreset].limits.max_bytes,
+        parent_snapshot_id: snapshotParentId || undefined,
+      });
+      await refreshSnapshots();
+      const manifest = result.snapshot.manifest;
+      onNotify("Immutable dataset snapshot created · " + manifest.sha256.slice(0, 12) + ".", "success");
+    } catch (cause) {
+      onNotify(cause instanceof Error ? cause.message : "Dataset snapshot could not be created.", "warning");
+    } finally {
+      setSnapshotBusy(null);
+    }
+  };
+
+  const verifySnapshot = async (snapshotId: string) => {
+    setSnapshotVerifyBusy(snapshotId);
+    try {
+      const result = await axiomApi.verifyDatasetSnapshot(snapshotId);
+      onNotify(
+        result.valid && result.lineage_valid
+          ? "Snapshot content hash and lineage verified."
+          : "Snapshot integrity verification failed.",
+        result.valid && result.lineage_valid ? "success" : "warning",
+      );
+    } catch (cause) {
+      onNotify(cause instanceof Error ? cause.message : "Snapshot verification failed.", "warning");
+    } finally {
+      setSnapshotVerifyBusy(null);
+    }
+  };
+
   const runCleaningPreview = async (path: string) => {
     setCleanPreviewBusy(path);
     setCleanPreview(null);
@@ -2943,6 +3000,12 @@ function Datasets({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
         <p className="quiet-note">{datasetScanPresets[scanPreset].description}. The API enforces fixed maximums; values are never returned.</p>
       </div>
       <label className="dataset-manifest-parent"><span>Optional parent manifest SHA-256 · link this dataset to an earlier source</span><input value={parentManifestSha256} onChange={(event) => setParentManifestSha256(event.target.value)} maxLength={64} placeholder="Paste a previous manifest digest (leave blank for source)" /></label>
+      <label className="dataset-manifest-parent"><span>Optional parent snapshot · link this capture to an earlier immutable snapshot</span>
+        <select aria-label="Parent dataset snapshot" value={snapshotParentId} onChange={(event) => setSnapshotParentId(event.target.value)} disabled={snapshotLoading}>
+          <option value="">Create a new source snapshot</option>
+          {(snapshotHistory?.snapshots ?? []).map((record) => <option key={record.manifest.snapshot_id} value={record.manifest.snapshot_id}>{record.manifest.snapshot_id.slice(0, 12)} · {record.manifest.sha256.slice(0, 12)} · {record.manifest.source_path}</option>)}
+        </select>
+      </label>
       <div className="dataset-scan-controls">
         <label><span>Search dataset paths</span><input value={datasetSearchInput} onChange={(event) => setDatasetSearchInput(event.target.value)} maxLength={160} placeholder="e.g. train, eval, validation" aria-label="Search dataset paths" /></label>
         <button type="button" className="button secondary-button" onClick={() => void refresh(datasetSearchInput.trim())} disabled={inventoryBusy}><Search size={15} /> Search inventory</button>
@@ -2950,13 +3013,34 @@ function Datasets({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
       {inventoryBusy ? <div className="loading-state" role="status">Scanning the local data directory…</div> : datasets.length ? <div className="module-list">{datasets.map((dataset) => <div className="module-row" key={dataset.path}>
         <span className="module-icon"><Database size={17} /></span>
         <span className="module-copy"><b>{dataset.path}</b><small>JSONL · {formatBytes(dataset.size_bytes)} · local workspace</small></span>
-        <div className="module-row-actions"><button type="button" className="button secondary-button" disabled={profileBusy !== null} onClick={() => void runProfile(dataset.path)}>{profileBusy === dataset.path ? "Profiling…" : "Profile"}</button><button type="button" className="button secondary-button" disabled={manifestBusy !== null} onClick={() => void runManifest(dataset.path)}>{manifestBusy === dataset.path ? "Hashing…" : "Manifest"}</button><button type="button" className="button secondary-button" disabled={cleanPreviewBusy !== null} onClick={() => void runCleaningPreview(dataset.path)}>{cleanPreviewBusy === dataset.path ? "Previewing…" : "Preview clean"}</button></div>
+        <div className="module-row-actions"><button type="button" className="button secondary-button" disabled={profileBusy !== null} onClick={() => void runProfile(dataset.path)}>{profileBusy === dataset.path ? "Profiling…" : "Profile"}</button><button type="button" className="button secondary-button" disabled={manifestBusy !== null} onClick={() => void runManifest(dataset.path)}>{manifestBusy === dataset.path ? "Hashing…" : "Manifest"}</button><button type="button" className="button secondary-button" disabled={cleanPreviewBusy !== null} onClick={() => void runCleaningPreview(dataset.path)}>{cleanPreviewBusy === dataset.path ? "Previewing…" : "Preview clean"}</button><button type="button" className="button secondary-button" disabled={snapshotBusy !== null} onClick={() => void runSnapshot(dataset.path)}>{snapshotBusy === dataset.path ? "Snapshotting…" : "Snapshot"}</button></div>
       </div>)}</div> : <EmptyState icon={Database} title="No JSONL datasets found" description="Place a JSONL file under the workspace data/ directory, then refresh. You can inspect any path directly with the CLI." action={<CliReference command="axiom dataset profile ./data/train.jsonl" />} />}
       {!inventoryBusy && datasets.length > 0 && <div className="pagination-actions">
         <small>Showing {datasets.length.toLocaleString()} of {datasetTotal.toLocaleString()} matching datasets</small>
         {datasetHasMore && <button type="button" className="button secondary-button" onClick={() => void loadMoreDatasets()} disabled={inventoryLoadingMore}>{inventoryLoadingMore ? "Loading…" : "Load more datasets"}</button>}
       </div>}
       {datasetTruncated && <InlineAlert tone="warning" role="status">The workspace scan reached its 5,000-entry safety limit. Narrow the search or inspect a subfolder to reduce the scan; entries beyond the cap are not included in this result.</InlineAlert>}
+    </Surface>
+    <Surface title="Immutable snapshot history" eyebrow="CONTENT-ADDRESSED / HASH-VERIFIED" action={<button type="button" className="button secondary-button" onClick={() => void refreshSnapshots()} disabled={snapshotLoading}>{snapshotLoading ? "Refreshing…" : "Refresh history"}</button>}>
+      <p className="quiet-note">Snapshots copy the selected JSONL content into read-only, SHA-256-addressed workspace storage. The append-only manifest index records the content hash and parent lineage; the source dataset is never changed. Snapshot count, per-file size and total stored bytes are bounded.</p>
+      {snapshotError && <InlineAlert tone="warning" role="alert">{snapshotError}</InlineAlert>}
+      {snapshotLoading ? <div className="loading-state" role="status">Loading immutable snapshot history…</div>
+        : snapshotHistory && snapshotHistory.snapshots.length > 0
+          ? <div className="module-list">{snapshotHistory.snapshots.map((record) => {
+              const manifest = record.manifest;
+              return <div className="module-row" key={manifest.snapshot_id}>
+                <span className="module-icon"><Database size={17} /></span>
+                <span className="module-copy">
+                  <b>{manifest.source_path} · {manifest.sha256.slice(0, 16)}</b>
+                  <small>{manifest.created_at} · {formatBytes(manifest.file_size_bytes)} · {manifest.parent_snapshot_id ? "derived from " + manifest.parent_snapshot_id.slice(0, 12) : "source snapshot"}</small>
+                </span>
+                <div className="module-row-actions">
+                  <button type="button" className="button secondary-button" disabled={snapshotVerifyBusy !== null} onClick={() => void verifySnapshot(manifest.snapshot_id)}>{snapshotVerifyBusy === manifest.snapshot_id ? "Verifying…" : "Verify"}</button>
+                </div>
+              </div>;
+            })}</div>
+          : <EmptyState icon={Database} title="No immutable snapshots yet" description="Create a snapshot from a JSONL dataset above. Identical content is stored once and later snapshots can reference an earlier snapshot as their parent." action={<CliReference command="axiom dataset snapshot ./data/train.jsonl" />} />}
+      {snapshotHistory && <p className="quiet-note">{snapshotHistory.total} immutable snapshot(s). Snapshot records are append-only; this page does not offer destructive deletion.</p>}
     </Surface>
     {datasets.length > 0 && <Surface title="Compare and validate" eyebrow="DATASET QUALITY">
       <p className="quiet-note">Select two or three JSONL files. The report compares field presence and observed types; checks never return row values.</p>
