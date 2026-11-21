@@ -304,6 +304,53 @@ export type AxiomEngineBenchmarkRun = {
   stop_reason: string;
   memory_stats: Record<string, number>;
 };
+export type AxiomEngineBenchmarkProfile = {
+  id: string;
+  name: string;
+  created_at: string;
+  fingerprint: string;
+  prompt_sha256: string;
+  prompt_chars: number;
+  model_config_sha256: string | null;
+  workload: {
+    prompt_sha256: string;
+    prompt_chars: number;
+    config: Record<string, unknown> & {
+      model: string;
+      device: string | null;
+      precision: string | null;
+      memory_mode: string | null;
+    };
+    metrics: Record<string, number>;
+  };
+  hardware: {
+    os_name: string;
+    os_release: string;
+    architecture: string;
+    cpu_cores: number;
+    ram_bytes: number | null;
+    gpu_name: string | null;
+    vram_bytes: number | null;
+    cuda_available: boolean;
+  };
+  software: { axiom_version: string; python_version: string; torch_version: string | null };
+};
+export type AxiomEngineBenchmarkProfileList = {
+  schema_version: 1;
+  total: number;
+  profiles: AxiomEngineBenchmarkProfile[];
+  privacy: { prompt_content_included: false; model_paths_included: false; credentials_included: false };
+};
+export type AxiomEngineBenchmarkProfileComparison = {
+  schema_version: 1;
+  comparable: boolean;
+  match: Record<string, boolean>;
+  left: { id: string; name: string };
+  right: { id: string; name: string };
+  metrics: Record<string, { left: number; right: number; delta: number }>;
+  note: string;
+};
+
 export type AxiomEngineBenchmark = {
   schema_version: number;
   engine: string;
@@ -347,6 +394,7 @@ export type AxiomEngineBenchmark = {
     results_persisted: false; cloud_provider_used: false;
   };
   generated_at: string;
+  profile_record?: AxiomEngineBenchmarkProfile | null;
 };
 
 export type AxiomQuantizationCandidate = {
@@ -2601,10 +2649,15 @@ export const axiomApi = {
     top_p: number; top_k: number; min_p: number; repetition_penalty: number; seed: number | null;
     stop_sequences: string[]; device: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu";
     memory_mode: "auto" | "full" | "layer_streaming" | "disk_streaming";
+    profile_name?: string;
     precision: "auto" | "fp32" | "fp16" | "bf16";
   }, signal?: AbortSignal) => requestJson<AxiomEngineBenchmark>("/api/engine/benchmark", {
     method: "POST", body: JSON.stringify(input), signal,
   }, 300_000),
+  axiomEngineBenchmarkProfiles: (limit = 100) =>
+    requestJson<AxiomEngineBenchmarkProfileList>("/api/engine/benchmark-profiles?limit=" + limit),
+  compareAxiomEngineBenchmarkProfiles: (leftId: string, rightId: string) =>
+    requestJson<AxiomEngineBenchmarkProfileComparison>("/api/engine/benchmark-profiles/compare?" + new URLSearchParams({ left_id: leftId, right_id: rightId })),
   axiomEngineStatus: () => requestJson<AxiomEngineStatus>("/api/engine/status"),
   engineBackends: (profile: EngineFabricProfile = "balanced") => requestJson<EngineFabricReport>("/api/engine/backends?" + new URLSearchParams({ profile })),
   engineBackendProfiles: () => requestJson<EngineFabricProfileReport>("/api/engine/backends/profiles"),
