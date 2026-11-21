@@ -940,7 +940,7 @@ class ServingProfileCreateRequest(BaseModel):
     max_new_tokens: int = Field(default=256, ge=1, le=2048, strict=True)
     max_prompt_chars: int = Field(default=12000, ge=1, le=12000, strict=True)
     max_concurrent_requests: int = Field(default=1, ge=1, le=1, strict=True)
-    max_queued_requests: int = Field(default=0, ge=0, le=0, strict=True)
+    max_queued_requests: int = Field(default=0, ge=0, le=32, strict=True)
     request_timeout_seconds: int = Field(default=300, ge=5, le=900, strict=True)
 
     @field_validator("model_path", mode="before")
