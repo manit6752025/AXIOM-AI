@@ -220,30 +220,37 @@ class PluginManifestStore:
                 or len(grant["tools"]) > MAX_TOOLS_PER_MANIFEST
             ):
                 raise PluginManifestError("Plugin grant registry contains an invalid record.")
-            if grant["manifest_sha256"] != next(
-                record["sha256"] for record in normalized_manifests
+            current_record = next(
+                record for record in normalized_manifests
                 if record["manifest"]["id"] == plugin_id
-            ):
-                # A stale grant is intentionally retained but never active. It
-                # will be visibly marked stale and cannot authorize new content.
-                continue
+            )
+            stale_grant = grant["manifest_sha256"] != current_record["sha256"]
             names: set[str] = set()
             declared = {
                 tool["name"]: set(tool["scopes"])
-                for record in normalized_manifests if record["manifest"]["id"] == plugin_id
-                for tool in record["manifest"]["tools"]
+                for tool in current_record["manifest"]["tools"]
             }
             for tool_grant in grant["tools"]:
                 if (
                     not isinstance(tool_grant, dict)
                     or set(tool_grant) != {"name", "scopes"}
                     or not isinstance(tool_grant.get("name"), str)
-                    or tool_grant["name"] not in declared
+                    or not _TOOL_NAME.fullmatch(tool_grant["name"])
                     or tool_grant["name"] in names
                     or not isinstance(tool_grant.get("scopes"), list)
                     or not tool_grant["scopes"]
-                    or any(scope not in declared[tool_grant["name"]] for scope in tool_grant["scopes"])
+                    or any(
+                        not isinstance(scope, str) or scope not in _ALLOWED_SCOPES
+                        for scope in tool_grant["scopes"]
+                    )
                     or len(set(tool_grant["scopes"])) != len(tool_grant["scopes"])
+                    or (
+                        not stale_grant
+                        and (
+                            tool_grant["name"] not in declared
+                            or any(scope not in declared[tool_grant["name"]] for scope in tool_grant["scopes"])
+                        )
+                    )
                 ):
                     raise PluginManifestError("Plugin grant contains an unknown tool or undeclared scope.")
                 names.add(tool_grant["name"])
@@ -386,6 +393,7 @@ class PluginManifestStore:
             or not isinstance(tool_name, str)
             or not _TOOL_NAME.fullmatch(tool_name)
             or not isinstance(required_scopes, list)
+            or not required_scopes
             or any(not isinstance(scope, str) or scope not in _ALLOWED_SCOPES for scope in required_scopes)
             or len(set(required_scopes)) != len(required_scopes)
         ):
