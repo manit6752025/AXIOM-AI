@@ -388,3 +388,66 @@ def test_telemetry_export_privacy_contract_detects_pid_or_missing_csv_controls()
     broken = monitor.replace('anchor.download = "axiom-resource-telemetry.csv"', "anchor.download = 'wrong.csv'")
     failures = release_smoke.telemetry_export_privacy_issues(broken, e2e, docs)
     assert any("axiom-resource-telemetry.csv" in issue for issue in failures)
+
+
+def test_cross_platform_package_release_contract_requires_wheel_sdist_and_install() -> None:
+    verifier = (ROOT / "scripts/verify_package_artifacts.py").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github/workflows/quality-gates.yml").read_text(encoding="utf-8")
+    tests = (ROOT / "tests/test_package_artifact_verification.py").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/Packaging.md").read_text(encoding="utf-8")
+    assert release_smoke.package_verification_issues(verifier, workflow, tests, docs) == []
+
+
+def test_cross_platform_package_release_contract_detects_missing_sdist_build() -> None:
+    verifier = (ROOT / "scripts/verify_package_artifacts.py").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github/workflows/quality-gates.yml").read_text(encoding="utf-8")
+    tests = (ROOT / "tests/test_package_artifact_verification.py").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/Packaging.md").read_text(encoding="utf-8")
+    broken_workflow = workflow.replace("python -m build --sdist --wheel --outdir dist", "python -m build --wheel --outdir dist")
+    failures = release_smoke.package_verification_issues(verifier, broken_workflow, tests, docs)
+    assert any("sdist" in issue for issue in failures)
+
+
+def test_persisted_schema_inventory_release_contract_matches_current_stores() -> None:
+    paths = {
+        "workflows": "axiom/core/workflows.py",
+        "llm_profiles": "axiom/core/llm_profiles.py",
+        "security_events": "axiom/core/security_events.py",
+        "hardware_snapshots": "axiom/core/hardware_snapshots.py",
+        "workspaces": "axiom/core/workspaces.py",
+        "prediction_jobs": "axiom/core/prediction_jobs.py",
+        "integrations": "axiom/core/integrations.py",
+        "permissions": "axiom/core/tool_permissions.py",
+        "registry": "axiom/models/registry.py",
+        "workspace_metadata": "axiom/core/workspace_metadata.py",
+        "fine_tuning": "axiom/core/fine_tuning.py",
+        "model_studio": "axiom/core/model_studio.py",
+        "runtime_traces": "axiom/core/runtime_traces.py",
+    }
+    sources = {name: (ROOT / path).read_text(encoding="utf-8") for name, path in paths.items()}
+    docs = (ROOT / "docs/Storage-Schemas-and-Migrations.md").read_text(encoding="utf-8")
+    assert release_smoke.persisted_schema_inventory_issues(docs, sources) == []
+
+
+def test_persisted_schema_inventory_detects_stale_versions_and_missing_store_notes() -> None:
+    paths = {
+        "workflows": "axiom/core/workflows.py",
+        "llm_profiles": "axiom/core/llm_profiles.py",
+        "security_events": "axiom/core/security_events.py",
+        "hardware_snapshots": "axiom/core/hardware_snapshots.py",
+        "workspaces": "axiom/core/workspaces.py",
+        "prediction_jobs": "axiom/core/prediction_jobs.py",
+        "integrations": "axiom/core/integrations.py",
+        "permissions": "axiom/core/tool_permissions.py",
+        "registry": "axiom/models/registry.py",
+        "workspace_metadata": "axiom/core/workspace_metadata.py",
+        "fine_tuning": "axiom/core/fine_tuning.py",
+        "model_studio": "axiom/core/model_studio.py",
+        "runtime_traces": "axiom/core/runtime_traces.py",
+    }
+    sources = {name: (ROOT / path).read_text(encoding="utf-8") for name, path in paths.items()}
+    docs = (ROOT / "docs/Storage-Schemas-and-Migrations.md").read_text(encoding="utf-8")
+    stale = docs.replace("schema_version: 2", "schema_version: 1", 1).replace(".axiom/tool_permissions.json", ".axiom/missing.json")
+    failures = release_smoke.persisted_schema_inventory_issues(stale, sources)
+    assert any("schema_version: 2" in failure for failure in failures)
+    assert any("tool_permissions.json" in failure for failure in failures)

@@ -550,17 +550,100 @@ def telemetry_export_privacy_issues(monitor: str, e2e: str, docs: str) -> list[s
     return failures
 
 
+def persisted_schema_inventory_issues(docs: str, sources: dict[str, str]) -> list[str]:
+    """Ensure every persisted store and its real migration/rollback rules stay documented."""
+    expected_doc_tokens = (
+        ".axiom/workflows.json", "schema_version: 2", "Schema-v1 records are accepted",
+        ".axiom/experiments.json", ".axiom/evaluations.json", ".axiom/agent-profiles.json",
+        ".axiom/models.json", ".axiom/integrations.json", ".axiom/tool_permissions.json",
+        ".axiom/security-events.json", ".axiom/llm-provider-profiles.json",
+        ".axiom/hardware-snapshots.json", "~/.axiom/workspaces.json",
+        ".axiom/prediction_jobs.json", "Fine-tuning jobs", "Model Studio jobs",
+        "manifest.json", "Runtime traces are in-memory only", "browser-memory-only",
+        "Model Studio reader does not yet reject every future version explicitly", "default-deny",
+    )
+    failures = [
+        f"Persisted-schema documentation is missing: {token}"
+        for token in expected_doc_tokens if token not in docs
+    ]
+    code_contracts = {
+        "workflows": ("WORKFLOW_SCHEMA_VERSION = 2",),
+        "llm_profiles": ("SCHEMA_VERSION = 2", "version not in {1, SCHEMA_VERSION}"),
+        "security_events": ("LEGACY_SCHEMA_VERSION = 1", "SCHEMA_VERSION = 2"),
+        "hardware_snapshots": ("SCHEMA_VERSION = 1",),
+        "workspaces": ("_SCHEMA_VERSION = 1",),
+        "prediction_jobs": ('"schema_version": 1', 'payload["schema_version"] != 1'),
+        "integrations": ('data.get("trust_status", "unverified")', 'data.get("connection_status", "not_inspected")'),
+        "permissions": ('"active_profile"', '"profiles"', "_default_config()"),
+        "registry": ("legacy_resource_id(", 'registry_file = self.root / "models.json"'),
+        "workspace_metadata": ("ARCHIVE_SCHEMA_VERSION = 1", '"agent_profiles": "agent-profiles.json"'),
+        "fine_tuning": ('"schema_version": 1', "def _read_job("),
+        "model_studio": ('"schema_version": 1', "def _read_job("),
+        "runtime_traces": ("MAX_RUNTIME_TRACES", "_traces_by_workspace"),
+    }
+    for name, tokens in code_contracts.items():
+        source = sources.get(name, "")
+        if not source:
+            failures.append(f"Persisted-schema source inventory is missing: {name}")
+            continue
+        for token in tokens:
+            if token not in source:
+                failures.append(f"Persisted-schema documentation/source contract for {name} is missing: {token}")
+    return failures
+
+
+def package_verification_issues(
+    verifier: str, workflow: str, tests: str, docs: str,
+) -> list[str]:
+    """Require wheel+sdist construction, safe archive inspection and import testing on every OS."""
+    checks = (
+        ("artifact verifier", verifier, (
+            "def verify_package_artifacts(", "MAX_ARCHIVE_MEMBERS",
+            "MAX_MEMBER_BYTES", "MAX_TOTAL_BYTES", "def _verify_wheel(",
+            "def _verify_sdist(", "EXPECTED_ENTRY_POINT", "axiom/webui/index.html",
+            "entry_points.txt", "testzip()", "tarfile.open", "install_wheel",
+        )),
+        ("cross-platform workflow", workflow, (
+            "matrix.os", "node-version: \"22\"", "npm ci", "npm run build",
+            "python -m build --sdist --wheel --outdir dist",
+            "python scripts/verify_package_artifacts.py --dist dist --install-wheel --json",
+            "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py",
+        )),
+        ("archive regression tests", tests, (
+            "test_verifies_wheel_and_sdist_bundle_cli_and_control_center",
+            "test_rejects_wheel_path_traversal_and_special_files",
+            "test_rejects_wheel_symlink_members",
+            "test_rejects_case_colliding_wheel_paths",
+            "test_rejects_wrong_cli_entry_point",
+            "test_rejects_sdist_symbolic_links",
+            "test_rejects_wheel_missing_control_center_css_asset",
+            "test_rejects_sdist_missing_control_center_css_asset",
+        )),
+        ("packaging documentation", docs, (
+            "Ubuntu", "Windows", "macOS", "wheel", "sdist",
+            "axiom/webui", "without extracting",
+        )),
+    )
+    failures: list[str] = []
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                failures.append(f"Cross-platform packaging {label} is missing: {token}")
+    return failures
+
+
 def inspect(root: Path) -> dict[str, Any]:
     failures: list[str] = []
     warnings: list[str] = []
     required = [
         "pyproject.toml", "axiom/version.py", "ROADMAP.md", "src/App.tsx",
         "src/api/client.ts", "src/components/ApiPlayground.tsx", "src/components/RuntimeConnectorPanel.tsx", "src/components/AgentProfiles.tsx", "src/components/LocalInferencePanel.tsx", "src/components/RuntimeTracePanel.tsx", "src/components/EngineTelemetryMonitor.tsx", "src/components/LocalAxiomEnginePanel.tsx", "src/components/BenchmarkResourceTrends.tsx", "src/components/ModelStudioPanel.tsx", "src/styles.css",
-        "axiom/api/server.py", "axiom/api/workspace.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/api/model_studio.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/model_studio.py", "axiom/core/runtime_traces.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/core/engine_fabric_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "axiom/cli/model_studio.py", "scripts/release_smoke.py",
+        "axiom/api/server.py", "axiom/api/workspace.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/api/model_studio.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/model_studio.py", "axiom/core/runtime_traces.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/core/engine_fabric_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "axiom/cli/model_studio.py", "scripts/release_smoke.py", "scripts/verify_package_artifacts.py", "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py",
         "tests/test_release_smoke.py", "tests/test_ollama_service.py", "tests/test_ollama_service_api.py", "tests/test_ollama_model_operations.py", "tests/test_cli_inference.py", "tests/test_axiom_engine.py", "tests/test_axiom_engine_api.py", "tests/test_axiom_engine_cli.py", "tests/test_native_engine.py", "tests/test_model_studio.py", "tests/test_engine_runtime_status.py", "tests/test_cli_model_studio_jobs.py", "e2e/axiom-engine.spec.ts", "e2e/helpers/auth.ts", "e2e/modules.spec.ts", "e2e/workflows.spec.ts", "e2e/evaluation.spec.ts",
         "e2e/model-registry-filters.spec.ts", "e2e/ollama-service.spec.ts", "e2e/inference-benchmark.spec.ts", "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/axiom-engine.spec.ts", "tests/test_workspace_model_registry_filters.py", "tests/test_workflow_store_pagination.py", "tests/test_workflow_api_pagination.py", "tests/test_workflow_cli.py",
         "tests/test_model_compatibility.py", "tests/test_inference_benchmark.py", "tests/test_inference_benchmark_api.py", "tests/test_runtime_traces.py", "tests/test_runtime_traces_api.py", "tests/test_runtime_discovery.py", "tests/test_runtime_discovery_api.py", "tests/test_agent_profiles.py", "tests/test_agent_profiles_api.py", "tests/test_agent_profiles_cli.py", "tests/test_engine_fabric_profiles.py", "tests/test_engine_fabric_profiles_api.py", "tests/test_engine_fabric_profiles_cli.py", "e2e/api-playground.spec.ts", "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts", "e2e/engine-fabric.spec.ts",
-        "docs/Runtime-Discovery.md", "docs/Agent-Profiles.md", "docs/Api-Playground.md", "docs/Inference-Benchmarking.md", "docs/Local-Engine.md", "docs/Engine-Fabric.md", ".github/workflows/quality-gates.yml", ".github/workflows/nightly-build.yml",
+        "docs/Runtime-Discovery.md", "docs/Agent-Profiles.md", "docs/Api-Playground.md", "docs/Inference-Benchmarking.md", "docs/Local-Engine.md", "docs/Engine-Fabric.md",
+        "docs/Packaging.md", "docs/Storage-Schemas-and-Migrations.md", ".github/workflows/quality-gates.yml", ".github/workflows/nightly-build.yml",
     ]
     for relative in required:
         if not (root / relative).is_file():
@@ -958,6 +1041,30 @@ def inspect(root: Path) -> dict[str, Any]:
     failures.extend(telemetry_export_privacy_issues(
         telemetry_export_monitor, telemetry_export_e2e, telemetry_export_docs,
     ))
+    package_verifier = (root / "scripts/verify_package_artifacts.py").read_text(encoding="utf-8")
+    package_tests = (root / "tests/test_package_artifact_verification.py").read_text(encoding="utf-8")
+    package_docs = (root / "docs/Packaging.md").read_text(encoding="utf-8")
+    package_workflow = (root / ".github/workflows/quality-gates.yml").read_text(encoding="utf-8")
+    failures.extend(package_verification_issues(
+        package_verifier, package_workflow, package_tests, package_docs,
+    ))
+    schema_docs = (root / "docs/Storage-Schemas-and-Migrations.md").read_text(encoding="utf-8")
+    schema_sources = {
+        "workflows": (root / "axiom/core/workflows.py").read_text(encoding="utf-8"),
+        "llm_profiles": (root / "axiom/core/llm_profiles.py").read_text(encoding="utf-8"),
+        "security_events": (root / "axiom/core/security_events.py").read_text(encoding="utf-8"),
+        "hardware_snapshots": (root / "axiom/core/hardware_snapshots.py").read_text(encoding="utf-8"),
+        "workspaces": (root / "axiom/core/workspaces.py").read_text(encoding="utf-8"),
+        "prediction_jobs": (root / "axiom/core/prediction_jobs.py").read_text(encoding="utf-8"),
+        "integrations": (root / "axiom/core/integrations.py").read_text(encoding="utf-8"),
+        "permissions": (root / "axiom/core/tool_permissions.py").read_text(encoding="utf-8"),
+        "registry": (root / "axiom/models/registry.py").read_text(encoding="utf-8"),
+        "workspace_metadata": (root / "axiom/core/workspace_metadata.py").read_text(encoding="utf-8"),
+        "fine_tuning": (root / "axiom/core/fine_tuning.py").read_text(encoding="utf-8"),
+        "model_studio": (root / "axiom/core/model_studio.py").read_text(encoding="utf-8"),
+        "runtime_traces": (root / "axiom/core/runtime_traces.py").read_text(encoding="utf-8"),
+    }
+    failures.extend(persisted_schema_inventory_issues(schema_docs, schema_sources))
     for path in (
         "/api/health", "/api/meta", "/api/workspace/runtime",
         "/api/workspace/models?offset=0&limit=5", "/api/workspace/datasets",
