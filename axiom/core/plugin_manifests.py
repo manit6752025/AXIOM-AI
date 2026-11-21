@@ -262,6 +262,8 @@ class PluginManifestStore:
                 try:
                     import fcntl
                     fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                except OSError:
+                    pass
                 finally:
                     os.close(lock_fd)
             os.close(directory_fd)
@@ -507,10 +509,8 @@ class PluginManifestStore:
             raise PluginManifestError("The current manifest SHA-256 is required to grant permissions.")
         if not isinstance(tools, list) or len(tools) > MAX_TOOLS_PER_MANIFEST:
             raise PluginManifestError("Plugin grant tool list is invalid.")
-        self._assert_safe_paths(require_registry=True)
-        self.root.mkdir(parents=True, exist_ok=True)
-        with file_lock(self.lock_file):
-            stored = self._read()
+        with self._locked_directory() as directory_fd:
+            stored = self._read(directory_fd)
             record = next(
                 (item for item in stored["manifests"] if item["manifest"]["id"] == plugin_id),
                 None,
@@ -560,8 +560,8 @@ class PluginManifestStore:
         self._assert_safe_paths()
         if not self.root.exists():
             return False
-        with file_lock(self.lock_file):
-            stored = self._read()
+        with self._locked_directory() as directory_fd:
+            stored = self._read(directory_fd)
             existed = stored["grants"].pop(plugin_id, None) is not None
             if existed:
                 self._write(stored, directory_fd)
