@@ -61,6 +61,7 @@ from axiom.datasets.progress import DatasetScanCancelled
 from axiom.datasets.inspector import inspect_dataset
 from axiom.models.analysis import analyze_config, disk_info
 from axiom.models.inspector import inspect_model
+from axiom.models.provenance import inspect_model_provenance
 from axiom.models.registry import Model, ModelRegistry
 from axiom.models.runtime_matrix import probe_local_runtime_matrix
 from axiom.core.storage import atomic_write_text
@@ -2524,6 +2525,62 @@ def model_inspect(
         f"Status:         {result.status}",
         title="AXIOM",
     ))
+
+@model_app.command("provenance")
+def model_provenance(
+    path: str,
+    model_id: str | None = typer.Option(None, "--model-id", help="Attach clearly labelled, user-supplied metadata from the local model registry."),
+    json_output: bool = typer.Option(False, "--json", help="Emit the full provenance evidence report as JSON."),
+) -> None:
+    """Inspect local model hashes, formats, license files, and declared registry metadata."""
+    registry_metadata = None
+    if model_id is not None:
+        try:
+            registered = ModelRegistry().get(model_id)
+        except (OSError, ValueError) as exc:
+            _cli_command_error(
+                f"Model registry could not be read: {exc}",
+                code="model_provenance_registry_failed",
+                json_output=json_output,
+            )
+        if registered is None:
+            _cli_command_error(
+                f"Registered model metadata not found: {model_id}",
+                code="model_provenance_model_not_found",
+                json_output=json_output,
+            )
+        registry_metadata = registered.to_dict()
+    try:
+        report = inspect_model_provenance(path, registry_metadata=registry_metadata)
+    except (OSError, RuntimeError, ValueError) as exc:
+        _cli_command_error(
+            str(exc),
+            code="model_provenance_failed",
+            json_output=json_output,
+        )
+    if json_output:
+        typer.echo(json.dumps({"provenance": report}, ensure_ascii=False, sort_keys=True))
+        return
+
+    weights = report["format_evidence"]
+    hashes = report["hash_evidence"]
+    license_evidence = report["license_evidence"]
+    console.print(Panel.fit(
+        f"[bold cyan]AXIOM MODEL PROVENANCE[/bold cyan]\n\n"
+        f"Directory:       {report['model_directory']}\n"
+        f"Formats:         {', '.join(weights['detected_formats']) or 'Unknown'}\n"
+        f"Weight files:    {weights['weight_file_count']}\n"
+        f"Weight size:     {weights['weight_size_bytes'] / (1024**3):.2f} GiB\n"
+        f"Hash status:     {hashes['status']}\n"
+        f"Checkpoint SHA:  {hashes['checkpoint_sha256'] or 'Unavailable'}\n"
+        f"License files:   {len(license_evidence['files'])}\n"
+        f"Declared license:{' ' + str(license_evidence['declared_license']) if license_evidence['declared_license'] else ' Not supplied'}\n"
+        f"Pickle weights:  {'present' if weights['pickle_capable_weight_files_present'] else 'not detected'}\n"
+        f"Network used:    no\n\n"
+        f"{report['scope_note']}",
+        title="AXIOM",
+    ))
+
 
 @dataset_app.command("inspect")
 def dataset_inspect(
