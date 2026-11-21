@@ -288,6 +288,19 @@ export class AxiomClient {
     });
   }
 
+  async downloadWorkspaceBackupStream(
+    workspaceId: string,
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<ReadableStream<Uint8Array>> {
+    const response = await this.checkedResponse(
+      "GET",
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/backup`,
+      { ...options, timeoutMs: options.timeoutMs ?? 900_000 },
+    );
+    if (!response.body) throw new AxiomNetworkError("AXIOM returned an empty backup stream.");
+    return response.body;
+  }
+
   restoreWorkspaceBackup(
     archive: Blob,
     name: string,
