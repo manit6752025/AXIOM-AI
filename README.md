@@ -127,7 +127,7 @@ Downloads and checksums are on [GitHub Releases](https://github.com/manit6752025
 | **Datasets** | Validate JSONL, find duplicates, estimate tokens, write a cleaned copy | `axiom dataset validate ./data/train.jsonl` |
 | **Hardware** | Detect CPU, RAM, GPU, VRAM, and estimate which model sizes fit | `axiom system info` |
 | **Training** | Hardware-aware plans, saved experiments, optional local LoRA fine-tuning | `axiom train plan 7 --method qlora` |
-| **AXIOM Engine** | Direct local inference on PyTorch, no Ollama needed | `axiom engine status` |
+| **AXIOM Engine** | Direct local inference and bounded local text embeddings; no Ollama needed | `axiom engine status` · `axiom engine embed` |
 | **Ollama** | Local service control, model pulls, streaming, structured JSON Schema output and benchmarking | `axiom infer status` · `axiom infer run --schema-file ./response.schema.json` |
 | **Model Studio** | Search and install GGUF models, convert to GGUF | `axiom model studio wizard` |
 | **Prompt Studio** | Build typed, versioned prompt templates and safely preview literal substitutions | `axiom prompt list` |
@@ -202,6 +202,19 @@ axiom engine run --model-path ~/models/my-llama-model --prompt "Explain AXIOM in
 - A local OpenAI-compatible endpoint is at `/v1/chat/completions` (text chat only, no tool calling).
 
 Details: [AXIOM Engine](docs/Local-Engine.md).
+
+</details>
+
+<details>
+<summary><b>Local embeddings</b></summary>
+
+~~~bash
+python -m pip install -e '.[embeddings]'
+axiom engine embed --model-path ./models/my-encoder --text "AXIOM runs locally." --json
+axiom engine embed-unload
+~~~
+
+Embedding generation is local-only, uses trusted safetensors checkpoints, and does not persist input text. See [Local Embeddings](docs/Local-Embeddings.md) for bounds and limitations.
 
 </details>
 
