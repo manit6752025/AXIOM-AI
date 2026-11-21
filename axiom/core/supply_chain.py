@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 MAX_DISTRIBUTIONS = 4096
 MAX_RELATIONSHIPS = 20_000
+MAX_TOTAL_REQUIREMENTS = 50_000
 MAX_AUDIT_FINDINGS = 20_000
 MAX_AUDIT_OUTPUT_BYTES = 8 * 1024 * 1024
 MAX_AUDIT_STDERR_BYTES = 1 * 1024 * 1024
@@ -88,8 +89,14 @@ def generate_spdx_sbom(
 
     packages_by_name: dict[str, dict[str, Any]] = {}
     requirements_by_name: dict[str, list[str]] = {}
+    total_requirements = 0
     for distribution in found:
         name, version, requirements = _distribution_values(distribution)
+        total_requirements += len(requirements)
+        if total_requirements > MAX_TOTAL_REQUIREMENTS:
+            raise SupplyChainError(
+                f"Installed dependency metadata exceeds {MAX_TOTAL_REQUIREMENTS} requirement entries."
+            )
         canonical = _canonical_name(name)
         if canonical in packages_by_name:
             existing = packages_by_name[canonical]
