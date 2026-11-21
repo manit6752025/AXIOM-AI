@@ -84,7 +84,18 @@ with AxiomClient(token="READ_TOKEN") as axiom:
         print(exc.status_code, exc.code, exc.request_id)
 ```
 
-Workspace backups are returned as bytes. Restores always create a new managed
+For large archives, stream directly into a caller-owned binary stream rather than building an archive-sized bytes object:
+
+```python
+from pathlib import Path
+from axiom_sdk import AxiomClient
+
+with AxiomClient(token="READ_TOKEN") as axiom:
+    with Path("workspace-backup.zip").open("xb") as output:
+        byte_count = axiom.download_workspace_backup_to("ws-example", output)
+```
+
+Workspace backups are also available as bytes for smaller files. Restores always create a new managed
 workspace and do not overwrite the active workspace:
 
 ```python
