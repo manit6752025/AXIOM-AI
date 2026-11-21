@@ -345,3 +345,18 @@ character chunking, attention-mask mean pooling, and optional L2 normalization.
 It does not download models, execute remote code, or persist source text.
 The JSON response includes vectors and character offsets; see
 [Local Embeddings](Local-Embeddings.md) for device and request limits.
+
+
+## Local cross-encoder reranking
+
+~~~bash
+axiom engine rerank --model-path ./models/my-reranker --query "local AI" --document "Candidate one" --document "Candidate two" --json
+axiom engine rerank --model-path ./models/my-reranker --query "local AI" --documents-file ./data/candidates.json
+axiom engine rerank-unload
+~~~
+
+Use a local sequence-classification checkpoint with safetensors weights and a
+compatible tokenizer. One-logit models use sigmoid scores; two-logit models
+use the positive-class softmax score. Ties preserve input order. Scores are
+ranking signals rather than calibrated relevance probabilities. See
+[Local Reranking](Local-Reranking.md).
