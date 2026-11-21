@@ -74,6 +74,7 @@ import {
   type LocalRerankingReport,
   type KnowledgeBaseSummary,
   type KnowledgeDocumentRecord,
+  type KnowledgeSearchReport,
 } from "./api/client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode } from "react";
@@ -4223,6 +4224,12 @@ function WorkspaceKnowledgePanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchPrefix, setSearchPrefix] = useState("");
+  const [embeddingModelPath, setEmbeddingModelPath] = useState("");
+  const [vectorWeight, setVectorWeight] = useState("0.5");
+  const [searchReport, setSearchReport] = useState<KnowledgeSearchReport | null>(null);
+  const [searchBusy, setSearchBusy] = useState(false);
 
   async function refreshBases(preferredId?: string) {
     const result = await axiomApi.knowledgeBases();
@@ -4284,6 +4291,29 @@ function WorkspaceKnowledgePanel() {
     } finally { setBusy(false); }
   }
 
+  async function searchKnowledge(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedBase || !searchQuery.trim()) return;
+    setSearchBusy(true);
+    setError("");
+    setSearchReport(null);
+    try {
+      const result = await axiomApi.searchKnowledgeBase(selectedBase, {
+        query: searchQuery,
+        limit: 8,
+        max_documents: 64,
+        source_prefixes: searchPrefix.trim() ? [searchPrefix.trim()] : [],
+        embedding_model_path: embeddingModelPath.trim() || undefined,
+        vector_weight: Number(vectorWeight),
+      });
+      setSearchReport(result);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Knowledge search failed.");
+    } finally {
+      setSearchBusy(false);
+    }
+  }
+
   async function removeBase() {
     if (!selectedBase) return;
     const current = bases.find((item) => item.id === selectedBase);
@@ -4337,13 +4367,53 @@ function WorkspaceKnowledgePanel() {
           <span className="quiet-note">TXT, Markdown, RST, CSV, JSON, JSONL · 8 MiB per file · UTF-8 only.</span>
         </div>
       </form>
+      <Surface title="Search this knowledge base" eyebrow="CITED LOCAL RETRIEVAL">
+        <form className="integration-form" onSubmit={(event) => void searchKnowledge(event)}>
+          <label className="field">
+            <span className="field-label-row"><span>Search query</span><span>{searchQuery.length.toLocaleString()} / 8,192</span></span>
+            <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} maxLength={8192} placeholder="Find local inference runtime details…" required />
+          </label>
+          <label className="field">
+            <span className="field-label-row"><span>Source path prefix (optional)</span></span>
+            <input value={searchPrefix} onChange={(event) => setSearchPrefix(event.target.value)} maxLength={4096} placeholder="documents/engineering" />
+          </label>
+          <label className="field">
+            <span className="field-label-row"><span>Local embedding model path (optional hybrid search)</span></span>
+            <input value={embeddingModelPath} onChange={(event) => setEmbeddingModelPath(event.target.value)} maxLength={4096} placeholder="models/my-encoder" />
+          </label>
+          {embeddingModelPath.trim() && <label className="field">
+            <span className="field-label-row"><span>Vector score weight</span></span>
+            <input type="number" min="0" max="1" step="0.05" value={vectorWeight} onChange={(event) => setVectorWeight(event.target.value)} />
+          </label>}
+          <div className="integration-form-actions">
+            <button type="submit" className="button primary-button" disabled={searchBusy || !searchQuery.trim()}>{searchBusy ? "Searching…" : "Search knowledge base"}</button>
+            <span className="quiet-note">Bounded lexical search by default; add a trusted local embedding model for hybrid ranking.</span>
+          </div>
+        </form>
+        {searchReport && <div className="knowledge-search-results" role="status">
+          <div className="integration-form-actions">
+            <StatusPill tone="success">{searchReport.engine === "axiom-hybrid-knowledge-search" ? "HYBRID SEARCH" : "LEXICAL SEARCH"}</StatusPill>
+            <span className="quiet-note">{searchReport.total_results} matching chunks · {searchReport.query.chunks_scanned} scanned · {searchReport.query.candidate_documents} documents</span>
+          </div>
+          {searchReport.results.map((item, index) => <article className="workflow-card" key={item.citation.document_id + ":" + item.citation.chunk_index}>
+            <div className="module-copy">
+              <b>{index + 1}. {item.citation.file_name}</b>
+              <small>{item.citation.source_path} · chars {item.citation.start_char.toLocaleString()}–{item.citation.end_char.toLocaleString()} · score {item.score.toFixed(4)}</small>
+            </div>
+            <p>{item.snippet}</p>
+            <small className="quiet-note">SHA-256 {item.citation.content_sha256} · chunk {item.citation.chunk_index}</small>
+          </article>)}
+          {searchReport.results.length === 0 && <EmptyState icon={Search} title="No matching chunks" description="Try broader terms or remove the source-path filter." />}
+          <p className="quiet-note">{searchReport.scope_note}</p>
+        </div>}
+      </Surface>
       <div className="module-list">
         {documents.map((document) => <div className="module-row" key={document.id}>
           <span className="module-icon"><Database size={16} /></span>
           <span className="module-copy"><b>{document.file_name}</b><small>{document.source_path} · {document.character_count.toLocaleString()} characters · SHA-256 {document.content_sha256.slice(0, 12)}…</small></span>
           <button type="button" className="button secondary-button" onClick={() => void removeDocument(document)} disabled={busy}>Remove copy</button>
         </div>)}
-        {documents.length === 0 && <EmptyState title="No documents yet" description="Ingest a workspace-relative text document to add it to this knowledge base." />}
+        {documents.length === 0 && <EmptyState icon={Database} title="No documents yet" description="Ingest a workspace-relative text document to add it to this knowledge base." />}
       </div>
     </>}
     {error && <InlineAlert tone="warning" role="alert">{error}</InlineAlert>}
