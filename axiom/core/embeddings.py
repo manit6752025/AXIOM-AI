@@ -36,7 +36,7 @@ def validate_embedding_inputs(texts, *, batch_size=8, max_length=256, chunk_size
         if not isinstance(text, str) or not text.strip():
             raise ValueError(f"Text input {index} must contain non-whitespace characters.")
         if len(text) > MAX_EMBEDDING_TEXT_CHARS:
-            raise ValueError(f"Text input {index} exceeds the {MAX_EMBEDDING_TEXT_CHARS}-character limit.")
+            raise ValueError(f"Text input {index} exceeds the per-input {MAX_EMBEDDING_TEXT_CHARS}-character limit.")
         total += len(text)
     if total > MAX_EMBEDDING_TOTAL_CHARS:
         raise ValueError(f"Combined input exceeds the {MAX_EMBEDDING_TOTAL_CHARS}-character limit.")
