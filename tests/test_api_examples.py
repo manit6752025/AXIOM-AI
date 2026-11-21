@@ -51,8 +51,9 @@ def test_secret_fields_are_redacted_but_environment_reference_names_are_typed() 
 
     save_profile = next(item for item in report["operations"] if item["path"] == "/api/llm/profiles" and item["method"] == "POST")
     env_reference = save_profile["request"]["schema"]["properties"]["api_key_env"]
-    assert env_reference["type"] == "string"
+    assert "string" in json.dumps(env_reference)
     assert env_reference.get("x-axiom-redacted") is not True
+    assert "$.body.api_key_env" not in save_profile["request"]["redacted_fields"]
 
     serialized = json.dumps(report, ensure_ascii=False)
     assert "never-return-this" not in serialized
@@ -110,3 +111,40 @@ def test_cli_emits_json_and_markdown_from_the_contract(monkeypatch) -> None:
     markdown_result = runner.invoke(api_app, ["examples", "--format", "markdown"])
     assert markdown_result.exit_code == 0, markdown_result.output
     assert "GET /api/health" in markdown_result.stdout
+
+ 
+ 
+ def test_response_examples_omit_sensitive_schema_properties() -> None:
+     report = build_api_examples({
+         "openapi": "3.1.0",
+         "info": {"version": "test"},
+         "components": {"schemas": {}},
+         "paths": {
+             "/api/test": {
+                 "get": {
+                     "operationId": "testResponseRedaction",
+                     "responses": {
+                         "200": {
+                             "description": "Synthetic response",
+                             "content": {
+                                 "application/json": {
+                                     "schema": {
+                                         "type": "object",
+                                         "required": ["id", "access_token"],
+                                         "properties": {
+                                             "id": {"type": "string"},
+                                             "access_token": {"type": "string"},
+                                         },
+                                     },
+                                 },
+                             },
+                         },
+                     },
+                 },
+             },
+         },
+     })
+     operation = report["operations"][0]
+     assert operation["response"]["example"] == {"id": "example"}
+     assert "$.response.access_token" in operation["response"]["redacted_fields"]
+ 
