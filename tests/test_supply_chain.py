@@ -213,6 +213,24 @@ def test_vulnerability_scan_reports_unavailable_scanner_without_claiming_clean(m
     assert "no vulnerability conclusion" in report["message"]
 
 
+@pytest.mark.parametrize(
+    ("exit_code", "findings"),
+    [
+        (0, [{"id": "PYSEC-2026-1"}]),
+        (1, []),
+    ],
+)
+def test_pip_audit_parser_rejects_exit_status_and_finding_mismatches(exit_code: int, findings: list[dict]):
+    payload = [{"name": "example", "version": "1.0", "vulns": findings}]
+    with pytest.raises(SupplyChainError, match="conflicts"):
+        supply_chain._parse_pip_audit_output(
+            payload,
+            generated_at="2026-11-22T00:00:00Z",
+            scanner_version="2.10.1",
+            exit_code=exit_code,
+        )
+
+
 def test_pip_audit_parser_sanitizes_findings_and_deduplicates_records():
     payload = [
         {"name": "FastAPI", "version": "0.90.0", "vulns": [
