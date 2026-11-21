@@ -18,6 +18,24 @@ class SDKContractError(RuntimeError):
     """An SDK operation does not match the live API schema."""
 
 
+def _method_body(source: str, name: str, language: str) -> str | None:
+    """Return one public method body without allowing a similarly named method to match."""
+    if language == "python":
+        match = re.search(rf"^    def {re.escape(name)}\s*\(", source, re.MULTILINE)
+        following_pattern = re.compile(r"^    (?:async )?def [A-Za-z_]\w*\s*\(", re.MULTILINE)
+    else:
+        match = re.search(rf"^  (?:async )?{re.escape(name)}\s*\(", source, re.MULTILINE)
+        following_pattern = re.compile(r"^  (?:async )?[A-Za-z_]\w*\s*\(", re.MULTILINE)
+    if match is None:
+        return None
+    following = following_pattern.search(source, match.end())
+    return source[match.start():following.start() if following else len(source)]
+
+
+def _route_fragments(route: str) -> list[str]:
+    return [fragment for fragment in re.split(r"\{[A-Za-z_]\w*\}", route) if fragment]
+
+
 def verify_sdk_contract() -> dict[str, Any]:
     """Check operation methods/paths and public client method bindings."""
     try:
@@ -69,10 +87,24 @@ def verify_sdk_contract() -> dict[str, Any]:
         seen_routes.add((method.casefold(), route))
         if method.casefold() not in paths.get(route, {}):
             failures.append(f"Live OpenAPI is missing {method} {route} ({name}).")
-        if not re.search(rf"^\s+def\s+{re.escape(python_method)}\s*\(", python_source, re.MULTILINE):
+        python_body = _method_body(python_source, python_method, "python")
+        typescript_body = _method_body(typescript_source, typescript_method, "typescript")
+        if python_body is None:
             failures.append(f"Python SDK method {python_method} is missing ({name}).")
-        if not re.search(rf"^\s+{re.escape(typescript_method)}\s*\(", typescript_source, re.MULTILINE):
+        if typescript_body is None:
             failures.append(f"TypeScript SDK method {typescript_method} is missing ({name}).")
+        for fragment in _route_fragments(route):
+            if python_body is not None and fragment not in python_body:
+                failures.append(
+                    f"Python SDK method {python_method} does not call the declared route {route} ({name})."
+                )
+                break
+        for fragment in _route_fragments(route):
+            if typescript_body is not None and fragment not in typescript_body:
+                failures.append(
+                    f"TypeScript SDK method {typescript_method} does not call the declared route {route} ({name})."
+                )
+                break
 
     if len(seen_names) != len(operations):
         failures.append("The SDK operation manifest contains one or more invalid entries.")
