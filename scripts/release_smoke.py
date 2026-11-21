@@ -365,7 +365,7 @@ def api_contract_examples_issues(
         ("OpenAPI generator", core, (
             "def build_api_examples(", "MAX_OPERATIONS = 512", "MAX_EXAMPLES_BYTES",
             "def _safe_schema(", "def _example_value(", "def _typescript_type(",
-            "schema_defaults_replayed", "render_api_examples_markdown",
+            '"x-axiom-redacted"', "schema_defaults_replayed", "render_api_examples_markdown",
         )),
         ("API examples endpoint", api, (
             'APIRouter(prefix="/api/contract"', '@router.get("/examples")',
@@ -394,7 +394,7 @@ def api_contract_examples_issues(
             "test_cli_emits_json_and_markdown",
         )),
         ("API docs", docs, (
-            "GET /api/contract/examples", "axiom api examples",
+            "GET /api/contract/examples", "axiom api",
             "synthetic", "variable names",
         )),
     )
@@ -404,6 +404,60 @@ def api_contract_examples_issues(
             if token not in source:
                 issues.append(f"Typed API example {label} contract is missing: {token}")
     return issues
+
+
+def hardware_snapshot_issues(
+    core: str, api: str, server: str, cli_main: str, client: str,
+    panel: str, app: str, e2e: str, tests: str, docs: str,
+) -> list[str]:
+    """Keep opt-in workspace hardware-history lifecycle wired across all surfaces."""
+    checks = (
+        ("snapshot store", core, (
+            "class HardwareSnapshotStore", "MAX_SNAPSHOTS = 100",
+            "MAX_RETENTION_DAYS = 3650", "def configure(", "def capture(", "def clear(",
+            "HardwareSnapshotOptInRequired", "raise HardwareSnapshotOptInRequired(", "def _normalize_hardware(",
+        )),
+        ("snapshot API", api, (
+            '"/hardware-snapshots"', '"/hardware-snapshots/settings"',
+            "HardwareSnapshotOptInRequired", "status_code=201",
+        )),
+        ("server registration", server, ("hardware_snapshots_router",)),
+        ("CLI lifecycle", cli_main, (
+            'name="snapshots"', '@hardware_snapshots_app.command("enable")',
+            '@hardware_snapshots_app.command("disable")',
+            '@hardware_snapshots_app.command("capture")',
+            '@hardware_snapshots_app.command("list")',
+            '@hardware_snapshots_app.command("clear")',
+        )),
+        ("typed API client", client, (
+            "HardwareSnapshotHistory", "hardwareSnapshots:",
+            "updateHardwareSnapshotSettings:", "captureHardwareSnapshot:",
+            "clearHardwareSnapshots:",
+        )),
+        ("Dashboard panel", panel, (
+            "Hardware snapshot history", "Enable history", "Capture snapshot",
+            "Clear history", "No automatic sampling",
+        )),
+        ("Dashboard registration", app, ("HardwareSnapshotPanel",)),
+        ("browser acceptance", e2e, (
+            "hardware history is opt-in", "captureCalls", "Enable history",
+            "Capture snapshot", "Clear history",
+        )),
+        ("regression tests", tests, (
+            "test_history_is_disabled_by_default", "test_explicit_capture_persists_only_allowlisted_hardware",
+            "test_hardware_snapshot_api_requires_opt_in", "test_system_hardware_snapshot_commands",
+        )),
+        ("documentation", docs, (
+            "GET /api/workspace/hardware-snapshots", "axiom system snapshots",
+            "hardware-snapshots.json", "No background or periodic sampler",
+        )),
+    )
+    failures: list[str] = []
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                failures.append(f"Hardware snapshot {label} contract is missing: {token}")
+    return failures
 
 
 def resource_monitoring_issues(cli_source: str, panel_source: str, app_source: str, e2e_source: str) -> list[str]:
@@ -863,6 +917,25 @@ def inspect(root: Path) -> dict[str, Any]:
         contract_examples_cli, cli_main_source, client, contract_examples_component,
         contract_examples_e2e, contract_examples_tests, contract_examples_docs,
     ))
+    snapshot_core = (root / "axiom/core/hardware_snapshots.py").read_text(encoding="utf-8")
+    snapshot_api = (root / "axiom/api/hardware_snapshots.py").read_text(encoding="utf-8")
+    snapshot_panel = (root / "src/components/HardwareSnapshotPanel.tsx").read_text(encoding="utf-8")
+    snapshot_e2e = (root / "e2e/hardware-snapshots.spec.ts").read_text(encoding="utf-8")
+    snapshot_tests = (
+        (root / "tests/test_hardware_snapshots.py").read_text(encoding="utf-8")
+        + (root / "tests/test_hardware_snapshots_api.py").read_text(encoding="utf-8")
+        + (root / "tests/test_hardware_snapshots_cli.py").read_text(encoding="utf-8")
+    )
+    snapshot_docs = (
+        (root / "docs/API.md").read_text(encoding="utf-8")
+        + (root / "docs/wiki/CLI-Reference.md").read_text(encoding="utf-8")
+        + (root / "docs/Storage-Schemas-and-Migrations.md").read_text(encoding="utf-8")
+    )
+    failures.extend(hardware_snapshot_issues(
+        snapshot_core, snapshot_api, (root / "axiom/api/server.py").read_text(encoding="utf-8"),
+        cli_main_source, client, snapshot_panel, app_source, snapshot_e2e,
+        snapshot_tests, snapshot_docs,
+    ))
     if "15_000" not in client:
         failures.append("The shared API client timeout is missing or has changed; review timeout policy.")
     styles_source = (root / "src/styles.css").read_text(encoding="utf-8")
@@ -922,7 +995,7 @@ def inspect(root: Path) -> dict[str, Any]:
         "e2e/evaluation.spec.ts", "e2e/api-playground.spec.ts",
         "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts", "e2e/engine-fabric.spec.ts",
         "e2e/model-registry-filters.spec.ts", "e2e/inference-benchmark.spec.ts",
-        "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/ollama-service.spec.ts", "e2e/settings-retention.spec.ts",
+        "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/hardware-snapshots.spec.ts", "e2e/ollama-service.spec.ts", "e2e/settings-retention.spec.ts",
     ):
         target = root / relative
         if not target.is_file():

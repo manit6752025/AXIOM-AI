@@ -89,3 +89,12 @@ These formats should only change through an explicit future schema migration.
 The workspace-local `.axiom/llm-provider-profiles.json` document advances from schema version 1 to version 2 to add the optional `api_key_env` field. The field is either null or a validated environment-variable name; it must never contain a credential value. Existing schema-v1 documents remain readable without an eager rewrite. The next successful profile save or delete writes the normalized document as schema v2 and adds `api_key_env: null` to legacy profiles. Unknown fields, embedded keys and malformed references fail closed.
 
 Rollback: stop AXIOM, preserve a backup, then restore a version-1 metadata-only profile file if rolling back to software that only understands schema 1. Do not copy credential values into the file. Environment variables are provisioned separately by the host deployment and are not exported by profile backup or API responses.
+
+
+## Hardware snapshot history — schema 1
+
+The workspace-local `.axiom/hardware-snapshots.json` document uses schema version 1 and contains an explicit opt-in flag, bounded retention settings, and up to 100 allowlisted hardware captures. Records include a UUID4-style resource ID, capture timestamp, SHA-256 fingerprint, AXIOM version, source marker and normalized hardware values. Arbitrary detector properties are discarded; unknown persisted fields fail closed.
+
+Capture is disabled by default. Reads do not probe hardware, and the store never schedules periodic sampling. Configure retention before capture. Every explicit capture and retention change prunes records older than the configured age and caps the retained count. A clear operation removes all snapshot records but preserves the chosen opt-in and retention settings.
+
+Rollback: stop AXIOM and back up the file before removing it. The store does not migrate unknown or future schemas. Hardware snapshots are optional diagnostic metadata and are not required for runtime startup, model access or inference.

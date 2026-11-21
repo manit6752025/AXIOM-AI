@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from axiom.api.examples import router as api_examples_router
+from axiom.api.hardware_snapshots import router as hardware_snapshots_router
 from axiom.api.evaluation import router as evaluation_router
 from axiom.api.model_studio import router as model_studio_router
 from axiom.api.fine_tuning import router as fine_tuning_router
@@ -288,6 +289,7 @@ def create_app() -> Any:
 
     register_optimizer_routes(app)
     app.include_router(api_examples_router)
+    app.include_router(hardware_snapshots_router)
     app.include_router(workspace_router)
     app.include_router(workspaces_router)
     app.include_router(workflows_router)

@@ -203,9 +203,23 @@ restarting event capture.
 The supported OpenAPI schema is the source of truth for generated request and response examples.
 
 - `GET /api/contract/examples` returns a bounded, deterministic catalogue of operations, path/query parameters, request and response JSON Schema projections, synthetic JSON payloads, TypeScript request/response aliases, and cURL templates.
-- `axiom api examples` prints a Markdown reference; `axiom api examples --format json` emits the complete machine-readable catalogue. Add `--output path` to create a new file without overwriting an existing one.
+- `axiom api` prints a Markdown reference; `axiom api --format json` emits the complete machine-readable catalogue. Add `--output path` to create a new file without overwriting an existing one.
 - The API Playground displays these generated examples beside its original allowlisted GET-only inspection workflow. It never executes generated POST, PUT, PATCH, or DELETE operations.
 
 The generator resolves local schema references, bounds operation count, recursion and response size, and produces examples from field types and constraints rather than copying OpenAPI defaults or example values. Credential/password fields are redacted in request templates and omitted from response samples. Environment-reference fields such as `api_key_env` remain typed as variable names and never include the environment's value. Local paths, prompts, IDs and other operator-specific inputs are explicitly marked as templates. Generated cURL commands are illustrative only; normal consent and API-scope protections apply if an operator runs a request separately.
 
 Examples are synthetic contract fixtures, not captured workspace responses, not verified execution plans, and not permission to execute a mutating operation.
+
+
+## Hardware snapshot history (R111)
+
+Hardware history is disabled by default and stores only explicit point-in-time captures in the active workspace's `.axiom/hardware-snapshots.json`.
+
+- `GET /api/workspace/hardware-snapshots` lists records and the current opt-in/retention settings. It does not probe hardware.
+- `PUT /api/workspace/hardware-snapshots/settings` configures `enabled`, `max_snapshots` (1–100), and `max_age_days` (1–3650).
+- `POST /api/workspace/hardware-snapshots` captures one snapshot and returns HTTP 409 until opt-in is enabled.
+- `DELETE /api/workspace/hardware-snapshots` clears retained records while preserving the selected enable/retention settings.
+
+CLI equivalents are `axiom system snapshots enable|disable|capture|list|clear`; use `--yes` for destructive CLI clear. The Dashboard exposes the same controls. No background or periodic sampler is started. The allowlisted record contains OS, architecture, CPU cores, system RAM, GPU/VRAM and CUDA availability only. It excludes hostname, usernames, machine IDs, network identifiers, filesystem paths, environment values, credentials, model/dataset content and arbitrary detector fields.
+
+The store rejects symlinks, future/malformed schemas, unknown fields and oversized documents; updates are serialized with a file lock and atomic replacement. A newly created POSIX metadata directory uses mode `0700`; the snapshot file uses mode `0600`. An existing shared `.axiom` directory is not chmodded as a side effect. Snapshot fingerprints are SHA-256 content identifiers, not signed attestations or proof of hardware performance.

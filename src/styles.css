@@ -2374,3 +2374,19 @@ html[data-accent="violet"] .app-shell.light {
 @media (max-width: 520px) {
   .mcp-server-trust-fields { grid-template-columns: minmax(0, 1fr); }
 }
+
+
+.hardware-snapshot-panel { margin-bottom: 28px; }
+.hardware-snapshot-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 220px)); gap: 14px; margin: 18px 0; }
+.hardware-snapshot-settings .field { margin: 0; }
+.hardware-snapshot-actions { display: flex; flex-wrap: wrap; gap: 9px; margin: 14px 0 18px; }
+.hardware-snapshot-meta { gap: 16px; margin: 12px 0; flex-wrap: wrap; }
+.hardware-snapshot-list { border-top: 1px solid var(--line); }
+.hardware-snapshot-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+.hardware-snapshot-row > div { display: grid; min-width: 0; gap: 5px; }
+.hardware-snapshot-row small { color: var(--muted); font-size: 11px; }
+.hardware-snapshot-row code { color: var(--muted); font-size: 10px; white-space: nowrap; }
+@media (max-width: 640px) {
+  .hardware-snapshot-settings { grid-template-columns: minmax(0, 1fr); }
+  .hardware-snapshot-row { align-items: flex-start; flex-direction: column; }
+}

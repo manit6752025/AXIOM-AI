@@ -47,7 +47,7 @@ def test_secret_fields_are_redacted_but_environment_reference_names_are_typed() 
     assert "api_key" not in chat["request"]["example"]
     assert "$.body.api_key" in chat["request"]["redacted_fields"]
     assert chat["request"]["schema"]["properties"]["api_key"]["x-axiom-redacted"] is True
-    assert "api_key: string" in chat["request"]["typescript_type"]
+    assert "api_key?: string" in chat["request"]["typescript_type"]
 
     save_profile = next(item for item in report["operations"] if item["path"] == "/api/llm/profiles" and item["method"] == "POST")
     env_reference = save_profile["request"]["schema"]["properties"]["api_key_env"]
@@ -104,11 +104,11 @@ def test_cli_emits_json_and_markdown_from_the_contract(monkeypatch) -> None:
     monkeypatch.setattr(server, "create_app", lambda: SimpleNamespace(openapi=lambda: minimal))
     runner = CliRunner()
 
-    json_result = runner.invoke(api_app, ["examples", "--format", "json"])
+    json_result = runner.invoke(api_app, ["--format", "json"])
     assert json_result.exit_code == 0, json_result.output
     assert json.loads(json_result.stdout)["operations"][0]["path"] == "/api/health"
 
-    markdown_result = runner.invoke(api_app, ["examples", "--format", "markdown"])
+    markdown_result = runner.invoke(api_app, ["--format", "markdown"])
     assert markdown_result.exit_code == 0, markdown_result.output
     assert "GET /api/health" in markdown_result.stdout
 

@@ -124,3 +124,21 @@ for CLI-specific safety, output, cancellation, and exit-code behavior.
 Python distribution: `axiom-all`
 
 npm launcher: `@netcore-technologies/axiom-cli`
+
+
+## Hardware snapshot history
+
+- `axiom system snapshots enable --max-snapshots 20 --max-age-days 90` explicitly enables capture and sets retention.
+- `axiom system snapshots capture --json` captures one snapshot; it refuses to run while capture is disabled.
+- `axiom system snapshots list --limit 20 --json` lists retained records without probing hardware.
+- `axiom system snapshots disable` prevents future captures but preserves retained records.
+- `axiom system snapshots clear --yes` permanently deletes all retained snapshots.
+
+The Dashboard provides the same opt-in, capture, retention and clear operations. Nothing is sampled automatically.
+
+
+### Generated API contract examples
+
+- `axiom api` prints a Markdown reference derived from the installed OpenAPI schema.
+- `axiom api --format json` prints machine-readable request/response schemas and synthetic examples.
+- `axiom api --output ./api-examples.md` creates a new file and refuses to overwrite an existing file. Generation never submits requests.

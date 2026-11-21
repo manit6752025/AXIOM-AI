@@ -315,3 +315,44 @@ def test_generated_api_example_smoke_detects_missing_secret_redaction_or_gui_bin
         broken_core, api, server, cli, cli_main, client, component, e2e, tests, docs,
     )
     assert any("x-axiom-redacted" in issue for issue in issues)
+
+
+
+def test_hardware_snapshot_release_smoke_requires_opt_in_api_cli_and_gui_contract() -> None:
+    core = (ROOT / "axiom/core/hardware_snapshots.py").read_text(encoding="utf-8")
+    api = (ROOT / "axiom/api/hardware_snapshots.py").read_text(encoding="utf-8")
+    server = (ROOT / "axiom/api/server.py").read_text(encoding="utf-8")
+    cli_main = (ROOT / "axiom/cli/main.py").read_text(encoding="utf-8")
+    client = (ROOT / "src/api/client.ts").read_text(encoding="utf-8")
+    panel = (ROOT / "src/components/HardwareSnapshotPanel.tsx").read_text(encoding="utf-8")
+    app = (ROOT / "src/App.tsx").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/hardware-snapshots.spec.ts").read_text(encoding="utf-8")
+    tests = "\\n".join((ROOT / path).read_text(encoding="utf-8") for path in (
+        "tests/test_hardware_snapshots.py",
+        "tests/test_hardware_snapshots_api.py",
+        "tests/test_hardware_snapshots_cli.py",
+    ))
+    docs = "\\n".join((ROOT / path).read_text(encoding="utf-8") for path in (
+        "docs/API.md", "docs/wiki/CLI-Reference.md", "docs/Storage-Schemas-and-Migrations.md",
+    ))
+    assert release_smoke.hardware_snapshot_issues(
+        core, api, server, cli_main, client, panel, app, e2e, tests, docs,
+    ) == []
+
+
+def test_hardware_snapshot_release_smoke_detects_missing_opt_in_contract() -> None:
+    core = (ROOT / "axiom/core/hardware_snapshots.py").read_text(encoding="utf-8")
+    api = (ROOT / "axiom/api/hardware_snapshots.py").read_text(encoding="utf-8")
+    server = (ROOT / "axiom/api/server.py").read_text(encoding="utf-8")
+    cli_main = (ROOT / "axiom/cli/main.py").read_text(encoding="utf-8")
+    client = (ROOT / "src/api/client.ts").read_text(encoding="utf-8")
+    panel = (ROOT / "src/components/HardwareSnapshotPanel.tsx").read_text(encoding="utf-8")
+    app = (ROOT / "src/App.tsx").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/hardware-snapshots.spec.ts").read_text(encoding="utf-8")
+    tests = (ROOT / "tests/test_hardware_snapshots.py").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/API.md").read_text(encoding="utf-8")
+    broken_core = core.replace("raise HardwareSnapshotOptInRequired(", "raise MissingOptInGuard(", 1)
+    issues = release_smoke.hardware_snapshot_issues(
+        broken_core, api, server, cli_main, client, panel, app, e2e, tests, docs,
+    )
+    assert any("HardwareSnapshotOptInRequired" in item for item in issues)
