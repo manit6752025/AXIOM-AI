@@ -21,6 +21,7 @@ type SavedLLMProfile = {
   provider: LLMProvider;
   model: string;
   base_url: string;
+  api_key_env: string | null;
   updated_at: string;
 };
 
@@ -59,12 +60,14 @@ function readSavedProfiles(): SavedLLMProfile[] {
       const model = record.model;
       const baseUrl = record.base_url;
       const updatedAt = record.updated_at;
+      const apiKeyEnv = record.api_key_env;
       if (
         typeof id !== "string" || !/^[A-Za-z0-9-]{8,80}$/.test(id) ||
         typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,47}$/.test(name) ||
         typeof provider !== "string" || !providerFallback.some((entry) => entry.id === provider) ||
         typeof model !== "string" || !model.trim() || model.length > 256 ||
         typeof baseUrl !== "string" || baseUrl.length > 512 ||
+        (apiKeyEnv !== undefined && apiKeyEnv !== null && (typeof apiKeyEnv !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(apiKeyEnv))) ||
         typeof updatedAt !== "string" || updatedAt.length > 40
       ) continue;
       const normalizedName = name.toLowerCase();
@@ -73,7 +76,7 @@ function readSavedProfiles(): SavedLLMProfile[] {
       if (normalizedBaseUrl === null) continue;
       names.add(normalizedName);
       ids.add(id);
-      profiles.push({ id, name, provider: provider as LLMProvider, model: model.trim(), base_url: normalizedBaseUrl, updated_at: updatedAt });
+      profiles.push({ id, name, provider: provider as LLMProvider, model: model.trim(), base_url: normalizedBaseUrl, api_key_env: typeof apiKeyEnv === "string" ? apiKeyEnv : null, updated_at: updatedAt });
     }
     return profiles;
   } catch {
@@ -83,8 +86,8 @@ function readSavedProfiles(): SavedLLMProfile[] {
 
 function writeSavedProfiles(profiles: SavedLLMProfile[]): boolean {
   try {
-    const safeProfiles = profiles.slice(0, MAX_SAVED_PROFILES).map(({ id, name, provider, model, base_url, updated_at }) => ({
-      id, name, provider, model, base_url, updated_at,
+    const safeProfiles = profiles.slice(0, MAX_SAVED_PROFILES).map(({ id, name, provider, model, base_url, api_key_env, updated_at }) => ({
+      id, name, provider, model, base_url, api_key_env, updated_at,
     }));
     const serialized = JSON.stringify({ schema_version: 1, profiles: safeProfiles });
     if (serialized.length > MAX_PROFILE_STORE_CHARS) return false;
@@ -121,11 +124,20 @@ export default function LLMClientPanel() {
   const [conversation, setConversation] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
   const [savedProfiles, setSavedProfiles] = useState<SavedLLMProfile[]>([]);
   const [profileName, setProfileName] = useState("");
+  const [apiKeyEnv, setApiKeyEnv] = useState("");
   const [selectedProfileId, setSelectedProfileId] = useState("");
   const [connectionVerified, setConnectionVerified] = useState(false);
 
   const local = provider === "axiom-local" || provider === "ollama-local";
   const selected = providers.find((item) => item.id === provider);
+  const activeSavedProfile = savedProfiles.find((item) =>
+    item.id === selectedProfileId &&
+    /^[0-9a-f]{32}$/i.test(item.id) &&
+    item.provider === provider &&
+    item.model === model.trim() &&
+    item.base_url === (provider === "openai-compatible" ? safeProfileBaseUrl(provider, baseUrl.trim()) : "")
+  );
+  const profileCredentialReady = Boolean(activeSavedProfile?.api_key_env);
   const loadModels = async (targetProvider = provider) => {
     setLoadingModels(true);
     setConnectionVerified(false);
@@ -179,6 +191,7 @@ export default function LLMClientPanel() {
         provider: item.provider,
         model: item.model,
         base_url: item.base_url,
+        api_key_env: item.api_key_env || null,
         updated_at: item.updated_at,
       }));
       setSavedProfiles(workspaceProfiles);
@@ -198,6 +211,7 @@ export default function LLMClientPanel() {
   const changeProvider = (value: string) => {
     setProvider(value as LLMProvider);
     setApiKey("");
+    setApiKeyEnv("");
     setConsent(false);
     setConnectionVerified(false);
     setSelectedProfileId("");
@@ -225,6 +239,10 @@ export default function LLMClientPanel() {
       setError("Choose or enter a model ID before saving this profile.");
       return;
     }
+    if (apiKeyEnv.trim() && !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(apiKeyEnv.trim())) {
+      setError("The server credential reference must be a valid environment-variable name, not a key value.");
+      return;
+    }
     const existing = savedProfiles.find((item) => item.name.toLowerCase() === name.toLowerCase());
     if (!existing && savedProfiles.length >= MAX_SAVED_PROFILES) {
       setError("The provider profile limit of 25 has been reached. Delete an unused profile first.");
@@ -236,6 +254,7 @@ export default function LLMClientPanel() {
         provider,
         model: model.trim(),
         base_url: normalizedBaseUrl || undefined,
+        api_key_env: provider === "axiom-local" || provider === "ollama-local" ? undefined : apiKeyEnv.trim() || undefined,
       });
       const profile: SavedLLMProfile = {
         id: saved.profile.id,
@@ -243,6 +262,7 @@ export default function LLMClientPanel() {
         provider: saved.profile.provider,
         model: saved.profile.model,
         base_url: saved.profile.base_url,
+        api_key_env: saved.profile.api_key_env || null,
         updated_at: saved.profile.updated_at,
       };
       const next = [profile, ...savedProfiles.filter((item) => item.id !== profile.id && item.name.toLowerCase() !== name.toLowerCase())];
@@ -254,11 +274,12 @@ export default function LLMClientPanel() {
     } catch (cause) {
       // Keep a clearly-labelled browser-only fallback for disconnected/offline API use.
       const profile: SavedLLMProfile = {
-        id: existing?.id || `profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+        id: `browser-profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
         name,
         provider,
         model: model.trim(),
         base_url: normalizedBaseUrl,
+        api_key_env: provider === "axiom-local" || provider === "ollama-local" ? null : apiKeyEnv.trim() || null,
         updated_at: new Date().toISOString(),
       };
       const next = [profile, ...savedProfiles.filter((item) => item.id !== profile.id && item.name.toLowerCase() !== name.toLowerCase())];
@@ -279,9 +300,12 @@ export default function LLMClientPanel() {
     setBaseUrl(profile.base_url);
     setModel(profile.model);
     setProfileName(profile.name);
+    setApiKeyEnv(profile.api_key_env || "");
     setSelectedProfileId(profile.id);
     setConnectionVerified(false);
-    setError(profile.provider === "openai-compatible" ? "Profile loaded. Enter the API key and explicitly connect; credentials are never stored in a profile." : "Profile loaded. Connect to verify the selected provider.");
+    setError(profile.api_key_env
+      ? `Profile loaded. AXIOM will resolve ${profile.api_key_env} on the server for provider requests; the secret value is never returned to the browser.`
+      : "Profile loaded. Enter a request-only key if required, then connect to verify the selected provider.");
   };
 
   const deleteProfile = async () => {
@@ -328,6 +352,7 @@ export default function LLMClientPanel() {
     const stopSequences = stopSequencesText.split(/\r?\n/).filter((value) => value.trim().length > 0);
     if (!model.trim()) { setError("Choose a model or enter an exact provider model ID."); return; }
     if (!prompt.trim()) { setError("Enter a prompt before generating."); return; }
+    if (!local && !apiKey.trim() && !profileCredentialReady) { setError("Enter a request-only API key or select a saved profile with a configured server environment reference."); return; }
     if (!Number.isInteger(tokenLimit) || tokenLimit < 1 || tokenLimit > 2048) { setError("Maximum output tokens must be between 1 and 2048."); return; }
     if (!Number.isFinite(temp) || temp < 0 || temp > 2) { setError("Temperature must be between 0 and 2."); return; }
     if (local && (!Number.isFinite(topPValue) || topPValue <= 0 || topPValue > 1)) { setError("Top-p must be greater than 0 and at most 1."); return; }
@@ -355,8 +380,9 @@ export default function LLMClientPanel() {
       ];
       const nextResult = await axiomApi.llmChat({
         provider,
-        api_key: local ? undefined : apiKey,
-        base_url: provider === "openai-compatible" ? baseUrl : undefined,
+        api_key: local || !apiKey.trim() ? undefined : apiKey,
+        base_url: provider === "openai-compatible" ? (profileCredentialReady ? activeSavedProfile?.base_url : baseUrl) : undefined,
+        profile_id: profileCredentialReady ? activeSavedProfile?.id : undefined,
         model: model.trim(),
         messages,
         max_tokens: tokenLimit,
@@ -389,7 +415,7 @@ export default function LLMClientPanel() {
         <h2>Unified LLM client</h2>
       </div>
       <div className="integration-form-actions">
-        <button type="button" className="button secondary-button" onClick={() => void loadModels()} disabled={loadingModels || running || (!local && (!apiKey.trim() || (provider === "openai-compatible" && !baseUrl.trim())))}>
+        <button type="button" className="button secondary-button" onClick={() => void loadModels()} disabled={loadingModels || running || (!local && (!apiKey.trim() && !profileCredentialReady || (provider === "openai-compatible" && !baseUrl.trim())))}>
           <RefreshCcw size={14} /> {loadingModels ? "Connecting…" : connectionVerified ? "Refresh connection" : "Connect"}
         </button>
         <button type="button" className="button secondary-button" onClick={disconnect} disabled={!connectionVerified && !apiKey && conversation.length === 0 && !result}>
@@ -401,7 +427,7 @@ export default function LLMClientPanel() {
     <div className="status-strip" aria-label="Unified LLM client status">
       <div className="status-strip-item">
         <span className={"status-pill " + (connectionVerified ? "success" : "warning")}><i />{connectionVerified ? "CONNECTED · VERIFIED" : local ? "LOCAL · NOT VERIFIED" : "CLOUD · NOT CONNECTED"}</span>
-        <div><b>{selected?.label || provider}</b><span>{connectionVerified ? "The latest model-catalogue request succeeded; AXIOM does not keep a provider socket open." : local ? "Local execution needs no API key. Connect to verify the model inventory." : "Enter a request-only key and connect. Cloud chat still requires separate per-request consent."}</span></div>
+        <div><b>{selected?.label || provider}</b><span>{connectionVerified ? "The latest model-catalogue request succeeded; AXIOM does not keep a provider socket open." : local ? "Local execution needs no API key. Connect to verify the model inventory." : "Enter a request-only key or select a saved server environment reference, then connect. Cloud chat still requires separate per-request consent."}</span></div>
       </div>
     </div>
     <section className="panel-surface" aria-label="Saved provider profiles" style={{ padding: 14, marginBottom: 16 }}>
@@ -428,7 +454,12 @@ export default function LLMClientPanel() {
           <button type="button" className="button secondary-button" onClick={saveProfile} disabled={!profileName.trim() || !model.trim()}>Save profile</button>
         </div>
       </div>
-      <p className="quiet-note">Profiles persist in this browser and store only the provider, model ID, profile name and public custom endpoint. API keys, prompts and conversation history are never saved. Cloud keys must be entered again after reload.</p>
+      {!local && <label className="field">
+        <span className="field-label-row"><span>Server API-key environment reference</span></span>
+        <input aria-label="API-key environment reference" value={apiKeyEnv} onChange={(event) => setApiKeyEnv(event.target.value)} maxLength={128} pattern="[A-Za-z_][A-Za-z0-9_]{0,127}" placeholder="e.g. AXIOM_DEEPSEEK_API_KEY" autoComplete="off" />
+        <small>Optional. Save the variable name only; configure its value in the AXIOM server environment. The value is never sent to or rendered in this browser.</small>
+      </label>}
+      <p className="quiet-note">Profiles store provider metadata and, optionally, an environment-variable name. Secret values, prompts and conversation history are never stored in workspace profiles or browser-local profile cache. Server environment values are resolved only for the outbound request.</p>
     </section>
     <form onSubmit={(event) => void run(event)}>
       <div className="two-column-grid">
@@ -453,8 +484,8 @@ export default function LLMClientPanel() {
       </label>}
       {!local && <label className="field">
         <span className="field-label-row"><span>Provider API key</span><KeyRound size={14} /></span>
-        <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} maxLength={512} required autoComplete="new-password" placeholder="Used only for requests in this page session" />
-        <small>Not written to localStorage, workspace files, settings, or runtime traces.</small>
+        <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} maxLength={512} required={!profileCredentialReady} autoComplete="new-password" placeholder={profileCredentialReady ? "Optional one-request override; profile uses its server reference" : "Used only for requests in this page session"} />
+        <small>{profileCredentialReady ? `Server-side credential reference: ${activeSavedProfile?.api_key_env}. The actual value remains on the AXIOM server.` : "Not written to localStorage, workspace files, settings, or runtime traces."}</small>
       </label>}
       {provider === "axiom-local" && <label className="field">
         <span className="field-label-row"><span>Native compute precision</span></span>
@@ -494,7 +525,7 @@ export default function LLMClientPanel() {
         <span>I understand this conversation will be sent to {selected?.label || "the selected provider"} and processed under its terms.</span>
       </label>}
       <div className="integration-form-actions">
-        <button type="submit" className="button primary-button" disabled={running || loadingModels || !model.trim() || !prompt.trim() || (!local && (!apiKey.trim() || !consent || (provider === "openai-compatible" && !baseUrl.trim())))}><Play size={15} /> {running ? "Generating…" : local ? "Generate locally" : "Send and generate"}</button>
+        <button type="submit" className="button primary-button" disabled={running || loadingModels || !model.trim() || !prompt.trim() || (!local && ((!apiKey.trim() && !profileCredentialReady) || !consent || (provider === "openai-compatible" && !baseUrl.trim())))}><Play size={15} /> {running ? "Generating…" : local ? "Generate locally" : "Send and generate"}</button>
         <span className="quiet-note"><ShieldCheck size={14} /> {local ? "Local model only" : "Explicit cloud consent"}</span>
       </div>
     </form>

@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 
 from axiom.core import llm_client
 from axiom.core.llm_profiles import LLMProfileError, LLMProfileStore
+from axiom.core.secret_refs import SecretReferenceError, resolve_secret_reference
 
 router = APIRouter(prefix="/api/llm", tags=["llm-client"])
 ProviderName = Literal["axiom-local", "ollama-local", "openai", "anthropic", "gemini", "deepseek", "moonshot", "openrouter", "openai-compatible"]
@@ -19,6 +20,7 @@ class ProviderRequest(BaseModel):
     provider: ProviderName
     api_key: SecretStr | None = None
     base_url: str | None = Field(default=None, max_length=512)
+    profile_id: str | None = Field(default=None, min_length=32, max_length=32, pattern="^[0-9a-f]{32}$")
 
 
 
@@ -29,6 +31,7 @@ class LLMProfileInput(BaseModel):
     provider: ProviderName
     model: str = Field(min_length=1, max_length=256)
     base_url: str | None = Field(default=None, max_length=512)
+    api_key_env: str | None = Field(default=None, max_length=128)
 
 
 class LLMProfileConnectRequest(BaseModel):
@@ -95,7 +98,26 @@ def get_providers() -> dict[str, Any]:
 @router.post("/models")
 def get_models(request: ProviderRequest) -> dict[str, Any]:
     key = request.api_key.get_secret_value() if request.api_key is not None else None
-    return _api_call(lambda: llm_client.list_models(request.provider, key, request.base_url))
+    credential_source = "request_only" if key else "none"
+    if request.profile_id:
+        try:
+            profile = LLMProfileStore().get(request.profile_id)
+        except LLMProfileError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from None
+        if profile is None:
+            raise HTTPException(status_code=404, detail="Provider profile not found.")
+        if profile["provider"] != request.provider or (profile["base_url"] or None) != (request.base_url or None):
+            raise HTTPException(status_code=422, detail="Provider request does not match the selected saved profile.")
+        if key is None and profile.get("api_key_env"):
+            try:
+                key = resolve_secret_reference(profile["api_key_env"])
+            except SecretReferenceError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from None
+            credential_source = "environment_reference"
+    result = _api_call(lambda: llm_client.list_models(request.provider, key, request.base_url))
+    if request.profile_id:
+        result["credential_source"] = credential_source
+    return result
 
 
 @router.get("/profiles")
@@ -114,6 +136,7 @@ def save_profile(request: LLMProfileInput) -> dict[str, Any]:
             provider=request.provider,
             model=request.model,
             base_url=request.base_url,
+            api_key_env=request.api_key_env,
         )
         return {"profile": profile, "credentials_persisted": False}
     except LLMProfileError as exc:
@@ -140,6 +163,13 @@ def connect_profile(profile_id: str, request: LLMProfileConnectRequest) -> dict[
     if profile is None:
         raise HTTPException(status_code=404, detail="Provider profile not found.")
     key = request.api_key.get_secret_value() if request.api_key is not None else None
+    credential_source = "request_only" if key else "none"
+    if key is None and profile.get("api_key_env"):
+        try:
+            key = resolve_secret_reference(profile["api_key_env"])
+        except SecretReferenceError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        credential_source = "environment_reference"
     result = _api_call(lambda: llm_client.list_models(
         profile["provider"],
         key,
@@ -152,6 +182,7 @@ def connect_profile(profile_id: str, request: LLMProfileConnectRequest) -> dict[
         "models": result.get("models", []),
         "checked_at": datetime.now(UTC).isoformat(),
         "credential_storage": result.get("credential_storage", "not_saved" if key else "not_applicable"),
+        "credential_source": credential_source,
         "connection_scope": "catalogue_check_only",
         "persistent_connection": False,
     }
@@ -165,6 +196,24 @@ def run_chat(request: ChatRequest) -> dict[str, Any]:
             detail="Confirm that the selected cloud provider will receive this conversation before sending it.",
         )
     key = request.api_key.get_secret_value() if request.api_key is not None else None
+    if request.profile_id:
+        try:
+            profile = LLMProfileStore().get(request.profile_id)
+        except LLMProfileError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from None
+        if profile is None:
+            raise HTTPException(status_code=404, detail="Provider profile not found.")
+        if (
+            profile["provider"] != request.provider
+            or profile["model"] != request.model
+            or (profile["base_url"] or None) != (request.base_url or None)
+        ):
+            raise HTTPException(status_code=422, detail="Chat request does not match the selected saved provider profile.")
+        if key is None and profile.get("api_key_env"):
+            try:
+                key = resolve_secret_reference(profile["api_key_env"])
+            except SecretReferenceError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from None
     messages = [message.model_dump() for message in request.messages]
     return _api_call(lambda: llm_client.chat(
         request.provider,

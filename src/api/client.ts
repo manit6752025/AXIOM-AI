@@ -521,21 +521,22 @@ export type LLMProviderInfo = {
 export type LLMProviderCatalog = { schema_version: 1; providers: LLMProviderInfo[]; credentials_persisted: false };
 export type LLMProviderProfile = {
   id: string; name: string; provider: LLMProvider; model: string; base_url: string;
-  created_at: string; updated_at: string;
+  api_key_env: string | null; created_at: string; updated_at: string;
 };
 export type LLMProviderProfileReport = {
-  schema_version: 1; profiles: LLMProviderProfile[]; total: number; max_profiles: number;
+  schema_version: 2; profiles: LLMProviderProfile[]; total: number; max_profiles: number;
   credentials_persisted: false;
 };
 export type LLMProviderProfileConnection = {
   profile_id: string; provider: LLMProvider; status: "verified"; models: string[];
   checked_at: string; credential_storage: "not_saved" | "not_applicable";
+  credential_source: "none" | "request_only" | "environment_reference";
   connection_scope: "catalogue_check_only"; persistent_connection: false;
 };
-export type LLMModelRequest = { provider: LLMProvider; api_key?: string; base_url?: string };
+export type LLMModelRequest = { provider: LLMProvider; api_key?: string; base_url?: string; profile_id?: string };
 export type LLMModelResult = {
   provider: LLMProvider; models: string[]; model_details?: Array<{ id: string; model_type?: string | null; architecture?: string | null }>;
-  count?: number; credential_storage: "not_saved" | "not_applicable"; execution: "local" | "remote"; note?: string;
+  count?: number; credential_storage: "not_saved" | "not_applicable"; credential_source?: "none" | "request_only" | "environment_reference"; execution: "local" | "remote"; note?: string;
 };
 export type LLMChatMessage = { role: "system" | "user" | "assistant"; content: string };
 export type LLMChatRequest = LLMModelRequest & {
@@ -2421,7 +2422,7 @@ export const axiomApi = {
   modelStudioFiles: (repoId: string) => requestJson<{ repo_id: string; files: ModelStudioFile[]; count: number; url: string; note: string }>(`/api/models/studio/files?${new URLSearchParams({ repo_id: repoId })}`),
   llmProviders: () => requestJson<LLMProviderCatalog>("/api/llm/providers"),
   llmProfiles: () => requestJson<LLMProviderProfileReport>("/api/llm/profiles"),
-  saveLLMProfile: (input: { name: string; provider: LLMProvider; model: string; base_url?: string }) =>
+  saveLLMProfile: (input: { name: string; provider: LLMProvider; model: string; base_url?: string; api_key_env?: string }) =>
     requestJson<{ profile: LLMProviderProfile; credentials_persisted: false }>("/api/llm/profiles", { method: "POST", body: JSON.stringify(input) }),
   deleteLLMProfile: (id: string) =>
     requestJson<{ deleted: LLMProviderProfile; credentials_persisted: false }>(`/api/llm/profiles/${encodeURIComponent(id)}`, { method: "DELETE" }),
