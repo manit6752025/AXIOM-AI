@@ -88,9 +88,11 @@ class AxiomClient:
         ):
             raise AxiomConfigurationError("base_url must be an HTTP(S) origin without credentials, path, query, or fragment.")
         try:
-            parsed.port
+            port = parsed.port
         except ValueError:
             raise AxiomConfigurationError("base_url contains an invalid port.") from None
+        if port is not None and not 1 <= port <= 65535:
+            raise AxiomConfigurationError("base_url port must be between 1 and 65535.")
         local = parsed.hostname.casefold().rstrip(".") in {"localhost", "127.0.0.1", "::1"}
         if parsed.scheme != "https" and not local:
             raise AxiomConfigurationError("Non-loopback AXIOM services must use HTTPS.")
