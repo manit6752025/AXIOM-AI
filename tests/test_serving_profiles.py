@@ -334,3 +334,56 @@ def test_serving_profile_api_applies_busy_admission_without_queueing(tmp_path, m
             assert busy.headers["retry-after"] == "1"
         finally:
             release_profile_request(profile["id"])
+
+
+
+def test_serving_profile_cli_creates_probes_runs_lists_and_deletes(tmp_path, monkeypatch):
+    import json
+    from typer.testing import CliRunner
+
+    import axiom.cli.engine as engine_cli
+
+    model = tmp_path / "models" / "tiny-qwen"
+    model.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(engine_cli, "resolve_local_model_directory", lambda value, label: str(Path(value).resolve()))
+    monkeypatch.setattr(engine_cli, "inspect_native_model_context", lambda path: {
+        "model_type": "qwen2", "architecture": "Qwen2ForCausalLM", "checkpoint_format": "safetensors",
+        "max_position_embeddings": 8192, "effective_max_position_embeddings": 8192,
+    })
+    monkeypatch.setattr(engine_cli, "readiness_probe", lambda profile: {
+        "profile_id": profile["id"], "profile_name": profile["name"], "ready": True,
+        "checks": {}, "problems": [], "weights_loaded": False, "service_started": False,
+        "network_used": False, "probed_at": "2026-11-21T00:00:00Z", "scope_note": "Metadata only.",
+    })
+    monkeypatch.setattr(engine_cli, "generate_from_profile", lambda profile, prompt, **kwargs: {
+        "response": "profile response", "completion_tokens": 2, "generation_tokens_per_second": 12.5,
+        "elapsed_ms": 160, "model": "tiny-qwen",
+    })
+    runner = CliRunner()
+    created = runner.invoke(engine_cli.engine_app, [
+        "profile", "create", "Local test", "--model-path", str(model),
+        "--device", "cpu", "--context-length", "4096", "--max-new-tokens", "64", "--json",
+    ])
+    assert created.exit_code == 0, created.output
+    profile = json.loads(created.stdout)["profile"]
+
+    listed = runner.invoke(engine_cli.engine_app, ["profile", "list", "--json"])
+    assert listed.exit_code == 0, listed.output
+    assert json.loads(listed.stdout)["profiles"][0]["id"] == profile["id"]
+
+    probed = runner.invoke(engine_cli.engine_app, ["profile", "probe", profile["id"], "--json"])
+    assert probed.exit_code == 0, probed.output
+    assert json.loads(probed.stdout)["ready"] is True
+
+    generated = runner.invoke(engine_cli.engine_app, [
+        "profile", "run", profile["id"], "--prompt", "Hello AXIOM", "--json",
+    ])
+    assert generated.exit_code == 0, generated.output
+    assert json.loads(generated.stdout)["result"]["response"] == "profile response"
+
+    removed = runner.invoke(engine_cli.engine_app, [
+        "profile", "delete", profile["id"], "--yes",
+    ])
+    assert removed.exit_code == 0, removed.output
+    assert json.loads(removed.stdout)["model_files_deleted"] is False
