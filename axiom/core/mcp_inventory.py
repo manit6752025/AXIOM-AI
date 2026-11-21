@@ -559,7 +559,7 @@ async def inspect_mcp_schemas(
         }
         result.update(_record_connection_result(integration.name, result))
         return result
-    result["connection_state_persisted"] = _record_connection_result(integration.name, result)
+    result.update(_record_connection_result(integration.name, result))
     return {
         "name": _safe_text(integration.name) or "Unnamed MCP server",
         "transport": "stdio",

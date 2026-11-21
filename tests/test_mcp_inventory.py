@@ -725,6 +725,9 @@ def test_schema_browse_negotiates_real_stdio_tool_resource_and_template_metadata
     assert result["resource_read_performed"] is False
     assert result["prompt_execution_performed"] is False
     assert result["connection_state_persisted"] is True
+    assert result["connection_state"] == "connected"
+    assert result["last_inspected_at"]
+    assert result["last_connection_error"] is None
     inventory = mcp_inventory.list_mcp_servers()["servers"][0]
     assert inventory["connection_state"] == "connected"
     assert inventory["last_inspected_at"]
