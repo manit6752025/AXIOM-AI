@@ -12,6 +12,8 @@ def test_dataset_snapshot_api_creates_lists_and_verifies_workspace_snapshots(tmp
     data.mkdir()
     content = b'{"prompt":"PRIVATE_SNAPSHOT_API_VALUE"}\n'
     (data / "train.jsonl").write_bytes(content)
+    monkeypatch.setenv("AXIOM_WORKSPACES_HOME", str(tmp_path / ".axiom-test-home"))
+    monkeypatch.setenv("AXIOM_WORKSPACES_DIR", str(tmp_path / ".axiom-managed-workspaces"))
     monkeypatch.chdir(tmp_path)
 
     with TestClient(create_app()) as client:
@@ -43,6 +45,8 @@ def test_dataset_snapshot_api_rejects_unsafe_sources_parent_and_byte_overflow(tm
     data.mkdir()
     (data / "train.jsonl").write_text("{}\n", encoding="utf-8")
     (data / "other.csv").write_text("value\n", encoding="utf-8")
+    monkeypatch.setenv("AXIOM_WORKSPACES_HOME", str(tmp_path / ".axiom-test-home"))
+    monkeypatch.setenv("AXIOM_WORKSPACES_DIR", str(tmp_path / ".axiom-managed-workspaces"))
     monkeypatch.chdir(tmp_path)
 
     with TestClient(create_app()) as client:
@@ -69,6 +73,8 @@ def test_dataset_snapshot_api_links_parent_manifest_to_prior_snapshot(tmp_path, 
     data = tmp_path / "data"
     data.mkdir()
     (data / "train.jsonl").write_text('{"x":1}\n', encoding="utf-8")
+    monkeypatch.setenv("AXIOM_WORKSPACES_HOME", str(tmp_path / ".axiom-test-home"))
+    monkeypatch.setenv("AXIOM_WORKSPACES_DIR", str(tmp_path / ".axiom-managed-workspaces"))
     monkeypatch.chdir(tmp_path)
 
     with TestClient(create_app()) as client:
@@ -84,6 +90,8 @@ def test_dataset_snapshot_api_links_parent_manifest_to_prior_snapshot(tmp_path, 
 
 def test_dataset_snapshot_api_returns_not_found_for_unknown_snapshot(tmp_path, monkeypatch):
     (tmp_path / "data").mkdir()
+    monkeypatch.setenv("AXIOM_WORKSPACES_HOME", str(tmp_path / ".axiom-test-home"))
+    monkeypatch.setenv("AXIOM_WORKSPACES_DIR", str(tmp_path / ".axiom-managed-workspaces"))
     monkeypatch.chdir(tmp_path)
     with TestClient(create_app()) as client:
         response = client.get(f"/api/workspace/dataset-snapshots/{'f' * 32}/verify")
