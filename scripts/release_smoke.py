@@ -1096,7 +1096,7 @@ def inspect(root: Path) -> dict[str, Any]:
         schema_core, inference_core, inference_api, client, ollama_cli,
         inference_panel, schema_tests, inference_core_tests, structured_api_tests,
         (root / "tests/test_cli_inference.py").read_text(encoding="utf-8"),
-        inference_stream_e2e, structured_docs,
+        (root / "e2e/inference.spec.ts").read_text(encoding="utf-8"), structured_docs,
     ))
     inference_stream_e2e = (root / "e2e/inference.spec.ts").read_text(encoding="utf-8")
     for token in ("test_streaming_api_passes_advanced_sampling_options", "test_generate_api_rejects_oversized_context_and_stop_sequence_lists", "test_streaming_inference_emits_ndjson_token_deltas", "test_streaming_inference_sanitizes_runtime_failures"):
