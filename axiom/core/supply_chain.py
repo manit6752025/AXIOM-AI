@@ -236,6 +236,8 @@ def write_report_new(path: str | Path, content: str) -> Path:
         else:
             descriptor = os.open(str(target), file_flags, 0o600)
         created = True
+        if os.name != "nt" and hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
         stream = os.fdopen(descriptor, "w", encoding="utf-8", newline="")
         descriptor = None
         with stream:
@@ -444,6 +446,9 @@ def audit_dependency_vulnerabilities(
     scan_cwd = Path(sys.prefix)
     if not scan_cwd.is_dir():
         raise SupplyChainError("The active Python environment directory is unavailable.")
+    completed: subprocess.Popen[bytes] | None = None
+    stdout_reader: Thread | None = None
+    stderr_reader: Thread | None = None
     try:
         completed = subprocess.Popen(
             args,
@@ -509,6 +514,16 @@ def audit_dependency_vulnerabilities(
     except SupplyChainError:
         raise
     except OSError:
+        if completed is not None:
+            try:
+                completed.kill()
+                completed.wait(timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        if stdout_reader is not None:
+            stdout_reader.join(timeout=5)
+        if stderr_reader is not None:
+            stderr_reader.join(timeout=5)
         return _scanner_failure(
             generated_at,
             scanner_version,
