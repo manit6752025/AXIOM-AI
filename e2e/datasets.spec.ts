@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { ensureAuthenticated } from "./helpers/auth";
 
 test("Datasets inventory offers a bounded, non-mutating cleaning preview", async ({ page }) => {
-  const requests: Array<{ method: string; path: string; body: unknown }> = [];
+  const datasetWriteRequests: string[] = [];
   let previewPayload: Record<string, unknown> | null = null;
   let previewCalls = 0;
 
@@ -35,7 +35,6 @@ test("Datasets inventory offers a bounded, non-mutating cleaning preview", async
     }
     previewCalls += 1;
     previewPayload = request.postDataJSON() as Record<string, unknown>;
-    requests.push({ method: request.method(), path: new URL(request.url()).pathname, body: previewPayload });
     await route.fulfill({
       json: {
         preview: {
@@ -70,6 +69,12 @@ test("Datasets inventory offers a bounded, non-mutating cleaning preview", async
   });
 
   await ensureAuthenticated(page);
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/workspace/dataset") && request.method() !== "GET") {
+      datasetWriteRequests.push(`${request.method()} ${url.pathname}`);
+    }
+  });
   await page.goto("/?page=datasets");
   await expect(page.getByRole("heading", { level: 1, name: "Datasets", exact: true })).toBeVisible();
   await expect(page.getByText("data/train.jsonl", { exact: true })).toBeVisible();
@@ -89,8 +94,5 @@ test("Datasets inventory offers a bounded, non-mutating cleaning preview", async
   expect(Number(previewPayload?.max_bytes)).toBeGreaterThan(0);
   expect(Number(previewPayload?.max_rows)).toBeGreaterThan(0);
   expect(Number(previewPayload?.max_line_bytes)).toBeGreaterThan(0);
-  expect(requests).toHaveLength(1);
-  expect(requests[0].method).toBe("POST");
-  expect(requests[0].path).toBe("/api/workspace/dataset-cleaning-preview");
-  expect(requests[0].body).toMatchObject({ path: "data/train.jsonl" });
+  expect(datasetWriteRequests).toEqual(["POST /api/workspace/dataset-cleaning-preview"]);
 });
