@@ -18,6 +18,8 @@ MAX_PROVENANCE_FILES = 20_000
 MAX_PROVENANCE_WEIGHT_FILES = 512
 MAX_PROVENANCE_HASH_BYTES = 16 * 1024**3
 MAX_LICENSE_EVIDENCE_BYTES = 1 * 1024**2
+MAX_LICENSE_EVIDENCE_FILES = 64
+MAX_TOTAL_LICENSE_EVIDENCE_BYTES = 16 * 1024**2
 _READ_CHUNK_BYTES = 1024 * 1024
 _WEIGHT_FORMATS = {
     ".safetensors": "safetensors",
@@ -183,15 +185,21 @@ def inspect_model_provenance(
         if hash_allowed:
             checkpoint_digest = tree_digest.hexdigest()
 
+    total_license_bytes = sum(item[2] for item in license_files)
+    license_scan_allowed = (
+        len(license_files) <= MAX_LICENSE_EVIDENCE_FILES
+        and total_license_bytes <= MAX_TOTAL_LICENSE_EVIDENCE_BYTES
+    )
     local_license_files = []
-    for relative, file_path, size in license_files:
-        digest = _hash_file(file_path, expected_size=size, max_bytes=MAX_LICENSE_EVIDENCE_BYTES)
-        local_license_files.append({
-            "path": relative,
-            "size_bytes": size,
-            "sha256": digest,
-            "hash_status": "complete" if digest is not None else "file_size_limit",
-        })
+    if license_scan_allowed:
+        for relative, file_path, size in license_files:
+            digest = _hash_file(file_path, expected_size=size, max_bytes=MAX_LICENSE_EVIDENCE_BYTES)
+            local_license_files.append({
+                "path": relative,
+                "size_bytes": size,
+                "sha256": digest,
+                "hash_status": "complete" if digest is not None else "file_size_limit",
+            })
 
     if not weight_files:
         hash_status = "no_weight_files"
@@ -249,7 +257,16 @@ def inspect_model_provenance(
             "maximum_weight_files": MAX_PROVENANCE_WEIGHT_FILES,
         },
         "license_evidence": {
-            "status": "local_files_found" if local_license_files else "no_local_license_file_found",
+            "status": (
+                "skipped_count_or_total_size_limit"
+                if license_files and not license_scan_allowed
+                else "local_files_found" if local_license_files else "no_local_license_file_found"
+            ),
+            "candidate_file_count": len(license_files),
+            "candidate_total_bytes": total_license_bytes,
+            "maximum_file_bytes": MAX_LICENSE_EVIDENCE_BYTES,
+            "maximum_files": MAX_LICENSE_EVIDENCE_FILES,
+            "maximum_total_bytes": MAX_TOTAL_LICENSE_EVIDENCE_BYTES,
             "human_review_required": True,
             "declared_license": registry_text.get("license"),
             "registry_review_state": registry_text.get("license_review"),
