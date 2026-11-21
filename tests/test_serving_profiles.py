@@ -184,6 +184,8 @@ def test_serving_profile_prompt_preflight_enforces_chars_output_and_exact_contex
         "context_limit_tokens": 16,
     }
     with pytest.raises(ServingProfileError, match="context"):
+        validate_serving_prompt({**profile, "context_length": 15}, "hello")
+    with pytest.raises(ServingProfileError, match="Maximum output tokens"):
         validate_serving_prompt(profile, "hello", 9)
     with pytest.raises(ServingProfileError, match="character"):
         validate_serving_prompt(profile, "x" * 33)
@@ -237,7 +239,7 @@ def test_serving_profile_api_crud_readiness_and_profile_limited_generation(tmp_p
     monkeypatch.chdir(tmp_path);
     model = tmp_path / "models" / "qwen"
     model.mkdir(parents=True)
-    monkeypatch.setattr(engine_api, "_validated_path", lambda value, label: str(Path(value).resolve()))
+    monkeypatch.setattr(engine_api, "_validated_path", lambda value, label: None if value is None else str(Path(value).resolve()))
     monkeypatch.setattr(engine_api, "inspect_native_model_context", lambda path: {
         "model_type": "qwen2", "architecture": "Qwen2ForCausalLM", "checkpoint_format": "safetensors",
         "max_position_embeddings": 8192, "effective_max_position_embeddings": 8192,
