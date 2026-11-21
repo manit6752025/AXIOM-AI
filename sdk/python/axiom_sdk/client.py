@@ -37,16 +37,28 @@ class AxiomClient:
         user_agent: str = "axiom-ai-sdk-python/1.0.0",
     ) -> None:
         self._base_url = self._validate_base_url(base_url)
-        if token is not None and (not isinstance(token, str) or not token.strip()):
-            raise AxiomConfigurationError("Bearer token must be a non-empty string when supplied.")
+        if token is not None and (
+            not isinstance(token, str)
+            or not token.strip()
+            or any(ord(character) < 32 or ord(character) == 127 for character in token)
+        ):
+            raise AxiomConfigurationError("Bearer token must be a non-empty string without control characters.")
         if workspace_id is not None and (
-            not isinstance(workspace_id, str) or not workspace_id.strip() or len(workspace_id) > 128
+            not isinstance(workspace_id, str)
+            or not workspace_id.strip()
+            or len(workspace_id) > 128
+            or any(ord(character) < 32 or ord(character) == 127 for character in workspace_id)
         ):
             raise AxiomConfigurationError("Workspace ID must be a non-empty string of at most 128 characters.")
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 900:
             raise AxiomConfigurationError("Request timeout must be greater than 0 and at most 900 seconds.")
-        if not isinstance(user_agent, str) or not user_agent.strip() or len(user_agent) > 256:
-            raise AxiomConfigurationError("User-Agent must contain 1 to 256 characters.")
+        if (
+            not isinstance(user_agent, str)
+            or not user_agent.strip()
+            or len(user_agent) > 256
+            or any(ord(character) < 32 or ord(character) == 127 for character in user_agent)
+        ):
+            raise AxiomConfigurationError("User-Agent must contain 1 to 256 printable characters.")
         self.token = token.strip() if token is not None else None
         self.workspace_id = workspace_id.strip() if workspace_id is not None else None
         self.timeout = float(timeout)
@@ -89,12 +101,17 @@ class AxiomClient:
         if not isinstance(headers, Mapping):
             raise AxiomConfigurationError("headers must be a mapping of string names and values.")
         normalized: dict[str, str] = {}
+        seen_names: set[str] = set()
         protected = {"authorization", "x-request-id", "x-axiom-workspace-id", "host", "content-length"}
         for key, value in headers.items():
             if not isinstance(key, str) or not isinstance(value, str) or not key.strip():
                 raise AxiomConfigurationError("Additional headers must have non-empty string names and string values.")
-            if key.casefold() in protected:
+            folded_name = key.casefold()
+            if folded_name in protected:
                 raise AxiomConfigurationError(f"The {key} header is managed by AxiomClient.")
+            if folded_name in seen_names:
+                raise AxiomConfigurationError(f"The {key} header was supplied more than once.")
+            seen_names.add(folded_name)
             if any(ord(character) < 32 or ord(character) == 127 for character in key + value):
                 raise AxiomConfigurationError("Additional headers must not contain control characters.")
             normalized[key] = value
@@ -285,8 +302,9 @@ class AxiomClient:
         return self.request_json("PATCH", f"/api/workspaces/{quote(workspace_id, safe='')}", json_body={"name": name})
 
     def download_workspace_backup(self, workspace_id: str, *, timeout: float | None = None) -> bytes:
+        selected_timeout = 900 if timeout is None else timeout
         return self.request_bytes(
-            "GET", f"/api/workspaces/{quote(workspace_id, safe='')}/backup", timeout=timeout or 900
+            "GET", f"/api/workspaces/{quote(workspace_id, safe='')}/backup", timeout=selected_timeout
         )
 
     def download_workspace_backup_to(
