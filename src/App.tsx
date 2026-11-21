@@ -4339,7 +4339,7 @@ function WorkspaceKnowledgePanel() {
       </form>
       <div className="module-list">
         {documents.map((document) => <div className="module-row" key={document.id}>
-          <span className="module-icon"><File size={16} /></span>
+          <span className="module-icon"><Database size={16} /></span>
           <span className="module-copy"><b>{document.file_name}</b><small>{document.source_path} · {document.character_count.toLocaleString()} characters · SHA-256 {document.content_sha256.slice(0, 12)}…</small></span>
           <button type="button" className="button secondary-button" onClick={() => void removeDocument(document)} disabled={busy}>Remove copy</button>
         </div>)}
