@@ -786,7 +786,7 @@ export default function LocalAxiomEnginePanel() {
         </button>
       </div>
       {predictionError && <div className="inline-alert warning" role="alert">{predictionError}</div>}
-      {predictionJobs.length ? <div className="module-list" aria-label="Saved prediction job history">
+      {predictionJobs.length ? <div className="module-list" role="region" aria-label="Saved prediction job history">
         {predictionJobs.map((job) => {
           const active = ["queued", "running", "cancelling", "finalizing", "publishing"].includes(job.status);
           return <article className="module-row prediction-job-row" key={job.id} aria-label={"Prediction job " + job.id}>

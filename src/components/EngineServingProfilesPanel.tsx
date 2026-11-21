@@ -150,7 +150,7 @@ export default function EngineServingProfilesPanel() {
         <div>
           <label className="field">
             <span className="field-label-row"><span>Profile name</span></span>
-            <input value={name} onChange={(event) => setName(event.target.value)} maxLength={48} />
+            <input aria-label="Serving profile name" value={name} onChange={(event) => setName(event.target.value)} maxLength={48} />
           </label>
           <label className="field">
             <span className="field-label-row"><span>Local model checkpoint</span></span>

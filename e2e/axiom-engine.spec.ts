@@ -427,7 +427,7 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
       generation_resumed_after_restart: false,
     },
   };
-  await page.route("**/api/prediction-jobs", async (route) => {
+  await page.route("**/api/prediction-jobs**", async (route) => {
     if (route.request().method() === "POST") {
       predictionRequest = route.request().postDataJSON() as Record<string, unknown>;
       await route.fulfill({ status: 202, json: {
