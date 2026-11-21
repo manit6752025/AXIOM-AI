@@ -18,6 +18,7 @@ from axiom.core.engine import AxiomEngineError, benchmark_local, discover_local_
 from axiom.core import model_studio
 from axiom.core.engine_fabric import EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
 from axiom.core.engine_fabric_profiles import EngineFabricProfileError, EngineFabricProfileStore
+from axiom.core.benchmark_profiles import BenchmarkProfileError, BenchmarkProfileStore
 
 engine_app = typer.Typer(help="Run causal language models directly through AXIOM's local engine.", no_args_is_help=True)
 console = Console()
@@ -340,6 +341,7 @@ def engine_benchmark(
     device: str = typer.Option("auto", "--device", help="Execution backend: auto, cpu, cuda, rocm, mps, or xpu."),
     memory_mode: str = typer.Option("auto", "--memory-mode", help="Memory strategy: auto, full, layer_streaming, or disk_streaming."),
     precision: str = typer.Option("auto", "--precision", help="Compute dtype: auto, fp32, fp16, or bf16."),
+    profile_name: str | None = typer.Option(None, "--profile-name", help="Save this run as a named workspace profile with hardware/software provenance."),
     json_output: bool = typer.Option(False, "--json", help="Print benchmark metrics as machine-readable JSON."),
 ) -> None:
     """Measure bounded AXIOM-native inference locally; generated text is discarded."""
@@ -364,9 +366,18 @@ def engine_benchmark(
         )
     except (ValueError, AxiomEngineError) as exc:
         _fail(str(exc))
+    if profile_name:
+        try:
+            report["profile_record"] = BenchmarkProfileStore().create(
+                profile_name, report, prompt, model_path, adapter_used=adapter_path is not None,
+            )
+        except BenchmarkProfileError as exc:
+            _fail(str(exc))
     if json_output:
         typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
         return
+    if profile_name:
+        console.print(f"Saved workspace benchmark profile: {profile_name} · {report['profile_record']['id']}")
 
     metrics = report["metrics"]
     console.print(Panel.fit(
@@ -825,6 +836,53 @@ def engine_auto_chat(
         console.print(f"{attempt.get('backend_name', attempt.get('backend_id', 'backend'))}: {status}{reason}")
     if routing.get("scope_note"):
         console.print(routing["scope_note"])
+
+
+@engine_app.command("benchmark-profiles")
+def engine_benchmark_profiles(
+    json_output: bool = typer.Option(False, "--json", help="Print saved profiles as JSON."),
+) -> None:
+    """List named, workspace-local native benchmark profiles."""
+    try:
+        report = BenchmarkProfileStore().list()
+    except BenchmarkProfileError as exc:
+        _fail(str(exc))
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
+        return
+    table = Table(title=f"Native benchmark profiles · {report['total']}")
+    table.add_column("Name", style="cyan")
+    table.add_column("Created")
+    table.add_column("Hardware")
+    table.add_column("Model")
+    table.add_column("Median")
+    for item in report["profiles"]:
+        table.add_row(item["name"], item["created_at"],
+                      f"{item['hardware']['os_name']} · {item['hardware']['architecture']}",
+                      item["workload"]["config"]["model"],
+                      f"{item['workload']['metrics']['median_elapsed_ms']} ms")
+    console.print(table)
+
+
+@engine_app.command("benchmark-compare")
+def engine_benchmark_compare(
+    left_id: str = typer.Argument(..., help="First saved benchmark profile ID."),
+    right_id: str = typer.Argument(..., help="Second saved benchmark profile ID."),
+    json_output: bool = typer.Option(False, "--json", help="Print comparison evidence and metric deltas as JSON."),
+) -> None:
+    """Compare two saved profiles and identify hardware/software/workload mismatches."""
+    try:
+        report = BenchmarkProfileStore().compare(left_id, right_id)
+    except BenchmarkProfileError as exc:
+        _fail(str(exc))
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
+        return
+    console.print(f"Comparable: {'yes' if report['comparable'] else 'no — descriptive comparison only'}")
+    for field, matched in report["match"].items():
+        console.print(f"{field}: {'match' if matched else 'different'}")
+    for metric, values in report["metrics"].items():
+        console.print(f"{metric}: {values['left']} → {values['right']} (Δ {values['delta']})")
 
 
 @engine_app.command("route-benchmark")
