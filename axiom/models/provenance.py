@@ -68,7 +68,11 @@ def _hash_file(path: Path, *, expected_size: int, max_bytes: int) -> str | None:
     return digest.hexdigest()
 
 
-def inspect_model_provenance(path: str | Path) -> dict[str, Any]:
+def inspect_model_provenance(
+    path: str | Path,
+    *,
+    registry_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Return bounded SHA-256, weight-format, and license-file evidence."""
     requested = Path(path).expanduser()
     if requested.is_symlink():
@@ -188,13 +192,32 @@ def inspect_model_provenance(path: str | Path) -> dict[str, Any]:
         hash_status = "skipped_size_or_file_count_limit"
 
     formats = sorted(format_counts)
+    registry = registry_metadata if isinstance(registry_metadata, dict) else {}
+    registry_text = {
+        key: value[:2048] if isinstance(value, str) else None
+        for key, value in registry.items()
+        if key in {"source", "source_url", "source_revision", "source_attribution", "license",
+                   "license_review", "license_review_notes"}
+    }
+    source_claims_present = any(registry_text.get(key) for key in (
+        "source", "source_url", "source_revision", "source_attribution",
+    ))
     return {
         "schema_version": 1,
         "model_directory": str(root),
+        "registry_metadata": {
+            "status": "supplied" if registry_text else "not_linked",
+            "evidence_origin": "user_supplied_workspace_registry" if registry_text else None,
+            **registry_text,
+        },
         "source_evidence": {
-            "status": "not_independently_verified",
+            "status": "registry_claim_not_verified" if source_claims_present else "not_independently_verified",
+            "declared_source": registry_text.get("source"),
+            "source_url": registry_text.get("source_url"),
+            "source_revision": registry_text.get("source_revision"),
+            "source_attribution": registry_text.get("source_attribution"),
             "network_used": False,
-            "note": "A local directory does not prove publisher identity, repository origin, or source revision. Registry attribution and URLs are user-supplied metadata.",
+            "note": "Registry source details are user-supplied claims. A local directory and URL do not prove publisher identity, repository origin, or that the files came from the declared revision.",
         },
         "format_evidence": {
             "detected_formats": formats,
@@ -219,10 +242,11 @@ def inspect_model_provenance(path: str | Path) -> dict[str, Any]:
         "license_evidence": {
             "status": "local_files_found" if local_license_files else "no_local_license_file_found",
             "human_review_required": True,
-            "declared_license": None,
-            "registry_review_state": None,
+            "declared_license": registry_text.get("license"),
+            "registry_review_state": registry_text.get("license_review"),
+            "registry_review_notes": registry_text.get("license_review_notes"),
             "files": local_license_files,
-            "note": "Presence and hashes of local license/notice files are evidence only; they do not establish license identity, grant rights, or replace human legal review.",
+            "note": "Registry license and review fields are user-supplied metadata. Presence and hashes of local license/notice files are evidence only; they do not establish license identity, grant rights, or replace human legal review.",
         },
         "security_evidence": {
             "symlink_files_skipped": symlink_files_skipped,
