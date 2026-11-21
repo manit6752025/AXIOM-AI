@@ -47,6 +47,8 @@ axiom workflow list --limit 20 --page-json
 axiom experiment print <experiment-id>
 axiom experiment diff <baseline-id> <candidate-id> --json
 axiom evaluation list --json
+axiom evaluation run ./data/eval.jsonl --prediction-field prediction --reference-field reference --experiment-id <experiment-id> --json
+axiom evaluation compare-experiments <baseline-experiment-id> <candidate-experiment-id> --metric token_f1_micro --json
 axiom engine discover --json
 axiom update --check
 axiom update --auto
