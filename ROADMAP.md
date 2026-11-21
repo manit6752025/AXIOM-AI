@@ -170,7 +170,7 @@ feature exists or a delivery-date promise.
 - [R127 · Planned] Add hybrid retrieval with chunking, metadata filters, source citations, and bounded search.
 - [R128 · Planned] Add opt-in local multimodal image understanding with explicit model and runtime capability checks.
 - [R129 · Planned] Add local speech-to-text and text-to-speech adapters with resource and privacy controls.
-- [R130 · Planned] Add versioned dataset snapshots with content hashes and immutable lineage.
+- [R130 · In progress; validation pending] Added a workspace-local, versioned content-addressed JSONL snapshot store with bounded read-only SHA-256 objects, deduplication, append-only hash-chained manifests, earlier-parent lineage, safe workspace/data path validation, source-change detection, byte/count limits and object verification. API, CLI, Datasets UI, core/API/CLI/browser tests and release-smoke coverage are in place; full CI verification remains pending.
 - [R131 · Planned] Add experiment comparison views and machine-readable statistical diffs.
 - [R132 · Planned] Add local model-serving profiles with validated resource limits and readiness probes.
 - [R133 · Planned] Add bounded, cancellable, resumable batch inference jobs with progress checkpoints.
