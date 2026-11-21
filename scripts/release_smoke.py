@@ -242,6 +242,7 @@ def structured_inference_issues(
             "MAX_SCHEMA_BYTES = 32 * 1024", "MAX_SCHEMA_DEPTH = 8",
             "MAX_SCHEMA_NODES = 128", "MAX_OUTPUT_CHARS = 65_536",
             "def validate_json_schema(", "def parse_and_validate_json_output(",
+            '_PROPERTY_NAME = re.compile(r"^[^\\x00]{1,128}$")',
             "additionalProperties", "object_pairs_hook=unique_pairs",
         )),
         ("runtime", inference_core, (

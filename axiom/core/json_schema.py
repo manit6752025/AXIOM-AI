@@ -29,7 +29,7 @@ _ALLOWED_KEYWORDS = frozenset({
     "maxLength", "minimum", "maximum", "minItems", "maxItems",
 })
 _SUPPORTED_DRAFT = "https://json-schema.org/draft/2020-12/schema"
-_PROPERTY_NAME = re.compile(r"^[^\\x00]{1,128}$")
+_PROPERTY_NAME = re.compile(r"^[^\x00]{1,128}$")
 
 
 class JsonSchemaError(ValueError):

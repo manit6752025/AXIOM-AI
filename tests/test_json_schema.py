@@ -129,3 +129,29 @@ def test_output_parser_rejects_duplicate_non_finite_invalid_or_wrong_type_values
 def test_output_parser_enforces_size_limit_before_json_parsing():
     with pytest.raises(JsonSchemaError, match="character limit"):
         parse_and_validate_json_output(" " + "x" * MAX_OUTPUT_CHARS, {"type": "string"})
+
+
+
+def test_schema_allows_ordinary_property_names_containing_x_zero_and_backslash():
+    schema = {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string"},
+            "x0": {"type": "string"},
+            "path\\name": {"type": "string"},
+        },
+        "required": ["text", "x0", "path\\name"],
+    }
+    validate_json_instance(
+        {"text": "hello", "x0": "value", "path\\name": "local"},
+        schema,
+    )
+
+
+@pytest.mark.parametrize("property_name", ["", "\\x00".encode().decode("unicode_escape"), "n" * 129])
+def test_schema_rejects_empty_nul_and_oversized_property_names(property_name):
+    with pytest.raises(JsonSchemaError, match="Property names"):
+        validate_json_schema({
+            "type": "object",
+            "properties": {property_name: {"type": "string"}},
+        })
