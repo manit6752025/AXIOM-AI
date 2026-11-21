@@ -12,7 +12,7 @@ if (typeof expected !== "string" || !/^\d+\.\d+\.\d+$/.test(expected)) {
 let actual;
 try {
   actual = require("typescript").version;
-} catch (error) {
+} catch {
   console.error("AXIOM frontend TypeScript is not installed. Run npm ci in the repository root.");
   process.exit(1);
 }
