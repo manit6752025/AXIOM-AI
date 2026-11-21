@@ -61,7 +61,7 @@ function validateHeaders(headers: Record<string, string> | undefined): Record<st
 }
 
 export class AxiomClient {
-  readonly baseUrl: URL;
+  readonly baseUrl: string;
   readonly timeoutMs: number;
   private readonly token: string | undefined;
   private readonly workspaceId: string | undefined;
@@ -102,7 +102,7 @@ export class AxiomClient {
     if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 900_000) {
       throw new AxiomConfigurationError("timeoutMs must be an integer between 1 and 900000.");
     }
-    this.baseUrl = parsed;
+    this.baseUrl = parsed.origin;
     this.timeoutMs = timeout;
     this.token = options.token;
     this.workspaceId = options.workspaceId;
@@ -136,7 +136,6 @@ export class AxiomClient {
     const id = requestId();
     const headers = new Headers({
       Accept: "application/json",
-      "User-Agent": "@axiom-ai/sdk/1.0.0",
       ...this.additionalHeaders,
     });
     for (const [name, value] of Object.entries(options.headers ?? {})) {
