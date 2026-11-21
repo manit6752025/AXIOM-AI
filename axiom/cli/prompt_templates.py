@@ -116,7 +116,7 @@ def register(app: typer.Typer) -> None:
         name: str = typer.Argument(..., help="Unique template name."),
         body: str | None = typer.Option(None, "--body", help="Template text; alternatively use --body-file."),
         body_file: Path | None = typer.Option(None, "--body-file", exists=True, dir_okay=False, readable=True),
-        description: str = typer.Option("", "--description", max_length=240),
+        description: str = typer.Option("", "--description", help="Optional description (maximum 240 characters)."),
         variables_json: str = typer.Option("[]", "--variables-json", help="JSON array of typed variable definitions."),
         json_output: bool = typer.Option(False, "--json", help="Emit the created template as JSON."),
     ) -> None:
@@ -137,10 +137,10 @@ def register(app: typer.Typer) -> None:
     def update_template(
         template_id: str = typer.Argument(..., help="Prompt template ID."),
         expected_version: int = typer.Option(..., "--expected-version", min=1, max=1_000_000),
-        name: str = typer.Option(..., "--name", max_length=80),
+        name: str = typer.Option(..., "--name", help="New template name (maximum 80 characters)."),
         body: str | None = typer.Option(None, "--body"),
         body_file: Path | None = typer.Option(None, "--body-file", exists=True, dir_okay=False, readable=True),
-        description: str = typer.Option("", "--description", max_length=240),
+        description: str = typer.Option("", "--description", help="Optional description (maximum 240 characters)."),
         variables_json: str = typer.Option("[]", "--variables-json"),
         json_output: bool = typer.Option(False, "--json"),
     ) -> None:
