@@ -195,14 +195,15 @@ def test_manifest_store_rejects_malformed_unhashable_grant_scopes_and_duplicate_
         store.list()
 
 
-def test_empty_plugin_grant_is_still_default_deny(tmp_path):
+def test_empty_plugin_grants_are_rejected_and_leave_default_deny(tmp_path):
     store = PluginManifestStore(tmp_path / ".axiom")
     registered = store.register(manifest())
-    store.grant(
-        "com.example.research",
-        expected_sha256=registered["sha256"],
-        tools=[],
-    )
+    with pytest.raises(PluginManifestError, match="at least one"):
+        store.grant(
+            "com.example.research",
+            expected_sha256=registered["sha256"],
+            tools=[],
+        )
     assert store.list()["manifests"][0]["permission_status"] == "default_deny"
     assert store.is_allowed("com.example.research", "search", ["read"]) is False
 
@@ -245,6 +246,12 @@ def test_plugin_manifest_api_keeps_registration_default_deny_and_invalidates_gra
             },
         )
         assert denied.status_code == 422
+
+        empty_grant = client.put(
+            f"/api/security/plugins/{plugin_id}/permissions",
+            json={"manifest_sha256": digest, "tools": []},
+        )
+        assert empty_grant.status_code == 422
 
         grant = client.put(
             f"/api/security/plugins/{plugin_id}/permissions",
