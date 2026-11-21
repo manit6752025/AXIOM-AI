@@ -211,7 +211,7 @@ def test_vulnerability_scan_bounds_captured_streams(monkeypatch: pytest.MonkeyPa
 
     class NoisyProcess:
         def __init__(self, *_args, **_kwargs):
-            self.stdout = io.BytesIO(b"{}" if stream_name == "stdout" else b"")
+            self.stdout = io.BytesIO(b"x" * (limit + 1) if stream_name == "stdout" else b"{}")
             self.stderr = io.BytesIO(b"x" * (limit + 1) if stream_name == "stderr" else b"")
             self.returncode = 0
 
