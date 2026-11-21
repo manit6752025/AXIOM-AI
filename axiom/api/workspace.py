@@ -168,8 +168,14 @@ class WorkspaceModelProvenanceInput(BaseModel):
             or any(ord(character) < 32 or ord(character) == 127 for character in value)
         ):
             raise ValueError("Model provenance path must be a canonical workspace-relative path.")
+        raw_parts = value.split("/")
         path = PurePosixPath(value)
-        if path.is_absolute() or not path.parts or any(part in {"", ".", ".."} for part in path.parts):
+        if (
+            path.is_absolute()
+            or not path.parts
+            or any(part in {"", ".", ".."} for part in raw_parts)
+            or path.as_posix() != value
+        ):
             raise ValueError("Model provenance path must be a canonical workspace-relative path.")
         return value
 
@@ -497,6 +503,8 @@ def workspace_model_provenance(request: WorkspaceModelProvenanceInput) -> dict[s
     """Hash local model weights and report source/license evidence without network access."""
     try:
         model_root = active_workspace_root() / "models"
+        if model_root.is_symlink():
+            raise ValueError("The workspace model root must not be a symbolic link.")
         current = model_root
         for component in Path(request.path).parts:
             current = current / component
