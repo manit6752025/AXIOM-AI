@@ -77,7 +77,7 @@ test("Datasets inventory offers a bounded, non-mutating cleaning preview", async
   });
   await page.goto("/?page=datasets");
   await expect(page.getByRole("heading", { level: 1, name: "Datasets", exact: true })).toBeVisible();
-  await expect(page.getByText("data/train.jsonl", { exact: true })).toBeVisible();
+  await expect(page.locator(".module-row").filter({ has: page.getByRole("button", { name: "Preview clean", exact: true }) }).getByText("data/train.jsonl", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Preview clean", exact: true }).click();
   await expect(page.getByText("Preview only", { exact: true })).toBeVisible();

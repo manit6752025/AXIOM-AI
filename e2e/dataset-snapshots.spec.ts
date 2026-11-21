@@ -69,16 +69,19 @@ test("Datasets creates immutable content-addressed snapshots and verifies parent
       creationBodies.push(body);
       const record = creationBodies.length === 1 ? firstRecord : secondRecord;
       await route.fulfill({ status: 201, json: { snapshot: record, total: creationBodies.length } });
-    } else if (url.pathname === "/api/workspace/dataset-snapshots/" + firstId + "/verify") {
+    } else if (url.pathname.startsWith("/api/workspace/dataset-snapshots/") && url.pathname.endsWith("/verify")) {
       verificationCalls += 1;
-      await route.fulfill({ json: {
+      const requestedId = url.pathname.split("/").at(-2);
+      const isFirst = requestedId === firstId;
+      const record = records.find((item) => item.manifest.snapshot_id === requestedId);
+      await route.fulfill({ status: record ? 200 : 404, json: {
         schema_version: 1,
-        snapshot_id: firstId,
-        valid: true,
-        expected_sha256: firstHash,
+        snapshot_id: requestedId,
+        valid: Boolean(record),
+        expected_sha256: isFirst ? firstHash : secondHash,
         file_size_bytes: 128,
-        manifest_sha256: firstManifestHash,
-        lineage_valid: true,
+        manifest_sha256: isFirst ? firstManifestHash : secondRecord.manifest_sha256,
+        lineage_valid: Boolean(record),
         immutable: true,
       } });
     } else if (url.pathname === "/api/workspace/dataset-manifest") {
