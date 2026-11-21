@@ -115,6 +115,16 @@ def test_manifest_versions_follow_semver_and_duplicate_ids_are_rejected(tmp_path
     assert len(store.list()["manifests"]) == 1
 
 
+def test_manifest_semver_rejects_empty_segments_and_compares_numeric_prerelease_identifiers():
+    for version in ("1.0.0-alpha..1", "1.0.0+build..2", "1.0.0-alpha.01"):
+        with pytest.raises(PluginManifestError):
+            validate_plugin_manifest(manifest(version))
+
+    _, first_hash = validate_plugin_manifest(manifest("1.0.0-alpha.2"))
+    _, second_hash = validate_plugin_manifest(manifest("1.0.0-alpha.10"))
+    assert first_hash != second_hash
+
+
 def test_manifest_store_fails_closed_for_tampered_registry_and_symlinks(tmp_path):
     root = tmp_path / ".axiom"
     store = PluginManifestStore(root)
@@ -135,6 +145,38 @@ def test_manifest_store_fails_closed_for_tampered_registry_and_symlinks(tmp_path
     with pytest.raises(PluginManifestError, match="symbolic links"):
         PluginManifestStore(linked_metadata).list()
     assert store.is_allowed("com.example.research", "search", []) is False
+
+
+def test_manifest_store_rejects_malformed_unhashable_grant_scopes_and_duplicate_json_keys(tmp_path):
+    store = PluginManifestStore(tmp_path / ".axiom")
+    record = store.register(manifest())
+    stored = json.loads(store.registry_file.read_text(encoding="utf-8"))
+    stored["grants"]["com.example.research"] = {
+        "manifest_sha256": record["sha256"],
+        "tools": [{"name": "search", "scopes": [["read"]]}],
+    }
+    store.registry_file.write_text(json.dumps(stored), encoding="utf-8")
+    with pytest.raises(PluginManifestError):
+        store.list()
+
+    store.registry_file.write_text(
+        '{"store_schema_version":1,"store_schema_version":1,"manifests":[],"grants":{}}',
+        encoding="utf-8",
+    )
+    with pytest.raises(PluginManifestError, match="safely"):
+        store.list()
+
+
+def test_empty_plugin_grant_is_still_default_deny(tmp_path):
+    store = PluginManifestStore(tmp_path / ".axiom")
+    registered = store.register(manifest())
+    store.grant(
+        "com.example.research",
+        expected_sha256=registered["sha256"],
+        tools=[],
+    )
+    assert store.list()["manifests"][0]["permission_status"] == "default_deny"
+    assert store.is_allowed("com.example.research", "search", ["read"]) is False
 
 
 def test_manifest_store_enforces_workspace_registry_capacity(tmp_path, monkeypatch):
