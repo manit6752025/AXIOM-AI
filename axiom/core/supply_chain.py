@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+from urllib.parse import quote
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Thread
@@ -96,7 +97,7 @@ def generate_spdx_sbom(
             "externalRefs": [{
                 "referenceCategory": "PACKAGE-MANAGER",
                 "referenceType": "purl",
-                "referenceLocator": f"pkg:pypi/{_canonical_name(name)}@{version}",
+                "referenceLocator": f"pkg:pypi/{_canonical_name(name)}@{quote(version, safe='.-_+')}",
             }],
         }
         requirements_by_name[canonical] = requirements
@@ -362,6 +363,9 @@ def audit_dependency_vulnerabilities(
         "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE",
     )
     environment = {key: os.environ[key] for key in allowed_environment if key in os.environ}
+    # Do not let pip configuration in the invoking workspace or user profile
+    # inject private package-index URLs or credentials into the audit process.
+    environment["PIP_CONFIG_FILE"] = os.devnull
     args = [executable, "-m", "pip_audit", "--local", "--format", "json", "--progress-spinner", "off"]
     scan_cwd = Path(sys.prefix)
     if not scan_cwd.is_dir():
