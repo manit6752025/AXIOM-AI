@@ -318,7 +318,7 @@ def test_serving_profile_api_applies_busy_admission_without_queueing(tmp_path, m
     monkeypatch.chdir(tmp_path);
     model = tmp_path / "models" / "qwen"
     model.mkdir(parents=True)
-    monkeypatch.setattr(engine_api, "_validated_path", lambda value, label: str(Path(value).resolve()))
+    monkeypatch.setattr(engine_api, "_validated_path", lambda value, label: None if value is None else str(Path(value).resolve()))
     monkeypatch.setattr(engine_api, "inspect_native_model_context", lambda path: {
         "model_type": "qwen2", "architecture": "Qwen2ForCausalLM", "checkpoint_format": "safetensors",
         "max_position_embeddings": 8192, "effective_max_position_embeddings": 8192,
