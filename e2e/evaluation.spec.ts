@@ -162,6 +162,7 @@ test("evaluation compares repeated experiment results and reports sample-size li
   });
 
   await page.goto("/?page=evaluation");
+  await expect(page.getByLabel("Baseline experiment").locator("option", { hasText: "Baseline snapshot" })).toHaveCount(1);
   await page.getByLabel("Baseline experiment").selectOption(experiments[0].id);
   await page.getByLabel("Candidate experiment").selectOption(experiments[1].id);
   await page.getByLabel("Comparison metric").selectOption("exact_match");
