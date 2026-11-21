@@ -658,7 +658,7 @@ export type AxiomEngineServingProfile = {
   max_new_tokens: number;
   max_prompt_chars: number;
   max_concurrent_requests: 1;
-  max_queued_requests: 0;
+  max_queued_requests: number;
   request_timeout_seconds: number;
   created_at: string;
   updated_at: string;
@@ -3033,7 +3033,7 @@ export const axiomApi = {
     memory_mode: AxiomEngineServingProfile["memory_mode"];
     precision: AxiomEngineServingProfile["precision"];
     context_length: number; max_new_tokens: number; max_prompt_chars: number;
-    max_concurrent_requests: 1; max_queued_requests: 0; request_timeout_seconds: number;
+    max_concurrent_requests: 1; max_queued_requests: number; request_timeout_seconds: number;
   }) => requestJson<{ profile: AxiomEngineServingProfile; scope: { weights_loaded: false; service_started: false; network_used: false } }>(
     "/api/engine/serving-profiles", { method: "POST", body: JSON.stringify(input) },
   ),
