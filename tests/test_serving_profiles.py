@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
@@ -232,6 +234,7 @@ def test_generate_from_profile_applies_saved_runtime_settings_and_prompt_budget(
 
 
 def test_serving_profile_api_crud_readiness_and_profile_limited_generation(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path);
     model = tmp_path / "models" / "qwen"
     model.mkdir(parents=True)
     monkeypatch.setattr(engine_api, "_validated_path", lambda value, label: str(Path(value).resolve()))
@@ -294,6 +297,7 @@ def test_serving_profile_api_crud_readiness_and_profile_limited_generation(tmp_p
 
 
 def test_serving_profile_api_rejects_unavailable_and_invalid_models(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path);
     monkeypatch.setattr(engine_api, "_validated_path", lambda value, label: value)
     monkeypatch.setattr(engine_api, "inspect_native_model_context", lambda path: {
         "model_type": "llama", "architecture": "LlamaForCausalLM", "checkpoint_format": "safetensors",
@@ -309,6 +313,7 @@ def test_serving_profile_api_rejects_unavailable_and_invalid_models(tmp_path, mo
 
 
 def test_serving_profile_api_applies_busy_admission_without_queueing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path);
     model = tmp_path / "models" / "qwen"
     model.mkdir(parents=True)
     monkeypatch.setattr(engine_api, "_validated_path", lambda value, label: str(Path(value).resolve()))
