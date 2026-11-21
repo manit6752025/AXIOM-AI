@@ -42,6 +42,7 @@ function requestId(): string {
 
 function validateHeaders(headers: Record<string, string> | undefined): Record<string, string> {
   const result: Record<string, string> = {};
+  const seenNames = new Set<string>();
   const protectedHeaders = new Set([
     "authorization",
     "x-request-id",
@@ -53,10 +54,15 @@ function validateHeaders(headers: Record<string, string> | undefined): Record<st
     if (!name.trim() || typeof value !== "string") {
       throw new AxiomConfigurationError("Additional headers need non-empty names and string values.");
     }
-    if (protectedHeaders.has(name.toLowerCase())) {
+    const lower = name.toLowerCase();
+    if (protectedHeaders.has(lower)) {
       throw new AxiomConfigurationError(`The ${name} header is managed by AxiomClient.`);
     }
-    if (/[\r\n\0]/.test(name + value)) {
+    if (seenNames.has(lower)) {
+      throw new AxiomConfigurationError(`The ${name} header was supplied more than once.`);
+    }
+    seenNames.add(lower);
+    if (/[\u0000-\u001f\u007f]/.test(name + value)) {
       throw new AxiomConfigurationError("Additional headers must not contain control characters.");
     }
     result[name] = value;
