@@ -1327,6 +1327,10 @@ export type McpSchemaInspection = {
   resource_templates_supported?: boolean;
   truncated?: { tools: boolean; resources: boolean; resource_templates: boolean };
   duration_ms: number;
+  connection_state_persisted?: boolean;
+  connection_state?: "connected" | "failed" | "timeout";
+  last_inspected_at?: string | null;
+  last_connection_error?: string | null;
   tool_execution_performed: false;
   resource_read_performed: false;
   prompt_execution_performed: false;
