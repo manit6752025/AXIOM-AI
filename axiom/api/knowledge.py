@@ -166,5 +166,7 @@ def search_knowledge_documents(base_id: str, request: KnowledgeSearchRequest) ->
         )
     except EmbeddingEngineError:
         raise HTTPException(status_code=503, detail="The local embedding model could not complete this retrieval request.") from None
+    except KnowledgeSearchError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
     except (OSError, ValueError, KeyError) as exc:
         raise _translate_store_error(exc) from None
