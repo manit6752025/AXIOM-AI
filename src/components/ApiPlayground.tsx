@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   axiomApi,
   playgroundEndpoints,
+  type ApiContractExamples,
   type PlaygroundEndpoint,
 } from "../api/client";
 
@@ -49,6 +50,34 @@ export default function ApiPlayground() {
   const [deepLoading, setDeepLoading] = useState(false);
   const [deepResults, setDeepResults] = useState<DeepResult[]>([]);
   const [deepComplete, setDeepComplete] = useState(false);
+  const [contractExamples, setContractExamples] = useState<ApiContractExamples | null>(null);
+  const [contractExamplesError, setContractExamplesError] = useState("");
+  const [contractExamplesLoading, setContractExamplesLoading] = useState(false);
+  const [selectedOperationId, setSelectedOperationId] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setContractExamplesLoading(true);
+    void axiomApi.apiContractExamples()
+      .then((report) => {
+        if (active) {
+          setContractExamples(report);
+          setSelectedOperationId(report.operations[0]?.operation_id ?? "");
+          setContractExamplesError("");
+        }
+      })
+      .catch((cause: unknown) => {
+        if (active) setContractExamplesError(cause instanceof Error ? cause.message : "Generated API examples are unavailable.");
+      })
+      .finally(() => {
+        if (active) setContractExamplesLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
+
+  const selectedOperation = contractExamples?.operations.find((item) => item.operation_id === selectedOperationId)
+    ?? contractExamples?.operations[0]
+    ?? null;
 
   const endpoint =
     playgroundEndpoints.find((item) => item.path === selected) ??
@@ -192,6 +221,62 @@ export default function ApiPlayground() {
             </pre>
           </div>
         )}
+      </section>
+
+      <section className="surface api-contract-examples">
+        <div className="surface-head">
+          <div>
+            <p className="surface-eyebrow">GENERATED FROM OPENAPI</p>
+            <h2>Typed API examples</h2>
+          </div>
+          {contractExamples && <span className="status-pill success">{contractExamples.operation_count} operations</span>}
+        </div>
+        <p className="quiet-note">
+          Request/response schemas, synthetic JSON and TypeScript types are generated from the running API contract.
+          This is a reference catalogue only: examples are never submitted, mutating methods are not executed,
+          and secret values are redacted.
+        </p>
+        {contractExamplesLoading && <p role="status">Generating examples from the API contract…</p>}
+        {contractExamplesError && <div className="inline-alert danger" role="alert">{contractExamplesError}</div>}
+        {contractExamples && selectedOperation && <>
+          <label className="field">
+            <span className="field-label-row"><span>Generated API operation</span></span>
+            <select aria-label="Generated API operation" value={selectedOperation.operation_id} onChange={(event) => setSelectedOperationId(event.target.value)}>
+              {contractExamples.operations.map((item) => (
+                <option key={item.operation_id} value={item.operation_id}>
+                  {item.method} {item.path} — {item.summary}
+                </option>
+              ))}
+            </select>
+            <small>{selectedOperation.side_effecting ? "Side-effecting operation template. It is displayed only and is never executed here." : "Read-only operation template."}</small>
+          </label>
+          <div className="status-strip" aria-label="Generated example metadata">
+            <div className="status-strip-item"><span>OpenAPI</span><b>{contractExamples.openapi_version}</b></div>
+            <div className="status-strip-item"><span>Operation</span><b>{selectedOperation.operation_id}</b></div>
+            <div className="status-strip-item"><span>Contract SHA-256</span><b>{contractExamples.source_sha256.slice(0, 12)}</b></div>
+          </div>
+          {selectedOperation.request && <>
+            <p className="surface-eyebrow">REQUEST / SYNTHETIC JSON</p>
+            <pre className="api-playground-json">{JSON.stringify(selectedOperation.request.example, null, 2)}</pre>
+            <p className="quiet-note">
+              {selectedOperation.request.redacted_fields.length
+                ? `Redacted fields: ${selectedOperation.request.redacted_fields.join(", ")}. `
+                : ""}
+              {selectedOperation.request.template_fields.length
+                ? `Operator-supplied template fields: ${selectedOperation.request.template_fields.join(", ")}.`
+                : "All displayed values are synthetic schema examples."}
+            </p>
+          </>}
+          {selectedOperation.response?.example !== undefined && selectedOperation.response?.example !== null && <>
+            <p className="surface-eyebrow">RESPONSE / SCHEMA EXAMPLE · HTTP {selectedOperation.response.status_code}</p>
+            <pre className="api-playground-json">{JSON.stringify(selectedOperation.response.example, null, 2)}</pre>
+          </>}
+          <p className="surface-eyebrow">TYPESCRIPT CONTRACT</p>
+          <pre className="api-playground-json">{selectedOperation.typescript}</pre>
+          <p className="surface-eyebrow">CURL TEMPLATE · NOT EXECUTED</p>
+          <pre className="api-playground-json">{selectedOperation.curl_template}</pre>
+        </>}
+        {!contractExamplesLoading && !contractExamples && !contractExamplesError && <p className="quiet-note">No generated examples are available.</p>}
       </section>
 
       <section className="surface">

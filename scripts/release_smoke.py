@@ -356,6 +356,56 @@ def api_playground_issues(component: str, client: str) -> list[str]:
     return issues
 
 
+def api_contract_examples_issues(
+    core: str, api: str, server: str, cli: str, cli_main: str,
+    client: str, component: str, e2e: str, tests: str, docs: str,
+) -> list[str]:
+    """Verify generated typed API examples stay tied to OpenAPI and secret-safe."""
+    checks = (
+        ("OpenAPI generator", core, (
+            "def build_api_examples(", "MAX_OPERATIONS = 512", "MAX_EXAMPLES_BYTES",
+            "def _safe_schema(", "def _example_value(", "def _typescript_type(",
+            "schema_defaults_replayed", "render_api_examples_markdown",
+        )),
+        ("API examples endpoint", api, (
+            'APIRouter(prefix="/api/contract"', '@router.get("/examples")',
+            "request.app.openapi()", "build_api_examples(",
+        )),
+        ("API server registration", server, ("api_examples_router",)),
+        ("CLI examples command", cli, (
+            '@api_app.command("examples")', '"--format"',
+            "build_api_examples(", "render_api_examples_markdown",
+        )),
+        ("root CLI registration", cli_main, ('app.add_typer(api_app, name="api")',)),
+        ("typed client", client, ("ApiContractExamples", "apiContractExamples:", '"/api/contract/examples"')),
+        ("Control Center panel", component, (
+            "Typed API examples", "axiomApi.apiContractExamples()",
+            "selectedOperation.typescript", "selectedOperation.curl_template",
+            "side_effecting", "never submitted",
+        )),
+        ("browser acceptance", e2e, (
+            'getByLabel("Generated API operation")', "post_llm_chat",
+            "$.body.api_key", "PostLlmChatRequest", "never submitted",
+        )),
+        ("generator regressions", tests, (
+            "test_generated_examples_cover_the_live_openapi_operation_set",
+            "test_secret_fields_are_redacted",
+            "test_api_examples_endpoint_returns_generated_contract",
+            "test_cli_emits_json_and_markdown",
+        )),
+        ("API docs", docs, (
+            "GET /api/contract/examples", "axiom api examples",
+            "synthetic", "variable names",
+        )),
+    )
+    issues: list[str] = []
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                issues.append(f"Typed API example {label} contract is missing: {token}")
+    return issues
+
+
 def resource_monitoring_issues(cli_source: str, panel_source: str, app_source: str, e2e_source: str) -> list[str]:
     """Require explicit opt-in, bounded retention and safe export across CLI and Runtime UI."""
     issues: list[str] = []
@@ -800,6 +850,19 @@ def inspect(root: Path) -> dict[str, Any]:
         if path not in client:
             failures.append(f"API playground allowlist is missing {path}.")
     failures.extend(api_playground_issues(component, client))
+    contract_examples_core = (root / "axiom/core/api_examples.py").read_text(encoding="utf-8")
+    contract_examples_api = (root / "axiom/api/examples.py").read_text(encoding="utf-8")
+    contract_examples_cli = (root / "axiom/cli/api.py").read_text(encoding="utf-8")
+    contract_examples_component = (root / "src/components/ApiPlayground.tsx").read_text(encoding="utf-8")
+    contract_examples_e2e = (root / "e2e/api-playground.spec.ts").read_text(encoding="utf-8")
+    contract_examples_tests = (root / "tests/test_api_examples.py").read_text(encoding="utf-8")
+    contract_examples_docs = (root / "docs/API.md").read_text(encoding="utf-8")
+    contract_examples_server = (root / "axiom/api/server.py").read_text(encoding="utf-8")
+    failures.extend(api_contract_examples_issues(
+        contract_examples_core, contract_examples_api, contract_examples_server,
+        contract_examples_cli, cli_main_source, client, contract_examples_component,
+        contract_examples_e2e, contract_examples_tests, contract_examples_docs,
+    ))
     if "15_000" not in client:
         failures.append("The shared API client timeout is missing or has changed; review timeout policy.")
     styles_source = (root / "src/styles.css").read_text(encoding="utf-8")

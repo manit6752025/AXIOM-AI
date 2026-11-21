@@ -147,7 +147,7 @@ feature exists or a delivery-date promise.
 ### 10 · API, telemetry, diagnostics, and delivery
 
 - [R109 · Implemented; tests passing] Add an allowlisted API playground with bounded payloads and timeouts.
-- [R110 · Planned] Add typed API examples generated from the supported contract.
+- [R110 · In progress; validation pending] Add typed API examples generated from the supported contract. The OpenAPI-driven generator now emits bounded request/response JSON Schema projections, synthetic payloads, TypeScript aliases, and cURL templates with sensitive-field redaction; the generated catalogue is exposed through the read-only API, `axiom api examples`, and the existing API Playground. Mutating examples are displayed only and are never executed. Full Python, lint/type, production-build, browser, and cross-platform checks are pending.
 - [R111 · Planned] Add local hardware snapshot history with opt-in retention.
 - [R112 · In progress; validation pending] Expose point-in-time CPU, process RSS, system RAM, device allocator, and trusted-model-storage telemetry via `GET /api/engine/telemetry` and `axiom engine telemetry --json`; the endpoint omits raw paths and user content. Historical sampling/export and physical-hardware validation remain outstanding.
 - [R113 · Planned] Add benchmark-linked resource trend charts with missing-data labels.
