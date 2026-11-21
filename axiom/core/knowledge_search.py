@@ -56,6 +56,8 @@ def _validate_filters(
             if value not in allowed_formats:
                 raise KnowledgeSearchError(f"Unsupported format filter: {item}.")
             normalized_formats.add(value)
+        if not normalized_formats:
+            normalized_formats = None
 
     prefixes: list[str] = []
     if source_prefixes is not None:
@@ -76,6 +78,8 @@ def _validate_filters(
             if not isinstance(value, str) or not _BASE_ID.fullmatch(value):
                 raise KnowledgeSearchError("Document ID filters must be 32-character hexadecimal IDs.")
             normalized_ids.add(value)
+        if not normalized_ids:
+            normalized_ids = None
     return normalized_formats, tuple(prefixes), normalized_ids
 
 
@@ -144,7 +148,7 @@ def _chunk_document(
             start += 1
         if len(chunks) > MAX_SEARCH_CHUNKS:
             raise KnowledgeStoreCapacityError(
-                f"Search expands beyond the {MAX_SEARCH_CHUNKS}-chunk request limit; narrow the metadata filters."
+                f"Search exceeds the {MAX_SEARCH_CHUNKS}-chunk limit; narrow the metadata filters."
             )
     return chunks
 
