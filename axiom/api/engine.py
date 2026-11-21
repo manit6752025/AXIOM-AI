@@ -15,6 +15,7 @@ from starlette.responses import StreamingResponse
 from axiom.core import model_studio
 from axiom.core.engine_fabric import EngineFabricBenchmarkRequirementError, EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
 from axiom.core.engine_fabric_profiles import EngineFabricProfileError, EngineFabricProfileStore
+from axiom.core.benchmark_profiles import BenchmarkProfileError, BenchmarkProfileStore
 from axiom.core.resource_telemetry import ResourceTelemetryError, ResourceTelemetryOptInRequired, ResourceTelemetryStore
 
 from axiom.core.engine import (
@@ -117,6 +118,7 @@ class NativeBenchmarkRequest(GenerateRequest):
     warmup_runs: int = Field(default=1, ge=0, le=2)
     iterations: int = Field(default=3, ge=1, le=5)
     max_new_tokens: int = Field(default=64, ge=1, le=128)
+    profile_name: str | None = Field(default=None, min_length=1, max_length=64, pattern="^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$")
 
 
 class BatchGenerateRequest(BaseModel):
@@ -381,11 +383,35 @@ async def engine_benchmark(
             )
         await asyncio.sleep(0.05)
     try:
-        return await worker
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from None
+        report = await worker
+        if request.profile_name:
+            report["profile_record"] = BenchmarkProfileStore().create(
+                request.profile_name, report, request.prompt, request.model_path,
+                adapter_used=request.adapter_path is not None,
+            )
+        else:
+            report["profile_record"] = None
+        return report
+    except (ValueError, BenchmarkProfileError):
+        raise HTTPException(status_code=422, detail="Benchmark request or saved profile is invalid.") from None
     except AxiomEngineError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+@router.get("/benchmark-profiles")
+def list_native_benchmark_profiles(limit: int = 100) -> dict[str, Any]:
+    try:
+        return BenchmarkProfileStore().list(limit)
+    except BenchmarkProfileError:
+        raise HTTPException(status_code=409, detail="Benchmark profile history could not be read safely.") from None
+
+
+@router.get("/benchmark-profiles/compare")
+def compare_native_benchmark_profiles(left_id: str, right_id: str) -> dict[str, Any]:
+    try:
+        return BenchmarkProfileStore().compare(left_id, right_id)
+    except BenchmarkProfileError:
+        raise HTTPException(status_code=422, detail="The requested benchmark profiles cannot be compared.") from None
 
 
 @router.post("/generate/batch")
