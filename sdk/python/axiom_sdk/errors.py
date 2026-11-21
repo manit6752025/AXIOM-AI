@@ -8,11 +8,11 @@ class AxiomError(Exception):
     """Base class for client-side AXIOM SDK failures."""
 
 
-class AxiomConfigurationError(AxiomError, ValueError):
+class AxiomConfigurationError(AxiomError):
     """The client configuration is unsafe or invalid."""
 
 
-class AxiomNetworkError(AxiomError, OSError):
+class AxiomNetworkError(AxiomError):
     """The AXIOM service could not be reached or a request timed out."""
 
     def __init__(self, message: str, *, request_id: str | None = None) -> None:
