@@ -19,7 +19,7 @@ def _workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.chdir(tmp_path)
     root = tmp_path / "workspace"
     (root / "data").mkdir(parents=True)
-    (root / "data" / "sample.jsonl").write_text('{"text":"safe"}\n', encoding="utf-8")
+    (root / "data" / "sample.jsonl").write_bytes(b'{"text":"safe"}\n')
     return root
 
 
