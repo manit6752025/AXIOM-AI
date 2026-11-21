@@ -2489,20 +2489,20 @@ export const axiomApi = {
       "/api/workspace/knowledge-bases", { method: "POST", body: JSON.stringify(input) },
     ),
   knowledgeDocuments: (baseId: string) =>
-    requestJson<KnowledgeDocumentList>(\`/api/workspace/knowledge-bases/\${encodeURIComponent(baseId)}/documents\`),
+    requestJson<KnowledgeDocumentList>(`/api/workspace/knowledge-bases/${encodeURIComponent(baseId)}/documents`),
   ingestKnowledgeDocument: (baseId: string, path: string) =>
     requestJson<{ schema_version: number; document: KnowledgeDocumentRecord; source_text_returned: false; source_text_persisted: true; network_used: false }>(
-      \`/api/workspace/knowledge-bases/\${encodeURIComponent(baseId)}/documents\`,
+      `/api/workspace/knowledge-bases/${encodeURIComponent(baseId)}/documents`,
       { method: "POST", body: JSON.stringify({ path }) },
     ),
   removeKnowledgeDocument: (baseId: string, documentId: string) =>
     requestJson<{ schema_version: number; removed: KnowledgeDocumentRecord; source_file_modified: false }>(
-      \`/api/workspace/knowledge-bases/\${encodeURIComponent(baseId)}/documents/\${encodeURIComponent(documentId)}\`,
+      `/api/workspace/knowledge-bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(documentId)}`,
       { method: "DELETE" },
     ),
   removeKnowledgeBase: (baseId: string) =>
     requestJson<{ schema_version: number; removed: KnowledgeBaseSummary; source_files_modified: false }>(
-      \`/api/workspace/knowledge-bases/\${encodeURIComponent(baseId)}\`, { method: "DELETE" },
+      `/api/workspace/knowledge-bases/${encodeURIComponent(baseId)}`, { method: "DELETE" },
     ),
 
   runtime: () => requestJson<RuntimeSnapshot>("/api/workspace/runtime"),
