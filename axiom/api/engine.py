@@ -1088,6 +1088,7 @@ async def generate_with_engine_serving_profile(
         seed=request.seed,
         stop_sequences=request.stop_sequences,
         cancel_event=cancel_event,
+        prompt_budget=budget,
     ))
     release_scheduled = False
     started = time.monotonic()
@@ -1120,7 +1121,11 @@ async def generate_with_engine_serving_profile(
         raise HTTPException(status_code=503, detail=str(exc)) from None
     finally:
         if not release_scheduled:
-            release_profile_request(profile_id)
+            if worker.done():
+                release_profile_request(profile_id)
+            else:
+                cancel_event.set()
+                worker.add_done_callback(lambda _task: release_profile_request(profile_id))
 
 
 class LocalRerankingRequest(BaseModel):
