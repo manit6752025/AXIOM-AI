@@ -273,6 +273,7 @@ def test_gui_refresh_repairs_frontend_dependencies_before_lint_and_build(
     _write_frontend_fixture(tmp_path, "7.0.0")
     commands: list[list[str]] = []
     monkeypatch.setattr(cli_main.shutil, "which", lambda name: "/usr/bin/npm")
+    monkeypatch.setattr(cli_main, "_frontend_runtime_typescript_mismatches", lambda root: [])
 
     def fake_run(command, *, cwd, check):
         commands.append(command)
@@ -299,6 +300,7 @@ def test_gui_refresh_skips_reinstall_when_dependencies_match_the_lockfile(
     _write_frontend_fixture(tmp_path, "6.0.3")
     commands: list[list[str]] = []
     monkeypatch.setattr(cli_main.shutil, "which", lambda name: "/usr/bin/npm")
+    monkeypatch.setattr(cli_main, "_frontend_runtime_typescript_mismatches", lambda root: [])
     monkeypatch.setattr(
         cli_main.subprocess,
         "run",

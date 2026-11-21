@@ -2616,7 +2616,7 @@ def mcp_serve():
 
 def main() -> None:
     """Run the public CLI using its stable executable name in every help screen."""
-    get_command(app).main(prog_name="axiom")
+    app(prog_name="axiom")
 
 
 if __name__ == "__main__":

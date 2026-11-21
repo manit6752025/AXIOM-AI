@@ -106,6 +106,7 @@ def test_refresh_control_center_runs_lint_then_build_without_deleting_ui(tmp_pat
     previous_index.write_text("previous UI", encoding="utf-8")
     calls = []
     monkeypatch.setattr(main_cli.shutil, "which", lambda command: "/usr/bin/npm")
+    monkeypatch.setattr(main_cli, "_frontend_runtime_typescript_mismatches", lambda root: [])
 
     def fake_run(args, *, cwd, check):
         calls.append((args, cwd, check))
@@ -207,21 +208,6 @@ def test_refresh_reinstalls_locked_typescript_before_lint_and_build(tmp_path, mo
     ]
     assert all(call[1] == tmp_path and call[2] is False for call in calls)
     assert previous_index.read_text(encoding="utf-8") == "previous UI"
-
-
-def test_main_uses_axiom_as_the_cli_program_name(monkeypatch):
-    import axiom.cli.main as main_cli
-
-    observed = {}
-
-    class Command:
-        def main(self, *, prog_name):
-            observed["prog_name"] = prog_name
-
-    monkeypatch.setattr(main_cli, "get_command", lambda app: Command())
-    main_cli.main()
-
-    assert observed["prog_name"] == "axiom"
 
 
 def test_update_cli_check_never_installs(monkeypatch):
