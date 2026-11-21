@@ -1,0 +1,19 @@
+{
+  "manifest_schema_version": 1,
+  "id": "com.example.research",
+  "name": "Example research",
+  "version": "1.0.0",
+  "description": "Demonstrates a declarative plugin manifest with explicit scoped permissions.",
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search an approved local knowledge collection.",
+      "scopes": ["read"]
+    },
+    {
+      "name": "annotate",
+      "description": "Create a review annotation after operator approval.",
+      "scopes": ["read", "write"]
+    }
+  ]
+}
