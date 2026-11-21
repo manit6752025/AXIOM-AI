@@ -340,6 +340,24 @@ def test_plugin_manifest_api_keeps_registration_default_deny_and_invalidates_gra
         ]
 
 
+def test_plugin_manifest_api_reports_durable_audit_failure_after_registry_mutation(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from axiom.api.server import create_app
+    from axiom.core.plugin_manifests import PluginManifestStore
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "axiom.api.security.record_security_event",
+        lambda _event_type: (_ for _ in ()).throw(OSError("journal unavailable")),
+    )
+    with TestClient(create_app()) as client:
+        response = client.post("/api/security/plugins/manifests", json={"manifest": manifest()})
+        assert response.status_code == 503
+        assert "may already have taken effect" in response.json()["detail"]
+    assert PluginManifestStore().list()["manifests"][0]["manifest"]["id"] == "com.example.research"
+
+
 def test_plugin_manifest_api_rejects_non_object_and_extra_envelope_fields(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
