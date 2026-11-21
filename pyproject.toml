@@ -49,6 +49,11 @@ training = [
     "tokenizers>=0.19",
     "safetensors>=0.4",
 ]
+embeddings = [
+    "torch>=2.2",
+    "transformers>=5,<6",
+    "safetensors>=0.4",
+]
 test = [
     "pytest>=8.3",
     "numpy>=1.24",
