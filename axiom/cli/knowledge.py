@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -10,6 +11,8 @@ from rich.table import Table
 from axiom.cli.errors import emit_error
 from axiom.cli.interactive import confirm as safe_confirm
 from axiom.core.knowledge import KnowledgeBaseStore, KnowledgeStoreCapacityError, KnowledgeStoreError
+from axiom.core.embeddings import EmbeddingEngineError
+from axiom.core.knowledge_search import KnowledgeSearchError, search_knowledge_base
 
 console = Console()
 knowledge_app = typer.Typer(help="Manage local workspace knowledge bases and documents.", no_args_is_help=True)
@@ -132,6 +135,67 @@ def register(root_app: typer.Typer) -> None:
         for document in result["documents"]:
             table.add_row(document["file_name"], document["id"], f"{document['character_count']:,}", document["format"])
         console.print(table if result["documents"] else "This knowledge base has no documents.")
+
+    @knowledge_app.command("search")
+    def search_documents(
+        base_id: str,
+        query: str = typer.Option(..., "--query", "-q", help="Words or phrase to search for."),
+        limit: int = typer.Option(8, "--limit", min=1, max=20),
+        max_documents: int = typer.Option(64, "--max-documents", min=1, max=64),
+        chunk_size_chars: int = typer.Option(1200, "--chunk-size-chars", min=256, max=4096),
+        chunk_overlap_chars: int = typer.Option(160, "--chunk-overlap-chars", min=0, max=512),
+        formats: list[str] = typer.Option([], "--format", help="Restrict by format; repeat for multiple formats."),
+        source_prefixes: list[str] = typer.Option([], "--source-prefix", help="Restrict to a workspace-relative path prefix; repeat as needed."),
+        document_ids: list[str] = typer.Option([], "--document-id", help="Restrict to a document ID; repeat as needed."),
+        embedding_model_path: Path | None = typer.Option(None, "--model-path", help="Trusted local embedding checkpoint for hybrid vector scoring."),
+        vector_weight: float = typer.Option(0.5, "--vector-weight", min=0.0, max=1.0),
+        device: str = typer.Option("auto", "--device", help="Execution device for local embeddings."),
+        json_output: bool = typer.Option(False, "--json", help="Print a versioned JSON result with citations."),
+    ) -> None:
+        """Search document chunks and return verifiable source citations."""
+        try:
+            result = search_knowledge_base(
+                _store(),
+                base_id,
+                query,
+                limit=limit,
+                max_documents=max_documents,
+                chunk_size_chars=chunk_size_chars,
+                chunk_overlap_chars=chunk_overlap_chars,
+                formats=formats,
+                source_prefixes=source_prefixes,
+                document_ids=document_ids,
+                embedding_model_path=str(embedding_model_path) if embedding_model_path else None,
+                vector_weight=vector_weight,
+                device=device,
+            )
+        except (OSError, ValueError, KeyError, EmbeddingEngineError) as exc:
+            _fail(str(exc), code="knowledge_search_failed")
+        if json_output:
+            typer.echo(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+            return
+        table = Table(title=f"Knowledge search · {result['knowledge_base']['name']}")
+        table.add_column("Rank", justify="right")
+        table.add_column("Score", justify="right")
+        table.add_column("Source")
+        table.add_column("Location")
+        table.add_column("Excerpt")
+        for rank, item in enumerate(result["results"], start=1):
+            citation = item["citation"]
+            location = f"{citation['start_char']:,}–{citation['end_char']:,}"
+            table.add_row(
+                str(rank),
+                f"{item['score']:.4f}",
+                citation["source_path"],
+                location,
+                item["snippet"],
+            )
+        console.print(table if result["results"] else "No matching knowledge chunks.")
+        console.print(result["scope_note"])
+        if result["query"]["vector_enabled"]:
+            console.print(f"Hybrid retrieval used local embeddings ({result['query']['vector_weight']:.0%} vector weight).")
+        else:
+            console.print("Lexical retrieval only. Supply --model-path to add local vector scoring.")
 
     @knowledge_app.command("remove-document")
     def remove_document(
