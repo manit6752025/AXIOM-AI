@@ -218,11 +218,16 @@ export type LocalInferenceResult = {
   eval_count: number | null;
   total_duration_ms: number | null;
   generated_at: string;
+  structured_output?: unknown;
+  structured_output_validated?: boolean;
 };
 export type LocalInferenceInput = {
   model: string; prompt: string; num_predict: number; temperature: number;
   top_p?: number; top_k?: number; min_p?: number; repetition_penalty?: number; seed?: number;
   num_ctx?: number; stop_sequences?: string[];
+};
+export type LocalInferenceStructuredInput = LocalInferenceInput & {
+  json_schema: Record<string, unknown>;
 };
 export type LocalInferenceStreamEvent =
   | { type: "token"; token: string; request_id?: string }
@@ -2681,6 +2686,10 @@ export const axiomApi = {
   cancelOllamaModelPull: (jobId: string) => requestJson<OllamaPullJob>(`/api/inference/models/pull/${encodeURIComponent(jobId)}/cancel`, { method: "POST", body: JSON.stringify({}) }),
   runLocalInference: (input: LocalInferenceInput) =>
     requestJson<LocalInferenceResult>("/api/inference/generate", {
+      method: "POST", body: JSON.stringify(input),
+    }, 300_000),
+  generateStructuredLocalInference: (input: LocalInferenceStructuredInput) =>
+    requestJson<LocalInferenceResult>("/api/inference/generate/structured", {
       method: "POST", body: JSON.stringify(input),
     }, 300_000),
   runLocalInferenceBenchmark: (input: { model: string; prompt: string; num_predict: number; temperature: number; warmup_runs: number; iterations: number; concurrency: number }) =>
