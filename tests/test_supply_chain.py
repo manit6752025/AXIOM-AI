@@ -9,6 +9,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from typer.testing import CliRunner
+
+from axiom.cli.main import app
 
 from axiom.core import supply_chain
 from axiom.core.supply_chain import (
@@ -168,3 +171,49 @@ def test_vulnerability_scan_does_not_report_clean_on_timeout(monkeypatch: pytest
     assert result["status"] == "error"
     assert result["network_accessed"] is True
     assert "no complete vulnerability conclusion" in result["message"]
+
+
+def test_security_cli_exports_spdx_sbom_to_a_create_only_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    report = {
+        "spdxVersion": "SPDX-2.3",
+        "axiom": {"package_count": 2},
+    }
+    monkeypatch.setattr("axiom.cli.extended.generate_spdx_sbom", lambda: report)
+    output = tmp_path / "sbom.spdx.json"
+    result = CliRunner().invoke(app, ["security", "sbom", "--output", str(output)])
+    assert result.exit_code == 0, result.output
+    assert json.loads(output.read_text(encoding="utf-8")) == report
+    again = CliRunner().invoke(app, ["security", "sbom", "--output", str(output)])
+    assert again.exit_code == 2
+    assert output.read_text(encoding="utf-8") == json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\\n"
+
+
+def test_security_cli_requires_network_flag_for_vulnerability_scans():
+    result = CliRunner().invoke(app, ["security", "vulnerabilities", "--json"])
+    assert result.exit_code == 2
+    assert "explicit network authorization" in result.output.lower()
+
+
+def test_security_cli_passes_explicit_authorization_and_exports_audit_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    report = {
+        "schema_version": 1,
+        "status": "complete",
+        "scanner": {"name": "pip-audit", "version": "2.9.0"},
+        "dependency_count": 3,
+        "vulnerable_dependency_count": 1,
+        "vulnerability_count": 1,
+        "findings": [{"id": "PYSEC-2026-1"}],
+        "network_accessed": True,
+    }
+    calls = []
+    def fake_audit(*, allow_network: bool, timeout_seconds: int):
+        calls.append((allow_network, timeout_seconds))
+        return report
+    monkeypatch.setattr("axiom.cli.extended.audit_dependency_vulnerabilities", fake_audit)
+    output = tmp_path / "dependency-audit.json"
+    result = CliRunner().invoke(app, [
+        "security", "vulnerabilities", "--allow-network", "--timeout", "45", "--output", str(output),
+    ])
+    assert result.exit_code == 0, result.output
+    assert calls == [(True, 45)]
+    assert json.loads(output.read_text(encoding="utf-8")) == report
