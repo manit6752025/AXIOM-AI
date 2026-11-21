@@ -42,7 +42,6 @@ import {
   type McpToolPolicy,
   type PluginManifestRegistry,
   type PluginManifestRecord,
-  type PluginToolGrant,
   type McpServerInventory,
   type McpServerHandshake,
   type McpSchemaInspection,
