@@ -244,3 +244,68 @@ def test_plugin_manifest_api_rejects_non_object_and_extra_envelope_fields(tmp_pa
             json={"manifest": manifest(), "execute": True},
         ).status_code == 422
         assert client.delete("/api/security/plugins/INVALID/permissions").status_code == 422
+
+def test_plugin_manifest_cli_validate_register_grant_list_and_revoke(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from axiom.cli.main import app
+
+    monkeypatch.chdir(tmp_path)
+    manifest_path = tmp_path / "plugin.json"
+    manifest_path.write_text(json.dumps(manifest()), encoding="utf-8")
+    runner = CliRunner()
+
+    validated = runner.invoke(app, [
+        "--no-banner", "plugin", "manifest", "validate", str(manifest_path), "--json",
+    ])
+    assert validated.exit_code == 0, validated.output
+    validation_report = json.loads(validated.stdout)
+    assert validation_report["valid"] is True
+    assert validation_report["permission_status"] == "default_deny"
+
+    registered = runner.invoke(app, [
+        "--no-banner", "plugin", "manifest", "register", str(manifest_path), "--json",
+    ])
+    assert registered.exit_code == 0, registered.output
+    registration = json.loads(registered.stdout)
+    digest = registration["sha256"]
+
+    denied_listing = runner.invoke(app, ["--no-banner", "plugin", "list", "--json"])
+    assert denied_listing.exit_code == 0, denied_listing.output
+    assert json.loads(denied_listing.stdout)["manifests"][0]["permission_status"] == "default_deny"
+
+    granted = runner.invoke(app, [
+        "--no-banner", "plugin", "grant", "com.example.research",
+        "--manifest-sha256", digest,
+        "--tool", "search:read",
+        "--tool", "annotate:read",
+        "--json",
+    ])
+    assert granted.exit_code == 0, granted.output
+    assert {item["name"] for item in json.loads(granted.stdout)["tools"]} == {"search", "annotate"}
+
+    revoked = runner.invoke(app, ["--no-banner", "plugin", "revoke", "com.example.research"])
+    assert revoked.exit_code == 0, revoked.output
+    assert "Revoked" in revoked.stdout
+
+
+def test_plugin_manifest_cli_rejects_duplicate_json_keys_and_symlink_files(tmp_path):
+    from axiom.cli.plugins import _read_manifest
+
+    duplicate = tmp_path / "duplicate.json"
+    duplicate.write_text(
+        '{"manifest_schema_version":1,"manifest_schema_version":1}',
+        encoding="utf-8",
+    )
+    with pytest.raises(PluginManifestError, match="duplicate"):
+        _read_manifest(str(duplicate))
+
+    target = tmp_path / "manifest.json"
+    target.write_text(json.dumps(manifest()), encoding="utf-8")
+    linked = tmp_path / "linked.json"
+    try:
+        linked.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    with pytest.raises(PluginManifestError, match="non-symlink"):
+        _read_manifest(str(linked))
