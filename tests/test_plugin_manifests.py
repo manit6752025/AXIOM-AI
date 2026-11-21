@@ -5,7 +5,6 @@ import json
 import pytest
 
 from axiom.core.plugin_manifests import (
-    MAX_MANIFESTS,
     PluginManifestError,
     PluginManifestStore,
     validate_plugin_manifest,
@@ -128,11 +127,14 @@ def test_manifest_store_fails_closed_for_tampered_registry_and_symlinks(tmp_path
 
     other = tmp_path / "external"
     other.mkdir()
-    linked = root / "plugins-link"
+    linked_metadata = tmp_path / "linked-metadata"
     try:
-        linked.symlink_to(other, target_is_directory=True)
+        linked_metadata.symlink_to(other, target_is_directory=True)
     except OSError:
         pytest.skip("symlink creation is unavailable")
+    with pytest.raises(PluginManifestError, match="symbolic links"):
+        PluginManifestStore(linked_metadata).list()
+    assert store.is_allowed("com.example.research", "search", []) is False
 
 
 def test_manifest_store_enforces_workspace_registry_capacity(tmp_path, monkeypatch):
