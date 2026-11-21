@@ -32,9 +32,10 @@ def test_profile_store_saves_only_non_secret_metadata_and_upserts_case_insensiti
     assert report["total"] == 1
     assert report["credentials_persisted"] is False
     serialized = store.path.read_text(encoding="utf-8")
-    assert "api_key" not in serialized
-    assert "secret" not in serialized.lower()
-    assert set(json.loads(serialized)) == {"schema_version", "profiles"}
+    persisted = json.loads(serialized)
+    assert all("api_key" not in profile for profile in persisted["profiles"])
+    assert all("secret" not in key.lower() for profile in persisted["profiles"] for key in profile)
+    assert set(persisted) == {"schema_version", "profiles"}
     if os.name != "nt":
         assert (store.path.stat().st_mode & 0o777) & 0o077 == 0
 
@@ -188,7 +189,8 @@ def test_profile_store_schema_v1_reads_and_migrates_on_next_write(tmp_path) -> N
     migrated = json.loads(path.read_text(encoding="utf-8"))
     assert migrated["schema_version"] == 2
     assert migrated["profiles"][0]["api_key_env"] == "TEAM_DEEPSEEK_KEY"
-    assert "api_key" not in path.read_text(encoding="utf-8")
+    assert all("api_key" not in item for item in migrated["profiles"])
+    assert "TEAM_DEEPSEEK_KEY" in path.read_text(encoding="utf-8")
 
 
 def test_profile_store_validates_environment_reference_names_and_provider_scope(tmp_path) -> None:
