@@ -1324,6 +1324,7 @@ export type WorkspaceExperimentPage = {
 
 export type WorkspaceEvaluationRun = {
   schema_version: 1;
+  experiment_id?: string | null;
   id: string;
   name: string;
   created_at: string;
@@ -1424,6 +1425,48 @@ export type WorkspaceEvaluationRun = {
       content_fingerprints_persisted_locally: true;
     };
   };
+};
+
+export type EvaluationExperimentSummary = {
+  experiment_id: string;
+  experiment_name: string;
+  plan_fingerprint: string;
+  replicate_count: number;
+  excluded_incomplete_count: number;
+  mean: number;
+  sample_standard_deviation: number | null;
+  minimum: number;
+  maximum: number;
+  run_ids: string[];
+};
+export type EvaluationExperimentComparison = {
+  schema_version: 1;
+  comparison_type: "axiom-repeated-offline-evaluation";
+  metric: "exact_match" | "normalized_exact_match" | "token_f1_micro";
+  corpus: {
+    comparison_corpus_sha256: string;
+    reference_field: string;
+    split_field: string | null;
+    selected_split: string | null;
+    sample_count: number;
+  };
+  baseline: EvaluationExperimentSummary;
+  candidate: EvaluationExperimentSummary;
+  difference: {
+    candidate_minus_baseline_mean: number;
+    direction: "improved" | "regressed" | "unchanged";
+  };
+  statistical_test: {
+    method: string;
+    status: "computed" | "insufficient_replicates";
+    minimum_replicates_per_group: 2;
+    t_statistic: number | null;
+    degrees_of_freedom: number | null;
+    p_value: number | null;
+    degenerate_zero_variance?: boolean;
+  };
+  generated_at: string;
+  scope_note: string;
 };
 
 export type WorkspaceEvaluationRunPage = {
@@ -2632,11 +2675,21 @@ export const axiomApi = {
     split_field?: string;
     split_value?: string;
     model_label?: string;
+    experiment_id?: string;
     baseline?: boolean;
     baseline_run_id?: string;
     regression_metric?: "exact_match" | "normalized_exact_match" | "token_f1_micro";
     regression_tolerance?: number;
   }) => requestJson<{ run: WorkspaceEvaluationRun }>("/api/evaluation/runs", {
+    method: "POST",
+    body: JSON.stringify(input),
+  }),
+
+  compareEvaluationExperiments: (input: {
+    baseline_experiment_id: string;
+    candidate_experiment_id: string;
+    metric?: "exact_match" | "normalized_exact_match" | "token_f1_micro";
+  }) => requestJson<{ comparison: EvaluationExperimentComparison }>("/api/evaluation/experiment-comparisons", {
     method: "POST",
     body: JSON.stringify(input),
   }),
