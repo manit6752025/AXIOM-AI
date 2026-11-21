@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
-import os
 from pathlib import Path
 
 import pytest
@@ -127,6 +125,7 @@ def test_knowledge_document_and_base_removal_preserve_source_files(tmp_path):
     document = store.ingest_document(base["id"], "documents/guide.md")
     removed_doc = store.remove_document(base["id"], document["id"])
     assert removed_doc["id"] == document["id"]
+    assert not (workspace / ".axiom" / "knowledge" / "documents" / f"{document['id']}.txt").exists()
     assert store.list_documents(base["id"])["documents"] == []
     base_two = store.create_base("Remove base")
     document_two = store.ingest_document(base_two["id"], "documents/guide.md")
@@ -134,4 +133,4 @@ def test_knowledge_document_and_base_removal_preserve_source_files(tmp_path):
     assert removed_base["document_count"] == 1
     assert store.get_base(base_two["id"]) is None
     assert source.exists()
-    assert store.read_document(base["id"], document["id"]) if False else True
+    assert not (workspace / ".axiom" / "knowledge" / "documents" / f"{document_two['id']}.txt").exists()
