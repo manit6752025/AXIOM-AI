@@ -94,6 +94,7 @@ def _sampling_kwargs(request: GenerateRequest) -> dict[str, Any]:
 
 
 class StructuredGenerateRequest(GenerateRequest):
+    num_predict: int = Field(default=256, ge=1, le=512, strict=True)
     json_schema: dict[str, Any]
 
     @field_validator("json_schema")
