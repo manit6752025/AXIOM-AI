@@ -645,7 +645,7 @@ export default function LocalAxiomEnginePanel() {
         <span className="status-pill">COMPLETE</span>
       </div>
       <p className="quiet-note">{benchmarkResult.iterations_completed} measured run(s) · {benchmarkResult.warmup_runs_completed} warm-up(s) excluded · {benchmarkResult.device ?? "device not reported"} · {benchmarkResult.precision ?? "precision not reported"} · {benchmarkResult.memory_mode.replaceAll("_", " ")}</p>
-      {benchmarkResult.profile_record && <p className="quiet-note" role="status">Saved profile “{benchmarkResult.profile_record.name}” · {benchmarkResult.profile_record.id}. This record contains hardware/software provenance and a prompt fingerprint only.</p>}
+      {benchmarkResult.profile_record && <p className="quiet-note" role="status">Saved reproducibility profile “{benchmarkResult.profile_record.name}” · {benchmarkResult.profile_record.id}. This record contains hardware/software provenance and a prompt fingerprint only.</p>}
       <div className="two-column-grid">
         <article className="surface"><p className="surface-eyebrow">Median latency</p><h3>{benchmarkResult.metrics.median_elapsed_ms.toFixed(2)} ms</h3><p className="quiet-note">p95: {benchmarkResult.metrics.p95_elapsed_ms.toFixed(2)} ms · measured wall time: {benchmarkResult.metrics.measured_wall_time_ms.toFixed(2)} ms</p></article>
         <article className="surface"><p className="surface-eyebrow">Generation throughput</p><h3>{benchmarkResult.metrics.aggregate_tokens_per_second.toFixed(2)} tokens/s</h3><p className="quiet-note">Median run: {benchmarkResult.metrics.median_generation_tokens_per_second.toFixed(2)} tokens/s · {benchmarkResult.metrics.completion_tokens.toLocaleString()} measured output tokens</p></article>
