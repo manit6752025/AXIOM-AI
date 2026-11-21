@@ -151,7 +151,15 @@ def test_python_sdk_parses_structured_api_errors(api_server):
     assert error.details == {"workspace_id": "missing"}
 
 
-def test_python_sdk_uploads_and_downloads_workspace_backups(api_server):
+def test_python_sdk_streams_large_workspace_backups_without_full_buffering(api_server):
+    import io
+
+    output = io.BytesIO()
+    with AxiomClient(api_server) as client:
+        written = client.download_workspace_backup_to("ws-1", output, chunk_size=4096)
+    assert written == len(output.getvalue())
+    assert output.getvalue().startswith(b"PK")
+\ndef test_python_sdk_uploads_and_downloads_workspace_backups(api_server):
     archive = b"PK\x03\x04uploaded"
     with AxiomClient(api_server) as client:
         downloaded = client.download_workspace_backup("ws-1")
