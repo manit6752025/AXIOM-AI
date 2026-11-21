@@ -27,6 +27,11 @@ from axiom.core.inference import (
     validate_model_name,
 )
 from axiom.core.runtime_traces import record_runtime_trace
+from axiom.core.json_schema import (
+    JsonSchemaError,
+    parse_and_validate_json_output,
+    validate_json_schema,
+)
 from axiom.core.ollama_service import (
     OllamaServiceError,
     cancel_model_pull,
@@ -86,6 +91,15 @@ def _sampling_kwargs(request: GenerateRequest) -> dict[str, Any]:
     if request.stop_sequences:
         values["stop_sequences"] = request.stop_sequences
     return values
+
+
+class StructuredGenerateRequest(GenerateRequest):
+    json_schema: dict[str, Any]
+
+    @field_validator("json_schema")
+    @classmethod
+    def schema_must_be_bounded_and_supported(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return validate_json_schema(value)
 
 
 class PullModelRequest(BaseModel):
@@ -540,6 +554,74 @@ async def inference_generate_stream(
             "X-Request-ID": request_id,
         },
     )
+
+
+@router.post("/generate/structured")
+def inference_generate_structured(
+    request: StructuredGenerateRequest,
+    response: Response,
+) -> dict[str, Any]:
+    """Generate and validate a bounded JSON value using Ollama's JSON Schema format."""
+    request_id = uuid.uuid4().hex
+    response.headers["X-Request-ID"] = request_id
+    started_at = datetime.now(UTC).isoformat()
+    started = perf_counter()
+    try:
+        result = run_local_inference(
+            request.model,
+            request.prompt,
+            num_predict=request.num_predict,
+            temperature=request.temperature,
+            **_sampling_kwargs(request),
+            response_format=request.json_schema,
+        )
+        structured_output = parse_and_validate_json_output(result.get("response", ""), request.json_schema)
+        record_runtime_trace(
+            request_id=request_id, operation="inference.generate.structured", model=request.model,
+            status="success", started_at=started_at, duration_ms=(perf_counter() - started) * 1000.0,
+            prompt_characters=len(request.prompt), requested_output_tokens=request.num_predict,
+            temperature=request.temperature, completion_tokens=result.get("eval_count"),
+        )
+        return {
+            **result,
+            "structured_output": structured_output,
+            "structured_output_validated": True,
+            "request_id": request_id,
+        }
+    except JsonSchemaError:
+        record_runtime_trace(
+            request_id=request_id, operation="inference.generate.structured", model=request.model,
+            status="error", started_at=started_at, duration_ms=(perf_counter() - started) * 1000.0,
+            prompt_characters=len(request.prompt), requested_output_tokens=request.num_predict,
+            temperature=request.temperature, error_code="invalid_structured_output",
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="The local model output did not satisfy the requested JSON Schema.",
+            headers={"X-Request-ID": request_id},
+        ) from None
+    except ValueError:
+        record_runtime_trace(
+            request_id=request_id, operation="inference.generate.structured", model=request.model,
+            status="error", started_at=started_at, duration_ms=(perf_counter() - started) * 1000.0,
+            prompt_characters=len(request.prompt), requested_output_tokens=request.num_predict,
+            temperature=request.temperature, error_code="invalid_generation_request",
+        )
+        raise HTTPException(
+            status_code=422, detail="Structured local inference request could not be validated.",
+            headers={"X-Request-ID": request_id},
+        ) from None
+    except InferenceRuntimeError:
+        record_runtime_trace(
+            request_id=request_id, operation="inference.generate.structured", model=request.model,
+            status="error", started_at=started_at, duration_ms=(perf_counter() - started) * 1000.0,
+            prompt_characters=len(request.prompt), requested_output_tokens=request.num_predict,
+            temperature=request.temperature, error_code="runtime_unavailable",
+        )
+        raise HTTPException(
+            status_code=503, detail="Local structured inference runtime did not complete the request.",
+            headers={"X-Request-ID": request_id},
+        ) from None
 
 
 @router.post("/generate")
