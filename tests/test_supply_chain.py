@@ -134,7 +134,7 @@ def test_pip_audit_parser_sanitizes_findings_and_deduplicates_records():
     assert result["network_accessed"] is True
 
 
-def test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_secret_environment(monkeypatch: pytest.MonkeyPatch):
+def test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_secret_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     payload = [{"name": "typer", "version": "0.12.0", "vulns": [
         {"id": "PYSEC-2026-1", "aliases": ["CVE-2026-0001"], "fix_versions": ["0.13.0"]},
     ]}]
@@ -159,7 +159,7 @@ def test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_s
             self.returncode = -9
 
     monkeypatch.setattr(supply_chain.subprocess, "Popen", FakeProcess)
-    monkeypatch.chdir(tmp_path if "tmp_path" in locals() else Path.cwd())
+    monkeypatch.chdir(tmp_path)
     report = audit_dependency_vulnerabilities(allow_network=True, timeout_seconds=30)
 
     assert report["status"] == "complete"
