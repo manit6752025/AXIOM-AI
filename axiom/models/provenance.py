@@ -37,6 +37,12 @@ class ModelProvenanceError(ValueError):
 
 
 def _hash_file(path: Path, *, expected_size: int, max_bytes: int) -> str | None:
+    try:
+        path_info = path.lstat()
+    except OSError:
+        raise ModelProvenanceError("A model file changed during provenance inspection.") from None
+    if not stat.S_ISREG(path_info.st_mode) or path_info.st_size != expected_size:
+        raise ModelProvenanceError("A model file changed during provenance inspection.")
     if expected_size > max_bytes:
         return None
     digest = hashlib.sha256()
@@ -132,9 +138,12 @@ def inspect_model_provenance(
         relative = file_path.relative_to(root).as_posix()
         suffix = file_path.suffix.casefold()
         try:
-            size = file_path.stat(follow_symlinks=False).st_size
+            file_info = file_path.stat(follow_symlinks=False)
         except OSError:
             raise ModelProvenanceError("A model file changed during provenance inspection.") from None
+        if not stat.S_ISREG(file_info.st_mode):
+            raise ModelProvenanceError("A model file changed during provenance inspection.")
+        size = file_info.st_size
         if suffix in _WEIGHT_FORMATS:
             fmt = _WEIGHT_FORMATS[suffix]
             weight_files.append((relative, file_path, size, fmt))
@@ -143,8 +152,8 @@ def inspect_model_provenance(
         if file_path.name.casefold() in _LICENSE_NAMES:
             license_files.append((relative, file_path, size))
 
-    weight_files.sort(key=lambda item: item[0].casefold())
-    license_files.sort(key=lambda item: item[0].casefold())
+    weight_files.sort(key=lambda item: (item[0].casefold(), item[0]))
+    license_files.sort(key=lambda item: (item[0].casefold(), item[0]))
     hash_allowed = (
         bool(weight_files)
         and len(weight_files) <= MAX_PROVENANCE_WEIGHT_FILES
@@ -223,7 +232,7 @@ def inspect_model_provenance(
             "detected_formats": formats,
             "weight_file_count": len(weight_files),
             "weight_size_bytes": total_weight_bytes,
-            "format_file_counts": format_counts,
+            "format_file_counts": {key: format_counts[key] for key in sorted(format_counts)},
             "pickle_capable_weight_files_present": any(item[3] == "pytorch_pickle_or_binary" for item in weight_files),
             "files": [
                 {"path": relative, "format": fmt, "size_bytes": size}
