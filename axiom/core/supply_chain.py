@@ -189,7 +189,7 @@ def generate_spdx_sbom(
 
 
 def write_report_new(path: str | Path, content: str) -> Path:
-    """Create a new local report with restrictive permissions; never overwrite or follow symlinks."""
+    """Create a private report atomically without overwriting or following symlinks."""
     if not isinstance(content, str) or len(content.encode("utf-8")) > 32 * 1024 * 1024:
         raise SupplyChainError("Report content exceeds the 32 MiB export limit.")
     target = Path(path).expanduser()
@@ -198,6 +198,10 @@ def write_report_new(path: str | Path, content: str) -> Path:
     target = Path(os.path.abspath(target))
     if target.name in {"", ".", ".."}:
         raise SupplyChainError("Report output must name a file.")
+
+    # Keep a human-readable rejection for pre-existing symlinks, then use
+    # directory descriptors on POSIX so replacing a parent with a symlink
+    # between validation and creation cannot redirect the output.
     current = Path(target.anchor)
     for component in target.parent.parts[1:]:
         current = current / component
@@ -207,27 +211,73 @@ def write_report_new(path: str | Path, content: str) -> Path:
             raise SupplyChainError("Report output parent must be an existing directory.")
     if target.is_symlink() or target.exists():
         raise SupplyChainError("Report output already exists; choose a new path.")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    flags |= getattr(os, "O_NOFOLLOW", 0)
-    flags |= getattr(os, "O_BINARY", 0)
+
+    file_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    file_flags |= getattr(os, "O_NOFOLLOW", 0)
+    file_flags |= getattr(os, "O_BINARY", 0)
+    directory_fd: int | None = None
+    descriptor: int | None = None
+    created = False
+    supports_directory_descriptors = (
+        os.open in getattr(os, "supports_dir_fd", set())
+        and os.unlink in getattr(os, "supports_dir_fd", set())
+        and hasattr(os, "O_DIRECTORY")
+        and hasattr(os, "O_NOFOLLOW")
+    )
     try:
-        descriptor = os.open(str(target), flags, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+        if supports_directory_descriptors:
+            directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+            directory_fd = os.open(target.anchor, directory_flags)
+            for component in target.parent.parts[1:]:
+                next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+                os.close(directory_fd)
+                directory_fd = next_fd
+            descriptor = os.open(target.name, file_flags, 0o600, dir_fd=directory_fd)
+        else:
+            descriptor = os.open(str(target), file_flags, 0o600)
+        created = True
+        stream = os.fdopen(descriptor, "w", encoding="utf-8", newline="")
+        descriptor = None
+        with stream:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        if os.name != "nt":
-            os.chmod(target, 0o600)
+        if directory_fd is not None:
+            os.fsync(directory_fd)
     except FileExistsError:
         raise SupplyChainError("Report output already exists; choose a new path.") from None
+    except SupplyChainError:
+        if created:
+            try:
+                if directory_fd is not None:
+                    os.unlink(target.name, dir_fd=directory_fd)
+                else:
+                    target.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
     except OSError:
-        try:
-            target.unlink(missing_ok=True)
-        except OSError:
-            pass
+        if created:
+            try:
+                if directory_fd is not None:
+                    os.unlink(target.name, dir_fd=directory_fd)
+                else:
+                    target.unlink(missing_ok=True)
+            except OSError:
+                pass
         raise SupplyChainError("Report output could not be written safely.") from None
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if directory_fd is not None:
+            try:
+                os.close(directory_fd)
+            except OSError:
+                pass
     return target
-
 
 def _parse_pip_audit_output(payload: Any, *, generated_at: str, scanner_version: str | None, exit_code: int) -> dict[str, Any]:
     if isinstance(payload, dict):
