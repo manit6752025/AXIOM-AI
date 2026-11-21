@@ -258,7 +258,7 @@ def search_knowledge_base(
         raise KnowledgeSearchError("Chunk overlap must be from 0 through 512 and smaller than chunk size.")
     if isinstance(vector_weight, bool) or not isinstance(vector_weight, (int, float)) or not 0 <= vector_weight <= 1:
         raise KnowledgeSearchError("Vector weight must be between 0 and 1.")
-    if device not in {"auto", "cpu", "cuda", "rocm", "mps", "xpu"}:
+    if not isinstance(device, str) or device not in {"auto", "cpu", "cuda", "rocm", "mps", "xpu"}:
         raise KnowledgeSearchError("Device must be one of auto, cpu, cuda, rocm, mps, or xpu.")
     if embedding_model_path is not None and (not isinstance(embedding_model_path, str) or not embedding_model_path.strip()):
         raise KnowledgeSearchError("Embedding model path must be non-empty text when supplied.")
