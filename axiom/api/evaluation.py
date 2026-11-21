@@ -25,6 +25,11 @@ from axiom.evaluation.service import (
     persist_evaluation_run,
 )
 from axiom.evaluation.store import EvaluationStore
+from axiom.evaluation.experiments import (
+    EvaluationComparisonError,
+    EvaluationExperimentNotFoundError,
+    compare_experiment_evaluations,
+)
 from axiom.path_safety import open_regular_file
 
 router = APIRouter(prefix="/api/evaluation", tags=["evaluation"])
@@ -40,6 +45,7 @@ class EvaluationRunInput(BaseModel):
     split_value: str | None = Field(default=None, max_length=160)
     name: str | None = Field(default=None, min_length=1, max_length=120)
     model_label: str | None = Field(default=None, max_length=256)
+    experiment_id: str | None = Field(default=None, min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
     baseline: bool = False
     baseline_run_id: str | None = Field(default=None, min_length=1, max_length=64)
     regression_metric: Literal["exact_match", "normalized_exact_match", "token_f1_micro"] = "token_f1_micro"
@@ -102,6 +108,7 @@ def create_evaluation_run(request: EvaluationRunInput) -> dict[str, Any]:
             regression_metric=request.regression_metric,
             regression_tolerance=request.regression_tolerance,
             python_version=platform.python_version(),
+            experiment_id=request.experiment_id,
         )
     except EvaluationBaselineNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
@@ -150,3 +157,32 @@ def delete_evaluation_run(run_id: str) -> dict[str, Any]:
 
     record_workspace_event("evaluation.remove", f"Deleted evaluation run {run_id}")
     return {"deleted": run}
+
+
+class ExperimentComparisonRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    baseline_experiment_id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
+    candidate_experiment_id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
+    metric: Literal["exact_match", "normalized_exact_match", "token_f1_micro"] = "token_f1_micro"
+
+
+@router.post("/experiment-comparisons")
+def compare_saved_experiment_evaluations(request: ExperimentComparisonRequest) -> dict[str, Any]:
+    """Return a corpus-matched statistical diff over repeated offline evaluation runs."""
+    try:
+        result = compare_experiment_evaluations(
+            request.baseline_experiment_id,
+            request.candidate_experiment_id,
+            metric=request.metric,
+        )
+    except EvaluationExperimentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    except (EvaluationComparisonError, OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    from axiom.api.workspace import record_workspace_event
+
+    record_workspace_event(
+        "evaluation.experiment_compare",
+        f"Compared offline evaluation runs for experiments {request.baseline_experiment_id} and {request.candidate_experiment_id}",
+    )
+    return {"comparison": result}
