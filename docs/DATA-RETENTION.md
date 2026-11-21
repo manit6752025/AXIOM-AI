@@ -56,6 +56,40 @@ writing. The explicit replace mode changes only collections present in the
 archive. Import does not restore datasets or checkpoints; their files remain at
 their existing paths and must be backed up separately.
 
+## Resource telemetry history
+
+Persistent resource telemetry is stored only after an explicit opt-in for the
+current workspace. It is separate from the in-memory inference request-trace
+buffer described below. The file is `.axiom/resource-telemetry.json`; its
+schema is version 1, the document is limited to 4 MiB, and updates use a lock
+and atomic replacement. POSIX metadata directories created for this store use
+mode `0700`; the resource file uses mode `0600`.
+
+The store retains at most 500 samples and at most 3,650 days. Defaults are 120
+samples and 30 days. Both limits are configurable in the Runtime resource
+monitor. Sampling is still off until the user selects Start; leaving the page
+or selecting Stop ends sampling. Turning off persistence stops future writes
+but leaves existing records until they expire under the configured limits or
+the user selects Clear history. Clear removes the samples while preserving
+the opt-in and retention settings.
+
+Only allowlisted resource values are written: sample time, CPU percentages and
+logical core count, system memory totals/availability/use, process RSS/peak
+RSS/thread count, device memory availability/capacity, and limited runtime
+device/memory-mode/precision/allocator metrics. Process IDs, device identifiers
+and names, model names and paths, model architecture, disk paths, generation
+metadata, prompts, generated output, environment values, credentials and
+network identifiers are excluded. Records include a SHA-256 content fingerprint
+for corruption/tamper detection; this is not a signed attestation.
+
+The Runtime page can export selected metrics as JSON or CSV and clear history.
+Exports are user-created local files and follow the destination's retention
+policy; AXIOM does not upload them automatically. The CLI's bounded
+`axiom engine telemetry --watch` output is a separate explicit JSONL export.
+Removing `.axiom/resource-telemetry.json` while AXIOM is stopped resets the
+history and the opt-in setting. No automatic sampling begins after installing
+or opening the application.
+
 ## Runtime traces and events
 
 The runtime request-trace buffer is held in process memory and is limited to 200

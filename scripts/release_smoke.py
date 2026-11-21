@@ -460,8 +460,12 @@ def hardware_snapshot_issues(
     return failures
 
 
-def resource_monitoring_issues(cli_source: str, panel_source: str, app_source: str, e2e_source: str) -> list[str]:
-    """Require explicit opt-in, bounded retention and safe export across CLI and Runtime UI."""
+def resource_monitoring_issues(
+    cli_source: str, panel_source: str, app_source: str, e2e_source: str,
+    core_source: str, api_source: str, client_source: str,
+    core_tests: str, api_tests: str,
+) -> list[str]:
+    """Require explicit opt-in, bounded persistent history and safe Runtime UI exports."""
     issues: list[str] = []
     groups = (
         ("CLI", cli_source, (
@@ -472,9 +476,14 @@ def resource_monitoring_issues(cli_source: str, panel_source: str, app_source: s
             "--output requires explicit opt-in",
         )),
         ("Runtime GUI", panel_source, (
-            "MAX_SAMPLES = 120",
+            "MAX_BROWSER_SAMPLES = 120",
             "if (!recording) return undefined;",
-            "axiomApi.axiomEngineTelemetry()",
+            "axiomApi.axiomEngineTelemetryHistory()",
+            "axiomApi.configureAxiomEngineTelemetryHistory(",
+            "axiomApi.recordAxiomEngineTelemetryHistory()",
+            "axiomApi.clearAxiomEngineTelemetryHistory()",
+            "persistentHistoryEnabled",
+            "maxAgeDays",
             "window.setInterval",
             'anchor.download = "axiom-resource-telemetry.json"',
             "setSamples([])",
@@ -483,13 +492,61 @@ def resource_monitoring_issues(cli_source: str, panel_source: str, app_source: s
             'import EngineTelemetryMonitor from "./components/EngineTelemetryMonitor";',
             "<EngineTelemetryMonitor />",
         )),
+        ("Persistent history store", core_source, (
+            "class ResourceTelemetryStore",
+            "class ResourceTelemetryOptInRequired",
+            "MAX_SAMPLES = 500",
+            "DEFAULT_MAX_SAMPLES = 120",
+            "DEFAULT_MAX_AGE_DAYS = 30",
+            "def configure(",
+            "def record(",
+            "def clear(",
+            "file_lock(",
+            "atomic_write_text(",
+            '"process_ids_included": False',
+            '"prompt_or_generated_content_included": False',
+            "0o600",
+        )),
+        ("Persistent history API", api_source, (
+            'class ResourceTelemetryHistorySettingsRequest(BaseModel)',
+            '@router.get("/telemetry-history")',
+            '@router.put("/telemetry-history/settings")',
+            '@router.post("/telemetry-history", status_code=201)',
+            '@router.delete("/telemetry-history")',
+            "ResourceTelemetryStore().configure(",
+            "store.record(runtime_telemetry())",
+        )),
+        ("Typed API client", client_source, (
+            "AxiomEngineResourceTelemetryHistory",
+            "axiomEngineTelemetryHistory:",
+            "configureAxiomEngineTelemetryHistory:",
+            "recordAxiomEngineTelemetryHistory:",
+            "clearAxiomEngineTelemetryHistory:",
+        )),
+        ("Core regression tests", core_tests, (
+            "test_history_is_disabled_by_default_and_does_not_create_workspace_files",
+            "test_record_persists_allowlisted_metrics_only_and_uses_private_file_modes",
+            "test_sample_retention_is_bounded_by_count_and_age_and_disable_stops_new_records",
+            "test_age_retention_prunes_old_records_and_clear_preserves_settings",
+            "test_history_rejects_tampered_fingerprints_and_unsupported_fields",
+        )),
+        ("API regression tests", api_tests, (
+            "test_resource_telemetry_api_has_explicit_opt_in_record_export_and_clear_lifecycle",
+            "test_resource_telemetry_api_rejects_invalid_retention_settings_and_extra_fields",
+        )),
         ("Browser acceptance", e2e_source, (
-            "const baselineTelemetryCalls = telemetryCalls", "expect(telemetryCalls).toBe(baselineTelemetryCalls)",
+            "const baselineTelemetryCalls = telemetryCalls",
+            "expect(telemetryCalls).toBe(baselineTelemetryCalls)",
             'name: "Start monitoring"',
             'name: "Stop monitoring"',
             "axiom-resource-telemetry.json",
             'name: "Clear history"',
             "privacy.model_paths_included",
+            "Persist resource history in workspace",
+            "Persistent history sample limit",
+            "Persistent history retention days",
+            "workspace-persistent",
+            "persistedHistoryRecords",
         )),
     )
     for label, source, tokens in groups:
@@ -539,7 +596,7 @@ def telemetry_export_privacy_issues(monitor: str, e2e: str, docs: str) -> list[s
         )),
         ("documentation", docs, (
             "JSON and CSV", "privacy controls", "Process IDs are never exported",
-            "browser-memory-only",
+            "browser-memory-only", "workspace-persistent",
         )),
     )
     failures: list[str] = []
@@ -557,7 +614,7 @@ def persisted_schema_inventory_issues(docs: str, sources: dict[str, str]) -> lis
         ".axiom/experiments.json", ".axiom/evaluations.json", ".axiom/agent-profiles.json",
         ".axiom/models.json", ".axiom/integrations.json", ".axiom/tool_permissions.json",
         ".axiom/security-events.json", ".axiom/llm-provider-profiles.json",
-        ".axiom/hardware-snapshots.json", "~/.axiom/workspaces.json",
+        ".axiom/hardware-snapshots.json", ".axiom/resource-telemetry.json", "~/.axiom/workspaces.json",
         ".axiom/prediction_jobs.json", "Fine-tuning jobs", "Model Studio jobs",
         "manifest.json", "Runtime traces are in-memory only", "browser-memory-only",
         "Model Studio's reader does not yet reject every future version explicitly", "default-deny",
@@ -573,6 +630,7 @@ def persisted_schema_inventory_issues(docs: str, sources: dict[str, str]) -> lis
         ("security_events", ".axiom/security-events.json", "schema_version: 2"),
         ("llm_profiles", ".axiom/llm-provider-profiles.json", "schema_version: 2"),
         ("hardware_snapshots", ".axiom/hardware-snapshots.json", "schema_version: 1"),
+        ("resource_telemetry", ".axiom/resource-telemetry.json", "schema_version: 1"),
         ("workspaces", "~/.axiom/workspaces.json", "schema_version: 1"),
         ("prediction_jobs", ".axiom/prediction_jobs.json", "schema_version: 1"),
     )
@@ -593,6 +651,7 @@ def persisted_schema_inventory_issues(docs: str, sources: dict[str, str]) -> lis
         "llm_profiles": ("SCHEMA_VERSION = 2", "version not in {1, SCHEMA_VERSION}"),
         "security_events": ("LEGACY_SCHEMA_VERSION = 1", "SCHEMA_VERSION = 2"),
         "hardware_snapshots": ("SCHEMA_VERSION = 1",),
+        "resource_telemetry": ("SCHEMA_VERSION = 1", "MAX_SAMPLES = 500", "DEFAULT_MAX_SAMPLES = 120"),
         "workspaces": ("_SCHEMA_VERSION = 1",),
         "prediction_jobs": ('"schema_version": 1', 'payload["schema_version"] != 1'),
         "integrations": ('data.get("trust_status", "unverified")', 'data.get("connection_status", "not_inspected")'),
@@ -660,12 +719,12 @@ def inspect(root: Path) -> dict[str, Any]:
     required = [
         "pyproject.toml", "axiom/version.py", "ROADMAP.md", "src/App.tsx",
         "src/api/client.ts", "src/components/ApiPlayground.tsx", "src/components/RuntimeConnectorPanel.tsx", "src/components/AgentProfiles.tsx", "src/components/LocalInferencePanel.tsx", "src/components/RuntimeTracePanel.tsx", "src/components/EngineTelemetryMonitor.tsx", "src/components/LocalAxiomEnginePanel.tsx", "src/components/BenchmarkResourceTrends.tsx", "src/components/ModelStudioPanel.tsx", "src/styles.css",
-        "axiom/api/server.py", "axiom/api/workspace.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/api/model_studio.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/model_studio.py", "axiom/core/runtime_traces.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/core/engine_fabric_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "axiom/cli/model_studio.py", "scripts/release_smoke.py", "scripts/verify_package_artifacts.py", "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py",
+        "axiom/api/server.py", "axiom/api/workspace.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/api/model_studio.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/model_studio.py", "axiom/core/runtime_traces.py", "axiom/core/resource_telemetry.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/core/engine_fabric_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "axiom/cli/model_studio.py", "scripts/release_smoke.py", "scripts/verify_package_artifacts.py", "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py",
         "tests/test_release_smoke.py", "tests/test_ollama_service.py", "tests/test_ollama_service_api.py", "tests/test_ollama_model_operations.py", "tests/test_cli_inference.py", "tests/test_axiom_engine.py", "tests/test_axiom_engine_api.py", "tests/test_axiom_engine_cli.py", "tests/test_native_engine.py", "tests/test_model_studio.py", "tests/test_engine_runtime_status.py", "tests/test_cli_model_studio_jobs.py", "e2e/axiom-engine.spec.ts", "e2e/helpers/auth.ts", "e2e/modules.spec.ts", "e2e/workflows.spec.ts", "e2e/evaluation.spec.ts",
         "e2e/model-registry-filters.spec.ts", "e2e/ollama-service.spec.ts", "e2e/inference-benchmark.spec.ts", "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/axiom-engine.spec.ts", "tests/test_workspace_model_registry_filters.py", "tests/test_workflow_store_pagination.py", "tests/test_workflow_api_pagination.py", "tests/test_workflow_cli.py",
-        "tests/test_model_compatibility.py", "tests/test_inference_benchmark.py", "tests/test_inference_benchmark_api.py", "tests/test_runtime_traces.py", "tests/test_runtime_traces_api.py", "tests/test_runtime_discovery.py", "tests/test_runtime_discovery_api.py", "tests/test_agent_profiles.py", "tests/test_agent_profiles_api.py", "tests/test_agent_profiles_cli.py", "tests/test_engine_fabric_profiles.py", "tests/test_engine_fabric_profiles_api.py", "tests/test_engine_fabric_profiles_cli.py", "e2e/api-playground.spec.ts", "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts", "e2e/engine-fabric.spec.ts",
+        "tests/test_model_compatibility.py", "tests/test_inference_benchmark.py", "tests/test_inference_benchmark_api.py", "tests/test_runtime_traces.py", "tests/test_runtime_traces_api.py", "tests/test_resource_telemetry.py", "tests/test_resource_telemetry_api.py", "tests/test_runtime_discovery.py", "tests/test_runtime_discovery_api.py", "tests/test_agent_profiles.py", "tests/test_agent_profiles_api.py", "tests/test_agent_profiles_cli.py", "tests/test_engine_fabric_profiles.py", "tests/test_engine_fabric_profiles_api.py", "tests/test_engine_fabric_profiles_cli.py", "e2e/api-playground.spec.ts", "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts", "e2e/engine-fabric.spec.ts",
         "docs/Runtime-Discovery.md", "docs/Agent-Profiles.md", "docs/Api-Playground.md", "docs/Inference-Benchmarking.md", "docs/Local-Engine.md", "docs/Engine-Fabric.md",
-        "docs/Packaging.md", "docs/Storage-Schemas-and-Migrations.md", ".github/workflows/quality-gates.yml", ".github/workflows/nightly-build.yml",
+        "docs/Packaging.md", "docs/Storage-Schemas-and-Migrations.md", "docs/DATA-RETENTION.md", ".github/workflows/quality-gates.yml", ".github/workflows/nightly-build.yml",
     ]
     for relative in required:
         if not (root / relative).is_file():
@@ -1050,7 +1109,15 @@ def inspect(root: Path) -> dict[str, Any]:
             failures.append("Native Engine CLI discovery regression coverage is missing: " + token)
     telemetry_panel = (root / "src/components/EngineTelemetryMonitor.tsx").read_text(encoding="utf-8")
     telemetry_e2e = (root / "e2e/telemetry-monitor.spec.ts").read_text(encoding="utf-8")
-    failures.extend(resource_monitoring_issues(engine_cli_source, telemetry_panel, app_source, telemetry_e2e))
+    telemetry_history_core = (root / "axiom/core/resource_telemetry.py").read_text(encoding="utf-8")
+    telemetry_history_api = (root / "axiom/api/engine.py").read_text(encoding="utf-8")
+    telemetry_history_core_tests = (root / "tests/test_resource_telemetry.py").read_text(encoding="utf-8")
+    telemetry_history_api_tests = (root / "tests/test_resource_telemetry_api.py").read_text(encoding="utf-8")
+    failures.extend(resource_monitoring_issues(
+        engine_cli_source, telemetry_panel, app_source, telemetry_e2e,
+        telemetry_history_core, telemetry_history_api, client,
+        telemetry_history_core_tests, telemetry_history_api_tests,
+    ))
     benchmark_trend_panel = (root / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
     benchmark_trend_chart = (root / "src/components/BenchmarkResourceTrends.tsx").read_text(encoding="utf-8")
     benchmark_trend_e2e = (root / "e2e/axiom-engine.spec.ts").read_text(encoding="utf-8")
@@ -1076,6 +1143,7 @@ def inspect(root: Path) -> dict[str, Any]:
         "llm_profiles": (root / "axiom/core/llm_profiles.py").read_text(encoding="utf-8"),
         "security_events": (root / "axiom/core/security_events.py").read_text(encoding="utf-8"),
         "hardware_snapshots": (root / "axiom/core/hardware_snapshots.py").read_text(encoding="utf-8"),
+        "resource_telemetry": (root / "axiom/core/resource_telemetry.py").read_text(encoding="utf-8"),
         "workspaces": (root / "axiom/core/workspaces.py").read_text(encoding="utf-8"),
         "prediction_jobs": (root / "axiom/core/prediction_jobs.py").read_text(encoding="utf-8"),
         "integrations": (root / "axiom/core/integrations.py").read_text(encoding="utf-8"),

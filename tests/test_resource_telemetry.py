@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from axiom.core import resource_telemetry as telemetry
 from axiom.core.resource_telemetry import (
     ResourceTelemetryError,
     ResourceTelemetryOptInRequired,

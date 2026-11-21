@@ -13,7 +13,7 @@ feature exists or a delivery-date promise.
 
 - [R001 · Implemented; tests passing] Publish a versioned API contract and compatibility policy.
 - [R002 · Implemented; tests passing] Resolve the workspace using explicit override, `AXIOM_WORKSPACE`, nearest parent `axiom.yaml`, then the current directory; reject explicit symlink roots.
-- [R003 · In progress; validation pending] Make API configuration environment-backed and documented; GUI port now accepts AXIOM_GUI_PORT, CORS origins and trusted model roots are documented, and a cross-platform compatibility report is being added.
+- [R003 · Implemented; tests passing] Environment-backed API/GUI configuration is documented and validated: AXIOM_GUI_PORT, CORS origins, trusted model roots and scoped bearer tokens; the Python/Node/OS compatibility report and boundary tests pass on supported CI targets.
 - [R004 · Implemented; tests passing] Normalize validation and error response envelopes.
 - [R005 · Implemented; tests passing] Add request IDs and correlation across CLI, API, and GUI.
 - [R006 · Implemented; tests passing] Add bounded pagination to every collection endpoint. Fine-tuning jobs and Agent Profiles now expose bounded API pages; Model Studio job history is exposed in the GUI and CLI with bounded search/pagination; Training history supports inspect/load-more and CLI offsets. Existing Models, Experiments, Datasets, Workflows, Logs, and Runtime Trace pages remain bounded. GitHub Actions verified Python, lint, production build, browser E2E, and Ubuntu/macOS/Windows static contracts.
@@ -21,7 +21,7 @@ feature exists or a delivery-date promise.
 - [R008 · Implemented; tests passing] Add cancellation and timeout semantics to long operations. Native streaming, prediction jobs, fine-tuning, Ollama pulls, and Model Studio pull/install/convert workers now support cooperative cancellation and bounded timeouts; Model Studio exposes API and GUI cancellation with distinct cancelled/timed-out states and safe cleanup. Full Python, lint, production build, browser E2E, and Ubuntu/macOS/Windows release contracts passed.
 - [R009 · Implemented; tests passing] Separate read-only plans from side-effecting jobs in API scopes. Opt-in read/write bearer tokens protect `/api/*` and `/v1/*`; unclassified mutations require write scope, with documented validation/planning allowlists and 401/403 request-ID envelopes.
 - [R010 · Implemented; tests passing] Add read-only workspace health checks for config parsing, path safety, file permissions, free disk, Python compatibility, and required dependency imports.
-- [R011 · In progress; validation pending] Document data retention, browser-local account settings, in-memory request traces, workspace metadata, generated files, and deletion boundaries in Settings and the retention guide.
+- [R011 · Implemented; tests passing] Documented browser-local account state, retention, runtime traces, workspace metadata, generated files and deletion boundaries in Settings and the retention guide; browser acceptance covers preferences, retention disclosures and metadata transfer.
 - [R012 · Implemented; tests passing] Add automated Python/Node/OS runtime compatibility checks to cross-platform release CI.
 
 ### 02 · CLI experience
@@ -179,7 +179,7 @@ feature exists or a delivery-date promise.
 - [R136 · Planned] Add software bill of materials generation and dependency vulnerability reports with export.
 - [R137 · Planned] Add versioned, default-deny plugin manifests and permission validation.
 - [R138 · Planned] Add workspace backup and restore with manifests, checksums, and safe path validation.
-- [R139 · In progress; validation pending] Add opt-in resource sampling and history with clear, export, and retention controls. The CLI now supports an explicit bounded watch and create-only JSONL export; the Runtime page now supports opt-in, 120-sample browser-memory history with a CPU trend, JSON export, and clear. Persistent server-side history and broader retention settings remain outstanding pending acceptance checks.
+- [R139 · In progress; validation pending] CLI bounded watch/JSONL export remains available; Runtime now supports browser-memory fallback and optional workspace-persistent samples through typed API routes, with explicit enable/disable, configurable count/age retention, JSON/CSV export, clear and privacy allowlisting. Core/API/browser tests and release-smoke contracts are added; full CI verification is pending.
 - [R140 · Planned] Publish stable Python and TypeScript SDKs verified against the supported API schema.
 
 
