@@ -204,7 +204,7 @@ class ResourceTelemetryStore:
         selected = Path(root).expanduser() if root is not None else Path(workspace_metadata_dir())
         if not selected.is_absolute():
             selected = Path.cwd() / selected
-        self.root = selected
+        self.root = Path(os.path.abspath(selected))
         self.path = self.root / "resource-telemetry.json"
         self.lock_path = self.root / _LOCK_NAME
 
