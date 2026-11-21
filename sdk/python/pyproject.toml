@@ -30,3 +30,6 @@ Issues = "https://github.com/manit6752025/AXIOM-AI/issues"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["axiom_sdk*"]
+
+[tool.setuptools.package-data]
+axiom_sdk = ["py.typed"]
