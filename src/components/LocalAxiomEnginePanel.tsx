@@ -789,7 +789,6 @@ export default function LocalAxiomEnginePanel() {
       {predictionJobs.length ? <div className="module-list" aria-label="Saved prediction job history">
         {predictionJobs.map((job) => {
           const active = ["queued", "running", "cancelling", "finalizing", "publishing"].includes(job.status);
-          const progress = job.rows_total > 0 ? Math.min(100, Math.round(job.rows_completed / job.rows_total * 100)) : 0;
           return <article className="module-row prediction-job-row" key={job.id} aria-label={"Prediction job " + job.id}>
             <span className="module-icon"><Activity size={17} /></span>
             <span className="module-copy">
