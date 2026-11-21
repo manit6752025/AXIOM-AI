@@ -314,6 +314,20 @@ def test_plugin_manifest_api_rejects_non_object_and_extra_envelope_fields(tmp_pa
             json={"manifest": manifest(), "execute": True},
         ).status_code == 422
         assert client.delete("/api/security/plugins/INVALID/permissions").status_code == 422
+        registered = client.post("/api/security/plugins/manifests", json={"manifest": manifest()})
+        assert registered.status_code == 201
+        digest = registered.json()["sha256"]
+        plugin_id = registered.json()["manifest"]["id"]
+        coerced_scope = client.put(
+            f"/api/security/plugins/{plugin_id}/permissions",
+            json={"manifest_sha256": digest, "tools": [{"name": "search", "scopes": [1]}]},
+        )
+        assert coerced_scope.status_code == 422
+        coerced_name = client.put(
+            f"/api/security/plugins/{plugin_id}/permissions",
+            json={"manifest_sha256": digest, "tools": [{"name": 7, "scopes": ["read"]}]},
+        )
+        assert coerced_name.status_code == 422
 
 def test_plugin_manifest_cli_validate_register_grant_list_and_revoke(tmp_path, monkeypatch):
     from typer.testing import CliRunner
