@@ -300,6 +300,10 @@ def record_engine_telemetry_history() -> dict[str, Any]:
     """Capture one allowlisted local resource sample only after explicit opt-in."""
     store = ResourceTelemetryStore()
     try:
+        if not store.list(limit=1)["settings"]["enabled"]:
+            raise ResourceTelemetryOptInRequired(
+                "Persistent resource history is disabled. Enable it explicitly first."
+            )
         return store.record(runtime_telemetry())
     except ResourceTelemetryOptInRequired:
         raise HTTPException(status_code=409, detail="Persistent resource history is disabled. Enable it explicitly first.") from None
