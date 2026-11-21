@@ -168,8 +168,8 @@ def validate_json_schema(schema: Any) -> dict[str, Any]:
         raise JsonSchemaError("JSON Schema must be an object.")
     try:
         encoded = json.dumps(schema, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
-    except (TypeError, ValueError, UnicodeError):
-        raise JsonSchemaError("JSON Schema must contain only finite JSON values.") from None
+    except (TypeError, ValueError, UnicodeError, RecursionError):
+        raise JsonSchemaError("JSON Schema must contain only finite JSON values within the nesting limit.") from None
     if len(encoded) > MAX_SCHEMA_BYTES:
         raise JsonSchemaError(f"JSON Schema exceeds the {MAX_SCHEMA_BYTES}-byte limit.")
     normalized = _validate_schema_node(schema, depth=0, counter=[0])
@@ -294,7 +294,7 @@ def parse_and_validate_json_output(output: str, schema: dict[str, Any]) -> Any:
         value = json.loads(output, parse_constant=reject_constant, object_pairs_hook=unique_pairs)
     except JsonSchemaError:
         raise
-    except (json.JSONDecodeError, UnicodeError, ValueError):
+    except (json.JSONDecodeError, UnicodeError, ValueError, RecursionError):
         raise JsonSchemaError("The local model returned invalid JSON; no structured value was accepted.") from None
     validate_json_instance(value, schema)
     return value
