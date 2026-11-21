@@ -34,3 +34,7 @@ def test_embedding_input_validation_enforces_bounds():
         validate_embedding_inputs(["x"], batch_size=17)
     with pytest.raises(ValueError, match="Device"):
         validate_embedding_inputs(["x"], device="cloud")
+    with pytest.raises(ValueError, match="Device"):
+        validate_embedding_inputs(["x"], device=[])
+    with pytest.raises(ValueError, match="normalization"):
+        validate_embedding_inputs(["x"], normalize="yes")
