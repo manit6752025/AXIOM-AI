@@ -24,6 +24,23 @@ def test_welch_comparison_requires_replicates_and_returns_bounded_statistics():
     assert result["t_statistic"] > 0
     assert result["degrees_of_freedom"] > 0
 
+    # A Welch p-value is not defined when both groups have no observed
+    # within-group variance, even when their sample means differ.
+    degenerate = _welch_test([0.4, 0.4, 0.4], [0.6, 0.6, 0.6])
+    assert degenerate["status"] == "degenerate_zero_variance"
+    assert degenerate["degenerate_zero_variance"] is True
+    assert degenerate["t_statistic"] is None
+    assert degenerate["degrees_of_freedom"] is None
+    assert degenerate["p_value"] is None
+    assert "zero within-group variance" in degenerate["note"]
+
+    # A single zero-variance group remains statistically computable when
+    # the other group supplies a positive variance estimate.
+    one_constant_group = _welch_test([0.4, 0.4, 0.4], [0.5, 0.6, 0.7])
+    assert one_constant_group["status"] == "computed"
+    assert one_constant_group["p_value"] is not None
+    assert 0 <= one_constant_group["p_value"] <= 1
+
 
 def test_api_compares_repeated_evaluations_linked_to_saved_plan_snapshots(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
