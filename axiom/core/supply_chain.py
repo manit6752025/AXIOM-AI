@@ -180,18 +180,14 @@ def generate_spdx_sbom(
             "annotationDate": created,
             "annotationType": "OTHER",
             "annotator": "Tool: AXIOM-AI",
-            "comment": f"Inventory contains {len(packages)} installed distributions. Package file contents and host paths were not collected.",
+            "comment": (
+                f"AXIOM inventory: schema_version=1; package_count={len(packages)}; "
+                f"relationship_count={len(relationships)}; content_sha256={content_fingerprint}; "
+                "scope=active Python environment, installed distribution metadata only; "
+                "file_contents_collected=false; host_paths_collected=false; "
+                "network_access_performed=false; package_code_executed=false."
+            ),
         }],
-        "axiom": {
-            "schema_version": 1,
-            "package_count": len(packages),
-            "relationship_count": len(relationships),
-            "content_sha256": content_fingerprint,
-            "scope": "active Python environment; installed distribution metadata only",
-            "file_contents_collected": False,
-            "host_paths_collected": False,
-            "network_access_performed": False,
-        },
     }
 
 
