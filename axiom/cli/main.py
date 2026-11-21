@@ -439,11 +439,10 @@ def _frontend_dependency_mismatches(source_root: Path) -> list[str]:
                 )
                 continue
             if name == "lucide-react":
-                declaration = (
-                    installed.get("types")
-                    or installed.get("typings")
-                    or installed.get("exports", {}).get(".", {}).get("types")
-                )
+                package_exports = installed.get("exports")
+                root_exports = package_exports.get(".") if isinstance(package_exports, dict) else None
+                exported_types = root_exports.get("types") if isinstance(root_exports, dict) else None
+                declaration = installed.get("types") or installed.get("typings") or exported_types
                 package_root = installed_path.parent.resolve()
                 if (
                     not isinstance(declaration, str)
