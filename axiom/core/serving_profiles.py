@@ -433,12 +433,17 @@ def generate_from_profile(
     stop_sequences: list[str] | tuple[str, ...] = (),
     cancel_event: threading.Event | None = None,
     prompt_budget: dict[str, Any] | None = None,
+    admission_held: bool = False,
 ) -> dict[str, Any]:
     """Execute one inference request under a saved profile's validated limits."""
-    from axiom.core.engine import generate_local
+    from contextlib import nullcontext
+
+    from axiom.core.engine import engine_execution_lock, generate_local
 
     budget = prompt_budget or validate_serving_prompt(profile, prompt, max_new_tokens)
-    return generate_local(
+    execution_guard = engine_execution_lock() if admission_held else nullcontext()
+    with execution_guard:
+        return generate_local(
         profile["model_path"],
         prompt,
         adapter_path=profile.get("adapter_path"),
@@ -453,5 +458,6 @@ def generate_from_profile(
         device_preference=profile["device_preference"],
         memory_mode=profile["memory_mode"],
         precision=profile["precision"],
-        cancel_event=cancel_event,
-    )
+            cancel_event=cancel_event,
+            _lock_held=admission_held,
+        )
