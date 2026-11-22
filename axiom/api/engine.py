@@ -21,7 +21,6 @@ from axiom.core.resource_telemetry import ResourceTelemetryError, ResourceTeleme
 from axiom.core.embeddings import EmbeddingEngineError, embed_local_texts, unload_local_embeddings
 from axiom.core.reranking import RerankerError, rerank_local_documents, unload_local_reranker
 from axiom.core.request_admission import (
-    BoundedRequestAdmission,
     RequestAdmissionCancelled,
     RequestAdmissionQueueFull,
     RequestAdmissionTimeout,
@@ -37,6 +36,7 @@ from axiom.core.serving_profiles import (
 )
 
 from axiom.core.engine import (
+    ENGINE_REQUEST_ADMISSION,
     AxiomEngineError,
     benchmark_local,
     check_local_adapter_compatibility,
@@ -53,7 +53,7 @@ from axiom.core.engine import (
 )
 
 router = APIRouter(prefix="/api/engine", tags=["axiom-engine"])
-NATIVE_PROFILE_ADMISSION = BoundedRequestAdmission(max_active=1, max_queue=32)
+NATIVE_PROFILE_ADMISSION = ENGINE_REQUEST_ADMISSION
 
 
 def _validated_path(value: Any, label: str) -> Any:
@@ -1139,6 +1139,7 @@ async def generate_with_engine_serving_profile(
         stop_sequences=request.stop_sequences,
         cancel_event=cancel_event,
         prompt_budget=budget,
+        admission_held=True,
     ))
     release_scheduled = False
     try:
