@@ -68,6 +68,13 @@ test("Runtime creates, probes, uses, and deletes a bounded native serving profil
         prompt_characters: 12, prompt_tokens: 8, max_new_tokens: 64,
         requested_context_tokens: 72, context_limit_tokens: 4096,
       },
+      admission: {
+        queue_position: 2,
+        queued: true,
+        waited_ms: 1250,
+        concurrency_limit: 1,
+        queue_limit: 3,
+      },
       result: { response: "Serving profile response stays local." },
       scope: { local_only: true, network_used: false, profile_persisted: false },
     } });
@@ -112,6 +119,7 @@ test("Runtime creates, probes, uses, and deletes a bounded native serving profil
   await expect.poll(() => generatePayload).not.toBeNull();
   expect(generatePayload).toMatchObject({ prompt: "Hello local model" });
   await expect(page.getByLabel("Serving profile generated response")).toContainText("Serving profile response stays local.");
+  await expect(page.getByRole("status").filter({ hasText: "Admitted from FIFO queue position 2" })).toContainText("waited 1.25 s");
 
   await page.getByRole("button", { name: "Delete serving profile Runtime smoke" }).click();
   await expect(page.getByText("0 profile(s)", { exact: true })).toBeVisible();
