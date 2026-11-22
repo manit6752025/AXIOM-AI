@@ -148,32 +148,46 @@ def test_model_provenance_release_contract_covers_path_binding_and_aggregate_lim
 
 def test_request_admission_is_wired_across_core_api_cli_and_runtime_ui() -> None:
     core = (ROOT / "axiom" / "core" / "request_admission.py").read_text(encoding="utf-8")
+    engine_core = (ROOT / "axiom" / "core" / "engine.py").read_text(encoding="utf-8")
     api = (ROOT / "axiom" / "api" / "engine.py").read_text(encoding="utf-8")
+    serving_core = (ROOT / "axiom" / "core" / "serving_profiles.py").read_text(encoding="utf-8")
     cli = (ROOT / "axiom" / "cli" / "engine.py").read_text(encoding="utf-8")
+    server = (ROOT / "axiom" / "api" / "server.py").read_text(encoding="utf-8")
     client = (ROOT / "src" / "api" / "client.ts").read_text(encoding="utf-8")
     panel = (ROOT / "src" / "components" / "EngineServingProfilesPanel.tsx").read_text(encoding="utf-8")
-    admission_tests = (ROOT / "tests" / "test_request_admission.py").read_text(encoding="utf-8")
+    admission_tests = (
+        (ROOT / "tests" / "test_request_admission.py").read_text(encoding="utf-8")
+        + (ROOT / "tests" / "test_native_engine.py").read_text(encoding="utf-8")
+    )
     serving_tests = (ROOT / "tests" / "test_serving_profiles.py").read_text(encoding="utf-8")
     e2e = (ROOT / "e2e" / "serving-profiles.spec.ts").read_text(encoding="utf-8")
     docs = (ROOT / "docs" / "Local-Serving-Profiles.md").read_text(encoding="utf-8")
     assert release_smoke.request_admission_issues(
-        core, api, cli, client, panel, admission_tests, serving_tests, e2e, docs,
+        core, engine_core, api, serving_core, cli, server, client, panel,
+        admission_tests, serving_tests, e2e, docs,
     ) == []
 
 
 def test_request_admission_release_contract_detects_missing_global_backpressure() -> None:
     core = (ROOT / "axiom" / "core" / "request_admission.py").read_text(encoding="utf-8")
+    engine_core = (ROOT / "axiom" / "core" / "engine.py").read_text(encoding="utf-8")
     api = (ROOT / "axiom" / "api" / "engine.py").read_text(encoding="utf-8")
+    serving_core = (ROOT / "axiom" / "core" / "serving_profiles.py").read_text(encoding="utf-8")
     cli = (ROOT / "axiom" / "cli" / "engine.py").read_text(encoding="utf-8")
+    server = (ROOT / "axiom" / "api" / "server.py").read_text(encoding="utf-8")
     client = (ROOT / "src" / "api" / "client.ts").read_text(encoding="utf-8")
     panel = (ROOT / "src" / "components" / "EngineServingProfilesPanel.tsx").read_text(encoding="utf-8")
-    admission_tests = (ROOT / "tests" / "test_request_admission.py").read_text(encoding="utf-8")
+    admission_tests = (
+        (ROOT / "tests" / "test_request_admission.py").read_text(encoding="utf-8")
+        + (ROOT / "tests" / "test_native_engine.py").read_text(encoding="utf-8")
+    )
     serving_tests = (ROOT / "tests" / "test_serving_profiles.py").read_text(encoding="utf-8")
     e2e = (ROOT / "e2e" / "serving-profiles.spec.ts").read_text(encoding="utf-8")
     docs = (ROOT / "docs" / "Local-Serving-Profiles.md").read_text(encoding="utf-8")
     broken = core.replace("len(self._waiters) >= self._max_queue", "len(self._waiters) >= 10", 1)
     issues = release_smoke.request_admission_issues(
-        broken, api, cli, client, panel, admission_tests, serving_tests, e2e, docs,
+        broken, engine_core, api, serving_core, cli, server, client, panel,
+        admission_tests, serving_tests, e2e, docs,
     )
     assert any("len(self._waiters) >= self._max_queue" in issue for issue in issues)
 
