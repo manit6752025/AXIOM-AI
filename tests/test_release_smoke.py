@@ -566,7 +566,8 @@ def test_persisted_schema_inventory_detects_stale_versions_and_missing_store_not
 def test_supply_chain_contract_requires_spdx_and_explicit_dependency_audit() -> None:
     core = (
         'def generate_spdx_sbom(\n"SPDX-2.3"\n"PACKAGE-MANAGER"\n"DEPENDS_ON"\n'
-        'MAX_DISTRIBUTIONS = 4096\nhost_paths_collected\nnetwork_access_performed\n'
+        'MAX_DISTRIBUTIONS = 4096\nMAX_TOTAL_REQUIREMENTS = 50_000\ncontent_sha256=\n'
+        'network_access_performed=false\nhost_paths_collected=false\nhost_paths_collected\nnetwork_access_performed\n'
         'def audit_dependency_vulnerabilities(\nallow_network: bool\nexplicit network authorization\n'
         'MAX_AUDIT_OUTPUT_BYTES\n"--local"\n"--format", "json"\nsubprocess.TimeoutExpired\nPIP_INDEX_URL\n"unavailable"'
     )
@@ -576,56 +577,21 @@ def test_supply_chain_contract_requires_spdx_and_explicit_dependency_audit() -> 
     gui = "exportSoftwareBillOfMaterials\nscanDependencyVulnerabilities\nwindow.confirm(\nExport SPDX 2.3 SBOM\nScan dependencies (network)\nunavailable scanner is never described as a clean scan"
     core_tests = (
         "test_spdx_sbom_contains_package_urls_versions_and_installed_dependency_relationships\n"
+        "test_spdx_sbom_validates_against_the_official_23_json_schema\n"
+        "test_spdx_sbom_bounds_aggregate_requirement_metadata\n"
         "test_spdx_sbom_rejects_unbounded_or_invalid_installed_metadata\n"
+        "test_pip_audit_parser_rejects_exit_status_and_finding_mismatches\n"
         "test_report_export_rejects_symlinked_parent_and_existing_symlink\n"
         "test_vulnerability_scan_requires_explicit_network_authorization\n"
         "test_vulnerability_scan_reports_unavailable_scanner_without_claiming_clean\n"
         "test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_secret_environment\n"
-        "test_vulnerability_scan_does_not_report_clean_on_timeout"
+        "test_vulnerability_scan_does_not_report_clean_on_timeout\n"
+        "test_vulnerability_scan_is_single_flight_and_does_not_spawn_concurrent_scanners\n"
+        "test_vulnerability_scan_rejects_duplicate_json_object_keys"
     )
     api_tests = (
-        "test_security_supply_chain_api_returns_spdx_sbom\n"
-        "test_security_supply_chain_api_requires_explicit_network_authorization\n"
-        "test_security_supply_chain_api_runs_only_authorized_bounded_dependency_scan"
-    )
-    e2e = (
-        'Export SPDX 2.3 SBOM\nScan dependencies (network)\npage.waitForEvent("dialog")\n'
-        'axiom-installed-environment.spdx.json\naxiom-dependency-vulnerability-report.json\nallow_network: true'
-    )
-    docs = "SPDX 2.3\npip-audit\nnetwork authorization\nunavailable\ninstalled Python"
-
-    assert release_smoke.supply_chain_issues(core, api, cli, client, gui, core_tests, api_tests, e2e, docs) == []
-    failures = release_smoke.supply_chain_issues(
-        core.replace("explicit network authorization", ""),
-        api, cli, client, gui, core_tests, api_tests, e2e, docs,
-    )
-    assert any("network authorization" in failure for failure in failures)
-
-
-def test_supply_chain_contract_requires_spdx_and_explicit_dependency_audit() -> None:
-    core = (
-        'def generate_spdx_sbom(\n"SPDX-2.3"\n"PACKAGE-MANAGER"\n"DEPENDS_ON"\n'
-        'MAX_DISTRIBUTIONS = 4096\nhost_paths_collected\nnetwork_access_performed\n'
-        'def audit_dependency_vulnerabilities(\nallow_network: bool\nexplicit network authorization\n'
-        'MAX_AUDIT_OUTPUT_BYTES\n"--local"\n"--format", "json"\nsubprocess.TimeoutExpired\nPIP_INDEX_URL\n"unavailable"'
-    )
-    api = '@router.get("/sbom")\n@router.post("/dependency-audit")\nallow_network=request.allow_network\ntimeout_seconds=request.timeout_seconds'
-    cli = '@security_app.command("sbom")\n@security_app.command("vulnerabilities")\n"--allow-network"\nwrite_report_new('
-    client = "SoftwareBillOfMaterials\nDependencyVulnerabilityReport\nsecuritySoftwareBillOfMaterials:\nscanDependencyVulnerabilities:"
-    gui = "exportSoftwareBillOfMaterials\nscanDependencyVulnerabilities\nwindow.confirm(\nExport SPDX 2.3 SBOM\nScan dependencies (network)\nunavailable scanner is never described as a clean scan"
-    core_tests = (
-        "test_spdx_sbom_contains_package_urls_versions_and_installed_dependency_relationships\n"
-        "test_spdx_sbom_rejects_unbounded_or_invalid_installed_metadata\n"
-        "test_report_export_rejects_symlinked_parent_and_existing_symlink\n"
-        "test_vulnerability_scan_requires_explicit_network_authorization\n"
-        "test_vulnerability_scan_reports_unavailable_scanner_without_claiming_clean\n"
-        "test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_secret_environment\n"
-        "test_vulnerability_scan_does_not_report_clean_on_timeout"
-    )
-    api_tests = (
-        "test_security_supply_chain_api_returns_spdx_sbom\n"
-        "test_security_supply_chain_api_requires_explicit_network_authorization\n"
-        "test_security_supply_chain_api_runs_only_authorized_bounded_dependency_scan"
+        "test_security_api_exports_spdx_sbom_to_a_create_only_file\n"
+        "test_security_api_requires_network_authorization_for_dependency_audits"
     )
     e2e = (
         'Export SPDX 2.3 SBOM\nScan dependencies (network)\npage.waitForEvent("dialog")\n'
