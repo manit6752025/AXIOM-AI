@@ -146,6 +146,38 @@ def test_model_provenance_release_contract_covers_path_binding_and_aggregate_lim
     assert release_smoke.model_provenance_issues(core, api, cli, client, app, tests, e2e, docs) == []
 
 
+def test_request_admission_is_wired_across_core_api_cli_and_runtime_ui() -> None:
+    core = (ROOT / "axiom" / "core" / "request_admission.py").read_text(encoding="utf-8")
+    api = (ROOT / "axiom" / "api" / "engine.py").read_text(encoding="utf-8")
+    cli = (ROOT / "axiom" / "cli" / "engine.py").read_text(encoding="utf-8")
+    client = (ROOT / "src" / "api" / "client.ts").read_text(encoding="utf-8")
+    panel = (ROOT / "src" / "components" / "EngineServingProfilesPanel.tsx").read_text(encoding="utf-8")
+    admission_tests = (ROOT / "tests" / "test_request_admission.py").read_text(encoding="utf-8")
+    serving_tests = (ROOT / "tests" / "test_serving_profiles.py").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e" / "serving-profiles.spec.ts").read_text(encoding="utf-8")
+    docs = (ROOT / "docs" / "Local-Serving-Profiles.md").read_text(encoding="utf-8")
+    assert release_smoke.request_admission_issues(
+        core, api, cli, client, panel, admission_tests, serving_tests, e2e, docs,
+    ) == []
+
+
+def test_request_admission_release_contract_detects_missing_global_backpressure() -> None:
+    core = (ROOT / "axiom" / "core" / "request_admission.py").read_text(encoding="utf-8")
+    api = (ROOT / "axiom" / "api" / "engine.py").read_text(encoding="utf-8")
+    cli = (ROOT / "axiom" / "cli" / "engine.py").read_text(encoding="utf-8")
+    client = (ROOT / "src" / "api" / "client.ts").read_text(encoding="utf-8")
+    panel = (ROOT / "src" / "components" / "EngineServingProfilesPanel.tsx").read_text(encoding="utf-8")
+    admission_tests = (ROOT / "tests" / "test_request_admission.py").read_text(encoding="utf-8")
+    serving_tests = (ROOT / "tests" / "test_serving_profiles.py").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e" / "serving-profiles.spec.ts").read_text(encoding="utf-8")
+    docs = (ROOT / "docs" / "Local-Serving-Profiles.md").read_text(encoding="utf-8")
+    broken = core.replace("len(self._waiters) >= self._max_queue", "len(self._waiters) >= 10", 1)
+    issues = release_smoke.request_admission_issues(
+        broken, api, cli, client, panel, admission_tests, serving_tests, e2e, docs,
+    )
+    assert any("len(self._waiters) >= self._max_queue" in issue for issue in issues)
+
+
 def test_model_compatibility_report_is_wired_into_the_existing_models_page() -> None:
     core_source = (ROOT / "axiom" / "models" / "compatibility.py").read_text(encoding="utf-8")
     api_source = (ROOT / "axiom" / "api" / "workspace.py").read_text(encoding="utf-8")
