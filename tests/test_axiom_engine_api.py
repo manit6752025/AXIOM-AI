@@ -921,7 +921,7 @@ def test_native_ndjson_stream_preserves_request_queue_full_error(monkeypatch) ->
 
     monkeypatch.setattr(engine_api, "resolve_local_model_directory", lambda value, label: value)
 
-    def rejected_stream(**_kwargs):
+    def rejected_stream(*_args, **_kwargs):
         raise RequestAdmissionQueueFull("Native inference queue is full.")
         yield
 
