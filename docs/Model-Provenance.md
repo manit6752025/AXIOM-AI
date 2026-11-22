@@ -46,8 +46,7 @@ no partial license-file digest set; the report includes candidate counts/bytes
 and the active limits. Symlink components in the selected model path are
 rejected, not resolved through.
 
-A SHA-256 digest identifies the exact bytes that were scanned. Publisher
-authentication is not performed by this local scanner: it does not authenticate
+A SHA-256 digest identifies the exact bytes that were scanned. The report does not provide publisher authentication; this local scanner does not authenticate
 the publisher, prove that files came from a declared repository revision, or
 detect malware. File extensions are format indicators, not proof
 that a checkpoint is safe to load. In particular, `.bin`, `.pt`, and
