@@ -142,6 +142,16 @@ Python distribution: `axiom-all`
 npm launcher: `@netcore-technologies/axiom-cli`
 
 
+## Declarative plugin manifests
+
+- `axiom plugin list` displays registered manifest versions, fingerprints, and permission status.
+- `axiom plugin manifest validate ./plugin-manifest.json` validates metadata without registering or granting access.
+- `axiom plugin manifest register ./plugin-manifest.json` registers a version; permissions remain denied.
+- `axiom plugin grant com.example.research --manifest-sha256 <sha256> --tool search:read` grants explicitly selected declared scopes against the exact current manifest.
+- `axiom plugin revoke com.example.research` revokes all grants.
+
+Manifest registration does not load code or execute commands. See [Plugin manifests](../Plugin-Manifests.md) for the schema and permission lifecycle.
+
 ## Hardware snapshot history
 
 - `axiom system snapshots enable --max-snapshots 20 --max-age-days 90` explicitly enables capture and sets retention.
