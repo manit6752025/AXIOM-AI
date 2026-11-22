@@ -417,6 +417,12 @@ def _run_nonstream(request: OpenAIChatCompletionRequest, model: dict[str, Any]) 
             return _openai_error("AXIOM Native Engine did not return a completion result.", 503, code="native_engine_error", error_type="server_error")
     except ValueError as exc:
         return _openai_error(str(exc), 422, code="invalid_request")
+    except RequestAdmissionQueueFull as exc:
+        return _openai_error(str(exc), 429, code="request_queue_full", error_type="rate_limit_error")
+    except RequestAdmissionTimeout as exc:
+        return _openai_error(str(exc), 504, code="request_queue_timeout", error_type="server_error")
+    except RequestAdmissionCancelled as exc:
+        return _openai_error(str(exc), 499, code="request_cancelled", error_type="server_error")
     except AxiomEngineError as exc:
         return _openai_error(str(exc), 503, code="native_engine_error", error_type="server_error")
     created = int(time.time())
