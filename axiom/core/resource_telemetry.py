@@ -192,7 +192,7 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
-            raise ValueError("Resource telemetry JSON contains duplicate object keys.")
+            raise ResourceTelemetryError("Resource telemetry JSON contains duplicate object keys.")
         result[key] = value
     return result
 
@@ -559,8 +559,6 @@ class ResourceTelemetryStore:
             return self._report(_default_settings(), [], limit=MAX_SAMPLES)
         try:
             with self._locked_directory(create=False) as directory_fd:
-                if directory_fd is None:
-                    return self._report(_default_settings(), [], limit=MAX_SAMPLES)
                 settings, _samples = self._read(directory_fd)
                 self._write(settings, [], directory_fd)
         except ResourceTelemetryError:
