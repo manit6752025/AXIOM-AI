@@ -1094,6 +1094,7 @@ async def generate_with_engine_serving_profile(
             queue_limit=profile["max_queued_requests"],
             timeout_seconds=profile["request_timeout_seconds"],
             cancel_event=admission_cancel,
+            queue_key=profile["id"],
         )
     except RequestAdmissionQueueFull as exc:
         disconnect_monitor.cancel()
