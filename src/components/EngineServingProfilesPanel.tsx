@@ -239,6 +239,7 @@ export default function EngineServingProfilesPanel() {
             <span className="module-copy">
               <b>{profile.name}</b>
               <small>{profile.model_path} · {profile.device_preference} · context {profile.context_length.toLocaleString()} · max output {profile.max_new_tokens}</small>
+              <small>{profile.max_concurrent_requests} active worker · {profile.max_queued_requests} queued per profile · {profile.request_timeout_seconds}s total request deadline</small>
               {report && <small>{report.ready ? "Ready for a local generation attempt" : report.problems.join(" · ")} · weights loaded: {report.weights_loaded ? "yes" : "no"}</small>}
             </span>
             <span className={"status-pill " + (report ? (report.ready ? "success" : "warning") : "neutral")}><i />{report ? (report.ready ? "READY" : "NOT READY") : "UNPROBED"}</span>
