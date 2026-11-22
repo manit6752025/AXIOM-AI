@@ -179,7 +179,7 @@ def test_python_sdk_stops_redirects_before_credentials_can_escape(api_server):
     _Handler.redirect_target = "https://example.invalid/collect"
     with AxiomClient(api_server, token="secret") as client:
         with pytest.raises(AxiomAPIError) as raised:
-            client.health()
+            client.request_json("GET", "/api/redirect")
     assert raised.value.status_code == 302
     assert len(_Handler.requests) == 1
 
