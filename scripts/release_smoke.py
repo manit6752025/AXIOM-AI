@@ -233,6 +233,7 @@ def request_admission_issues(
     engine_api: str,
     serving_core: str,
     engine_cli: str,
+    server_source: str,
     client: str,
     runtime_panel: str,
     admission_tests: str,
@@ -291,9 +292,8 @@ def request_admission_issues(
             "_CLI_PROFILE_ADMISSION.acquire(",
             "queue_key=profile[\"id\"]",
             "admission_held=True",
-            "_CLI_PROFILE_ADMISSION.acquire(",
-            "queue_key=profile[\"id\"]",
             "_CLI_PROFILE_ADMISSION.release()",
+            "RequestAdmissionQueueFull, RequestAdmissionTimeout, RequestAdmissionCancelled",
             "max_queued_requests: int = typer.Option",
             "waited {admission['waited_ms']} ms",
             "queued at position",
@@ -338,8 +338,19 @@ def request_admission_issues(
         ("Global API error mapping", engine_api, (
             "NATIVE_PROFILE_ADMISSION = ENGINE_REQUEST_ADMISSION",
         )),
-        ("API admission error handlers", docs, (
+        ("API admission error handlers", server_source, (
+            "@app.exception_handler(RequestAdmissionQueueFull)",
+            "@app.exception_handler(RequestAdmissionTimeout)",
+            "@app.exception_handler(RequestAdmissionCancelled)",
+            "request_queue_full",
+            "request_queue_timeout",
+            "request_cancelled",
+            "Retry-After",
+        )),
+        ("Serving documentation", docs, (
+            "selected profile's queue limit",
             "global ceiling of 32 waiters",
+            "ordinary native generation",
             "Retry-After: 1",
             "499",
             "queue_position",
@@ -1643,16 +1654,23 @@ def inspect(root: Path) -> dict[str, Any]:
         telemetry_history_core_tests, telemetry_history_api_tests,
     ))
     request_admission_core = (root / "axiom/core/request_admission.py").read_text(encoding="utf-8")
-    request_admission_tests = (root / "tests/test_request_admission.py").read_text(encoding="utf-8")
+    native_engine_core = (root / "axiom/core/engine.py").read_text(encoding="utf-8")
+    serving_profile_core = (root / "axiom/core/serving_profiles.py").read_text(encoding="utf-8")
+    request_admission_tests = (
+        (root / "tests/test_request_admission.py").read_text(encoding="utf-8")
+        + (root / "tests/test_native_engine.py").read_text(encoding="utf-8")
+    )
     serving_profiles_tests = (root / "tests/test_serving_profiles.py").read_text(encoding="utf-8")
+    server_source = (root / "axiom/api/server.py").read_text(encoding="utf-8")
     serving_profiles_cli = engine_cli_source
     serving_profiles_panel = (root / "src/components/EngineServingProfilesPanel.tsx").read_text(encoding="utf-8")
     serving_profiles_e2e = (root / "e2e/serving-profiles.spec.ts").read_text(encoding="utf-8")
     serving_profiles_docs = (root / "docs/Local-Serving-Profiles.md").read_text(encoding="utf-8")
     failures.extend(request_admission_issues(
-        request_admission_core, engine_api, serving_profiles_cli, client,
-        serving_profiles_panel, request_admission_tests, serving_profiles_tests,
-        serving_profiles_e2e, serving_profiles_docs,
+        request_admission_core, native_engine_core, engine_api, serving_profile_core,
+        serving_profiles_cli, server_source, client, serving_profiles_panel,
+        request_admission_tests, serving_profiles_tests, serving_profiles_e2e,
+        serving_profiles_docs,
     ))
     benchmark_trend_panel = (root / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
     benchmark_trend_chart = (root / "src/components/BenchmarkResourceTrends.tsx").read_text(encoding="utf-8")
