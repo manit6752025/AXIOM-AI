@@ -36,6 +36,7 @@ class BoundedRequestAdmission:
         self._max_queue = max_queue
         self._active = 0
         self._waiters: deque[tuple[object, str | None]] = deque()
+        self._waiter_positions: dict[object, int] = {}
         self._condition = threading.Condition(threading.Lock())
 
     @property
@@ -85,15 +86,13 @@ class BoundedRequestAdmission:
             if queue_limit == 0 or profile_waiters >= queue_limit or len(self._waiters) >= self._max_queue:
                 raise RequestAdmissionQueueFull("The native request queue is full; retry after capacity becomes available.")
             self._waiters.append(queued_ticket)
+            self._waiter_positions[ticket] = len(self._waiters)
             try:
                 while True:
                     if cancel_event is not None and cancel_event.is_set():
                         raise RequestAdmissionCancelled("Request was cancelled while waiting in the native queue.")
                     if self._active < self._max_active and self._waiters and self._waiters[0][0] is ticket:
-                        queue_position = next(
-                            (index + 1 for index, (waiter, _key) in enumerate(self._waiters) if waiter is ticket),
-                            0,
-                        )
+                        queue_position = self._waiter_positions.pop(ticket, 1)
                         self._waiters.popleft()
                         self._active += 1
                         self._condition.notify_all()
@@ -108,6 +107,12 @@ class BoundedRequestAdmission:
             finally:
                 if queued_ticket in self._waiters:
                     self._waiters.remove(queued_ticket)
+                    self._waiter_positions.pop(ticket, None)
+                    # A cancelled/expired ticket vacates its place. Re-number
+                    # the remaining waiters, while successful admission keeps
+                    # the queue position originally assigned at enqueue time.
+                    for position, (waiting_ticket, _key) in enumerate(self._waiters, start=1):
+                        self._waiter_positions[waiting_ticket] = position
                     self._condition.notify_all()
 
     def release(self) -> None:
