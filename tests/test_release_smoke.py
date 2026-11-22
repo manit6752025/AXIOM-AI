@@ -27,6 +27,15 @@ def test_roadmap_audit_accepts_implemented_status_with_code_scan_review_pending(
     assert release_smoke.roadmap_issues(markdown) == []
 
 
+def test_roadmap_audit_accepts_validation_and_registry_publication_pending_status() -> None:
+    markdown = "\\n".join(
+        f"- [R{i:03d} · {'Planned' if i % 2 else 'Implemented; tests passing'}] Requirement {i}."
+        for i in range(1, 140)
+    )
+    markdown += "\\n- [R140 · In progress; validation and registry publication pending] SDK packages are not yet published."
+    assert release_smoke.roadmap_issues(markdown) == []
+
+
 def test_roadmap_audit_detects_duplicates_missing_ids_and_unknown_status() -> None:
     markdown = "- [R001 · Maybe] A\n- [R001 · Planned] Duplicate\n"
     issues = release_smoke.roadmap_issues(markdown)
