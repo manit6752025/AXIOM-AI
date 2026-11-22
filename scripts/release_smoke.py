@@ -184,10 +184,11 @@ def model_provenance_issues(
         ("Provenance API", api_source, (
             '@router.post("/models/provenance")', "validate_model_path(str(model_root / request.path))",
             "current.is_symlink()", "require_canonical_workspace_relative_path",
+            "registered_path != model_path",
         )),
         ("Provenance CLI", cli_source, (
             '@model_app.command("provenance")', "inspect_model_provenance(",
-            "hash_evidence", "license_evidence['status']",
+            "hash_evidence", "license_evidence['status']", "model_provenance_path_mismatch",
         )),
         ("Typed client", client_source, (
             "export type WorkspaceModelProvenance", "maximum_total_bytes: number",
@@ -206,6 +207,7 @@ def model_provenance_issues(
             "test_model_provenance_skips_license_hashing_over_total_byte_bound",
             "test_model_provenance_rejects_symlinked_ancestor_components",
             "test_model_provenance_api_enforces_workspace_paths_and_labels_registry_claims",
+            "test_model_provenance_cli_rejects_registry_claims_for_a_different_model_path",
         )),
         ("Browser acceptance", e2e_source, (
             '"/api/workspace/models/provenance"',
