@@ -202,7 +202,7 @@ test("keeps request timeouts active while streaming a large backup body", async 
 
 test("rejects control characters in workspace names and duplicate headers", () => {
   assert.throws(
-    () => new AxiomClient({ workspaceId: "ws\\nheader" }),
+    () => new AxiomClient({ workspaceId: "ws\nheader" }),
     AxiomConfigurationError,
   );
   assert.throws(
@@ -210,7 +210,7 @@ test("rejects control characters in workspace names and duplicate headers", () =
     AxiomConfigurationError,
   );
   const client = new AxiomClient();
-  assert.throws(() => client.createWorkspace("bad\\nname"), AxiomConfigurationError);
+  assert.throws(() => client.createWorkspace("bad\nname"), AxiomConfigurationError);
   client.close();
 });
 
