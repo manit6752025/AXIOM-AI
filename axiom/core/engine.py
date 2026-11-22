@@ -25,6 +25,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator
+from axiom.core.request_admission import BoundedRequestAdmission
 
 _MAX_PROMPT_CHARS = 12_000
 _MAX_CHAT_CHARS = 24_000
@@ -38,33 +39,33 @@ _TEMPLATE_FORMAT_WIDTH_RE = re.compile(
     r"%(?!%)(?:\([^)]+\))?[-+#0 ]*(?P<width>\d+|\*)?(?:\.(?P<precision>\d+|\*))?[diouxXeEfFgGcrsa]"
 )
 _LOG = logging.getLogger(__name__)
-# A plain Lock is deliberate: the streaming generator may resume on a different worker thread.
+# All native generation entry points and serving profiles share this process-wide
+# FIFO admission manager. The lock still protects the loaded-runtime pointer and
+# unload lifecycle; queue admission is separate so the waiter count is bounded.
 _ENGINE_LOCK = threading.Lock()
+ENGINE_REQUEST_ADMISSION = BoundedRequestAdmission(max_active=1, max_queue=32)
+
+
+@contextmanager
+def engine_execution_lock() -> Iterator[None]:
+    """Protect loaded model state after a caller has already acquired admission."""
+    with _ENGINE_LOCK:
+        yield
 
 
 @contextmanager
 def _engine_request_lock(cancel_event: threading.Event | None = None) -> Iterator[None]:
-    """Bound admission wait for the single loaded native runtime.
-
-    The current engine executes one request per loaded runtime. Waiting
-    requests are bounded and cooperatively cancellable instead of accumulating
-    indefinitely behind the runtime lock.
-    """
-    deadline = time.monotonic() + _MAX_ENGINE_QUEUE_WAIT_SECONDS
-    acquired = False
-    while not acquired:
-        if cancel_event is not None and cancel_event.is_set():
-            raise AxiomEngineError("Native generation was cancelled while waiting for the engine.")
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise AxiomEngineError(
-                "AXIOM Native Engine is busy with another request. Retry shortly or use a second AXIOM process for concurrent inference."
-            )
-        acquired = _ENGINE_LOCK.acquire(timeout=min(0.1, remaining))
+    """Use one bounded FIFO admission queue for every native model request."""
+    ENGINE_REQUEST_ADMISSION.acquire(
+        queue_limit=32,
+        timeout_seconds=_MAX_ENGINE_QUEUE_WAIT_SECONDS,
+        cancel_event=cancel_event,
+    )
     try:
-        yield
+        with _ENGINE_LOCK:
+            yield
     finally:
-        _ENGINE_LOCK.release()
+        ENGINE_REQUEST_ADMISSION.release()
 _LOADED_RUNTIME: dict[str, Any] | None = None
 _LOADED_ARCHITECTURE: str | None = None
 _MODEL_ROOT_ENV = "AXIOM_MODEL_ROOTS"
@@ -1701,7 +1702,7 @@ def _load_local_model(
 def unload_local_model() -> dict[str, Any]:
     """Release the loaded local model and best-effort accelerator cache."""
     global _LOADED_RUNTIME, _LOADED_ARCHITECTURE
-    with _ENGINE_LOCK:
+    with _engine_request_lock():
         previous_runtime = _LOADED_RUNTIME
         was_loaded = previous_runtime is not None
         _LOADED_RUNTIME = None
