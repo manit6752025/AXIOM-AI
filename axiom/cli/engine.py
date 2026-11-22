@@ -228,12 +228,20 @@ def serving_profile_run(
             _CLI_PROFILE_ADMISSION.release()
 
     thread = Thread(target=worker, name="axiom-serving-profile", daemon=True)
-    thread.start()
+    try:
+        thread.start()
+    except (OSError, RuntimeError) as exc:
+        _CLI_PROFILE_ADMISSION.release()
+        _fail(f"Serving profile worker could not be started: {exc}")
     remaining = max(
         0.0,
         profile["request_timeout_seconds"] - (time.monotonic() - request_started),
     )
-    thread.join(remaining)
+    try:
+        thread.join(remaining)
+    except KeyboardInterrupt:
+        cancel_event.set()
+        raise
     if thread.is_alive():
         cancel_event.set()
         _fail("Serving profile request exceeded its configured timeout; cooperative cancellation was requested.")
