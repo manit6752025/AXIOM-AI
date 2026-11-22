@@ -689,6 +689,13 @@ export type AxiomEngineServingGeneration = {
   schema_version: 1;
   profile: { id: string; name: string };
   request_budget: { prompt_characters: number; prompt_tokens: number; max_new_tokens: number; requested_context_tokens: number; context_limit_tokens: number };
+  admission: {
+    queue_position: number;
+    queued: boolean;
+    waited_ms: number;
+    concurrency_limit: 1;
+    queue_limit: number;
+  };
   result: AxiomEngineResult;
   scope: { local_only: true; network_used: false; profile_persisted: false };
 };
