@@ -141,13 +141,13 @@ test("exposes workspace backup response bodies as a streaming reader", async () 
   client.close();
 });
 
-test("rejects insecure remote origins, invalid paths and protected custom headers", () => {
+test("rejects insecure remote origins, invalid paths and protected custom headers", async () => {
   assert.throws(() => new AxiomClient({ baseUrl: "http://api.example.com" }), AxiomConfigurationError);
   assert.throws(() => new AxiomClient({ baseUrl: "https://user:pass@example.com" }), AxiomConfigurationError);
   assert.throws(() => new AxiomClient({ headers: { Authorization: "override" } }), AxiomConfigurationError);
   const client = new AxiomClient();
-  assert.throws(() => client.request("GET", "https://example.invalid/api/health"), AxiomConfigurationError);
-  assert.throws(() => client.request("GET", "/api/../openapi.json"), AxiomConfigurationError);
+  await assert.rejects(() => client.request("GET", "https://example.invalid/api/health"), AxiomConfigurationError);
+  await assert.rejects(() => client.request("GET", "/api/../openapi.json"), AxiomConfigurationError);
   client.close();
 });
 
