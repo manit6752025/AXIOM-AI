@@ -159,7 +159,11 @@ def test_request_admission_is_wired_across_core_api_cli_and_runtime_ui() -> None
         (ROOT / "tests" / "test_request_admission.py").read_text(encoding="utf-8")
         + (ROOT / "tests" / "test_native_engine.py").read_text(encoding="utf-8")
     )
-    serving_tests = (ROOT / "tests" / "test_serving_profiles.py").read_text(encoding="utf-8")
+    serving_tests = (
+        (ROOT / "tests" / "test_serving_profiles.py").read_text(encoding="utf-8")
+        + (ROOT / "tests" / "test_api_admission_errors.py").read_text(encoding="utf-8")
+        + (ROOT / "tests" / "test_axiom_engine_api.py").read_text(encoding="utf-8")
+    )
     e2e = (ROOT / "e2e" / "serving-profiles.spec.ts").read_text(encoding="utf-8")
     docs = (ROOT / "docs" / "Local-Serving-Profiles.md").read_text(encoding="utf-8")
     assert release_smoke.request_admission_issues(
@@ -181,7 +185,11 @@ def test_request_admission_release_contract_detects_missing_global_backpressure(
         (ROOT / "tests" / "test_request_admission.py").read_text(encoding="utf-8")
         + (ROOT / "tests" / "test_native_engine.py").read_text(encoding="utf-8")
     )
-    serving_tests = (ROOT / "tests" / "test_serving_profiles.py").read_text(encoding="utf-8")
+    serving_tests = (
+        (ROOT / "tests" / "test_serving_profiles.py").read_text(encoding="utf-8")
+        + (ROOT / "tests" / "test_api_admission_errors.py").read_text(encoding="utf-8")
+        + (ROOT / "tests" / "test_axiom_engine_api.py").read_text(encoding="utf-8")
+    )
     e2e = (ROOT / "e2e" / "serving-profiles.spec.ts").read_text(encoding="utf-8")
     docs = (ROOT / "docs" / "Local-Serving-Profiles.md").read_text(encoding="utf-8")
     broken = core.replace("len(self._waiters) >= self._max_queue", "len(self._waiters) >= 10", 1)
