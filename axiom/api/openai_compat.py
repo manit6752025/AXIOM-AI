@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from starlette.responses import JSONResponse, StreamingResponse
 
 from axiom.core.engine import AxiomEngineError, discover_local_engine_assets, generate_local_batch, generate_local_stream
+from axiom.core.request_admission import RequestAdmissionCancelled, RequestAdmissionQueueFull, RequestAdmissionTimeout
 from axiom.core.inference import InferenceRuntimeError, run_local_chat, runtime_status as ollama_runtime_status
 
 router = APIRouter()
@@ -269,10 +270,36 @@ def _produce_stream(iterator: Iterator[dict[str, Any]], output: Queue, cancelled
                     continue
             else:
                 break
+    except RequestAdmissionQueueFull as exc:
+        while not cancelled.is_set():
+            try:
+                output.put({
+                    "type": "error",
+                    "code": "request_queue_full",
+                    "message": str(exc),
+                    "retry_after_seconds": 1,
+                }, timeout=0.1)
+                break
+            except Full:
+                continue
+    except RequestAdmissionTimeout as exc:
+        while not cancelled.is_set():
+            try:
+                output.put({"type": "error", "code": "request_queue_timeout", "message": str(exc)}, timeout=0.1)
+                break
+            except Full:
+                continue
+    except RequestAdmissionCancelled as exc:
+        while not cancelled.is_set():
+            try:
+                output.put({"type": "error", "code": "request_cancelled", "message": str(exc)}, timeout=0.1)
+                break
+            except Full:
+                continue
     except (ValueError, AxiomEngineError) as exc:
         while not cancelled.is_set():
             try:
-                output.put({"type": "error", "message": str(exc)}, timeout=0.1)
+                output.put({"type": "error", "code": "native_engine_error", "message": str(exc)}, timeout=0.1)
                 break
             except Full:
                 continue
@@ -340,6 +367,12 @@ def _run_batched_nonstream(request: OpenAIChatCompletionRequest, model: dict[str
         )
     except ValueError as exc:
         return _openai_error(str(exc), 422, code="invalid_request")
+    except RequestAdmissionQueueFull as exc:
+        return _openai_error(str(exc), 429, code="request_queue_full", error_type="rate_limit_error")
+    except RequestAdmissionTimeout as exc:
+        return _openai_error(str(exc), 504, code="request_queue_timeout", error_type="server_error")
+    except RequestAdmissionCancelled as exc:
+        return _openai_error(str(exc), 499, code="request_cancelled", error_type="server_error")
     except AxiomEngineError as exc:
         return _openai_error(str(exc), 503, code="native_engine_error", error_type="server_error")
     results = batch.get("results", [])
@@ -443,8 +476,15 @@ def _streaming_response(
                 if not isinstance(item, dict):
                     continue
                 if item.get("type") == "error":
+                    error_code = item.get("code", "native_engine_error")
+                    error_type = "rate_limit_error" if error_code == "request_queue_full" else "server_error"
                     yield "data: " + json.dumps({
-                        "error": {"message": item.get("message", "Native inference failed."), "type": "server_error", "code": "native_engine_error"}
+                        "error": {
+                            "message": item.get("message", "Native inference failed."),
+                            "type": error_type,
+                            "code": error_code,
+                            "retry_after_seconds": item.get("retry_after_seconds"),
+                        }
                     }) + "\n\n"
                     yield "data: [DONE]\n\n"
                     return
