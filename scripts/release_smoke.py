@@ -267,6 +267,9 @@ def request_admission_issues(
             "\"waited_ms\": admission[\"waited_ms\"]",
             "worker.add_done_callback",
             "cancel_event.set()",
+            "disconnect_monitor.cancel()",
+            "except asyncio.CancelledError:",
+            "admission_cancel.set()",
         )),
         ("Serving CLI", engine_cli, (
             "_CLI_PROFILE_ADMISSION = BoundedRequestAdmission(max_active=1, max_queue=32)",
@@ -302,7 +305,7 @@ def request_admission_issues(
             "test_serving_profile_api_crud_readiness_and_profile_limited_generation",
             "test_serving_profile_api_maps_queue_full_timeout_and_cancellation",
             'admission_calls[0]["queue_key"] == profile_id',
-            'busy.headers["retry-after"] == "1"',
+            'failed.headers["retry-after"] == "1"',
         )),
         ("Browser acceptance", e2e, (
             "max_queued_requests: 3",
@@ -312,7 +315,7 @@ def request_admission_issues(
             "Generation cancellation was sent",
         )),
         ("Serving documentation", docs, (
-            "per-profile queue limit",
+            "selected profile's queue limit",
             "global ceiling of 32 waiters",
             "Retry-After: 1",
             "499",
