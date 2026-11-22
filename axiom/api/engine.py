@@ -512,6 +512,25 @@ def _produce_native_stream(
         for event in iterator:
             if not _enqueue_stream_item(output, event, cancel_event):
                 break
+    except RequestAdmissionQueueFull as exc:
+        _enqueue_stream_item(output, {
+            "type": "error",
+            "code": "request_queue_full",
+            "message": str(exc),
+            "retry_after_seconds": 1,
+        }, cancel_event)
+    except RequestAdmissionTimeout as exc:
+        _enqueue_stream_item(output, {
+            "type": "error",
+            "code": "request_queue_timeout",
+            "message": str(exc),
+        }, cancel_event)
+    except RequestAdmissionCancelled as exc:
+        _enqueue_stream_item(output, {
+            "type": "error",
+            "code": "request_cancelled",
+            "message": str(exc),
+        }, cancel_event)
     except ValueError as exc:
         _enqueue_stream_item(output, {
             "type": "error",
