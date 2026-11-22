@@ -426,7 +426,9 @@ def test_serving_profile_cli_creates_probes_runs_lists_and_deletes(tmp_path, mon
         "profile", "run", profile["id"], "--prompt", "Hello AXIOM", "--json",
     ])
     assert generated.exit_code == 0, generated.output
-    assert json.loads(generated.stdout)["result"]["response"] == "profile response"
+    generated_report = json.loads(generated.stdout)
+    assert generated_report["result"]["response"] == "profile response"
+    assert generated_report["admission"] == {"queue_position": 0, "waited_ms": 0}
 
     removed = runner.invoke(engine_cli.engine_app, [
         "profile", "delete", profile["id"], "--yes",
