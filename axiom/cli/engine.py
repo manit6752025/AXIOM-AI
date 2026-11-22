@@ -23,13 +23,12 @@ from axiom.core.workspace_context import active_workspace_root
 from axiom.core import model_studio
 from axiom.core.engine_fabric import EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
 from axiom.core.engine_fabric_profiles import EngineFabricProfileError, EngineFabricProfileStore
+from axiom.core.request_admission import BoundedRequestAdmission, RequestAdmissionCancelled, RequestAdmissionQueueFull, RequestAdmissionTimeout
 from axiom.core.serving_profiles import (
     ServingProfileError,
     ServingProfileStore,
     generate_from_profile,
     readiness_probe,
-    release_profile_request,
-    reserve_profile_request,
 )
 from axiom.core.embeddings import EmbeddingEngineError, MAX_EMBEDDING_TOTAL_CHARS, embed_local_texts, unload_local_embeddings
 from axiom.core.reranking import MAX_RERANK_TOTAL_CHARS, RerankerError, rerank_local_documents, unload_local_reranker
@@ -37,6 +36,7 @@ from axiom.core.benchmark_profiles import BenchmarkProfileError, BenchmarkProfil
 
 engine_app = typer.Typer(help="Run causal language models directly through AXIOM's local engine.", no_args_is_help=True)
 console = Console()
+_CLI_PROFILE_ADMISSION = BoundedRequestAdmission(max_active=1, max_queue=32)
 
 
 def _fail(message: str) -> None:
@@ -112,7 +112,10 @@ def serving_profile_create(
         return
     console.print(f"[green]Saved serving profile[/green] {profile['name']} · {profile['id']}")
     console.print(f"Model: {context['architecture']} · context {context['effective_max_position_embeddings']:,} tokens")
-    console.print("Admission: one active native request · no queued requests")
+    console.print(
+        f"Admission: one active native request · up to {profile['max_queued_requests']} queued for this profile · "
+        "32 waiting requests maximum across this CLI process"
+    )
 
 
 @serving_profile_app.command("list")
@@ -134,11 +137,14 @@ def serving_profile_list(json_output: bool = typer.Option(False, "--json")) -> N
     table.add_column("Device")
     table.add_column("Context", justify="right")
     table.add_column("Output", justify="right")
+    table.add_column("Queue", justify="right")
+    table.add_column("Timeout", justify="right")
     table.add_column("Model")
     for profile in report["profiles"]:
         table.add_row(
             profile["name"], profile["id"][:12], profile["device_preference"],
             f"{profile['context_length']:,}", str(profile["max_new_tokens"]),
+            str(profile["max_queued_requests"]), f"{profile['request_timeout_seconds']}s",
             Path(profile["model_path"]).name,
         )
     console.print(table)
@@ -195,9 +201,18 @@ def serving_profile_run(
     readiness = readiness_probe(profile)
     if not readiness["ready"]:
         _fail("Serving profile is not ready: " + "; ".join(readiness["problems"]))
+    request_started = time.monotonic()
     try:
-        reserve_profile_request(profile_id)
-    except ServingProfileError as exc:
+        admission = _CLI_PROFILE_ADMISSION.acquire(
+            queue_limit=profile["max_queued_requests"],
+            timeout_seconds=profile["request_timeout_seconds"],
+            queue_key=profile["id"],
+        )
+    except RequestAdmissionQueueFull as exc:
+        _fail(f"{exc} Retry after capacity becomes available.")
+    except RequestAdmissionTimeout as exc:
+        _fail(str(exc))
+    except RequestAdmissionCancelled as exc:
         _fail(str(exc))
     output: Queue = Queue(maxsize=1)
     cancel_event = Event()
@@ -210,11 +225,15 @@ def serving_profile_run(
         except BaseException as exc:
             output.put(("error", exc))
         finally:
-            release_profile_request(profile_id)
+            _CLI_PROFILE_ADMISSION.release()
 
     thread = Thread(target=worker, name="axiom-serving-profile", daemon=True)
     thread.start()
-    thread.join(profile["request_timeout_seconds"])
+    remaining = max(
+        0.0,
+        profile["request_timeout_seconds"] - (time.monotonic() - request_started),
+    )
+    thread.join(remaining)
     if thread.is_alive():
         cancel_event.set()
         _fail("Serving profile request exceeded its configured timeout; cooperative cancellation was requested.")
@@ -229,14 +248,20 @@ def serving_profile_run(
     if json_output:
         typer.echo(json.dumps({
             "profile": {"id": profile["id"], "name": profile["name"]},
+            "admission": admission,
             "result": value,
             "local_only": True,
         }, ensure_ascii=False, separators=(",", ":")))
     else:
         console.print(value["response"])
+        queue_note = (
+            f"queued at position {admission['queue_position']}"
+            if admission["queue_position"] > 0 else "admitted immediately"
+        )
         console.print(
             f"{value['completion_tokens']:,} tokens · {value['generation_tokens_per_second']:.2f} tok/s · "
-            f"{value['elapsed_ms']:.1f} ms"
+            f"{value['elapsed_ms']:.1f} ms · {queue_note} · "
+            f"waited {admission['waited_ms']} ms"
         )
 
 
