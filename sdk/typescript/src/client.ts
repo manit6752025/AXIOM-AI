@@ -28,6 +28,26 @@ interface PendingResponse {
   externallyAborted: () => boolean;
 }
 
+function hasControlCharacters(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function parseErrorEnvelope(text: string): AxiomErrorEnvelope {
+  if (!text) return {};
+  try {
+    const value: unknown = JSON.parse(text);
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      ? value as AxiomErrorEnvelope
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 function requestId(): string {
   const cryptoApi = globalThis.crypto;
   if (cryptoApi && typeof cryptoApi.randomUUID === "function") {
@@ -266,12 +286,7 @@ export class AxiomClient {
         throw this.responseReadError(pending, cause);
       }
       pending.cleanup();
-      let payload: AxiomErrorEnvelope = {};
-      try {
-        payload = text ? JSON.parse(text) as AxiomErrorEnvelope : {};
-      } catch {
-        payload = {};
-      }
+      const payload = parseErrorEnvelope(text);
       const error = payload.error ?? {};
       const message = error.message ?? payload.detail ?? `AXIOM API request failed with HTTP ${response.status}.`;
       throw new AxiomAPIError(
