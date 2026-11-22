@@ -205,11 +205,11 @@ def test_python_sdk_rejects_invalid_ports_credentials_and_duplicate_headers():
             AxiomClient(origin)
 
     with pytest.raises(AxiomConfigurationError, match="control"):
-        AxiomClient(token="secret\\r\\nX-Evil: true")
+        AxiomClient(token="secret\r\nX-Evil: true")
     with pytest.raises(AxiomConfigurationError, match="more than once"):
         AxiomClient(headers={"X-Client": "one", "x-client": "two"})
     with pytest.raises(AxiomConfigurationError, match="printable"):
-        AxiomClient(workspace_id="workspace\\nheader")
+        AxiomClient(workspace_id="workspace\nheader")
 
 
 def test_python_sdk_closes_cleanly(api_server):
