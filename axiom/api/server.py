@@ -33,6 +33,11 @@ from axiom.api.knowledge import router as knowledge_router
 from axiom.api.prediction_jobs import router as prediction_jobs_router
 from axiom.api.workflows import router as workflows_router
 from axiom.version import __version__
+from axiom.core.request_admission import (
+    RequestAdmissionCancelled,
+    RequestAdmissionQueueFull,
+    RequestAdmissionTimeout,
+)
 
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 _logger = logging.getLogger(__name__)
@@ -251,6 +256,28 @@ def create_app() -> Any:
             },
             headers={**(headers or {}), "X-Request-ID": request_id},
         )
+
+    @app.exception_handler(RequestAdmissionQueueFull)
+    async def request_queue_full(request: Request, exc: RequestAdmissionQueueFull) -> Any:
+        message = str(exc)
+        return error_response(
+            request,
+            "request_queue_full",
+            message,
+            message,
+            429,
+            {"Retry-After": "1"},
+        )
+
+    @app.exception_handler(RequestAdmissionTimeout)
+    async def request_queue_timeout(request: Request, exc: RequestAdmissionTimeout) -> Any:
+        message = str(exc)
+        return error_response(request, "request_queue_timeout", message, message, 504)
+
+    @app.exception_handler(RequestAdmissionCancelled)
+    async def request_cancelled(request: Request, exc: RequestAdmissionCancelled) -> Any:
+        message = str(exc)
+        return error_response(request, "request_cancelled", message, message, 499)
 
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException) -> Any:
