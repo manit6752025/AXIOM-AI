@@ -1081,11 +1081,17 @@ async def generate_with_engine_serving_profile(
     started = time.monotonic()
 
     async def watch_queue_disconnect() -> None:
-        while not admission_cancel.is_set():
-            if await raw_request.is_disconnected():
-                admission_cancel.set()
-                return
-            await asyncio.sleep(0.05)
+        try:
+            while not admission_cancel.is_set():
+                if await raw_request.is_disconnected():
+                    admission_cancel.set()
+                    return
+                await asyncio.sleep(0.05)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # If disconnect monitoring fails, do not admit more local work.
+            admission_cancel.set()
 
     disconnect_monitor = asyncio.create_task(watch_queue_disconnect())
     try:
@@ -1097,34 +1103,17 @@ async def generate_with_engine_serving_profile(
             queue_key=profile["id"],
         )
     except RequestAdmissionQueueFull as exc:
-        disconnect_monitor.cancel()
-        try:
-            await disconnect_monitor
-        except asyncio.CancelledError:
-            pass
         raise HTTPException(429, detail=str(exc), headers={"Retry-After": "1"}) from None
     except RequestAdmissionTimeout as exc:
-        disconnect_monitor.cancel()
-        try:
-            await disconnect_monitor
-        except asyncio.CancelledError:
-            pass
         raise HTTPException(status_code=504, detail=str(exc)) from None
     except RequestAdmissionCancelled as exc:
-        disconnect_monitor.cancel()
-        try:
-            await disconnect_monitor
-        except asyncio.CancelledError:
-            pass
         raise HTTPException(status_code=499, detail=str(exc)) from None
+    except asyncio.CancelledError:
+        admission_cancel.set()
+        raise
     except (OSError, RuntimeError, ValueError) as exc:
-        disconnect_monitor.cancel()
-        try:
-            await disconnect_monitor
-        except asyncio.CancelledError:
-            pass
         raise HTTPException(status_code=503, detail="Native request admission failed safely.") from exc
-    else:
+    finally:
         disconnect_monitor.cancel()
         try:
             await disconnect_monitor
