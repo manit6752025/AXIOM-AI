@@ -24,6 +24,13 @@ export default function EngineServingProfilesPanel() {
   const [selectedId, setSelectedId] = useState("");
   const [readiness, setReadiness] = useState<Record<string, AxiomEngineServingReadiness>>({});
   const [output, setOutput] = useState("");
+  const [admission, setAdmission] = useState<{
+    queue_position: number;
+    queued: boolean;
+    waited_ms: number;
+    concurrency_limit: 1;
+    queue_limit: number;
+  } | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
@@ -105,9 +112,11 @@ export default function EngineServingProfilesPanel() {
     setBusy("generate");
     setError("");
     setOutput("");
+    setAdmission(null);
     try {
       const report = await axiomApi.generateAxiomEngineServingProfile(selectedProfile.id, { prompt });
       setOutput(report.result.response);
+      setAdmission(report.admission);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Profile generation failed.");
     } finally {
@@ -237,6 +246,14 @@ export default function EngineServingProfilesPanel() {
       <button type="button" className="button primary-button" onClick={() => void generate()} disabled={busy !== "" || !selectedProfile || !prompt.trim()}>
         <Play size={15} /> {busy === "generate" ? "Generating locally…" : "Generate through profile"}
       </button>
+      {admission && <p className="quiet-note" role="status">
+        {admission.queued
+          ? `Admitted from FIFO queue position ${admission.queue_position}`
+          : "Admitted immediately"}
+        · waited {(admission.waited_ms / 1000).toFixed(2)} s
+        · one active worker
+        · per-profile queue cap {admission.queue_limit}
+      </p>}
       {output && <pre className="local-inference-output" aria-label="Serving profile generated response">{output}</pre>}
       <p className="quiet-note">Profiles persist only configuration. They do not save credentials, custom endpoints, prompts or responses. Readiness is a preflight, not a guarantee of runtime fit or a separate HTTP listener.</p>
     </section>
