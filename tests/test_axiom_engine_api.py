@@ -916,6 +916,72 @@ def test_openai_chat_completion_calls_axiom_native_stream_with_chat_messages(mon
     assert observed["include_token_events"] is False
 
 
+def test_native_ndjson_stream_preserves_request_queue_full_error(monkeypatch) -> None:
+    from axiom.core.request_admission import RequestAdmissionQueueFull
+
+    monkeypatch.setattr(engine_api, "resolve_local_model_directory", lambda value, label: value)
+
+    def rejected_stream(**_kwargs):
+        raise RequestAdmissionQueueFull("Native inference queue is full.")
+        yield
+
+    monkeypatch.setattr(engine_api, "generate_local_stream", rejected_stream)
+    response = _client().post("/api/engine/generate/stream", json={
+        "model_path": "/trusted/models/tiny",
+        "prompt": "hello",
+        "max_new_tokens": 8,
+    })
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line]
+    assert events[0]["type"] == "error"
+    assert events[0]["code"] == "request_queue_full"
+    assert events[0]["retry_after_seconds"] == 1
+
+
+def test_openai_nonstream_maps_global_admission_queue_full_to_429(monkeypatch) -> None:
+    from axiom.core.request_admission import RequestAdmissionQueueFull
+
+    monkeypatch.setattr(openai_compat, "discover_local_engine_assets", lambda: {
+        "models": [{"name": "tiny-llama", "path": "/trusted/models/tiny", "model_type": "llama"}],
+    })
+
+    def rejected_stream(**_kwargs):
+        raise RequestAdmissionQueueFull("Native inference queue is full.")
+        yield
+
+    monkeypatch.setattr(openai_compat, "generate_local_stream", rejected_stream)
+    response = _client().post("/v1/chat/completions", json={
+        "model": "tiny-llama",
+        "messages": [{"role": "user", "content": "hello"}],
+    })
+    assert response.status_code == 429
+    assert response.json()["error"]["code"] == "request_queue_full"
+    assert response.json()["error"]["type"] == "rate_limit_error"
+
+
+def test_openai_sse_stream_preserves_global_admission_error_codes(monkeypatch) -> None:
+    from axiom.core.request_admission import RequestAdmissionQueueFull
+
+    monkeypatch.setattr(openai_compat, "discover_local_engine_assets", lambda: {
+        "models": [{"name": "tiny-llama", "path": "/trusted/models/tiny", "model_type": "llama"}],
+    })
+
+    def rejected_stream(**_kwargs):
+        raise RequestAdmissionQueueFull("Native inference queue is full.")
+        yield
+
+    monkeypatch.setattr(openai_compat, "generate_local_stream", rejected_stream)
+    response = _client().post("/v1/chat/completions", json={
+        "model": "tiny-llama",
+        "messages": [{"role": "user", "content": "hello"}],
+        "stream": True,
+    })
+    assert response.status_code == 200
+    assert '"code": "request_queue_full"' in response.text
+    assert '"type": "rate_limit_error"' in response.text
+    assert "data: [DONE]" in response.text
+
+
 def test_openai_chat_stream_formats_cumulative_tokens_as_sse_deltas(monkeypatch) -> None:
     monkeypatch.setattr(openai_compat, "discover_local_engine_assets", lambda: {
         "models": [{"name": "tiny-llama", "path": "/trusted/models/tiny", "model_type": "llama"}],
