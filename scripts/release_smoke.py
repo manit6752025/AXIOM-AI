@@ -1668,7 +1668,11 @@ def inspect(root: Path) -> dict[str, Any]:
         (root / "tests/test_request_admission.py").read_text(encoding="utf-8")
         + (root / "tests/test_native_engine.py").read_text(encoding="utf-8")
     )
-    serving_profiles_tests = (root / "tests/test_serving_profiles.py").read_text(encoding="utf-8")
+    serving_profiles_tests = (
+        (root / "tests/test_serving_profiles.py").read_text(encoding="utf-8")
+        + (root / "tests/test_api_admission_errors.py").read_text(encoding="utf-8")
+        + (root / "tests/test_axiom_engine_api.py").read_text(encoding="utf-8")
+    )
     server_source = (root / "axiom/api/server.py").read_text(encoding="utf-8")
     serving_profiles_cli = engine_cli_source
     serving_profiles_panel = (root / "src/components/EngineServingProfilesPanel.tsx").read_text(encoding="utf-8")
