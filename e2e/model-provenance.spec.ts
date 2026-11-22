@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { ensureAuthenticated } from "./helpers/auth";
 
 test("Models can inspect bounded local provenance evidence without loading weights", async ({ page }) => {
+  const provenanceApiPath = "/api/workspace/models/provenance";
   let provenancePayload: Record<string, unknown> | null = null;
   const report = {
     schema_version: 1,
@@ -72,7 +73,7 @@ test("Models can inspect bounded local provenance evidence without loading weigh
       truncated: false,
     },
   }));
-  await page.route("**/api/workspace/models/provenance", async (route) => {
+  await page.route(`**${provenanceApiPath}`, async (route) => {
     provenancePayload = route.request().postDataJSON() as Record<string, unknown>;
     await route.fulfill({ json: { provenance: report } });
   });
