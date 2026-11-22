@@ -229,7 +229,9 @@ def model_provenance_issues(
 
 def request_admission_issues(
     admission_core: str,
+    engine_core: str,
     engine_api: str,
+    serving_core: str,
     engine_cli: str,
     client: str,
     runtime_panel: str,
@@ -253,9 +255,22 @@ def request_admission_issues(
             "RequestAdmissionTimeout",
             "RequestAdmissionCancelled",
         )),
+        ("Native engine integration", engine_core, (
+            "ENGINE_REQUEST_ADMISSION = BoundedRequestAdmission(max_active=1, max_queue=32)",
+            "ENGINE_REQUEST_ADMISSION.acquire(",
+            "with _ENGINE_LOCK:",
+            "ENGINE_REQUEST_ADMISSION.release()",
+            "with _engine_request_lock():",
+        )),
+        ("Serving profile execution", serving_core, (
+            "admission_held: bool = False",
+            "engine_execution_lock() if admission_held else nullcontext()",
+            "_lock_held=admission_held",
+        )),
         ("Serving API", engine_api, (
-            "NATIVE_PROFILE_ADMISSION = BoundedRequestAdmission(max_active=1, max_queue=32)",
+            "NATIVE_PROFILE_ADMISSION = ENGINE_REQUEST_ADMISSION",
             "queue_key=profile[\"id\"]",
+            "admission_held=True",
             "RequestAdmissionQueueFull",
             "RequestAdmissionTimeout",
             "RequestAdmissionCancelled",
@@ -272,7 +287,10 @@ def request_admission_issues(
             "admission_cancel.set()",
         )),
         ("Serving CLI", engine_cli, (
-            "_CLI_PROFILE_ADMISSION = BoundedRequestAdmission(max_active=1, max_queue=32)",
+            "_CLI_PROFILE_ADMISSION = ENGINE_REQUEST_ADMISSION",
+            "_CLI_PROFILE_ADMISSION.acquire(",
+            "queue_key=profile[\"id\"]",
+            "admission_held=True",
             "_CLI_PROFILE_ADMISSION.acquire(",
             "queue_key=profile[\"id\"]",
             "_CLI_PROFILE_ADMISSION.release()",
@@ -300,6 +318,9 @@ def request_admission_issues(
             "test_queue_wait_times_out_and_cancelled_ticket_is_removed",
             "test_queue_limits_are_scoped_per_profile_with_a_global_safety_ceiling",
             "test_queue_position_is_recomputed_after_an_earlier_ticket_is_cancelled",
+        "test_engine_admission_wait_is_bounded",
+        "test_engine_admission_wait_honors_cancellation",
+        "test_engine_admission_uses_one_shared_manager_and_releases_slots",
         )),
         ("Serving API regressions", serving_tests, (
             "test_serving_profile_api_crud_readiness_and_profile_limited_generation",
@@ -314,8 +335,10 @@ def request_admission_issues(
             "Cancel generation",
             "Generation cancellation was sent",
         )),
-        ("Serving documentation", docs, (
-            "selected profile's queue limit",
+        ("Global API error mapping", engine_api, (
+            "NATIVE_PROFILE_ADMISSION = ENGINE_REQUEST_ADMISSION",
+        )),
+        ("API admission error handlers", docs, (
             "global ceiling of 32 waiters",
             "Retry-After: 1",
             "499",
