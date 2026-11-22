@@ -66,7 +66,7 @@ class AxiomClient:
             or len(workspace_id) > 128
             or any(ord(character) < 32 or ord(character) == 127 for character in workspace_id)
         ):
-            raise AxiomConfigurationError("Workspace ID must be a non-empty string of at most 128 characters.")
+            raise AxiomConfigurationError("Workspace ID must be a non-empty printable string of at most 128 characters.")
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 900:
             raise AxiomConfigurationError("Request timeout must be greater than 0 and at most 900 seconds.")
         if (
