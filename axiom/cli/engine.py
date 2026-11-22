@@ -17,13 +17,13 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from axiom.core.engine import AxiomEngineError, benchmark_local, discover_local_engine_assets, estimate_native_quantization, generate_local, generate_local_batch, generate_local_stream, inspect_native_model_context, resolve_local_model_directory, runtime_status, runtime_telemetry
+from axiom.core.engine import ENGINE_REQUEST_ADMISSION, AxiomEngineError, benchmark_local, discover_local_engine_assets, estimate_native_quantization, generate_local, generate_local_batch, generate_local_stream, inspect_native_model_context, resolve_local_model_directory, runtime_status, runtime_telemetry
 from axiom.core.prediction_jobs import cancel_prediction_job, get_prediction_job, list_prediction_jobs, start_prediction_job, wait_prediction_job
 from axiom.core.workspace_context import active_workspace_root
 from axiom.core import model_studio
 from axiom.core.engine_fabric import EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
 from axiom.core.engine_fabric_profiles import EngineFabricProfileError, EngineFabricProfileStore
-from axiom.core.request_admission import BoundedRequestAdmission, RequestAdmissionCancelled, RequestAdmissionQueueFull, RequestAdmissionTimeout
+from axiom.core.request_admission import RequestAdmissionCancelled, RequestAdmissionQueueFull, RequestAdmissionTimeout
 from axiom.core.serving_profiles import (
     ServingProfileError,
     ServingProfileStore,
@@ -36,7 +36,7 @@ from axiom.core.benchmark_profiles import BenchmarkProfileError, BenchmarkProfil
 
 engine_app = typer.Typer(help="Run causal language models directly through AXIOM's local engine.", no_args_is_help=True)
 console = Console()
-_CLI_PROFILE_ADMISSION = BoundedRequestAdmission(max_active=1, max_queue=32)
+_CLI_PROFILE_ADMISSION = ENGINE_REQUEST_ADMISSION
 
 
 def _fail(message: str) -> None:
@@ -221,6 +221,7 @@ def serving_profile_run(
         try:
             output.put(("result", generate_from_profile(
                 profile, prompt, max_new_tokens=max_new_tokens, cancel_event=cancel_event,
+                admission_held=True,
             )))
         except BaseException as exc:
             output.put(("error", exc))
@@ -421,7 +422,7 @@ def engine_estimate(
             ram_budget_gib=ram_budget_gib,
             vram_budget_gib=vram_budget_gib,
         )
-    except (ValueError, AxiomEngineError) as exc:
+    except (ValueError, AxiomEngineError, RequestAdmissionQueueFull, RequestAdmissionTimeout, RequestAdmissionCancelled) as exc:
         _fail(str(exc))
     if json_output:
         typer.echo(json.dumps(report, indent=2, ensure_ascii=False))
@@ -631,7 +632,7 @@ def engine_benchmark(
             memory_mode=memory_mode,
             precision=precision,
         )
-    except (ValueError, AxiomEngineError) as exc:
+    except (ValueError, AxiomEngineError, RequestAdmissionQueueFull, RequestAdmissionTimeout, RequestAdmissionCancelled) as exc:
         _fail(str(exc))
     if profile_name:
         try:
@@ -776,7 +777,7 @@ def engine_run(
                 memory_mode=memory_mode,
                 precision=precision,
             )
-    except (ValueError, AxiomEngineError) as exc:
+    except (ValueError, AxiomEngineError, RequestAdmissionQueueFull, RequestAdmissionTimeout, RequestAdmissionCancelled) as exc:
         _fail(str(exc))
     if json_output:
         typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
@@ -854,7 +855,7 @@ def engine_batch(
             memory_mode=memory_mode,
             precision=precision,
         )
-    except (ValueError, AxiomEngineError) as exc:
+    except (ValueError, AxiomEngineError, RequestAdmissionQueueFull, RequestAdmissionTimeout, RequestAdmissionCancelled) as exc:
         _fail(str(exc))
     if json_output:
         typer.echo(json.dumps(result, indent=2, ensure_ascii=False))
