@@ -28,6 +28,7 @@ def test_sdk_operation_manifest_paths_and_methods_exist_in_openapi():
 def test_sdk_contract_rejects_manifest_drift(monkeypatch, tmp_path):
     import scripts.verify_sdk_contract as verifier
 
+    original = verifier.MANIFEST_PATH.read_text(encoding="utf-8")
     malformed = json.loads(original)
     malformed["operations"][0]["path"] = "/api/not-a-real-route"
     temporary = tmp_path / "drifted-operations.json"
