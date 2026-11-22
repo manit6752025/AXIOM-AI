@@ -261,6 +261,15 @@ def test_serving_profile_api_crud_readiness_and_profile_limited_generation(tmp_p
         "context_limit_tokens": profile["context_length"],
     })
     expected = {"engine": "axiom-native-engine", "response": "hello", "completion_tokens": 1}
+    admission_calls = []
+    releases = []
+
+    def fake_admission(**kwargs):
+        admission_calls.append(kwargs)
+        return {"queue_position": 2, "waited_ms": 42}
+
+    monkeypatch.setattr(engine_api.NATIVE_PROFILE_ADMISSION, "acquire", fake_admission)
+    monkeypatch.setattr(engine_api.NATIVE_PROFILE_ADMISSION, "release", lambda: releases.append(True))
 
     def fake_generate(profile, prompt, **kwargs):
         return expected
@@ -268,7 +277,7 @@ def test_serving_profile_api_crud_readiness_and_profile_limited_generation(tmp_p
     monkeypatch.setattr(engine_api, "generate_from_profile", fake_generate)
     with _client() as client:
         create = client.post("/api/engine/serving-profiles", json=_config(
-            tmp_path, model_path=str(model), name="API profile",
+            tmp_path, model_path=str(model), name="API profile", max_queued_requests=3,
         ))
         assert create.status_code == 201, create.text
         profile = create.json()["profile"]
@@ -292,6 +301,16 @@ def test_serving_profile_api_crud_readiness_and_profile_limited_generation(tmp_p
         assert result.json()["profile"]["id"] == profile_id
         assert result.json()["result"] == expected
         assert result.json()["scope"]["network_used"] is False
+        assert result.json()["admission"] == {
+            "queue_position": 2,
+            "queued": True,
+            "waited_ms": 42,
+            "concurrency_limit": 1,
+            "queue_limit": 3,
+        }
+        assert admission_calls[0]["queue_key"] == profile_id
+        assert admission_calls[0]["queue_limit"] == 3
+        assert releases == [True]
 
         excessive = client.post(f"/api/engine/serving-profiles/{profile_id}/generate", json={
             "prompt": "x" * 12001,
@@ -320,8 +339,18 @@ def test_serving_profile_api_rejects_unavailable_and_invalid_models(tmp_path, mo
         assert malformed.status_code == 422
 
 
-def test_serving_profile_api_applies_busy_admission_without_queueing(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path);
+@pytest.mark.parametrize(
+    ("error_type", "expected_status"),
+    [
+        (engine_api.RequestAdmissionQueueFull, 429),
+        (engine_api.RequestAdmissionTimeout, 504),
+        (engine_api.RequestAdmissionCancelled, 499),
+    ],
+)
+def test_serving_profile_api_maps_queue_full_timeout_and_cancellation(
+    tmp_path, monkeypatch, error_type, expected_status,
+):
+    monkeypatch.chdir(tmp_path)
     model = tmp_path / "models" / "qwen"
     model.mkdir(parents=True)
     monkeypatch.setattr(engine_api, "_validated_path", lambda value, label: None if value is None else str(Path(value).resolve()))
@@ -333,12 +362,24 @@ def test_serving_profile_api_applies_busy_admission_without_queueing(tmp_path, m
     monkeypatch.setattr(engine_api, "validate_serving_prompt", lambda *args, **kwargs: {"max_new_tokens": 8})
     with _client() as client:
         profile = client.post("/api/engine/serving-profiles", json=_config(
-            tmp_path, model_path=str(model), name="Busy profile",
+            tmp_path, model_path=str(model), name="Busy profile", max_queued_requests=2,
         )).json()["profile"]
-        monkeypatch.setattr(engine_api.NATIVE_PROFILE_ADMISSION, "acquire", lambda **kwargs: (_ for _ in ()).throw(engine_api.RequestAdmissionQueueFull("The native request queue is full.")))
-        busy = client.post(f"/api/engine/serving-profiles/{profile['id']}/generate", json={"prompt": "hi"})
-        assert busy.status_code == 429
-        assert busy.headers["retry-after"] == "1"
+
+        def reject(**kwargs):
+            assert kwargs["queue_key"] == profile["id"]
+            assert kwargs["queue_limit"] == 2
+            raise error_type("The native request admission did not succeed.")
+
+        monkeypatch.setattr(engine_api.NATIVE_PROFILE_ADMISSION, "acquire", reject)
+        failed = client.post(
+            f"/api/engine/serving-profiles/{profile['id']}/generate",
+            json={"prompt": "hi"},
+        )
+        assert failed.status_code == expected_status
+        if expected_status == 429:
+            assert failed.headers["retry-after"] == "1"
+        else:
+            assert "retry-after" not in failed.headers
 
 
 
