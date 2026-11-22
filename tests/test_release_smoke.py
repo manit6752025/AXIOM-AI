@@ -590,8 +590,10 @@ def test_supply_chain_contract_requires_spdx_and_explicit_dependency_audit() -> 
         "test_vulnerability_scan_rejects_duplicate_json_object_keys"
     )
     api_tests = (
-        "test_security_api_exports_spdx_sbom_to_a_create_only_file\n"
-        "test_security_api_requires_network_authorization_for_dependency_audits"
+        "test_security_supply_chain_api_returns_spdx_sbom\\n"
+        "test_security_supply_chain_api_requires_explicit_network_authorization\\n"
+        "test_security_supply_chain_api_runs_only_authorized_bounded_dependency_scan\\n"
+        "test_security_supply_chain_api_rejects_coerced_network_authorization_values"
     )
     e2e = (
         'Export SPDX 2.3 SBOM\nScan dependencies (network)\npage.waitForEvent("dialog")\n'
