@@ -169,7 +169,7 @@ jobs:
           echo "Website and signed APT repository assembled successfully."
 
       - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Upload combined Pages artifact
         uses: actions/upload-pages-artifact@v4
