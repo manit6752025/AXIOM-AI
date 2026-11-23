@@ -334,11 +334,21 @@ def register(app, model_app, dataset_app) -> None:
             {"name": name, "available": bool(shutil.which(command)), "path": shutil.which(command)}
             for name, command in (("Python", "python3"), ("Python fallback", "python"), ("Git", "git"), ("Node.js", "node"), ("npm", "npm"))
         ]
-        payload = {"schema_version": 1, "version": AXIOM_VERSION, "workspace": report, "tools": tool_checks}
+        summary = report["summary"]
+        exit_code = 1 if summary["failed"] or (strict and summary["warnings"]) else 0
+        payload = {
+            "schema_version": 1,
+            "version": AXIOM_VERSION,
+            "status": report["status"],
+            "strict": strict,
+            "exit_code": exit_code,
+            "workspace": report,
+            "tools": tool_checks,
+        }
         if json_output:
             typer.echo(json.dumps(payload, indent=2, sort_keys=True))
-            if report["summary"]["failed"] or (strict and report["summary"]["warnings"]):
-                raise typer.Exit(code=1)
+            if exit_code:
+                raise typer.Exit(code=exit_code)
             return
 
         typer.echo(f"AXIOM Doctor — {AXIOM_VERSION}")
