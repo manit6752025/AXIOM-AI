@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 
 import pytest
@@ -2600,3 +2601,61 @@ def test_engine_admission_uses_one_shared_manager_and_releases_slots():
     with engine_module._engine_request_lock():
         assert engine_module.ENGINE_REQUEST_ADMISSION.active_count == before + 1
     assert engine_module.ENGINE_REQUEST_ADMISSION.active_count == before
+
+
+@pytest.mark.skipif(
+    not os.environ.get("AXIOM_ACCELERATOR_DEVICE"),
+    reason="Runs only on explicitly provisioned physical accelerator runners.",
+)
+def test_native_lora_adapter_executes_on_configured_accelerator(tmp_path: Path) -> None:
+    """Load a real safetensors checkpoint and LoRA adapter on the selected accelerator."""
+    requested = os.environ["AXIOM_ACCELERATOR_DEVICE"].strip().lower()
+    torch = pytest.importorskip("torch")
+    safetensors_torch = pytest.importorskip("safetensors.torch")
+
+    if requested == "cuda":
+        assert torch.version.cuda is not None, "CUDA runner needs a CUDA-enabled PyTorch build."
+        assert torch.cuda.is_available(), "A physical CUDA device must be available."
+        device = torch.device("cuda")
+    elif requested == "rocm":
+        assert getattr(torch.version, "hip", None), "ROCm runner needs a ROCm-enabled PyTorch build."
+        assert torch.cuda.is_available(), "A physical ROCm device must be available through torch.cuda."
+        device = torch.device("cuda")
+    elif requested == "mps":
+        assert torch.backends.mps.is_built(), "MPS runner needs a PyTorch build with MPS support."
+        assert torch.backends.mps.is_available(), "An Apple MPS device must be available."
+        device = torch.device("mps")
+    elif requested == "xpu":
+        xpu = getattr(torch, "xpu", None)
+        assert xpu is not None and xpu.is_available(), "A physical Intel XPU device must be available."
+        device = torch.device("xpu")
+    else:
+        pytest.fail(f"Unsupported AXIOM_ACCELERATOR_DEVICE value: {requested!r}")
+
+    torch.manual_seed(7)
+    root = tmp_path / "trusted-accelerator"
+    model = root / "base"
+    model.mkdir(parents=True)
+    (model / "config.json").write_text(json.dumps(_config()), encoding="utf-8")
+    (model / "tokenizer.json").write_text("{}", encoding="utf-8")
+    safetensors_torch.save_file(_tiny_weights(torch), str(model / "model.safetensors"))
+    adapter = _tiny_adapter_file(safetensors_torch, torch, root)
+
+    base_runtime = NativeLlamaRuntime.from_directory(
+        model, torch, device, trusted_roots=(root.resolve(),)
+    )
+    adapted_runtime = NativeLlamaRuntime.from_directory(
+        model, torch, device, adapter_dir=adapter, trusted_roots=(root.resolve(),)
+    )
+    token_ids = torch.tensor([[1, 2, 3]], dtype=torch.long, device=device)
+
+    with torch.inference_mode():
+        base_logits, _ = base_runtime.forward(token_ids)
+        adapted_logits, _ = adapted_runtime.forward(token_ids)
+
+    assert base_logits.device.type == adapted_logits.device.type == device.type
+    assert base_logits.shape == adapted_logits.shape == (1, _config()["vocab_size"])
+    assert torch.isfinite(base_logits).all().item()
+    assert torch.isfinite(adapted_logits).all().item()
+    assert adapted_runtime.adapter
+    assert not torch.allclose(base_logits, adapted_logits)
