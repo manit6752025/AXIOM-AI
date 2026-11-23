@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -35,7 +36,41 @@ security_app = typer.Typer(help="Audit local configuration, permissions, API cre
 artifact_app = typer.Typer(help="Inspect Python release packages without extracting or executing them.", no_args_is_help=True)
 security_events_app = typer.Typer(help="Review, verify, and export the local security event journal.", no_args_is_help=True)
 MAX_CONFIG_VALIDATION_BYTES = 256 * 1024
+_SECRET_CONFIG_KEY_MARKERS = (
+    "apikey", "clientsecret", "secret", "password", "credential",
+    "privatekey", "authorization", "accesstoken", "refreshtoken",
+    "authtoken", "bearertoken",
+)
 console = Console()
+
+
+def _redact_config_values(value: object) -> tuple[object, int]:
+    """Return a JSON-safe config tree with likely credential fields redacted."""
+    if isinstance(value, dict):
+        redacted: dict[str, object] = {}
+        count = 0
+        for raw_key, child in value.items():
+            key = str(raw_key)
+            normalized = re.sub(r"[^a-z0-9]", "", key.casefold())
+            if any(marker in normalized for marker in _SECRET_CONFIG_KEY_MARKERS) or normalized == "token":
+                redacted[key] = "[REDACTED]"
+                count += 1
+            else:
+                safe_child, child_count = _redact_config_values(child)
+                redacted[key] = safe_child
+                count += child_count
+        return redacted, count
+    if isinstance(value, list):
+        result: list[object] = []
+        count = 0
+        for item in value:
+            safe_item, child_count = _redact_config_values(item)
+            result.append(safe_item)
+            count += child_count
+        return result, count
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value, 0
+    return str(value), 0
 
 PROJECT_PATHS = (
     "axiom.yaml",
@@ -460,16 +495,30 @@ def register(app, model_app, dataset_app) -> None:
         print_next_commands(next_commands(root))
 
     @app.command("check")
-    def check() -> None:
+    def check(
+        json_output: bool = typer.Option(False, "--json", help="Emit a versioned project status report."),
+    ) -> None:
         """Quickly check for a local AXIOM project and its standard paths."""
         root = Path.cwd()
+        detected = project_detected(root)
+        missing = missing_project_paths(root) if detected else list(PROJECT_PATHS)
+        if json_output:
+            typer.echo(json.dumps({
+                "schema_version": 1,
+                "status": "ready" if detected and not missing else "incomplete" if detected else "not_project",
+                "project_detected": detected,
+                "root": str(root),
+                "required_paths": list(PROJECT_PATHS),
+                "missing_paths": missing,
+                "next_commands": list(next_commands(root)),
+            }, ensure_ascii=False, sort_keys=True))
+            return
 
-        if not project_detected(root):
+        if not detected:
             console.print(f"[yellow]No AXIOM project detected:[/yellow] {root}")
             console.print("Next: [cyan]axiom init my-ai[/cyan]")
             return
 
-        missing = missing_project_paths(root)
         console.print(f"[green]✓ AXIOM project detected:[/green] {root}")
 
         if missing:
@@ -642,21 +691,24 @@ def register(app, model_app, dataset_app) -> None:
         )
 
     @project_app.command("validate")
-    def project_validate() -> None:
+    def project_validate(
+        json_output: bool = typer.Option(False, "--json", help="Emit a versioned project validation report."),
+    ) -> None:
         """Check expected AXIOM project paths in the current directory."""
         root = Path.cwd()
-
-        required = [
-            "axiom.yaml",
-            "README.md",
-            "data",
-            "models",
-            "experiments",
-            "evaluations",
-            "outputs",
-        ]
-
+        required = list(PROJECT_PATHS)
         missing = [item for item in required if not (root / item).exists()]
+        if json_output:
+            typer.echo(json.dumps({
+                "schema_version": 1,
+                "valid": not missing,
+                "root": str(root),
+                "required_paths": required,
+                "missing_paths": missing,
+            }, ensure_ascii=False, sort_keys=True))
+            if missing:
+                raise typer.Exit(code=1)
+            return
 
         if missing:
             console.print("[red]Project validation failed.[/red]")
@@ -678,9 +730,36 @@ def register(app, model_app, dataset_app) -> None:
             "--path",
             help="Path to a local axiom.yaml file",
         ),
+        json_output: bool = typer.Option(False, "--json", help="Emit parsed YAML as versioned JSON with sensitive values redacted."),
     ) -> None:
-        """Print a local axiom.yaml file."""
+        """Print a local axiom.yaml file or a redacted machine-readable representation."""
         config = Path(path)
+
+        if json_output:
+            try:
+                with open_regular_file(config) as handle:
+                    raw = handle.read(MAX_CONFIG_VALIDATION_BYTES + 1)
+            except FileNotFoundError:
+                emit_error("Configuration file was not found.", code="config_not_found")
+            except (OSError, SafePathError):
+                emit_error("Configuration file could not be read safely.", code="config_read_failed")
+            if len(raw) > MAX_CONFIG_VALIDATION_BYTES:
+                emit_error("Configuration file exceeds the 256 KiB JSON inspection limit.", code="config_too_large")
+            try:
+                parsed = yaml.safe_load(raw.decode("utf-8"))
+            except (UnicodeError, yaml.YAMLError):
+                emit_error("Configuration file is not valid UTF-8 YAML.", code="config_parse_failed")
+            if not isinstance(parsed, dict):
+                emit_error("Configuration document must contain a YAML mapping.", code="config_shape_invalid")
+            safe_config, redacted_count = _redact_config_values(parsed)
+            typer.echo(json.dumps({
+                "schema_version": 1,
+                "path": str(config),
+                "config": safe_config,
+                "redacted_value_count": redacted_count,
+                "scope_note": "Sensitive-looking configuration values are redacted by key name. Review the source file with care before sharing it.",
+            }, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False))
+            return
 
         if not config.is_file():
             emit_error(f"Config not found: {config}", code="config_not_found")
