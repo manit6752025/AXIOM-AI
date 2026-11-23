@@ -95,6 +95,10 @@ class WorkspaceModelInput(BaseModel):
     architecture: str | None = Field(default=None, max_length=160)
     license: str | None = Field(default=None, max_length=120)
     license_review: Literal["unreviewed", "approved", "restricted", "unknown"] = "unreviewed"
+    source_attribution: str | None = Field(default=None, max_length=200)
+    source_url: str | None = Field(default=None, max_length=2048)
+    source_revision: str | None = Field(default=None, max_length=160)
+    license_review_notes: str | None = Field(default=None, max_length=1000)
     tags: list[str] = Field(default_factory=list, max_length=32)
     favorite: bool = False
     content_sha256: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
@@ -112,6 +116,10 @@ class WorkspaceModelPatch(BaseModel):
     architecture: str | None = Field(default=None, max_length=160)
     license: str | None = Field(default=None, max_length=120)
     license_review: Literal["unreviewed", "approved", "restricted", "unknown"] | None = None
+    source_attribution: str | None = Field(default=None, max_length=200)
+    source_url: str | None = Field(default=None, max_length=2048)
+    source_revision: str | None = Field(default=None, max_length=160)
+    license_review_notes: str | None = Field(default=None, max_length=1000)
     tags: list[str] | None = Field(default=None, max_length=32)
     favorite: bool | None = None
     content_sha256: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
@@ -492,7 +500,7 @@ def workspace_update_model(model_id: str, request: WorkspaceModelPatch) -> dict[
     changes = request.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=422, detail="At least one metadata field is required.")
-    if any(value is None for key, value in changes.items() if key not in {"license", "content_sha256", "architecture", "parameters", "quantization", "tags", "size_bytes", "workspace_labels"}):
+    if any(value is None for key, value in changes.items() if key not in {"license", "content_sha256", "architecture", "parameters", "quantization", "tags", "size_bytes", "workspace_labels", "source_attribution", "source_url", "source_revision", "license_review_notes"}):
         raise HTTPException(status_code=422, detail="Non-null metadata values are required.")
     try:
         model = ModelRegistry().update(model_id, changes)

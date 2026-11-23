@@ -1,6 +1,6 @@
 import json
 
-from axiom.core.tool_permissions import ToolPermissionStore
+from axiom.core.tool_permissions import TOOL_SCOPES, ToolPermissionStore
 from axiom.core.workflows import validate_workflow_graph
 
 
@@ -20,6 +20,10 @@ def test_tool_permissions_deny_by_default_and_follow_active_profile(tmp_path):
 
     assert store.allows("axiom_system_info") is True
     assert store.allows("axiom_dataset_clean") is False
+    listed = {item["name"]: item for item in store.list()["tools"]}
+    assert listed["axiom_dataset_clean"]["scopes"] == ["write", "read"]
+    assert listed["axiom_engine_generate"]["scopes"] == ["execution", "read"]
+    assert set(TOOL_SCOPES) == set(listed)
 
     try:
         store.create_profile("read-only")

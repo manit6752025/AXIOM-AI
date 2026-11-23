@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 import { recordFrontendError } from "../diagnostics/frontendErrors";
-=======
-import { redactErrorText, reportFrontendError } from "../utils/errorReporting";
->>>>>>> 0150185 (feat(gui): add redacted frontend error reports)
 
 const API_BASE = import.meta.env.VITE_AXIOM_API_URL || "";
 
@@ -529,6 +525,10 @@ export type WorkspaceModel = {
   architecture?: string | null;
   license?: string | null;
   license_review?: "unreviewed" | "approved" | "restricted" | "unknown";
+  source_attribution?: string | null;
+  source_url?: string | null;
+  source_revision?: string | null;
+  license_review_notes?: string | null;
   tags?: string[];
   favorite?: boolean;
   content_sha256?: string | null;
@@ -1278,9 +1278,7 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
     succeeded = true;
     return payload as T;
   } catch (error) {
-    let safeError: Error;
     if (error instanceof DOMException && error.name === "AbortError") {
-<<<<<<< HEAD
       recordFrontendError({ source: "api.request", category: "api_timeout", errorName: "AbortError" });
       throw new Error(`AXIOM backend did not respond within 15 seconds (request ID ${requestId}).`, { cause: error });
     }
@@ -1289,16 +1287,6 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
       throw new Error(`AXIOM backend is unavailable. Start the local API and try again (request ID ${requestId}).`, { cause: error });
     }
     throw error;
-=======
-      safeError = new Error(`AXIOM backend did not respond within ${Math.round(timeoutMs / 1000)} seconds (request ID ${requestId}).`);
-    } else if (error instanceof TypeError) {
-      safeError = new Error(`AXIOM backend is unavailable. Start the local API and try again (request ID ${requestId}).`);
-    } else {
-      safeError = new Error(redactErrorText(error));
-    }
-    reportFrontendError("api", safeError);
-    throw safeError;
->>>>>>> 0150185 (feat(gui): add redacted frontend error reports)
   } finally {
     window.clearTimeout(timeout);
     window.dispatchEvent(new CustomEvent("axiom:api-request-end", {
@@ -2032,7 +2020,7 @@ export const axiomApi = {
       method: "POST", body: JSON.stringify({}),
     }),
   modelStudioStatus: () => requestJson<ModelStudioStatus>("/api/models/studio/status"),
-  modelStudioSearch: (q: string, limit = 12) => requestJson<{ provider: string; query: string; count: number; results: ModelStudioModel[]; note: string }>(`/api/models/studio/search?${new URLSearchParams({ q, limit: String(limit) })}`),
+  modelStudioSearch: (q: string, limit = 12, consent = false) => requestJson<{ provider: string; query: string; count: number; results: ModelStudioModel[]; note: string }>(`/api/models/studio/search?${new URLSearchParams({ q, limit: String(limit), consent: String(consent) })}`),
   modelStudioFiles: (repoId: string) => requestJson<{ repo_id: string; files: ModelStudioFile[]; count: number; url: string; note: string }>(`/api/models/studio/files?${new URLSearchParams({ repo_id: repoId })}`),
   llmProviders: () => requestJson<LLMProviderCatalog>("/api/llm/providers"),
   llmModels: (input: LLMModelRequest) => requestJson<LLMModelResult>("/api/llm/models", { method: "POST", body: JSON.stringify(input) }),

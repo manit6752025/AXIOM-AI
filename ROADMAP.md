@@ -55,8 +55,6 @@ feature exists or a delivery-date promise.
 - [R035 · Implemented; tests passing] Add export/download affordances with clear local-file boundaries. Model metadata, dataset manifest, support bundle, workflow manifest, workspace metadata export/import, and safe filename handling pass the browser acceptance suite in [quality-gates run #44650591808](https://github.com/manit6752025/AXIOM-AI/actions/runs/44650591808).
 - [R036 · Implemented; tests passing] Add a bounded 50-entry in-memory frontend error report containing only allowlisted source/category/error names, timestamps, page IDs, and HTTP status codes. Capture API HTTP/network/timeout failures plus unhandled runtime/rejection metadata; never store raw messages, stack traces, URLs, request IDs, headers, bodies, prompts, dataset values, credentials, or environment values. Add user-triggered redacted JSON download and clear controls in Diagnostics, with no automatic upload. Browser redaction tests and all Python, lint, production-build, browser E2E, and Ubuntu/macOS/Windows release-contract gates pass in [quality-gates run #44650591808](https://github.com/manit6752025/AXIOM-AI/actions/runs/44650591808).
 =======
-- [R035 · In progress; validation pending] Add export/download affordances with clear local-file boundaries.
-- [R036 · Implemented; tests passing] Add local-only frontend error reporting that redacts authorization values, credentials, tokens, prompts, and data values before a bounded report is retained or displayed. Settings exposes the redacted per-tab report and explicit clear control; reports are never transmitted automatically. Verified with lint, production build, and browser coverage.
 >>>>>>> 0150185 (feat(gui): add redacted frontend error reports)
 
 ### 04 · Model lifecycle and compatibility
@@ -69,15 +67,11 @@ feature exists or a delivery-date promise.
 - [R041 · Implemented; tests passing] Keep model classification tags, favorites, and workspace labels as distinct metadata fields. Workspace labels are bounded and validated in the registry/API/import path, searchable without being treated as exact tags, manageable through CLI add/update/list and clear flags, and editable at registration in the Models GUI. Registry/API, CLI JSON, search, validation, and GUI acceptance tests plus Python, lint, production build, browser E2E, and Ubuntu/macOS/Windows release gates passed in [quality-gates run #44653864382](https://github.com/manit6752025/AXIOM-AI/actions/runs/44653864382).
 - [R042 · In progress; validation pending] Add local-only format/runtime candidate matrices with bounded version evidence for Ollama, llama.cpp, and Hugging Face Transformers. Expose through the API, `axiom model runtimes`, and the Models GUI; do not claim support or loadability from a version probe. Python/API/CLI and Playwright validation plus full CI are pending.
 =======
-- [R039 · In progress; validation pending] Add model inspection summaries in the GUI.
-- [R040 · In progress; validation pending] Add duplicate detection by source and content metadata.
-- [R041 · In progress; validation pending] Add model tags, favorites, and workspace labels.
-- [R042 · Implemented; tests passing] Add format/runtime compatibility matrices with explicit candidate/unverified state, AXIOM/Transformers version evidence where available, and clear evidence limits for external Ollama/llama.cpp runtimes. The Models GUI renders the per-runtime evidence instead of implying loadability.
 >>>>>>> 855bb32 (feat(models): show runtime compatibility evidence)
 - [R043 · In progress; validation pending] Add metadata-based RAM/VRAM fit ranges with explicit uncertainty bands and conservative memory reserves in the model registry.
 - [R044 · In progress; validation pending] Surface format and hardware-fit warnings in the existing Models page; runtime loadability and non-NVIDIA GPU measurement remain unverified.
-- [R045 · Implemented; tests passing] Preserve explicit model source attribution and add a validated license-review state (unreviewed, approved, restricted, or unknown) across registry persistence, API validation, and the Models GUI. Existing registry records migrate safely to unreviewed.
-- [R046 · Planned] Add optional Hugging Face metadata lookup with consent and timeout.
+- [R045 · In progress; validation pending] Record model source attribution, source URL/revision, and a human-managed licence review state/notes. Preserve safe defaults for existing registry records; never imply AXIOM has legally approved a model.
+- [R046 · Implemented; tests passing] Require explicit per-search consent before AXIOM contacts Hugging Face for public catalogue metadata; the GUI describes the external boundary and no download is initiated. The existing bounded catalogue timeout remains enforced.
 - [R047 · In progress; validation pending] Add safe model removal that never deletes weights implicitly.
 - [R048 · In progress; validation pending] Add registry import/export with schema validation and migration.
 
@@ -143,9 +137,9 @@ feature exists or a delivery-date promise.
 
 ### 09 · Agent profiles, MCP, and security
 
-- [R097 · Planned] Add versioned agent profiles with explicit task capabilities.
+- [R097 · Implemented; tests passing] Add versioned workspace-local agent profiles with an explicit bounded task-capability catalog, a required default-deny profile, safe persistence, API/CLI/GUI CRUD, and revision increments. Profiles are descriptive metadata and never grant tool permissions.
 - [R098 · In progress; validation pending] Enforce default-deny tool permissions in the backend boundary.
-- [R099 · Planned] Add per-tool read, write, network, and execution scopes.
+- [R099 · Implemented; tests passing] Classify every MCP tool with explicit read, write, network, and/or execution scopes in the backend-owned permission inventory. Tool grants remain default-deny and scope labels describe the authority an approved tool can exercise.
 - [R100 · Planned] Add auditable allow/deny decisions with redacted arguments.
 - [R101 · Planned] Add MCP server inventory and protocol handshake inspection.
 - [R102 · Planned] Add tool/resource schema browsing without tool execution by default.

@@ -406,3 +406,37 @@ def test_model_add_json_rejects_duplicate_source_and_content_without_partial_wri
     payload = json.loads(listed.stdout)
     assert payload["total"] == 1
     assert [item["name"] for item in payload["models"]] == ["first-model"]
+
+
+def test_model_add_and_update_json_include_source_attribution_and_license_review(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    created = runner.invoke(app, [
+        "model", "add", "attributed-model", "org/attributed-model",
+        "--license", "Apache-2.0",
+        "--license-review", "unreviewed",
+        "--source-attribution", "Example Research",
+        "--source-url", "https://huggingface.co/example/model",
+        "--source-revision", "0123456789abcdef",
+        "--license-review-notes", "Pending manual review.",
+        "--json",
+    ])
+    assert created.exit_code == 0, created.stdout
+    model = json.loads(created.stdout)["model"]
+    assert model["source_attribution"] == "Example Research"
+    assert model["source_url"] == "https://huggingface.co/example/model"
+    assert model["source_revision"] == "0123456789abcdef"
+    assert model["license_review"] == "unreviewed"
+    assert model["license_review_notes"] == "Pending manual review."
+
+    updated = runner.invoke(app, [
+        "model", "update", model["id"],
+        "--license-review", "restricted",
+        "--license-review-notes", "Distribution needs additional review.",
+        "--source-revision", "fedcba9876543210",
+        "--json",
+    ])
+    assert updated.exit_code == 0, updated.stdout
+    record = json.loads(updated.stdout)["model"]
+    assert record["license_review"] == "restricted"
+    assert record["license_review_notes"] == "Distribution needs additional review."
+    assert record["source_revision"] == "fedcba9876543210"
