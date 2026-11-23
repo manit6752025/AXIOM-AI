@@ -294,7 +294,7 @@ def test_axiom_root_distribution_is_excluded_but_other_null_versions_remain():
 
     # The third-party record remains intact so the parser will fail closed
     # when it validates the missing package version.
-    with pytest.raises(SupplyChainError, match="invalid version"):
+    with pytest.raises(SupplyChainError, match="non-string version"):
         supply_chain._parse_pip_audit_output(
             filtered, generated_at="2026-11-23T00:00:00Z",
             scanner_version="2.10.1", exit_code=0,
