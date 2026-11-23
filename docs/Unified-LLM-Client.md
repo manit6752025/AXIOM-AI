@@ -15,7 +15,9 @@ This client currently handles text conversations. It does not add multimodal/ima
 
 Open **Runtime → Unified LLM client**. Choose a provider and load its model catalogue, or enter the exact model ID yourself. Supply a system instruction and prompt, then set the output-token budget and temperature.
 
-Cloud requests are blocked until the user confirms that the selected provider receives the conversation. Provider credentials are sent in the HTTPS provider authorization header and are not written to AXIOM workspace files or settings by this client. The browser form keeps the current key in component memory while the panel is mounted; clear it or leave the page when finished. A cloud provider processes data under its own policies, so never send secrets or private data without reviewing those terms.
+Cloud requests are blocked until the user confirms that the selected provider receives the conversation. Provider credentials are sent in the HTTPS provider authorization header and are not written to AXIOM workspace files or settings by this client. The browser form keeps the current key in component memory while the panel is mounted; use **Disconnect** to clear the key, consent and in-memory conversation, or leave the page when finished.
+
+The panel supports up to 25 browser-local provider profiles. A profile stores only its name, provider ID, model ID and (for the custom adapter) a public HTTPS `/v1` endpoint. It never stores API keys, prompts, system instructions or chat history. Profile metadata remains in this browser's local storage and is not synchronized with the workspace or CLI. After reloading, apply a profile, enter its cloud key again if required, and explicitly **Connect** to verify its model catalogue. The connection indicator reports the last successful catalogue request; it is not a persistent socket or a credential vault. Cloud chat still requires a separate consent checkbox for every request. A cloud provider processes data under its own policies, so never send secrets or private data without reviewing those terms.
 
 ## CLI
 

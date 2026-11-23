@@ -103,7 +103,7 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
   expect(continuedMessages.some((message) => message.role === "user" && message.content === "Continue our previous answer")).toBe(true);
 
   await panel.getByLabel("LLM provider", { exact: true }).selectOption("ollama-local");
-  await panel.getByRole("button", { name: "Load models" }).click();
+  await panel.getByRole("button", { name: "Connect" }).click();
   await expect(panel.getByLabel("Model ID")).toHaveValue("qwen2.5:0.5b");
   await panel.getByLabel("Prompt").fill("Hello Ollama local model");
   await panel.getByRole("button", { name: "Generate locally" }).click();
@@ -116,7 +116,7 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
 
   await panel.getByLabel("LLM provider", { exact: true }).selectOption("deepseek");
   await panel.getByLabel("Provider API key").fill("never-return-this");
-  await panel.getByRole("button", { name: "Load models" }).click();
+  await panel.getByRole("button", { name: "Connect" }).click();
   await expect(panel.getByLabel("Model ID")).toHaveValue("deepseek-chat");
   await expect.poll(() => modelCatalogueCalls).toBeGreaterThan(1);
 
@@ -134,4 +134,27 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
   const messages = chatRequests[3]["messages"] as Array<{ role: string; content: string }>;
   expect(messages.some((message) => message.role === "user" && message.content === "Hello cloud model")).toBe(true);
   await expect(panel).not.toContainText("never-return-this");
+
+  await panel.getByLabel("Provider profile name").fill("DeepSeek team");
+  await panel.getByRole("button", { name: "Save profile" }).click();
+  const storedProfiles = await page.evaluate(() => localStorage.getItem("axiom-llm-provider-profiles-v1") || "");
+  expect(storedProfiles).toContain("DeepSeek team");
+  expect(storedProfiles).not.toContain("never-return-this");
+  expect(storedProfiles).not.toContain("Hello cloud model");
+  await page.reload();
+  const reloadedPanel = page.locator(".llm-client-panel");
+  await expect(reloadedPanel.getByRole("heading", { name: "Unified LLM client" })).toBeVisible();
+  await expect(reloadedPanel.getByLabel("Provider API key")).toHaveValue("");
+  await reloadedPanel.getByLabel("Saved provider profile").selectOption({ label: "DeepSeek team · deepseek" });
+  await reloadedPanel.getByRole("button", { name: "Apply profile" }).click();
+  await expect(reloadedPanel.getByLabel("LLM provider")).toHaveValue("deepseek");
+  await expect(reloadedPanel.getByLabel("Model ID")).toHaveValue("deepseek-chat");
+  await reloadedPanel.getByLabel("Provider API key").fill("never-return-this");
+  await reloadedPanel.getByRole("button", { name: "Connect" }).click();
+  await expect(reloadedPanel.getByRole("button", { name: "Disconnect" })).toBeEnabled();
+  await reloadedPanel.getByRole("button", { name: "Disconnect" }).click();
+  await expect(reloadedPanel.getByLabel("Provider API key")).toHaveValue("");
+  await expect(reloadedPanel.getByRole("button", { name: "Connect" })).toBeDisabled();
+  const afterDisconnect = await page.evaluate(() => localStorage.getItem("axiom-llm-provider-profiles-v1") || "");
+  expect(afterDisconnect).not.toContain("never-return-this");
 });
