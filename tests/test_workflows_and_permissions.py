@@ -1,4 +1,6 @@
+import ast
 import json
+from pathlib import Path
 
 from axiom.core.tool_permissions import TOOL_SCOPES, ToolPermissionStore
 from axiom.core.workflows import WorkflowStore, validate_workflow_graph
@@ -371,3 +373,86 @@ def test_workflow_schema_v1_legacy_edges_migrate_to_schema_v2(tmp_path):
     assert persisted[0]["schema_version"] == 2
     assert persisted[0]["edges"][0]["source_port"] == "artifact"
     assert persisted[0]["versions"][0]["edges"][0]["target_port"] == "artifact"
+
+
+def test_every_registered_mcp_tool_has_a_default_deny_guard_at_entry():
+    server_path = Path(__file__).resolve().parents[1] / "axiom" / "mcp" / "server.py"
+    module = ast.parse(server_path.read_text(encoding="utf-8"), filename=str(server_path))
+    registered = []
+    for node in ast.walk(module):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        is_tool = any(
+            isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Attribute)
+            and isinstance(decorator.func.value, ast.Name)
+            and decorator.func.value.id == "mcp"
+            and decorator.func.attr == "tool"
+            for decorator in node.decorator_list
+        )
+        if is_tool:
+            registered.append(node)
+
+    assert registered, "The AXIOM MCP server must register tools."
+    known_tools = set(TOOL_SCOPES)
+    missing_permissions = []
+    late_guards = []
+    for handler in registered:
+        body = list(handler.body)
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            body.pop(0)
+        permission_indexes = []
+        for index, statement in enumerate(body[:4]):
+            for call in (item for item in ast.walk(statement) if isinstance(item, ast.Call)):
+                if isinstance(call.func, ast.Attribute) and call.func.attr == "require":
+                    permission_indexes.append((index, call))
+        if not permission_indexes:
+            missing_permissions.append(handler.name)
+            continue
+        valid_guards = [
+            (index, call)
+            for index, call in permission_indexes
+            if call.args
+            and isinstance(call.args[0], ast.Constant)
+            and isinstance(call.args[0].value, str)
+            and call.args[0].value in known_tools
+        ]
+        if not valid_guards:
+            missing_permissions.append(handler.name)
+        elif min(index for index, _ in valid_guards) > 1:
+            late_guards.append(handler.name)
+
+    assert not missing_permissions, (
+        "Every registered MCP tool must enforce a known ToolPermissionStore capability: "
+        + ", ".join(sorted(missing_permissions))
+    )
+    assert not late_guards, (
+        "MCP tool permission guards must execute before operational work: "
+        + ", ".join(sorted(late_guards))
+    )
+
+
+def test_mcp_tool_invocation_is_denied_until_explicit_profile_grant(tmp_path, monkeypatch):
+    from axiom.mcp.server import axiom_info
+
+    monkeypatch.chdir(tmp_path)
+    store = ToolPermissionStore()
+    assert store.allows("axiom_info") is False
+    try:
+        axiom_info()
+    except PermissionError as exc:
+        assert "axiom_info" in str(exc)
+        assert "denied" in str(exc)
+    else:
+        raise AssertionError("the actual MCP tool must enforce default-deny")
+
+    store.save_profile("approved-info", ["axiom_info"])
+    store.set_active("approved-info")
+    result = axiom_info()
+    assert result["name"] == "AXIOM"
+    assert result["version"]
