@@ -27,6 +27,7 @@ def plan(
     latency: str = typer.Option("low", "--latency"),
     target_tps: float = typer.Option(10.0, "--target-tps"),
     quantization: str = typer.Option("auto", "--quantization"),
+    json_output: bool = typer.Option(False, "--json", help="Emit a versioned machine-readable optimization plan."),
 ):
     """Build a hardware-aware model optimization plan."""
     result = plan_optimization(
@@ -38,6 +39,14 @@ def plan(
         target_tokens_per_second=target_tps,
         quantization=quantization,
     )
+
+    if json_output:
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "plan": result.to_dict(),
+            "scope_note": "Planning estimates only; throughput and runtime memory must be measured on the target device.",
+        }, ensure_ascii=False, indent=2, sort_keys=True))
+        return
 
     table = Table(title="AXIOM Agent Model Plan")
     table.add_column("Setting")
@@ -71,12 +80,24 @@ def plan(
 def hf_search(
     query: str,
     limit: int = typer.Option(10, "--limit"),
+    json_output: bool = typer.Option(False, "--json", help="Emit a versioned machine-readable model search result."),
 ):
     """Search Hugging Face models."""
     try:
         results = search_models(query, limit)
     except Exception as exc:  # noqa: BLE001
         raise typer.BadParameter(str(exc))
+
+    if json_output:
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "provider": "huggingface",
+            "query": query,
+            "total": len(results),
+            "results": results,
+            "scope_note": "Model metadata only; no model weights were downloaded.",
+        }, ensure_ascii=False, indent=2, sort_keys=True))
+        return
 
     table = Table(title=f"Hugging Face: {query}")
     table.add_column("Model")
@@ -96,7 +117,10 @@ def hf_search(
 
 
 @ai_app.command("policy-audit")
-def policy_audit(model_path: str):
+def policy_audit(
+    model_path: str,
+    json_output: bool = typer.Option(False, "--json", help="Emit a versioned machine-readable policy inspection."),
+):
     """Audit model policy/safety indicators without modifying it."""
     try:
         result = audit_model(model_path)
@@ -104,6 +128,14 @@ def policy_audit(model_path: str):
         raise typer.BadParameter(f"Model path does not exist: {model_path}")
     except ValueError as exc:
         raise typer.BadParameter(str(exc))
+
+    if json_output:
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "audit": result,
+            "scope_note": "Audit only. AXIOM does not remove, disable, bypass, or weaken model safety mechanisms.",
+        }, ensure_ascii=False, indent=2, sort_keys=True))
+        return
 
     console.print(
         Panel(
