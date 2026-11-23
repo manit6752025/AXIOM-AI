@@ -48,6 +48,8 @@ def register(app: typer.Typer) -> None:
                 flags |= os.O_NOFOLLOW
             descriptor = os.open(destination, flags, 0o600)
             try:
+                if os.name == "posix":
+                    os.fchmod(descriptor, 0o600)
                 with os.fdopen(descriptor, "wb") as stream:
                     stream.write(archive)
             except BaseException:

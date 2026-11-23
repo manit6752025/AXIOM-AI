@@ -140,7 +140,7 @@ feature exists or a delivery-date promise.
 - [R103 · Planned] Add per-server trust, ownership, and connection state.
 - [R104 · Planned] Add safe secret references and never render stored secret values.
 - [R105 · In progress; validation pending] Add read-only security audits for config and MCP policy permissions, active tool grants, API token scopes, CORS origins, and AXIOM's loopback/network-exposure contracts through the CLI, API, and Diagnostics page; never return credential values.
-- [R106 · Planned] Add path traversal and symlink threat-model regression coverage.
+- [R106 · In progress; validation pending] Harden workspace-relative path resolution against symlinked roots and parent-directory swaps on POSIX; add regression tests for traversal inputs, symlinked roots/parents/final files, and path-selection/open races.
 - [R107 · Planned] Add dependency, package, and release-artifact security checks.
 - [R108 · Planned] Add security event export and administrator review workflows.
 
@@ -153,7 +153,7 @@ feature exists or a delivery-date promise.
 - [R113 · Planned] Add benchmark-linked resource trend charts with missing-data labels.
 - [R114 · Planned] Add telemetry export, clear-history, and privacy controls.
 - [R115 · In progress; validation pending] Add diagnostic checks for config parsing and permissions, safe paths, dependency importability and minimum versions, and storage free space.
-- [R116 · Planned] Add copyable support bundles with explicit secret/data redaction.
+- [R116 · In progress; validation pending] Deliver allowlisted redacted support bundles through the API, Diagnostics GUI, and CLI; exclude secrets, environment values, data/model contents, and absolute workspace paths, and write CLI archives with private POSIX permissions.
 - [R117 · Implemented; tests passing] Add release smoke checks for CLI, API, production UI build, and browser acceptance coverage together.
 - [R118 · Planned] Add cross-platform packaging verification for supported targets.
 - [R119 · Planned] Add migration/rollback notes for every persisted-data schema change.
