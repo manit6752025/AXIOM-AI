@@ -917,7 +917,7 @@ class LocalVisionRequest(BaseModel):
     def image_must_be_workspace_relative(cls, value: str) -> str:
         if not value.startswith("data/") or value.strip() != value:
             raise ValueError("Image path must be workspace-relative under data/.")
-        if Path(value).suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+        if not value.lower().endswith((".png", ".jpg", ".jpeg")):
             raise ValueError("Image path must refer to a PNG or JPEG file.")
         return value
 
