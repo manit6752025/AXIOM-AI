@@ -1786,6 +1786,53 @@ export type McpToolPolicy = {
   tools: McpTool[];
 };
 
+export type PluginManifestTool = {
+  name: string;
+  description: string;
+  scopes: Array<"read" | "write" | "execution" | "network" | "secrets">;
+};
+
+export type PluginManifest = {
+  manifest_schema_version: 1;
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  tools: PluginManifestTool[];
+};
+
+export type PluginToolGrant = {
+  name: string;
+  scopes: string[];
+};
+
+export type PluginManifestRecord = {
+  manifest: PluginManifest;
+  sha256: string;
+  permission_status: "default_deny" | "granted" | "stale_manifest";
+  granted_tools: PluginToolGrant[];
+};
+
+export type PluginManifestRegistry = {
+  store_schema_version: 1;
+  manifests: PluginManifestRecord[];
+  maximum_manifests: number;
+  maximum_tools_per_manifest: number;
+  execution_note: string;
+};
+
+export type PluginManifestRegistration = {
+  manifest: PluginManifest;
+  sha256: string;
+  permission_status: "default_deny";
+};
+
+export type PluginPermissionGrant = {
+  plugin_id: string;
+  manifest_sha256: string;
+  tools: PluginToolGrant[];
+};
+
 export type McpServerInventoryEntry = {
   name: string;
   transport: "stdio";
@@ -2981,6 +3028,22 @@ export const axiomApi = {
   },
 
   mcpToolPolicy: () => requestJson<McpToolPolicy>("/api/security/tool-permissions"),
+  pluginManifestRegistry: () => requestJson<PluginManifestRegistry>("/api/security/plugins"),
+  registerPluginManifest: (manifest: unknown) =>
+    requestJson<PluginManifestRegistration>("/api/security/plugins/manifests", {
+      method: "POST",
+      body: JSON.stringify({ manifest }),
+    }),
+  grantPluginPermissions: (pluginId: string, grant: Omit<PluginPermissionGrant, "plugin_id">) =>
+    requestJson<PluginPermissionGrant>(
+      `/api/security/plugins/${encodeURIComponent(pluginId)}/permissions`,
+      { method: "PUT", body: JSON.stringify(grant) },
+    ),
+  revokePluginPermissions: (pluginId: string) =>
+    requestJson<{ plugin_id: string; revoked: boolean }>(
+      `/api/security/plugins/${encodeURIComponent(pluginId)}/permissions`,
+      { method: "DELETE" },
+    ),
   mcpServerInventory: () => requestJson<McpServerInventory>("/api/mcp/servers"),
   updateMcpServerTrust: (name: string, update: McpServerTrustUpdate) =>
     requestJson<McpServerTrustRecord>(
