@@ -228,6 +228,21 @@ export default function LocalAxiomEnginePanel() {
     }
   };
 
+  const resumePredictionJob = async (jobId: string) => {
+    setPredictionError("");
+    setPredictionBusy(true);
+    try {
+      const result = await axiomApi.resumeAxiomPredictionJob(jobId);
+      setPredictionJobs((current) => current.map((job) => job.id === jobId ? result.job : job));
+      setLifecycleNotice("Prediction job resumed from its verified checkpoint. Previously committed rows will not be generated again.");
+      await refreshPredictionJobs();
+    } catch (cause) {
+      setPredictionError(cause instanceof Error ? cause.message : "Prediction job could not be resumed.");
+    } finally {
+      setPredictionBusy(false);
+    }
+  };
+
   const unload = async () => {
     setUnloading(true);
     setError("");
@@ -802,10 +817,12 @@ export default function LocalAxiomEnginePanel() {
             </span>
             <span className={"status-pill " + (job.status === "completed" ? "success" : active ? "warning" : job.status === "failed" || job.status === "interrupted" ? "warning" : "neutral")}>{job.status.toUpperCase().replaceAll("_", " ")}</span>
             {active && <button type="button" className="icon-button danger-icon-button" aria-label={"Cancel prediction job " + job.id} onClick={() => void cancelPredictionJob(job.id)}><Unplug size={15} /></button>}
+            {job.status === "interrupted" && job.resumable && <button type="button" className="button secondary-button" aria-label={"Resume prediction job " + job.id} disabled={predictionBusy || running || benchmarking || unloading} onClick={() => void resumePredictionJob(job.id)}>Resume from checkpoint</button>}
+            {job.status === "interrupted" && !job.resumable && <small>Resume unavailable: no fully verified checkpoint or model fingerprint is available.</small>}
           </article>;
         })}
       </div> : <p className="quiet-note">No prediction jobs have been saved in this workspace.</p>}
-      <p className="quiet-note">Job progress is persisted, but this version does not resume generation after an owning worker process exits. Interrupted jobs are explicitly marked; no partial output is presented as complete.</p>
+      <p className="quiet-note">Completed rows are flushed to a private checkpoint and integrity metadata before progress is committed. After a process restart, AXIOM verifies the dataset, model/adapter fingerprints, checkpoint inode, digest and row count before resuming. Partial checkpoints are never exposed as evaluation artifacts.</p>
     </section>
     {batchResult && <section className="panel-surface" aria-label="Native batch results" style={{ padding: 14, marginTop: 14 }}>
       <div className="surface-head">
