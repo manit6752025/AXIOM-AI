@@ -648,3 +648,53 @@ def test_engine_benchmark_requirements_command_exits_nonzero_on_preflight_failur
     result = runner.invoke(engine_app, ["benchmark-requirements", "--backend", "ollama", "--model", "missing"])
     assert result.exit_code == 2
     assert "model_not_found" in result.output
+
+
+def test_native_benchmark_profile_list_cli_uses_workspace_store(monkeypatch) -> None:
+    expected = {"schema_version": 1, "total": 1, "profiles": [{
+        "id": "a" * 32, "name": "baseline", "created_at": "2026-11-21T00:00:00Z",
+        "hardware": {"os_name": "Linux", "architecture": "x86_64"},
+        "workload": {"config": {"model": "qwen-test"}, "metrics": {"median_elapsed_ms": 10.0}},
+    }]}
+    class FakeStore:
+        def list(self):
+            return expected
+    monkeypatch.setattr(engine_cli, "BenchmarkProfileStore", FakeStore)
+    result = runner.invoke(engine_app, ["benchmark-profiles", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == expected
+
+
+def test_native_benchmark_profile_compare_cli_reports_comparability(monkeypatch) -> None:
+    expected = {"schema_version": 1, "comparable": False, "match": {"hardware": False},
+                "left": {"id": "a" * 32, "name": "old"}, "right": {"id": "b" * 32, "name": "new"},
+                "metrics": {"median_elapsed_ms": {"left": 100, "right": 90, "delta": -10}},
+                "note": "hardware differs"}
+    class FakeStore:
+        def compare(self, left, right):
+            assert left == "a" * 32 and right == "b" * 32
+            return expected
+    monkeypatch.setattr(engine_cli, "BenchmarkProfileStore", FakeStore)
+    result = runner.invoke(engine_app, ["benchmark-compare", "a" * 32, "b" * 32, "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == expected
+
+
+def test_native_benchmark_cli_saves_named_profile_when_requested(tmp_path, monkeypatch) -> None:
+    model = tmp_path / "model"
+    model.mkdir()
+    report = {"model": "qwen-test", "architecture": "qwen3", "metrics": {"median_elapsed_ms": 10.0}, "runs": [], "iterations_completed": 1}
+    saved = []
+    monkeypatch.setattr(engine_cli, "benchmark_local", lambda *_args, **_kwargs: report.copy())
+    class FakeStore:
+        def create(self, name, result, prompt, model_path, *, adapter_used=False):
+            saved.append((name, prompt, model_path, adapter_used))
+            return {"id": "c" * 32, "name": name}
+    monkeypatch.setattr(engine_cli, "BenchmarkProfileStore", FakeStore)
+    result = runner.invoke(engine_app, [
+        "benchmark", "--model-path", str(model), "--prompt", "private prompt",
+        "--profile-name", "Qwen baseline", "--json",
+    ])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["profile_record"]["id"] == "c" * 32
+    assert saved == [("Qwen baseline", "private prompt", model, False)]

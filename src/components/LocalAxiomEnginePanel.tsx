@@ -16,7 +16,7 @@ const formatEstimatedMemory = (gib: number): string => {
 };
 
 import BenchmarkResourceTrends, { type BenchmarkResourceSample } from "./BenchmarkResourceTrends";
-import { axiomApi, type AxiomEngineAdapterCompatibility, type AxiomEngineAssets, type AxiomEngineBatchResult, type AxiomEngineBenchmark, type AxiomEngineLiveTelemetry, type AxiomEngineResult, type AxiomEngineStatus, type AxiomEngineStreamEvent, type AxiomEngineSystemTelemetry, type AxiomQuantizationEstimate } from "../api/client";
+import { axiomApi, type AxiomEngineAdapterCompatibility, type AxiomEngineAssets, type AxiomEngineBatchResult, type AxiomEngineBenchmark, type AxiomEngineBenchmarkProfile, type AxiomEngineBenchmarkProfileComparison, type AxiomEngineLiveTelemetry, type AxiomEngineResult, type AxiomEngineStatus, type AxiomEngineStreamEvent, type AxiomEngineSystemTelemetry, type AxiomQuantizationEstimate } from "../api/client";
 
 export default function LocalAxiomEnginePanel() {
   const [status, setStatus] = useState<AxiomEngineStatus | null>(null);
@@ -67,6 +67,12 @@ export default function LocalAxiomEnginePanel() {
   const [benchmarkResult, setBenchmarkResult] = useState<AxiomEngineBenchmark | null>(null);
   const [benchmarkResourceSamples, setBenchmarkResourceSamples] = useState<BenchmarkResourceSample[]>([]);
   const [benchmarkError, setBenchmarkError] = useState("");
+  const [benchmarkProfileName, setBenchmarkProfileName] = useState("");
+  const [benchmarkProfiles, setBenchmarkProfiles] = useState<AxiomEngineBenchmarkProfile[]>([]);
+  const [benchmarkProfileComparison, setBenchmarkProfileComparison] = useState<AxiomEngineBenchmarkProfileComparison | null>(null);
+  const [benchmarkProfileError, setBenchmarkProfileError] = useState("");
+  const [benchmarkCompareLeft, setBenchmarkCompareLeft] = useState("");
+  const [benchmarkCompareRight, setBenchmarkCompareRight] = useState("");
 
   const refresh = async () => {
     setLoading(true);
@@ -95,6 +101,16 @@ export default function LocalAxiomEnginePanel() {
   useEffect(() => {
     void refresh();
     return () => activeStreamRef.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void axiomApi.axiomEngineBenchmarkProfiles().then((result) => {
+      if (active) setBenchmarkProfiles(result.profiles);
+    }).catch((cause) => {
+      if (active) setBenchmarkProfileError(cause instanceof Error ? cause.message : "Benchmark profile history is unavailable.");
+    });
+    return () => { active = false; };
   }, []);
 
   const unload = async () => {
@@ -395,6 +411,7 @@ export default function LocalAxiomEnginePanel() {
         device: devicePreference,
         memory_mode: memoryMode,
         precision,
+        profile_name: benchmarkProfileName.trim() || undefined,
       }, controller.signal);
       let telemetryAfter: AxiomEngineSystemTelemetry | null = null;
       try { telemetryAfter = await axiomApi.axiomEngineTelemetry(); } catch { telemetryAfter = null; }
@@ -415,6 +432,10 @@ export default function LocalAxiomEnginePanel() {
         device_allocated_delta_bytes: delta(afterAllocator?.current_allocated_bytes, beforeAllocator?.current_allocated_bytes),
       };
       setBenchmarkResourceSamples((current) => [...current, resourceSample].slice(-20));
+      if (report.profile_record) {
+        setBenchmarkProfiles((current) => [report.profile_record!, ...current.filter((item) => item.id !== report.profile_record!.id)].slice(0, 100));
+        setBenchmarkProfileError("");
+      }
       setBenchmarkResult(report);
       void refresh();
     } catch (cause) {
@@ -586,6 +607,7 @@ export default function LocalAxiomEnginePanel() {
         <div className="two-column-grid">
           <label className="field"><span className="field-label-row"><span>Benchmark warm-up runs</span></span><input aria-label="Benchmark warm-up runs" type="number" min={0} max={2} step={1} value={benchmarkWarmupRuns} onChange={(event) => setBenchmarkWarmupRuns(event.target.value)} /><small>0–2 runs excluded from the results.</small></label>
           <label className="field"><span className="field-label-row"><span>Measured benchmark runs</span></span><input aria-label="Measured benchmark runs" type="number" min={1} max={5} step={1} value={benchmarkIterations} onChange={(event) => setBenchmarkIterations(event.target.value)} /><small>1–5 measured generations; this is bounded to protect local resources.</small></label>
+          <label className="field"><span className="field-label-row"><span>Save reproducibility profile (optional)</span></span><input aria-label="Benchmark profile name" type="text" maxLength={64} value={benchmarkProfileName} onChange={(event) => setBenchmarkProfileName(event.target.value)} placeholder="e.g. RTX 4070 · Qwen 7B FP16" /><small>Stores workload metrics and hardware/software provenance. Prompt content and model paths are never saved.</small></label>
         </div>
         <div className="integration-form-actions">
           <button type="button" className="button secondary-button" onClick={() => void runBenchmark()} disabled={!status?.ready || loading || running || benchmarking || unloading || !modelPath.trim() || !prompt.trim() || Boolean(adapterCompatibility && !adapterCompatibility.structurally_compatible)}>
@@ -623,6 +645,7 @@ export default function LocalAxiomEnginePanel() {
         <span className="status-pill">COMPLETE</span>
       </div>
       <p className="quiet-note">{benchmarkResult.iterations_completed} measured run(s) · {benchmarkResult.warmup_runs_completed} warm-up(s) excluded · {benchmarkResult.device ?? "device not reported"} · {benchmarkResult.precision ?? "precision not reported"} · {benchmarkResult.memory_mode.replaceAll("_", " ")}</p>
+      {benchmarkResult.profile_record && <p className="quiet-note" role="status">Saved profile “{benchmarkResult.profile_record.name}” · {benchmarkResult.profile_record.id}. This record contains hardware/software provenance and a prompt fingerprint only.</p>}
       <div className="two-column-grid">
         <article className="surface"><p className="surface-eyebrow">Median latency</p><h3>{benchmarkResult.metrics.median_elapsed_ms.toFixed(2)} ms</h3><p className="quiet-note">p95: {benchmarkResult.metrics.p95_elapsed_ms.toFixed(2)} ms · measured wall time: {benchmarkResult.metrics.measured_wall_time_ms.toFixed(2)} ms</p></article>
         <article className="surface"><p className="surface-eyebrow">Generation throughput</p><h3>{benchmarkResult.metrics.aggregate_tokens_per_second.toFixed(2)} tokens/s</h3><p className="quiet-note">Median run: {benchmarkResult.metrics.median_generation_tokens_per_second.toFixed(2)} tokens/s · {benchmarkResult.metrics.completion_tokens.toLocaleString()} measured output tokens</p></article>
@@ -649,6 +672,32 @@ export default function LocalAxiomEnginePanel() {
       </section>}
       <p className="quiet-note">{benchmarkResult.scope_note} No prompts or generated responses are displayed or retained.</p>
     </section>}
+    <section className="panel-surface" aria-label="Saved benchmark profiles" style={{ padding: 12, marginTop: 14 }}>
+      <div className="surface-head"><div><p className="surface-eyebrow">REPRODUCIBILITY / PROVENANCE</p><h3>Saved hardware-specific profiles</h3></div><span className="status-pill">{benchmarkProfiles.length} saved</span></div>
+      <p className="quiet-note">A controlled comparison requires matching hardware, software, model metadata, workload settings and prompt fingerprint. Other comparisons are labelled descriptive. AXIOM never stores the prompt text, model path or weights in a profile.</p>
+      {benchmarkProfileError && <div className="inline-alert warning" role="alert">{benchmarkProfileError}</div>}
+      {benchmarkProfiles.length === 0 ? <p className="quiet-note">No saved profiles in this workspace. Enter a profile name before running a benchmark to save one.</p> :
+        <div className="module-list">{benchmarkProfiles.slice(0, 10).map((item) => <article className="module-row" key={item.id}>
+          <span className="module-copy"><b>{item.name}</b><small>{item.hardware.gpu_name ?? "CPU"} · {item.hardware.os_name} {item.hardware.architecture} · AXIOM {item.software.axiom_version} · {item.workload.metrics.median_elapsed_ms.toFixed(2)} ms median</small></span>
+          <button type="button" className="icon-button" aria-label={"Select " + item.name + " as first comparison profile"} onClick={() => setBenchmarkCompareLeft(item.id)}>1</button>
+          <button type="button" className="icon-button" aria-label={"Select " + item.name + " as second comparison profile"} onClick={() => setBenchmarkCompareRight(item.id)}>2</button>
+        </article>)}</div>}
+      <div className="integration-form-actions">
+        <button type="button" className="button secondary-button" disabled={!benchmarkCompareLeft || !benchmarkCompareRight || benchmarkCompareLeft === benchmarkCompareRight} onClick={() => {
+          setBenchmarkProfileError("");
+          void axiomApi.compareAxiomEngineBenchmarkProfiles(benchmarkCompareLeft, benchmarkCompareRight)
+            .then(setBenchmarkProfileComparison)
+            .catch((cause) => setBenchmarkProfileError(cause instanceof Error ? cause.message : "Benchmark profile comparison failed."));
+        }}>Compare selected profiles</button>
+        <button type="button" className="button secondary-button" onClick={() => void axiomApi.axiomEngineBenchmarkProfiles().then((result) => setBenchmarkProfiles(result.profiles)).catch((cause) => setBenchmarkProfileError(cause instanceof Error ? cause.message : "Benchmark profile history is unavailable."))}>Refresh profiles</button>
+      </div>
+      {benchmarkProfileComparison && <div className="surface" aria-live="polite">
+        <b>{benchmarkProfileComparison.comparable ? "Controlled comparison" : "Descriptive comparison only"}</b>
+        <p className="quiet-note">{benchmarkProfileComparison.note}</p>
+        {Object.entries(benchmarkProfileComparison.match).map(([key, matched]) => <p key={key} className="quiet-note">{key.replaceAll("_", " ")}: {matched ? "match" : "different"}</p>)}
+        {Object.entries(benchmarkProfileComparison.metrics).map(([key, value]) => <p key={key} className="quiet-note">{key.replaceAll("_", " ")}: {value.left.toFixed(2)} → {value.right.toFixed(2)} (Δ {value.delta.toFixed(2)})</p>)}
+      </div>}
+    </section>
     <BenchmarkResourceTrends samples={benchmarkResourceSamples} />
     <section className="surface axiom-quantization-planner" aria-label="Memory and quantization planner">
       <div className="surface-head">
