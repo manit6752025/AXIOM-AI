@@ -93,6 +93,34 @@ def test_model_provenance_skips_hashing_above_declared_byte_limit(tmp_path, monk
     assert report["hash_evidence"]["files"] == []
 
 
+def test_model_provenance_skips_license_hashing_over_aggregate_bounds(tmp_path, monkeypatch):
+    model = tmp_path / "model"
+    model.mkdir()
+    for index in range(3):
+        (model / f"LICENSE-{index}.txt").write_bytes(b"license evidence")
+    monkeypatch.setattr(provenance, "MAX_LICENSE_EVIDENCE_FILES", 2)
+
+    report = inspect_model_provenance(model)
+    evidence = report["license_evidence"]
+    assert evidence["status"] == "skipped_count_or_total_size_limit"
+    assert evidence["candidate_file_count"] == 3
+    assert evidence["files"] == []
+
+
+def test_model_provenance_skips_license_hashing_over_total_byte_bound(tmp_path, monkeypatch):
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "LICENSE").write_bytes(b"x" * 32)
+    (model / "NOTICE").write_bytes(b"y" * 32)
+    monkeypatch.setattr(provenance, "MAX_TOTAL_LICENSE_EVIDENCE_BYTES", 32)
+
+    report = inspect_model_provenance(model)
+    evidence = report["license_evidence"]
+    assert evidence["status"] == "skipped_count_or_total_size_limit"
+    assert evidence["candidate_total_bytes"] == 64
+    assert evidence["files"] == []
+
+
 def test_model_provenance_returns_explicit_no_weight_status(tmp_path):
     model = tmp_path / "model"
     model.mkdir()

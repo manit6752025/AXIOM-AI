@@ -73,7 +73,7 @@ def test_spdx_sbom_validates_against_the_official_23_json_schema():
         generated_at=datetime(2026, 11, 22, 0, 0, tzinfo=UTC),
     )
     validator = jsonschema.Draft201909Validator(schema)
-    errors = sorted(validator.iter_errors(report), key=lambda item: list(item.absolute_path))
+    errors = sorted(validator.iter_errors(report), key=lambda item: tuple(str(part) for part in item.absolute_path))
     assert not errors, [error.message for error in errors]
     assert "axiom" not in report
 
@@ -308,6 +308,38 @@ def test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_s
     assert "PIP_INDEX_URL" not in kwargs["env"]
     assert "AXIOM_API_TOKEN" not in kwargs["env"]
     assert kwargs["env"]["PIP_CONFIG_FILE"] == os.devnull
+
+
+def test_vulnerability_scan_is_single_flight_and_does_not_spawn_concurrent_scanners():
+    assert supply_chain._AUDIT_LOCK.acquire(blocking=False)
+    try:
+        report = audit_dependency_vulnerabilities(allow_network=True)
+    finally:
+        supply_chain._AUDIT_LOCK.release()
+    assert report["status"] == "error"
+    assert report["network_accessed"] is False
+    assert "already active" in report["message"]
+
+
+def test_vulnerability_scan_rejects_duplicate_json_object_keys(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(supply_chain.importlib.util, "find_spec", lambda _name: object())
+    monkeypatch.setattr(supply_chain.importlib.metadata, "version", lambda _name: "2.10.1")
+
+    class DuplicateJSONProcess:
+        def __init__(self, *_args, **_kwargs):
+            self.stdout = io.BytesIO(b'{"dependencies":[],"dependencies":[]}')
+            self.stderr = io.BytesIO()
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(supply_chain.subprocess, "Popen", DuplicateJSONProcess)
+    with pytest.raises(SupplyChainError, match="ambiguous JSON"):
+        audit_dependency_vulnerabilities(allow_network=True)
 
 
 def test_vulnerability_scan_does_not_report_clean_on_timeout(monkeypatch: pytest.MonkeyPatch):

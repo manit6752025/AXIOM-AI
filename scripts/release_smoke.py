@@ -818,6 +818,8 @@ def supply_chain_issues(
             "test_vulnerability_scan_reports_unavailable_scanner_without_claiming_clean",
             "test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_secret_environment",
             "test_vulnerability_scan_does_not_report_clean_on_timeout",
+            "test_vulnerability_scan_is_single_flight_and_does_not_spawn_concurrent_scanners",
+            "test_vulnerability_scan_rejects_duplicate_json_object_keys",
         )),
         ("API regression tests", api_tests, (
             "test_security_supply_chain_api_returns_spdx_sbom",
