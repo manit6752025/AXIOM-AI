@@ -66,3 +66,21 @@ chunk number, and start/end character offsets so callers can verify provenance.
 BM25 and cosine-derived fusion scores are ranking signals, not calibrated
 relevance probabilities. This is retrieval, not answer synthesis; AXIOM does
 not claim that the returned snippets constitute a complete answer.
+
+
+## Retrieval quality regression
+
+The offline test `tests/test_knowledge_retrieval_benchmark.py` copies six actual
+operator documents from the repository into a temporary workspace, ingests
+them through `KnowledgeBaseStore`, and runs six fixed information-seeking
+queries through the production BM25 search implementation. It reports
+document-level Recall@5, mean reciprocal rank@5, and nDCG@5; duplicate chunks
+from one document count only at that document's first rank. The regression
+thresholds are Recall@5 ≥ 0.95, MRR@5 ≥ 0.80, and nDCG@5 ≥ 0.80.
+
+This is a repeatable quality gate over AXIOM's current operator-document corpus,
+not a universal relevance guarantee or external user-corpus benchmark. Before
+changing the chunker or ranker, preserve the fixed query/relevance pairs and
+review metric changes; extend the corpus with representative documents and
+independently judged relevance labels as additional domains are introduced.
+Scores remain ranking signals, not calibrated probabilities.
