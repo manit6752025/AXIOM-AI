@@ -231,6 +231,21 @@ Cross-encoder scores and ranks are computed locally. Scores are ranking signals,
 </details>
 
 <details>
+<summary><b>Workspace knowledge bases</b></summary>
+
+~~~bash
+axiom knowledge base create "Engineering notes"
+axiom knowledge base list
+axiom knowledge ingest BASE_ID documents/guide.md
+axiom knowledge documents BASE_ID
+axiom knowledge remove-document BASE_ID DOCUMENT_ID --yes
+~~~
+
+Knowledge bases are workspace-scoped. AXIOM ingests bounded UTF-8 TXT, Markdown, RST, CSV, JSON, and JSONL files into private workspace storage; original source files are never changed. See [Workspace Knowledge](docs/Local-Knowledge.md).
+
+</details>
+
+<details>
 <summary><b>Ollama and Model Studio</b></summary>
 
 ```bash

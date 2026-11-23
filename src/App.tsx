@@ -72,6 +72,8 @@ import {
   type WorkspaceRuntimeMatrix,
   type LocalEmbeddingsReport,
   type LocalRerankingReport,
+  type KnowledgeBaseSummary,
+  type KnowledgeDocumentRecord,
 } from "./api/client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode } from "react";
@@ -4211,6 +4213,146 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
   </FeaturePage>;
 }
 
+function WorkspaceKnowledgePanel() {
+  const [bases, setBases] = useState<KnowledgeBaseSummary[]>([]);
+  const [selectedBase, setSelectedBase] = useState("");
+  const [documents, setDocuments] = useState<KnowledgeDocumentRecord[]>([]);
+  const [baseName, setBaseName] = useState("");
+  const [description, setDescription] = useState("");
+  const [sourcePath, setSourcePath] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  async function refreshBases(preferredId?: string) {
+    const result = await axiomApi.knowledgeBases();
+    setBases(result.knowledge_bases);
+    const nextId = preferredId && result.knowledge_bases.some((item) => item.id === preferredId)
+      ? preferredId
+      : result.knowledge_bases.some((item) => item.id === selectedBase)
+        ? selectedBase
+        : result.knowledge_bases[0]?.id || "";
+    setSelectedBase(nextId);
+    if (nextId) {
+      const page = await axiomApi.knowledgeDocuments(nextId);
+      setDocuments(page.documents);
+    } else {
+      setDocuments([]);
+    }
+  }
+
+  useEffect(() => {
+    void refreshBases().catch((cause) => setError(cause instanceof Error ? cause.message : "Knowledge bases are unavailable."));
+  }, []);
+
+  async function createBase(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const result = await axiomApi.createKnowledgeBase({ name: baseName, description });
+      setBaseName(""); setDescription("");
+      await refreshBases(result.knowledge_base.id);
+      setNotice("Created " + result.knowledge_base.name + ".");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not create the knowledge base.");
+    } finally { setBusy(false); }
+  }
+
+  async function ingest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedBase) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const result = await axiomApi.ingestKnowledgeDocument(selectedBase, sourcePath);
+      setSourcePath("");
+      await refreshBases(selectedBase);
+      setNotice("Ingested " + result.document.file_name + "; the source file was left unchanged.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Document ingestion failed.");
+    } finally { setBusy(false); }
+  }
+
+  async function removeDocument(document: KnowledgeDocumentRecord) {
+    if (!selectedBase) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await axiomApi.removeKnowledgeDocument(selectedBase, document.id);
+      await refreshBases(selectedBase);
+      setNotice("Removed the ingested copy of " + document.file_name + "; the source file was left unchanged.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not remove the ingested document.");
+    } finally { setBusy(false); }
+  }
+
+  async function removeBase() {
+    if (!selectedBase) return;
+    const current = bases.find((item) => item.id === selectedBase);
+    if (!current || !window.confirm("Remove " + current.name + " and its AXIOM-managed ingested copies? Original workspace files will remain untouched.")) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await axiomApi.removeKnowledgeBase(selectedBase);
+      await refreshBases();
+      setNotice("Removed " + current.name + "; original files were left unchanged.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not remove the knowledge base.");
+    } finally { setBusy(false); }
+  }
+
+  return <Surface title="Workspace knowledge bases" eyebrow="PRIVATE DOCUMENT INGESTION">
+    <p className="quiet-note">Build workspace-scoped collections from local UTF-8 documents. Source files stay in place; AXIOM stores a private, hash-verified copy inside this workspace.</p>
+    <form className="integration-form" onSubmit={(event) => void createBase(event)}>
+      <label className="field">
+        <span className="field-label-row"><span>Knowledge base name</span></span>
+        <input value={baseName} onChange={(event) => setBaseName(event.target.value)} maxLength={80} placeholder="Engineering notes" required />
+      </label>
+      <label className="field">
+        <span className="field-label-row"><span>Description (optional)</span></span>
+        <input value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} placeholder="Local team documents" />
+      </label>
+      <div className="integration-form-actions">
+        <button type="submit" className="button primary-button" disabled={busy || !baseName.trim()}>{busy ? "Working…" : "Create knowledge base"}</button>
+      </div>
+    </form>
+    <label className="field">
+      <span className="field-label-row"><span>Current knowledge base</span></span>
+      <select value={selectedBase} onChange={(event) => {
+        const value = event.target.value;
+        setSelectedBase(value);
+        if (value) void axiomApi.knowledgeDocuments(value).then((result) => setDocuments(result.documents)).catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load documents."));
+        else setDocuments([]);
+      }}>
+        <option value="">Choose a knowledge base</option>
+        {bases.map((base) => <option key={base.id} value={base.id}>{base.name} · {base.document_count} documents</option>)}
+      </select>
+    </label>
+    {selectedBase && <>
+      <form className="integration-form" onSubmit={(event) => void ingest(event)}>
+        <label className="field">
+          <span className="field-label-row"><span>Workspace-relative document path</span></span>
+          <input value={sourcePath} onChange={(event) => setSourcePath(event.target.value)} maxLength={4096} placeholder="documents/guide.md" required />
+        </label>
+        <div className="integration-form-actions">
+          <button type="submit" className="button primary-button" disabled={busy || !sourcePath.trim()}>Ingest document</button>
+          <button type="button" className="button secondary-button" onClick={() => void removeBase()} disabled={busy}>Remove knowledge base</button>
+          <span className="quiet-note">TXT, Markdown, RST, CSV, JSON, JSONL · 8 MiB per file · UTF-8 only.</span>
+        </div>
+      </form>
+      <div className="module-list">
+        {documents.map((document) => <div className="module-row" key={document.id}>
+          <span className="module-icon"><Database size={16} /></span>
+          <span className="module-copy"><b>{document.file_name}</b><small>{document.source_path} · {document.character_count.toLocaleString()} characters · SHA-256 {document.content_sha256.slice(0, 12)}…</small></span>
+          <button type="button" className="button secondary-button" onClick={() => void removeDocument(document)} disabled={busy}>Remove copy</button>
+        </div>)}
+        {documents.length === 0 && <EmptyState title="No documents yet" description="Ingest a workspace-relative text document to add it to this knowledge base." />}
+      </div>
+    </>}
+    {error && <InlineAlert tone="warning" role="alert">{error}</InlineAlert>}
+    {notice && <div className="quiet-note" role="status">{notice}</div>}
+    <p className="quiet-note">Ingested content is kept inside this workspace. It is not uploaded or added to runtime traces. Removing a knowledge base deletes only AXIOM's ingested copies, not original files.</p>
+  </Surface>;
+}
+
+
 function LocalRerankerPanel() {
   const [modelPath, setModelPath] = useState("");
   const [query, setQuery] = useState("");
@@ -4413,6 +4555,7 @@ function Runtime() {
     <LocalInferencePanel />
     <LocalEmbeddingsPanel />
     <LocalRerankerPanel />
+    <WorkspaceKnowledgePanel />
     <LLMClientPanel />
     <RuntimeTracePanel />
     <EngineTelemetryMonitor />
