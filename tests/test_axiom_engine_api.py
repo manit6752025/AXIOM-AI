@@ -1521,3 +1521,111 @@ def test_local_vision_api_maps_missing_local_runtime_to_service_unavailable(tmp_
     })
     assert response.status_code == 503
     assert response.json()["detail"] == "Local vision runtime unavailable."
+
+
+
+def test_local_speech_transcription_api_uses_active_workspace_and_forwards_resource_limits(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_transcribe(model_path, audio_path, **kwargs):
+        captured.update(model_path=model_path, audio_path=audio_path, **kwargs)
+        return {
+            "schema_version": 1,
+            "engine": "whisper.cpp",
+            "model": "ggml-base.bin",
+            "transcript": "Local transcription.",
+            "privacy": {"network_used": False},
+        }
+
+    monkeypatch.setattr(engine_api, "active_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(engine_api, "transcribe_local_audio", fake_transcribe)
+    response = _client().post("/api/engine/speech/transcribe", json={
+        "model_path": "/trusted/ggml-base.bin",
+        "audio_path": "data/meeting.wav",
+        "language": "en",
+        "timeout_seconds": 120,
+        "threads": 6,
+        "use_accelerator": True,
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["transcript"] == "Local transcription."
+    assert captured == {
+        "model_path": "/trusted/ggml-base.bin",
+        "audio_path": "data/meeting.wav",
+        "workspace_root": tmp_path,
+        "language": "en",
+        "timeout_seconds": 120,
+        "threads": 6,
+        "use_accelerator": True,
+    }
+
+
+@pytest.mark.parametrize("payload", [
+    {"model_path": "/trusted/whisper.bin", "audio_path": "../secret.wav"},
+    {"model_path": "/trusted/whisper.bin", "audio_path": "data/voice.txt"},
+    {"model_path": "/trusted/whisper.bin", "audio_path": "data/voice.wav", "language": "english"},
+    {"model_path": "/trusted/whisper.bin", "audio_path": "data/voice.wav", "threads": 17},
+    {"model_path": "/trusted/whisper.bin", "audio_path": "data/voice.wav", "use_accelerator": "yes"},
+])
+def test_local_speech_transcription_api_rejects_invalid_requests_before_execution(monkeypatch, payload):
+    monkeypatch.setattr(engine_api, "transcribe_local_audio", lambda *_args, **_kwargs: pytest.fail("invalid speech request reached runtime"))
+    response = _client().post("/api/engine/speech/transcribe", json=payload)
+    assert response.status_code == 422
+
+
+def test_local_speech_synthesis_api_forwards_bounded_text_and_voice_settings(monkeypatch):
+    captured = {}
+
+    def fake_synthesize(model_path, text, **kwargs):
+        captured.update(model_path=model_path, text=text, **kwargs)
+        return {
+            "schema_version": 1,
+            "engine": "piper",
+            "model": "voice.onnx",
+            "audio_base64": "UklGRg==",
+            "audio": {"format": "wav", "size_bytes": 4},
+            "privacy": {"network_used": False, "text_persisted_by_axiom": False},
+        }
+
+    monkeypatch.setattr(engine_api, "synthesize_local_speech", fake_synthesize)
+    response = _client().post("/api/engine/speech/synthesize", json={
+        "model_path": "/trusted/voice.onnx",
+        "text": "Speak locally.",
+        "timeout_seconds": 60,
+        "speaker_id": 2,
+        "max_audio_bytes": 4096,
+        "use_accelerator": False,
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["audio_base64"] == "UklGRg=="
+    assert captured == {
+        "model_path": "/trusted/voice.onnx",
+        "text": "Speak locally.",
+        "max_audio_bytes": 4096,
+        "timeout_seconds": 60,
+        "speaker_id": 2,
+        "use_accelerator": False,
+    }
+
+
+@pytest.mark.parametrize("payload", [
+    {"model_path": "/trusted/voice.onnx", "text": " "},
+    {"model_path": "/trusted/voice.onnx", "text": "Hello", "speaker_id": 256},
+    {"model_path": "/trusted/voice.onnx", "text": "Hello", "max_audio_bytes": 13 * 1024 * 1024},
+    {"model_path": "/trusted/voice.onnx", "text": "Hello", "use_accelerator": "yes"},
+])
+def test_local_speech_synthesis_api_rejects_unbounded_requests_before_execution(monkeypatch, payload):
+    monkeypatch.setattr(engine_api, "synthesize_local_speech", lambda *_args, **_kwargs: pytest.fail("invalid synthesis request reached runtime"))
+    response = _client().post("/api/engine/speech/synthesize", json=payload)
+    assert response.status_code == 422
+
+
+def test_local_speech_api_maps_unavailable_local_binary_to_service_unavailable(monkeypatch):
+    def unavailable(*_args, **_kwargs):
+        raise engine_api.LocalSpeechError("Local Piper runtime is missing.")
+    monkeypatch.setattr(engine_api, "synthesize_local_speech", unavailable)
+    response = _client().post("/api/engine/speech/synthesize", json={
+        "model_path": "/trusted/voice.onnx", "text": "Hello.",
+    })
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Local Piper runtime is missing."
