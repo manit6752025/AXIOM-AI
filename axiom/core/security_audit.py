@@ -507,7 +507,7 @@ def audit_security_posture(
         elif any(status == "warn" for status, _reason in origin_results) and not scopes_enabled:
             checks.append(_check(
                 "security.cors.origins", "Browser CORS origins", "warn", "warning",
-                "Remote browser origins are allowed while API token-scope enforcement is disabled.",
+                "Remote browser origins are allowed while API token-scope enforcement is disabled; CORS is not an authentication boundary.",
                 "Restrict CORS to loopback or enable API read/write token scopes.",
             ))
         elif any(status == "warn" for status, _reason in origin_results):

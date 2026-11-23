@@ -76,7 +76,7 @@ def test_dataset_inventory_discloses_bounded_scan_truncation(tmp_path: Path, mon
 
 
 def test_workspace_events_are_paginated_newest_first_and_searchable(monkeypatch) -> None:
-    monkeypatch.setattr(workspace, "_events", deque(maxlen=100))
+    monkeypatch.setattr(workspace, "_events_by_workspace", {workspace._event_workspace_key(): deque(maxlen=100)})
     workspace.record_workspace_event("models.add", "Added Alpha")
     workspace.record_workspace_event("datasets.profile", "Profiled train.jsonl")
     workspace.record_workspace_event("models.remove", "Removed Beta")

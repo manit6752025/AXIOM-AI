@@ -81,7 +81,10 @@ def test_unversioned_workflow_records_migrate_without_changing_ids(tmp_path):
     assert "schema_version" not in json.loads(path.read_text(encoding="utf-8"))[0]
 
     updated = store.update(
-        "legacy-workflow-id", name="Migrated workflow", nodes=[], edges=[]
+        "legacy-workflow-id",
+        name="Migrated workflow",
+        nodes=[{"id": "step", "type": "dataset.profile"}],
+        edges=[],
     )
     assert updated is not None
     assert updated["id"] == "legacy-workflow-id"
