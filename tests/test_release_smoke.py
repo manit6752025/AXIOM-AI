@@ -27,6 +27,15 @@ def test_roadmap_audit_accepts_implemented_status_with_code_scan_review_pending(
     assert release_smoke.roadmap_issues(markdown) == []
 
 
+def test_roadmap_audit_accepts_validation_and_registry_publication_pending_status() -> None:
+    markdown = "\\n".join(
+        f"- [R{i:03d} · {'Planned' if i % 2 else 'Implemented; tests passing'}] Requirement {i}."
+        for i in range(1, 140)
+    )
+    markdown += "\\n- [R140 · In progress; validation and registry publication pending] SDK packages are not yet published."
+    assert release_smoke.roadmap_issues(markdown) == []
+
+
 def test_roadmap_audit_detects_duplicates_missing_ids_and_unknown_status() -> None:
     markdown = "- [R001 · Maybe] A\n- [R001 · Planned] Duplicate\n"
     issues = release_smoke.roadmap_issues(markdown)
@@ -159,7 +168,11 @@ def test_request_admission_is_wired_across_core_api_cli_and_runtime_ui() -> None
         (ROOT / "tests" / "test_request_admission.py").read_text(encoding="utf-8")
         + (ROOT / "tests" / "test_native_engine.py").read_text(encoding="utf-8")
     )
-    serving_tests = (ROOT / "tests" / "test_serving_profiles.py").read_text(encoding="utf-8")
+    serving_tests = (
+        (ROOT / "tests" / "test_serving_profiles.py").read_text(encoding="utf-8")
+        + (ROOT / "tests" / "test_api_admission_errors.py").read_text(encoding="utf-8")
+        + (ROOT / "tests" / "test_axiom_engine_api.py").read_text(encoding="utf-8")
+    )
     e2e = (ROOT / "e2e" / "serving-profiles.spec.ts").read_text(encoding="utf-8")
     docs = (ROOT / "docs" / "Local-Serving-Profiles.md").read_text(encoding="utf-8")
     assert release_smoke.request_admission_issues(
@@ -181,7 +194,11 @@ def test_request_admission_release_contract_detects_missing_global_backpressure(
         (ROOT / "tests" / "test_request_admission.py").read_text(encoding="utf-8")
         + (ROOT / "tests" / "test_native_engine.py").read_text(encoding="utf-8")
     )
-    serving_tests = (ROOT / "tests" / "test_serving_profiles.py").read_text(encoding="utf-8")
+    serving_tests = (
+        (ROOT / "tests" / "test_serving_profiles.py").read_text(encoding="utf-8")
+        + (ROOT / "tests" / "test_api_admission_errors.py").read_text(encoding="utf-8")
+        + (ROOT / "tests" / "test_axiom_engine_api.py").read_text(encoding="utf-8")
+    )
     e2e = (ROOT / "e2e" / "serving-profiles.spec.ts").read_text(encoding="utf-8")
     docs = (ROOT / "docs" / "Local-Serving-Profiles.md").read_text(encoding="utf-8")
     broken = core.replace("len(self._waiters) >= self._max_queue", "len(self._waiters) >= 10", 1)

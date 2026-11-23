@@ -19,6 +19,7 @@ VALID_STATUSES = {
     "Planned",
     "In progress",
     "In progress; validation pending",
+    "In progress; validation and registry publication pending",
     "Implemented; tests passing; code-scan review pending",
 }
 
@@ -275,9 +276,6 @@ def request_admission_issues(
             "RequestAdmissionQueueFull",
             "RequestAdmissionTimeout",
             "RequestAdmissionCancelled",
-            "request_queue_full",
-            "request_queue_timeout",
-            "request_cancelled",
             "HTTPException(429",
             "\"Retry-After\": \"1\"",
             "status_code=504",
@@ -320,16 +318,20 @@ def request_admission_issues(
             "test_fifo_queue_admits_in_order_and_enforces_bound",
             "test_queue_wait_times_out_and_cancelled_ticket_is_removed",
             "test_queue_limits_are_scoped_per_profile_with_a_global_safety_ceiling",
-            "test_queue_position_is_recomputed_after_an_earlier_ticket_is_cancelled",
-        "test_engine_admission_wait_is_bounded",
-        "test_engine_admission_wait_honors_cancellation",
-        "test_engine_admission_uses_one_shared_manager_and_releases_slots",
+                "test_queue_position_is_recomputed_after_an_earlier_ticket_is_cancelled",
+            "test_engine_admission_wait_is_bounded",
+            "test_engine_admission_wait_honors_cancellation",
+            "test_engine_admission_uses_one_shared_manager_and_releases_slots",
         )),
         ("Serving API regressions", serving_tests, (
             "test_serving_profile_api_crud_readiness_and_profile_limited_generation",
             "test_serving_profile_api_maps_queue_full_timeout_and_cancellation",
             'admission_calls[0]["queue_key"] == profile_id',
             'failed.headers["retry-after"] == "1"',
+            "test_application_maps_shared_native_admission_failures_to_http",
+            "test_native_ndjson_stream_preserves_request_queue_full_error",
+            "test_openai_nonstream_maps_global_admission_queue_full_to_429",
+            "test_openai_sse_stream_preserves_global_admission_error_codes",
         )),
         ("Browser acceptance", e2e, (
             "max_queued_requests: 3",
@@ -1667,7 +1669,11 @@ def inspect(root: Path) -> dict[str, Any]:
         (root / "tests/test_request_admission.py").read_text(encoding="utf-8")
         + (root / "tests/test_native_engine.py").read_text(encoding="utf-8")
     )
-    serving_profiles_tests = (root / "tests/test_serving_profiles.py").read_text(encoding="utf-8")
+    serving_profiles_tests = (
+        (root / "tests/test_serving_profiles.py").read_text(encoding="utf-8")
+        + (root / "tests/test_api_admission_errors.py").read_text(encoding="utf-8")
+        + (root / "tests/test_axiom_engine_api.py").read_text(encoding="utf-8")
+    )
     server_source = (root / "axiom/api/server.py").read_text(encoding="utf-8")
     serving_profiles_cli = engine_cli_source
     serving_profiles_panel = (root / "src/components/EngineServingProfilesPanel.tsx").read_text(encoding="utf-8")
