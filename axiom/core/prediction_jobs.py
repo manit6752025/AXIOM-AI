@@ -582,11 +582,22 @@ def _open_prediction_checkpoint(
         descriptor = -1
         before = os.fstat(stream.fileno())
         expected_identity = record.get("checkpoint_identity")
+
+        def file_snapshot(info: Any) -> tuple[int, int, int, int, int]:
+            return (
+                info.st_dev,
+                info.st_ino,
+                info.st_size,
+                info.st_mtime_ns,
+                info.st_ctime_ns,
+            )
+
         if (
             not stat.S_ISREG(before.st_mode)
             or not isinstance(expected_identity, list)
             or list(_file_identity(before)) != expected_identity
             or list(_file_identity(path_info)) != expected_identity
+            or file_snapshot(path_info) != file_snapshot(before)
         ):
             stream.close()
             raise ValueError("Prediction checkpoint identity changed.")
@@ -620,6 +631,16 @@ def _open_prediction_checkpoint(
         ):
             stream.close()
             raise ValueError("Prediction checkpoint digest or row count does not match saved job state.")
+        # Re-stat before truncation: identity alone does not detect an in-place
+        # write that races the digest read on the same inode.
+        after_read = os.fstat(stream.fileno())
+        path_after_read = path.lstat()
+        if (
+            file_snapshot(after_read) != file_snapshot(before)
+            or file_snapshot(path_after_read) != file_snapshot(before)
+        ):
+            stream.close()
+            raise ValueError("Prediction checkpoint changed during digest verification.")
         if before.st_size > committed_bytes:
             os.ftruncate(stream.fileno(), committed_bytes)
             stream.flush()
@@ -631,6 +652,7 @@ def _open_prediction_checkpoint(
             or _file_identity(current_path) != _file_identity(before)
             or not stat.S_ISREG(current_path.st_mode)
             or after.st_size != committed_bytes
+            or file_snapshot(after) != file_snapshot(current_path)
         ):
             stream.close()
             raise ValueError("Prediction checkpoint changed during verification.")

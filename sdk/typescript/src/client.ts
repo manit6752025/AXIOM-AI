@@ -13,7 +13,6 @@ import type {
   AxiomPredictionJobStartResult,
   AxiomPredictionJobResumeResult,
   AxiomPredictionJobStatusResult,
-  AxiomPredictionJobSummary,
   AxiomRequestOptions,
   AxiomTelemetryHistory,
   AxiomTelemetryHistorySettings,

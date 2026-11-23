@@ -40,6 +40,10 @@ tamper-resistance check: diagnostics do not read, print, or export configuration
 values. Use `axiom doctor --strict --json` in CI when workspace warnings should
 also produce a non-zero exit status; ordinary `--json` keeps warnings
 informational for projects that have not created every optional directory.
+Both JSON modes include the top-level `status`, `strict`, and effective
+`exit_code` fields, so a parser can make the same decision as the process
+exit status without inferring policy from individual checks. Workspace failures
+always produce a non-zero code; warnings do so only in strict mode.
 
 
 ## Roadmap audit
