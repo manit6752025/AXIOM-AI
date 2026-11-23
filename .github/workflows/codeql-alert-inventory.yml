@@ -56,7 +56,7 @@ jobs:
           if [ -n "$analysis_id" ]; then
             echo "Latest CodeQL analysis ID: $analysis_id"
             gh api -H "Accept: application/sarif+json" \
-              "/repos/$GH_REPO/code-scanning/analyses/$analysis_id/sarif" \
+              "/repos/$GH_REPO/code-scanning/analyses/$analysis_id" \
               > "$RUNNER_TEMP/codeql-latest.sarif"
           else
             echo "No CodeQL analysis ID was returned." >&2
