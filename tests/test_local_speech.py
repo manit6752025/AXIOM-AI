@@ -83,8 +83,11 @@ def test_transcribe_uses_only_local_whisper_cli_and_bounded_workspace_audio(tmp_
     model = tmp_path / "trusted" / "ggml-base.bin"
     model.parent.mkdir()
     model.write_bytes(b"model")
+    executable = tmp_path / "bin" / "whisper-cli"
+    executable.parent.mkdir()
+    executable.write_text("test executable stub", encoding="utf-8")
     monkeypatch.setattr(local_speech, "_resolve_trusted_model", lambda *_args: (model, None))
-    monkeypatch.setattr(local_speech.shutil, "which", lambda name: "/opt/whisper/bin/whisper-cli" if name == "whisper-cli" else None)
+    monkeypatch.setattr(local_speech.shutil, "which", lambda name: str(executable) if name == "whisper-cli" else None)
     monkeypatch.setenv("AXIOM_SECRET_TOKEN", "must-not-be-inherited")
     observed = {}
 
@@ -110,7 +113,7 @@ def test_transcribe_uses_only_local_whisper_cli_and_bounded_workspace_audio(tmp_
     assert report["privacy"]["network_used"] is False
     assert report["privacy"]["audio_persisted_by_axiom"] is False
     assert observed["audio"] == audio
-    assert observed["command"][0] == "/opt/whisper/bin/whisper-cli"
+    assert observed["command"][0] == str(executable)
     assert "-ng" in observed["command"]
     assert observed["kwargs"]["shell"] is False
     assert observed["kwargs"]["timeout"] == 90
@@ -163,8 +166,11 @@ def test_synthesize_uses_local_piper_and_returns_bounded_wav(tmp_path, monkeypat
     config = Path(str(model) + ".json")
     model.write_bytes(b"model")
     config.write_text("{}", encoding="utf-8")
+    executable = tmp_path / "bin" / "piper"
+    executable.parent.mkdir()
+    executable.write_text("test executable stub", encoding="utf-8")
     monkeypatch.setattr(local_speech, "_resolve_trusted_model", lambda *_args: (model, config))
-    monkeypatch.setattr(local_speech.shutil, "which", lambda name: "/opt/piper/bin/piper" if name == "piper" else None)
+    monkeypatch.setattr(local_speech.shutil, "which", lambda name: str(executable) if name == "piper" else None)
     wav_data = _wav_bytes()
     observed = {}
 
