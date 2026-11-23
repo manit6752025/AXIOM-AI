@@ -2,6 +2,29 @@
 
 The Control Center's **Models** page reads from the local AXIOM model registry. Registry actions operate on metadata; removing a registry record does not delete the model's weight files.
 
+## Registered metadata and validation
+
+Each registry record supports a stable ID, display name, source or local path, format,
+parameter metadata, quantization, architecture, licence, tags, favorite status,
+optional SHA-256 content digest, and optional `size_bytes`. Weight size is the
+combined weight-file size in bytes when known; it is metadata, not a live disk
+measurement. Discovering and inspecting a local model folder pre-fills the size
+from the files found during that bounded inspection. Manual registration can
+supply a known size or leave it unknown.
+
+The size field accepts a non-negative safe integer up to 9,007,199,254,740,991
+bytes. Boolean, fractional, negative, and out-of-range values are rejected.
+The optional content digest must be exactly 64 hexadecimal characters. Both
+fields are included in schema-version-1 JSON import/export and remain optional
+so older registry exports continue to import. Updates validate the complete
+candidate record before writing it.
+
+The Models page displays known sizes and exposes the size and digest fields in
+the registration form. The CLI accepts `--size-bytes` for both
+`axiom model add` and `axiom model update`; `axiom model list` displays
+the stored byte count. These operations update registry metadata only and do
+not hash, move, download, or rewrite model weights.
+
 ## Search, filter, sort, and paginate
 
 The Models page provides server-side inventory controls:
@@ -21,6 +44,21 @@ The API endpoint is GET /api/workspace/models. Its optional query parameters are
 Saved filter presets are stored in this browser's local storage under a versioned AXIOM key. Each preset contains only its name and filter options, not model weights, credentials, prompts, or model files. Up to 20 presets are retained. Clearing the filter form does not delete saved presets; each preset can be applied or deleted explicitly.
 
 Registry contents and search requests still go to the local AXIOM API. A saved preset is a convenience for this browser, not a cross-device account setting or server-side shared preference.
+
+## Local model inspection
+
+The Models page can discover candidate folders below the workspace `models/`
+directory and inspect a selected candidate's local configuration and supported
+weight-file metadata. The summary reports the detected architecture/model type,
+format, combined weight-file size, tokenizer/config presence, detected
+capabilities, and a heuristic memory estimate when enough metadata is available.
+Use **Use metadata** to prefill the registry form from the inspection result.
+
+Inspection is metadata-only: it does not load or execute model weights, contact a
+remote catalogue, or prove that a runtime can load the model. The scan is bounded
+and does not follow directory symlinks; selected paths are validated against the
+trusted workspace model root. Missing or ambiguous metadata remains unknown
+rather than being inferred as a confirmed capability.
 
 ## Hardware fit and compatibility report
 

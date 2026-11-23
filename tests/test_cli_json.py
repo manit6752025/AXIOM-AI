@@ -329,7 +329,7 @@ def test_model_add_and_update_json_preserve_metadata_fields(tmp_path: Path, monk
         "model", "add", "tiny-llama", "/models/tiny-llama",
         "--format", "safetensors", "--architecture", "LlamaForCausalLM",
         "--license", "apache-2.0", "--tag", "local", "--tag", "reviewed",
-        "--content-sha256", "a" * 64, "--json",
+        "--content-sha256", "a" * 64, "--size-bytes", "4096", "--json",
     ])
     assert created.exit_code == 0, created.stdout
     model = json.loads(created.stdout)["model"]
@@ -337,11 +337,12 @@ def test_model_add_and_update_json_preserve_metadata_fields(tmp_path: Path, monk
     assert model["license"] == "apache-2.0"
     assert model["tags"] == ["local", "reviewed"]
     assert model["content_sha256"] == "a" * 64
+    assert model["size_bytes"] == 4096
 
     updated = runner.invoke(app, [
         "model", "update", model["id"],
         "--architecture", "MistralForCausalLM",
-        "--license", "mit", "--tag", "quality-reviewed",
+        "--license", "mit", "--tag", "quality-reviewed", "--size-bytes", "8192",
         "--favorite", "--json",
     ])
     assert updated.exit_code == 0, updated.stdout
@@ -351,6 +352,7 @@ def test_model_add_and_update_json_preserve_metadata_fields(tmp_path: Path, monk
     assert record["tags"] == ["quality-reviewed"]
     assert record["favorite"] is True
     assert record["content_sha256"] == "a" * 64
+    assert record["size_bytes"] == 8192
 
 
 def test_model_update_validation_failure_does_not_mutate_registry(tmp_path: Path, monkeypatch) -> None:
@@ -365,3 +367,33 @@ def test_model_update_validation_failure_does_not_mutate_registry(tmp_path: Path
     listed = runner.invoke(app, ["model", "list", "--json"])
     model_after = json.loads(listed.stdout)["models"][0]
     assert model_after == original
+
+
+
+def test_model_add_json_rejects_duplicate_source_and_content_without_partial_writes(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    created = runner.invoke(app, [
+        "model", "add", "first-model", "org/demo-model",
+        "--content-sha256", "a" * 64, "--json",
+    ])
+    assert created.exit_code == 0, created.stdout
+
+    same_source = runner.invoke(app, [
+        "model", "add", "same-source", "ORG/DEMO-MODEL", "--json",
+    ])
+    assert same_source.exit_code == 1
+    assert json.loads(same_source.stdout)["error"]["code"] == "model_add_failed"
+    assert "source already registered" in json.loads(same_source.stdout)["error"]["message"]
+
+    same_content = runner.invoke(app, [
+        "model", "add", "same-content", "org/another-location",
+        "--content-sha256", "A" * 64, "--json",
+    ])
+    assert same_content.exit_code == 1
+    assert json.loads(same_content.stdout)["error"]["code"] == "model_add_failed"
+    assert "content already registered" in json.loads(same_content.stdout)["error"]["message"]
+
+    listed = runner.invoke(app, ["model", "list", "--json"])
+    payload = json.loads(listed.stdout)
+    assert payload["total"] == 1
+    assert [item["name"] for item in payload["models"]] == ["first-model"]

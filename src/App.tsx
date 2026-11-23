@@ -2068,6 +2068,8 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
   const [architecture, setArchitecture] = useState("");
   const [license, setLicense] = useState("");
   const [quantization, setQuantization] = useState("");
+  const [sizeBytes, setSizeBytes] = useState("");
+  const [contentSha256, setContentSha256] = useState("");
   const [tags, setTags] = useState("");
   const [modelSearch, setModelSearch] = useState("");
   const [favoriteOnly, setFavoriteOnly] = useState(false);
@@ -2207,6 +2209,8 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
     setFormat(result.model_format.toLowerCase());
     setArchitecture(result.architecture || "");
     setParameters(result.parameter_count ? `${(result.parameter_count / 1_000_000_000).toFixed(1)}B` : "");
+    setSizeBytes(String(result.weight_size_bytes));
+    setContentSha256("");
     setFormOpen(true);
   };
 
@@ -2226,6 +2230,17 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
 
   const addModel = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const normalizedSize = sizeBytes.trim();
+    const parsedSizeBytes = normalizedSize ? Number(normalizedSize) : null;
+    if (normalizedSize && (!/^\d+$/.test(normalizedSize) || parsedSizeBytes === null || !Number.isSafeInteger(parsedSizeBytes))) {
+      onNotify("Weight size must be a non-negative whole number of safe integer bytes.", "warning");
+      return;
+    }
+    const digest = contentSha256.trim();
+    if (digest && !/^[a-f0-9]{64}$/i.test(digest)) {
+      onNotify("Content SHA-256 must contain exactly 64 hexadecimal characters.", "warning");
+      return;
+    }
     setSaving(true);
     try {
       await axiomApi.addModel({
@@ -2236,6 +2251,8 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
         architecture: architecture.trim() || null,
         license: license.trim() || null,
         quantization: quantization.trim() || null,
+        size_bytes: parsedSizeBytes,
+        content_sha256: digest || null,
         tags: [...new Set(tags.split(",").map((tag) => tag.trim()).filter(Boolean))],
         favorite: false,
       });
@@ -2245,6 +2262,8 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
       setArchitecture("");
       setLicense("");
       setQuantization("");
+      setSizeBytes("");
+      setContentSha256("");
       setTags("");
       setFormOpen(false);
       onNotify("Model registered in the local AXIOM inventory.", "success");
@@ -2312,6 +2331,9 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
     }
   };
 
+  const validSizeBytes = !sizeBytes.trim() || (/^\d+$/.test(sizeBytes.trim()) && Number.isSafeInteger(Number(sizeBytes)));
+  const validContentSha256 = !contentSha256.trim() || /^[a-f0-9]{64}$/i.test(contentSha256.trim());
+
   return <FeaturePage page="models" actions={<><button type="button" className="button secondary-button" onClick={() => void refresh()} disabled={loading}><RefreshCcw size={16} /> Refresh</button><button type="button" className="button secondary-button" onClick={() => void discoverLocalModels()} disabled={discoveryBusy}><Search size={15} /> {discoveryBusy ? "Discovering…" : "Discover local"}</button><button type="button" className="button secondary-button" onClick={() => void exportModels()}><ArrowDownToLine size={15} /> Export</button><button type="button" className="button secondary-button" onClick={() => importRef.current?.click()}><Upload size={15} /> Import</button><input ref={importRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importModels(event)} /><button type="button" className="button primary-button" onClick={() => setFormOpen((open) => !open)}><Plus size={16} /> Register model</button></>}>
     <div className="info-grid"><InfoCard icon={BrainCircuit} label="Matching models" value={loading ? "—" : String(modelTotal)} detail={loading ? "Loading inventory" : `${models.filter((model) => model.favorite).length} favorites on this page`} tone={modelTotal ? "success" : "neutral"} /><InfoCard icon={HardDrive} label="Storage" value="Local" detail="Registry metadata only" tone="neutral" /><InfoCard icon={SlidersHorizontal} label="Inventory" value={loading ? "—" : String(models.length)} detail={hasMore ? `Showing ${models.length} of ${modelTotal} matches` : "All matching entries loaded"} tone="info" /></div>
     <Surface title="Find models" eyebrow="SERVER-SIDE SEARCH AND FILTERS">
@@ -2340,8 +2362,10 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
         <label className="field"><span className="field-label-row"><span>Parameters</span></span><input value={parameters} onChange={(event) => setParameters(event.target.value)} maxLength={80} placeholder="8B" /></label>
         <label className="field"><span className="field-label-row"><span>Quantization</span></span><input value={quantization} onChange={(event) => setQuantization(event.target.value)} maxLength={80} placeholder="Q4_K_M" /></label>
         <label className="field"><span className="field-label-row"><span>License</span></span><input value={license} onChange={(event) => setLicense(event.target.value)} maxLength={120} placeholder="Apache-2.0" /></label>
+        <label className="field"><span className="field-label-row"><span>Weight size (bytes)</span></span><input aria-label="Weight size in bytes" type="number" inputMode="numeric" min="0" step="1" value={sizeBytes} onChange={(event) => setSizeBytes(event.target.value)} placeholder="Known combined weight-file size" aria-invalid={!validSizeBytes} /></label>
+        <label className="field"><span className="field-label-row"><span>Content SHA-256</span></span><input aria-label="Content SHA-256" value={contentSha256} onChange={(event) => setContentSha256(event.target.value)} maxLength={64} spellCheck={false} placeholder="Optional 64-character digest" aria-invalid={!validContentSha256} /></label>
         <label className="field"><span className="field-label-row"><span>Tags, comma-separated</span></span><input value={tags} onChange={(event) => setTags(event.target.value)} maxLength={1200} placeholder="chat, local, favorite" /></label>
-        <div className="integration-form-actions"><button type="button" className="button secondary-button" onClick={() => setFormOpen(false)}>Cancel</button><button type="submit" className="button primary-button" disabled={saving || !name.trim() || !source.trim() || !format.trim()}>{saving ? "Registering…" : "Save to registry"}</button></div>
+        <div className="integration-form-actions"><button type="button" className="button secondary-button" onClick={() => setFormOpen(false)}>Cancel</button><button type="submit" className="button primary-button" disabled={saving || !name.trim() || !source.trim() || !format.trim() || !validSizeBytes || !validContentSha256}>{saving ? "Registering…" : "Save to registry"}</button></div>
       </form>
       <p className="quiet-note">This saves metadata only. It does not download, move, or inspect model files. Registry import accepts AXIOM schema version 1 and never overwrites existing entries.</p>
     </Surface>}
@@ -2373,7 +2397,7 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
     </Surface>}
     <Surface title="Model registry" eyebrow="LOCAL INVENTORY">
       {error ? <InlineAlert tone="warning" role="alert">{error}</InlineAlert> : null}
-      {loading ? <div className="loading-state" role="status">Loading model registry…</div> : models.length ? <><div className="module-list">{models.map((model) => <div className="module-row model-registry-row" key={model.id}><span className="module-icon"><BrainCircuit size={17} /></span><span className="module-copy"><b>{model.name}</b><small>{model.source} · {model.format}{model.parameters ? ` · ${model.parameters}` : ""}{model.quantization ? ` · ${model.quantization}` : ""}{model.architecture ? ` · ${model.architecture}` : ""}{model.license ? ` · ${model.license}` : ""}{model.tags?.length ? ` · ${model.tags.join(", ")}` : ""}</small></span><button type="button" className="icon-button" aria-label={`${model.favorite ? "Remove" : "Add"} ${model.name} ${model.favorite ? "favorite" : "to favorites"}`} title={model.favorite ? "Remove favorite" : "Add favorite"} onClick={() => void toggleFavorite(model)}><Star size={15} fill={model.favorite ? "currentColor" : "none"} /></button><button type="button" className="icon-button" aria-label={`Check hardware fit for ${model.name}`} title={compatibilityBusyId === model.id ? "Checking hardware fit…" : "Estimate hardware fit"} disabled={compatibilityBusyId === model.id} onClick={() => void inspectCompatibility(model)}><Gauge size={15} /></button><button type="button" className="icon-button danger-icon-button" aria-label={`Remove ${model.name} from registry`} title="Remove registry entry" onClick={() => setRemoving(model)}><Trash2 size={15} /></button></div>)}</div>{hasMore && <div className="pagination-actions"><button type="button" className="button secondary-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more models"}</button></div>}</> : <EmptyState icon={BrainCircuit} title="Registry is empty" description="Register model metadata here or use the CLI. Model files remain where they are." action={<CliReference command="axiom model add my-model local safetensors" />} />}
+      {loading ? <div className="loading-state" role="status">Loading model registry…</div> : models.length ? <><div className="module-list">{models.map((model) => <div className="module-row model-registry-row" key={model.id}><span className="module-icon"><BrainCircuit size={17} /></span><span className="module-copy"><b>{model.name}</b><small>{model.source} · {model.format}{model.parameters ? ` · ${model.parameters}` : ""}{model.quantization ? ` · ${model.quantization}` : ""}{model.architecture ? ` · ${model.architecture}` : ""}{model.license ? ` · ${model.license}` : ""}{model.size_bytes !== null && model.size_bytes !== undefined ? ` · ${formatBytes(model.size_bytes)}` : ""}{model.tags?.length ? ` · ${model.tags.join(", ")}` : ""}</small></span><button type="button" className="icon-button" aria-label={`${model.favorite ? "Remove" : "Add"} ${model.name} ${model.favorite ? "favorite" : "to favorites"}`} title={model.favorite ? "Remove favorite" : "Add favorite"} onClick={() => void toggleFavorite(model)}><Star size={15} fill={model.favorite ? "currentColor" : "none"} /></button><button type="button" className="icon-button" aria-label={`Check hardware fit for ${model.name}`} title={compatibilityBusyId === model.id ? "Checking hardware fit…" : "Estimate hardware fit"} disabled={compatibilityBusyId === model.id} onClick={() => void inspectCompatibility(model)}><Gauge size={15} /></button><button type="button" className="icon-button danger-icon-button" aria-label={`Remove ${model.name} from registry`} title="Remove registry entry" onClick={() => setRemoving(model)}><Trash2 size={15} /></button></div>)}</div>{hasMore && <div className="pagination-actions"><button type="button" className="button secondary-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more models"}</button></div>}</> : <EmptyState icon={BrainCircuit} title="Registry is empty" description="Register model metadata here or use the CLI. Model files remain where they are." action={<CliReference command="axiom model add my-model local safetensors" />} />}
     </Surface>
     {removing && <ConfirmationDialog titleId="remove-model-title" descriptionId="remove-model-description" eyebrow="CONFIRM REGISTRY CHANGE" title={`Remove ${removing.name}?`} description="This removes only its AXIOM registry metadata. Local model weights will not be deleted." confirmLabel="Remove registry entry" busyLabel="Removing…" busy={removingBusy} onCancel={() => setRemoving(null)} onConfirm={() => void removeModel()} />}
     <ModelStudioPanel />

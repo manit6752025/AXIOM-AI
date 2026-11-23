@@ -1236,8 +1236,16 @@ def model_list(
     table.add_column("Format")
     table.add_column("Parameters")
     table.add_column("Quantization")
+    table.add_column("Weight size (bytes)", justify="right")
     for model in models:
-        table.add_row(model.name, model.source, model.format, model.parameters or "-", model.quantization or "-")
+        table.add_row(
+            model.name,
+            model.source,
+            model.format,
+            model.parameters or "-",
+            model.quantization or "-",
+            str(model.size_bytes) if model.size_bytes is not None else "-",
+        )
     console.print(table)
 
 @model_app.command("export")
@@ -1513,6 +1521,7 @@ def model_add(
     license_name: str | None = typer.Option(None, "--license", help="Source/license identifier from trusted metadata."),
     tag: list[str] | None = typer.Option(None, "--tag", help="Repeat for each model tag."),
     content_sha256: str | None = typer.Option(None, "--content-sha256", help="Optional 64-hex digest for inspected local weights."),
+    size_bytes: int | None = typer.Option(None, "--size-bytes", help="Known combined weight-file size in bytes."),
     json_output: bool = typer.Option(False, "--json", help="Emit the created model record as JSON."),
 ):
     """Register model metadata without downloading or moving weights."""
@@ -1528,6 +1537,7 @@ def model_add(
             license=license_name,
             tags=tag or [],
             content_sha256=content_sha256,
+            size_bytes=size_bytes,
         )
         registry.add(model)
     except (TypeError, ValueError) as exc:
@@ -1554,6 +1564,7 @@ def model_update(
     tag: list[str] | None = typer.Option(None, "--tag", help="Replace all tags; repeat for each tag."),
     clear_tags: bool = typer.Option(False, "--clear-tags", help="Clear all tags."),
     content_sha256: str | None = typer.Option(None, "--content-sha256"),
+    size_bytes: int | None = typer.Option(None, "--size-bytes", help="Known combined weight-file size in bytes."),
     favorite: bool | None = typer.Option(None, "--favorite/--unfavorite"),
     json_output: bool = typer.Option(False, "--json", help="Emit the updated model record as JSON."),
 ):
@@ -1568,6 +1579,7 @@ def model_update(
         ("architecture", architecture),
         ("license", license_name),
         ("content_sha256", content_sha256),
+        ("size_bytes", size_bytes),
     ):
         if value is not None:
             changes[key] = value

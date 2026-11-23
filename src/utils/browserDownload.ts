@@ -6,7 +6,12 @@ export function sanitizeDownloadFilename(requestedFilename: string): string {
   const leaf = requestedFilename.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) ?? "";
   let safe = leaf
     .normalize("NFKC")
-    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .split("")
+    .filter((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint > 0x1f && codePoint !== 0x7f;
+    })
+    .join("")
     .replace(/[<>:"|?*]/g, "_")
     .replace(/^[. ]+|[. ]+$/g, "")
     .trim()

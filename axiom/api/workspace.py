@@ -96,6 +96,7 @@ class WorkspaceModelInput(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=32)
     favorite: bool = False
     content_sha256: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
+    size_bytes: int | None = Field(default=None, strict=True, ge=0, le=9_007_199_254_740_991)
     id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
 
@@ -110,6 +111,7 @@ class WorkspaceModelPatch(BaseModel):
     tags: list[str] | None = Field(default=None, max_length=32)
     favorite: bool | None = None
     content_sha256: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
+    size_bytes: int | None = Field(default=None, strict=True, ge=0, le=9_007_199_254_740_991)
 
 
 class WorkspaceModelImportInput(BaseModel):
@@ -476,7 +478,7 @@ def workspace_update_model(model_id: str, request: WorkspaceModelPatch) -> dict[
     changes = request.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=422, detail="At least one metadata field is required.")
-    if any(value is None for key, value in changes.items() if key not in {"license", "content_sha256", "architecture", "parameters", "quantization", "tags"}):
+    if any(value is None for key, value in changes.items() if key not in {"license", "content_sha256", "architecture", "parameters", "quantization", "tags", "size_bytes"}):
         raise HTTPException(status_code=422, detail="Non-null metadata values are required.")
     try:
         model = ModelRegistry().update(model_id, changes)

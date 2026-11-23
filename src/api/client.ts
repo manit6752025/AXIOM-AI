@@ -527,6 +527,7 @@ export type WorkspaceModel = {
   tags?: string[];
   favorite?: boolean;
   content_sha256?: string | null;
+  size_bytes?: number | null;
 };
 
 export type WorkspaceModelPage = {
