@@ -1161,6 +1161,29 @@ export type KnowledgeDocumentList = {
   documents: KnowledgeDocumentRecord[]; total: number;
 };
 
+export type KnowledgeSearchCitation = {
+  document_id: string; file_name: string; source_path: string; format: string;
+  content_sha256: string; chunk_index: number; start_char: number; end_char: number; character_count: number;
+};
+export type KnowledgeSearchResultItem = {
+  score: number; lexical_score: number; vector_score: number | null; snippet: string;
+  citation: KnowledgeSearchCitation;
+};
+export type KnowledgeSearchReport = {
+  schema_version: number; engine: string; knowledge_base: KnowledgeBaseSummary;
+  query: {
+    character_count: number; candidate_documents: number; chunks_scanned: number; result_limit: number;
+    chunk_size_chars: number; chunk_overlap_chars: number; vector_enabled: boolean; vector_weight: number;
+    formats: string[]; source_prefixes: string[]; document_ids: string[];
+  };
+  results: KnowledgeSearchResultItem[]; total_results: number;
+  privacy: {
+    source_documents_modified: false; results_persisted: false; network_used: false;
+    full_source_documents_returned: false; snippets_returned: true;
+  };
+  scope_note: string;
+};
+
 export type RuntimeSnapshot = {
   status: string;
   hardware: HardwareSnapshot;
@@ -2483,6 +2506,15 @@ export const axiomApi = {
   ),
 
 
+  searchKnowledgeBase: (baseId: string, input: {
+    query: string; limit?: number; max_documents?: number; chunk_size_chars?: number;
+    chunk_overlap_chars?: number; formats?: string[]; source_prefixes?: string[];
+    document_ids?: string[]; embedding_model_path?: string; vector_weight?: number;
+    device?: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu";
+  }) => requestJson<KnowledgeSearchReport>(
+    `/api/workspace/knowledge-bases/${encodeURIComponent(baseId)}/search`,
+    { method: "POST", body: JSON.stringify(input) },
+  ),
   knowledgeBases: () => requestJson<KnowledgeBaseList>("/api/workspace/knowledge-bases"),
   createKnowledgeBase: (input: { name: string; description?: string }) =>
     requestJson<{ schema_version: number; knowledge_base: KnowledgeBaseSummary }>(
