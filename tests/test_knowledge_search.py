@@ -98,6 +98,46 @@ def test_knowledge_search_fuses_local_embedding_scores_when_model_is_supplied(tm
     {"device": "remote"},
     {"device": []},
 ])
+def test_knowledge_search_hybrid_ranking_recovers_semantic_only_matches(tmp_path, monkeypatch):
+    store, base = _seed_store(tmp_path)
+    (tmp_path / "docs" / "mobility.md").write_text(
+        "A vehicle drivetrain transfers torque from the engine to the wheels.",
+        encoding="utf-8",
+    )
+    store.ingest_document(base["id"], "docs/mobility.md")
+
+    def fake_embed(model_path, texts, **kwargs):
+        vectors = []
+        for text in texts:
+            normalized = text.casefold()
+            if "automotive" in normalized or "vehicle" in normalized:
+                vectors.append([1.0, 0.0])
+            else:
+                vectors.append([0.0, 1.0])
+        return {"embeddings": vectors}
+
+    monkeypatch.setattr("axiom.core.knowledge_search.embed_local_texts", fake_embed)
+    result = search_knowledge_base(
+        store,
+        base["id"],
+        "automotive",
+        embedding_model_path="/trusted/encoder",
+        vector_weight=1.0,
+        device="cpu",
+    )
+
+    assert result["engine"] == "axiom-hybrid-knowledge-search"
+    assert result["query"]["vector_enabled"] is True
+    assert result["query"]["vector_weight"] == 1.0
+    assert result["results"]
+    best = result["results"][0]
+    assert best["citation"]["source_path"] == "docs/mobility.md"
+    assert best["lexical_score"] == 0.0
+    assert best["vector_score"] == 1.0
+    assert best["score"] == 1.0
+    assert best["citation"]["content_sha256"]
+
+
 def test_knowledge_search_rejects_unbounded_parameters(tmp_path, kwargs):
     store, base = _seed_store(tmp_path)
     with pytest.raises(KnowledgeSearchError):
