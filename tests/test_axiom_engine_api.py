@@ -18,6 +18,27 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
+def test_engine_status_api_exposes_native_dependency_and_device_readiness(monkeypatch) -> None:
+    report = {
+        "ready": True,
+        "packages": {"torch": True, "tokenizers": True, "safetensors": True},
+        "versions": {"torch": "2.9.0", "tokenizers": "0.22.0", "safetensors": "0.6.0"},
+        "minimum_versions": {"torch": "2.2.0", "tokenizers": "0.19.0", "safetensors": "0.4.0"},
+        "recommended_device": "cpu",
+        "devices": [{"id": "cpu", "name": "CPU", "available": True}],
+        "architecture": None,
+        "loaded_device": None,
+        "remote_code": False,
+        "execution_backend": "pytorch-native-axiom",
+    }
+    monkeypatch.setattr(engine_api, "runtime_status", lambda: report)
+
+    response = _client().get("/api/engine/status")
+
+    assert response.status_code == 200
+    assert response.json() == report
+
+
 def test_engine_request_accepts_absolute_paths_only_inside_explicit_roots(tmp_path, monkeypatch) -> None:
     root = tmp_path / "models"
     model = root / "tiny-model"
@@ -694,16 +715,23 @@ def test_engine_stream_endpoint_yields_token_snapshots_and_final_metrics(tmp_pat
         "generated_at": "2026-10-22T00:00:00+00:00",
         "local_only": True,
     }
-    monkeypatch.setattr(engine_api, "generate_local_stream", lambda *_args, **_kwargs: iter([
-        {"type": "token", "response": "Hel", "completion_tokens": 1},
-        {"type": "complete", "result": completed},
-    ]))
+    captured: dict[str, object] = {}
+
+    def fake_stream(*_args, **kwargs):
+        captured.update(kwargs)
+        return iter([
+            {"type": "token", "response": "Hel", "completion_tokens": 1},
+            {"type": "complete", "result": completed},
+        ])
+
+    monkeypatch.setattr(engine_api, "generate_local_stream", fake_stream)
 
     response = _client().post("/api/engine/generate/stream", json={
-        "model_path": str(model), "prompt": "hello", "max_new_tokens": 2, "temperature": 0,
+        "model_path": str(model), "prompt": "hello", "max_new_tokens": 2, "temperature": 0, "device": "cuda",
     })
 
     assert response.status_code == 200
+    assert captured["device_preference"] == "cuda"
     assert response.headers["content-type"].startswith("application/x-ndjson")
     events = [json.loads(line) for line in response.text.splitlines()]
     assert events[0] == {"type": "token", "response": "Hel", "completion_tokens": 1}

@@ -29,6 +29,15 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
     versions: { torch: "2.9.0", tokenizers: "0.22.0", safetensors: "0.6.0", gguf: "0.19.0", numpy: "2.4.6" },
     minimum_versions: { torch: "2.2.0", tokenizers: "0.19.0", safetensors: "0.4.0" },
     problems: [], execution_backend: "pytorch-native-axiom", transformers_generation_used: false, ollama_used: false,
+    devices: [
+      { id: "cuda", name: "NVIDIA CUDA", available: false, reason: "CUDA driver not available in this test.", memory_free_gib: null, memory_total_gib: null },
+      { id: "rocm", name: "AMD ROCm", available: false, reason: "ROCm runtime not available in this test.", memory_free_gib: null, memory_total_gib: null },
+      { id: "mps", name: "Apple Metal (MPS)", available: false, reason: "MPS not available in this test.", memory_free_gib: null, memory_total_gib: null },
+      { id: "xpu", name: "Intel XPU", available: false, reason: "XPU runtime not available in this test.", memory_free_gib: null, memory_total_gib: null },
+      { id: "cpu", name: "CPU", available: true, reason: "CPU tensor execution is available.", memory_free_gib: null, memory_total_gib: null },
+    ],
+    recommended_device: "cpu",
+    loaded_device: engineLoaded ? "cpu" : null,
     supported_model_types: ["llama", "mistral", "qwen2", "qwen3"], supported_weights: ["safetensors", "gguf-dequantized-float"],
     loaded: engineLoaded, architecture: engineLoaded ? "LlamaForCausalLM" : null, model_loading: "local_safetensors_and_gguf_if_available", remote_code: false,
     setup_note: "AXIOM Native Engine is ready for supported local Llama/Mistral safetensors and single-file GGUF checkpoints (GGUF dequantizes to floating-point; no low-bit kernels).",
@@ -140,6 +149,7 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
     expect(requestBody.seed).toBe(42);
     expect(requestBody.stop_sequences).toEqual(["<END>", "###"]);
     expect(requestBody.memory_mode).toBe("auto");
+    expect(requestBody.device).toBe("cpu");
     const completed = {
       engine: "axiom-native-engine", execution_backend: "pytorch-native-axiom", transformers_generation_used: false, ollama_used: false,
       model: "llama-test", architecture: "LlamaForCausalLM", model_type: "llama", device: "cpu", checkpoint_format: "safetensors", decoder: "axiom-autoregressive-kv-cache", attention_backend: "pytorch-scaled-dot-product-attention",
@@ -207,6 +217,15 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(engine).toContainText("GGUF");
   await expect(engine).toContainText("dequantizing GGUF tensors to floating-point");
   await expect(engine.getByText("ENGINE READY")).toBeVisible();
+  const executionDevice = engine.getByLabel("Execution device");
+  await expect(executionDevice).toHaveValue("auto");
+  await expect(engine).toContainText("Recommended: cpu");
+  await expect(executionDevice.locator('option[value="cuda"]')).toBeDisabled();
+  await expect(executionDevice.locator('option[value="rocm"]')).toBeDisabled();
+  await expect(executionDevice.locator('option[value="mps"]')).toBeDisabled();
+  await expect(executionDevice.locator('option[value="xpu"]')).toBeDisabled();
+  await expect(executionDevice.locator('option[value="cpu"]')).toBeEnabled();
+  await executionDevice.selectOption("cpu");
 
   await engine.getByLabel("Select discovered native model").selectOption("/models/llama-test");
   await expect(engine.getByLabel("Local native model directory")).toHaveValue("/models/llama-test");
