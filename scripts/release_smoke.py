@@ -947,7 +947,7 @@ def persisted_schema_inventory_issues(docs: str, sources: dict[str, str]) -> lis
         ("hardware_snapshots", ".axiom/hardware-snapshots.json", "schema_version: 1"),
         ("resource_telemetry", ".axiom/resource-telemetry.json", "schema_version: 1"),
         ("workspaces", "~/.axiom/workspaces.json", "schema_version: 1"),
-        ("prediction_jobs", ".axiom/prediction_jobs.json", "schema_version: 1"),
+        ("prediction_jobs", ".axiom/prediction_jobs.json", "schema_version: 2"),
     )
     for name, store_path, expected_version in versioned_inventory_rows:
         row = next(
@@ -968,7 +968,7 @@ def persisted_schema_inventory_issues(docs: str, sources: dict[str, str]) -> lis
         "hardware_snapshots": ("SCHEMA_VERSION = 1",),
         "resource_telemetry": ("SCHEMA_VERSION = 1", "MAX_SAMPLES = 500", "DEFAULT_MAX_SAMPLES = 120"),
         "workspaces": ("_SCHEMA_VERSION = 1",),
-        "prediction_jobs": ('"schema_version": 1', 'payload["schema_version"] != 1'),
+        "prediction_jobs": ('"schema_version": 2', 'payload["schema_version"] not in {1, 2}'),
         "integrations": ('data.get("trust_status", "unverified")', 'data.get("connection_status", "not_inspected")'),
         "permissions": ('"active_profile"', '"profiles"', "_default_config()"),
         "registry": ("legacy_resource_id(", 'registry_file = self.root / "models.json"'),
