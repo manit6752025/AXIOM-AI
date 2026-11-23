@@ -394,3 +394,19 @@ def test_model_studio_unquantized_conversion_removes_partial_output_on_cancellat
             quantization="none",
         )
     assert not output.exists()
+
+
+def test_model_studio_job_path_rejects_untrusted_id_components(tmp_path, monkeypatch):
+    monkeypatch.setattr(studio, "jobs_directory", lambda: tmp_path)
+    safe_id = "b" * 32
+    assert studio._job_path(safe_id) == tmp_path / f"{safe_id}.json"
+
+    for unsafe_id in (
+        f"../{safe_id}",
+        f"nested/{safe_id}",
+        f"{safe_id}/../../outside",
+        f"{safe_id}\\\\outside",
+        "b" * 31,
+    ):
+        with pytest.raises(ValueError, match="Invalid Model Studio job ID"):
+            studio._job_path(unsafe_id)
