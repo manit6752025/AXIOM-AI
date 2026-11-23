@@ -29,12 +29,28 @@ def _staging(tmp_path: Path) -> Path:
     return destination
 
 
-def test_published_backup_manifest_schema_and_example_match_runtime_limits():
-    from pathlib import Path
+def test_published_backup_manifest_schema_and_example_match_runtime_limits(tmp_path: Path):
+    from jsonschema import Draft202012Validator, FormatChecker
 
     root = Path(__file__).resolve().parents[1]
     schema = json.loads((root / "docs/schemas/workspace-backup-manifest-v1.schema.json").read_text(encoding="utf-8"))
     example = json.loads((root / "examples/workspace-backup-manifest-v1.example.json").read_text(encoding="utf-8"))
+
+    # Validate the published schema itself and both the published example and
+    # a manifest emitted by the production ZIP writer with a standards-based
+    # Draft 2020-12 validator (including date-time format checking).
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema, format_checker=FormatChecker())
+    validator.validate(example)
+
+    workspace = tmp_path / "schema-validated-workspace"
+    workspace.mkdir()
+    (workspace / "README.md").write_text("AXIOM backup schema smoke test\\n", encoding="utf-8")
+    archive, _report = _archive(workspace)
+    with zipfile.ZipFile(archive) as bundle:
+        generated_manifest = json.loads(bundle.read("manifest.json"))
+    validator.validate(generated_manifest)
+
     assert schema["properties"]["schema_version"]["const"] == workspace_backup.BACKUP_SCHEMA_VERSION
     assert schema["properties"]["files"]["maxItems"] == workspace_backup.MAX_BACKUP_FILES
     assert example["limits"] == {
@@ -265,3 +281,41 @@ def test_workspace_backup_restore_enforces_archive_inventory_limits(tmp_path: Pa
     with pytest.raises(WorkspaceBackupError, match="entry count|file inventory"):
         restore_workspace_backup(archive, staging)
     assert not staging.exists()
+
+def test_workspace_backup_round_trips_at_resource_limits_and_rejects_over_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    workspace = tmp_path / "limit-boundary"
+    workspace.mkdir()
+    (workspace / "first.bin").write_bytes(b"a" * 16)
+    (workspace / "second.bin").write_bytes(b"b" * 16)
+
+    # Exercise the actual inventory, ZIP writer and restore checks at their
+    # exact count/per-file/aggregate boundaries without allocating production
+    # limits (50,000 files or tens of GiB) in the CI runner.
+    monkeypatch.setattr(workspace_backup, "MAX_BACKUP_FILES", 2)
+    monkeypatch.setattr(workspace_backup, "MAX_BACKUP_FILE_BYTES", 16)
+    monkeypatch.setattr(workspace_backup, "MAX_BACKUP_TOTAL_BYTES", 32)
+
+    archive, report = _archive(workspace)
+    assert report["file_count"] == 2
+    assert report["total_bytes"] == 32
+
+    staging = _staging(tmp_path)
+    restored = restore_workspace_backup(archive, staging)
+    assert restored["file_count"] == 2
+    assert (staging / "first.bin").read_bytes() == b"a" * 16
+    assert (staging / "second.bin").read_bytes() == b"b" * 16
+
+    # A third entry exceeds the file-count boundary, while one extra byte
+    # exceeds the aggregate-byte boundary. Both must fail before publication.
+    (workspace / "third.bin").write_bytes(b"")
+    with pytest.raises(WorkspaceBackupError, match="50,000 files"):
+        create_workspace_backup(workspace, io.BytesIO())
+
+    (workspace / "third.bin").unlink()
+    (workspace / "second.bin").write_bytes(b"b" * 17)
+    with pytest.raises(WorkspaceBackupError, match="50 GiB"):
+        create_workspace_backup(workspace, io.BytesIO())
+

@@ -5490,6 +5490,7 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
   const [workspaceRestoreBusy, setWorkspaceRestoreBusy] = useState(false);
   const [workspaceBackupFile, setWorkspaceBackupFile] = useState<File | null>(null);
   const [workspaceRestoreName, setWorkspaceRestoreName] = useState("Restored workspace");
+  const [workspaceRestoreNotice, setWorkspaceRestoreNotice] = useState<string | null>(null);
   const [frontendErrors, setFrontendErrors] = useState(() => getFrontendErrorReport().events);
   const [frontendReportBusy, setFrontendReportBusy] = useState(false);
   const [supplyChainBusy, setSupplyChainBusy] = useState(false);
@@ -5600,16 +5601,18 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
       `Restore "${workspaceBackupFile.name}" as a new workspace named "${name}"? The archive can contain credentials, project configuration, datasets and model weights. AXIOM verifies paths and checksums before registration. Your current workspace will not be overwritten.`
     )) return;
     setWorkspaceRestoreBusy(true);
+    setWorkspaceRestoreNotice(null);
     try {
       const result = await axiomApi.restoreWorkspaceBackup(workspaceBackupFile, name);
+      const message = `Restored ${result.backup.file_count.toLocaleString()} file(s) into new workspace "${result.workspace.name}". Your current workspace remains active.`;
       setWorkspaceBackupFile(null);
+      setWorkspaceRestoreNotice(message);
       window.dispatchEvent(new CustomEvent("axiom:workspaces-changed"));
-      onNotify(
-        `Restored ${result.backup.file_count.toLocaleString()} file(s) into new workspace "${result.workspace.name}". Your current workspace remains active.`,
-        "success",
-      );
+      onNotify(message, "success");
     } catch (cause) {
-      onNotify(cause instanceof Error ? cause.message : "Workspace backup could not be restored.", "warning");
+      const message = cause instanceof Error ? cause.message : "Workspace backup could not be restored.";
+      setWorkspaceRestoreNotice(`Restore failed: ${message}`);
+      onNotify(message, "warning");
     } finally {
       setWorkspaceRestoreBusy(false);
     }
@@ -5628,7 +5631,7 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
     }
   };
 
-  const runScan = async () => {
+  const runScan = async (announceFailures = false) => {
     setScanState("scanning");
     const [healthResult, hardwareResult, modelResult, datasetResult, workspaceDiagnosticsResult, securityAuditResult, securityEventsResult] = await Promise.allSettled([
       axiomApi.health(),
@@ -5655,7 +5658,13 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
     if (securityEventsResult.status === "fulfilled") setSecurityEvents(securityEventsResult.value);
     else { setSecurityEvents(null); failures.push("security event journal"); }
     setScanState(failures.length ? "failed" : "idle");
-    if (failures.length) onNotify(`Some diagnostics could not complete: ${failures.join(", ")}.`, "warning");
+    // The initial background scan updates the page status but must not replace
+    // a more important action result (for example, a successful workspace
+    // restore) with a delayed warning toast. Only an explicit user-requested
+    // scan announces its failures.
+    if (announceFailures && failures.length) {
+      onNotify(`Some diagnostics could not complete: ${failures.join(", ")}.`, "warning");
+    }
   };
 
   const refreshSecurityEvents = async () => {
@@ -5720,7 +5729,7 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
     <button type="button" className="button secondary-button" onClick={() => void downloadBundle()} disabled={bundleBusy}><ArrowDownToLine size={16} /> {bundleBusy ? "Preparing bundle…" : "Download support bundle"}</button>
     <button type="button" className="button secondary-button" onClick={() => void exportSoftwareBillOfMaterials()} disabled={supplyChainBusy}><ArrowDownToLine size={16} /> Export SPDX SBOM</button>
     <button type="button" className="button secondary-button" onClick={() => void scanDependencyVulnerabilities()} disabled={supplyChainBusy}>{supplyChainBusy ? "Checking dependencies…" : "Scan dependencies (network)"}</button>
-    <button type="button" className="button primary-button" onClick={() => void runScan()} disabled={scanState === "scanning"}><Wrench size={16} /> {scanState === "scanning" ? "Scanning…" : "Run diagnostics"}</button>
+    <button type="button" className="button primary-button" onClick={() => void runScan(true)} disabled={scanState === "scanning"}><Wrench size={16} /> {scanState === "scanning" ? "Scanning…" : "Run diagnostics"}</button>
   </>}>
     <div className="diagnostic-hero"><div><p className="eyebrow">WORKSPACE READINESS</p><strong>{headline}</strong><p>{systemDescription}{health?.version ? ` · AXIOM ${health.version}` : ""}</p></div><div className={`diagnostic-ring ${scanState === "failed" ? "blocked" : scanState}`}><span>{scanState === "scanning" ? "…" : connected ? "OK" : "N/A"}</span></div></div>
     <Surface title="Full workspace backup and restore" eyebrow="CHECKSUM-VERIFIED / NEW WORKSPACE">
@@ -5752,6 +5761,11 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
           </button>
         </div>
       </form>
+      {workspaceRestoreNotice && (
+        <div className="workspace-restore-result" role="status" aria-live="polite">
+          {workspaceRestoreNotice}
+        </div>
+      )}
       <Callout tone="warning" title="Restore never overwrites the current workspace">
         AXIOM verifies the archive manifest, per-file SHA-256 checksums, sizes and safe paths, then extracts into a private staging directory. Only after the complete restore succeeds is a separate managed workspace registered. The active workspace and its files remain unchanged.
       </Callout>

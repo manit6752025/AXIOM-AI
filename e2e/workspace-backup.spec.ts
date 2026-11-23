@@ -20,6 +20,7 @@ test("Diagnostics downloads and restores a full workspace into a new isolated wo
   };
   let restored = false;
   let restoreRequestName: string | null = null;
+  let restoreResponseStatus: number | null = null;
   await page.addInitScript(() => {
     const originalClick = HTMLAnchorElement.prototype.click;
     HTMLAnchorElement.prototype.click = function () {
@@ -42,6 +43,7 @@ test("Diagnostics downloads and restores a full workspace into a new isolated wo
       } });
     } else if (url.pathname === "/api/workspaces/backup/restore" && request.method() === "POST") {
       restoreRequestName = url.searchParams.get("name");
+      restoreResponseStatus = 201;
       const body = request.postDataBuffer();
       expect(body?.length).toBeGreaterThan(0);
       restored = true;
@@ -142,8 +144,11 @@ test("Diagnostics downloads and restores a full workspace into a new isolated wo
   });
   await page.getByRole("button", { name: "Verify and restore as new workspace" }).click();
 
-  await expect(page.getByText('Restored 3 file(s) into new workspace "Restored workspace".', { exact: true })).toBeVisible();
   expect(restoreRequestName).toBe("Restored workspace");
+  expect(restoreResponseStatus).toBe(201);
+  await expect(page.locator(".workspace-restore-result")).toHaveText(
+    'Restored 3 file(s) into new workspace "Restored workspace". Your current workspace remains active.',
+  );
   expect(await page.evaluate(() => localStorage.getItem("axiom-active-workspace"))).toBe(defaultWorkspace.id);
 
   await page.getByRole("button", { name: /Switch workspace. Current workspace: Original workspace/ }).click();
