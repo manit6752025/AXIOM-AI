@@ -1,0 +1,104 @@
+name: AXIOM CodeQL alert inventory
+
+on:
+  push:
+    branches: [main, implement/roadmap]
+    paths:
+      - ".github/workflows/codeql-alert-inventory.yml"
+      - ".github/codeql/**"
+      - "axiom/core/**"
+      - "axiom/path_safety.py"
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: read
+
+concurrency:
+  group: axiom-codeql-alert-inventory-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    name: Read-only inventory of GitHub-managed code-scanning alerts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch all open code-scanning alerts through the repository token
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --paginate \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/$GH_REPO/code-scanning/alerts?state=open&per_page=100" \
+            --jq '.[] | {
+              number: .number,
+              html_url: .html_url,
+              rule_id: .rule.id,
+              rule_name: .rule.name,
+              description: .rule.description,
+              severity: .rule.severity,
+              state: .state,
+              tool: .tool.name,
+              path: .most_recent_instance.location.path,
+              start_line: .most_recent_instance.location.start_line,
+              end_line: .most_recent_instance.location.end_line,
+              message: .most_recent_instance.message.text,
+              instance_ref: .most_recent_instance.ref,
+              instance_commit: .most_recent_instance.commit_sha,
+              analysis_key: .most_recent_instance.analysis_key,
+              category: .most_recent_instance.category,
+              environment: .most_recent_instance.environment
+            }' | jq -s 'sort_by(.severity, .rule_id, .path)' > "$RUNNER_TEMP/codeql-open-alerts.json"
+
+          analysis_id="$(gh api -H "Accept: application/vnd.github+json" \
+            "/repos/$GH_REPO/code-scanning/analyses?tool_name=CodeQL&per_page=100" \
+            --jq '.[0].id // empty')"
+          if [ -n "$analysis_id" ]; then
+            echo "Latest CodeQL analysis ID: $analysis_id"
+            gh api -H "Accept: application/sarif+json" \
+              "/repos/$GH_REPO/code-scanning/analyses/$analysis_id" \
+              > "$RUNNER_TEMP/codeql-latest.sarif"
+          else
+            echo "No CodeQL analysis ID was returned." >&2
+            exit 1
+          fi
+      - name: Summarize open alerts without printing source code
+        env:
+          ALERTS_FILE: ${{ runner.temp }}/codeql-open-alerts.json
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+
+          with open(os.environ["ALERTS_FILE"], encoding="utf-8") as stream:
+              alerts = json.load(stream)
+          counts = Counter(item.get("severity") or "unknown" for item in alerts)
+          print(f"Open GitHub-managed code-scanning alerts: {len(alerts)}")
+          print("Severity counts: " + ", ".join(f"{key}={value}" for key, value in sorted(counts.items())))
+          for alert in alerts:
+              print(
+                  "#{number} | {severity} | {rule} | {path}:{line} | {url}".format(
+                      number=alert.get("number"),
+                      severity=alert.get("severity"),
+                      rule=alert.get("rule_id"),
+                      path=alert.get("path") or "<no path>",
+                      line=alert.get("start_line") or "?",
+                      url=alert.get("html_url"),
+                  )
+              )
+          PY
+      - name: Upload alert inventory and CodeQL SARIF data-flow report
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiom-codeql-alert-details
+          path: |
+            ${{ runner.temp }}/codeql-open-alerts.json
+            ${{ runner.temp }}/codeql-latest.sarif
+          if-no-files-found: error
+          retention-days: 14
