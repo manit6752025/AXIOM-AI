@@ -148,10 +148,10 @@ def test_resume_prediction_job_revalidates_assets_and_schedules_checkpoint_worke
     data.mkdir()
     dataset = data / "eval.jsonl"
     dataset.write_text(
-        '{"prompt":"one","reference":"A"}\\n{"prompt":"two","reference":"B"}\\n',
+        '{"prompt":"one","reference":"A"}\n{"prompt":"two","reference":"B"}\n',
         encoding="utf-8",
     )
-    committed = b'{"prompt":"one","reference":"A","prediction":"first"}\\n'
+    committed = b'{"prompt":"one","reference":"A","prediction":"first"}\n'
     record, checkpoint_path = _checkpoint(root, committed)
     job_id = record["id"]
     manifest = prediction_jobs._preflight_dataset(
@@ -247,8 +247,8 @@ def test_resume_prediction_job_refuses_dataset_fingerprint_changes(tmp_path, mon
     data = root / "data"
     data.mkdir()
     dataset = data / "eval.jsonl"
-    dataset.write_text('{"prompt":"changed","reference":"A"}\\n', encoding="utf-8")
-    committed = b'{"prompt":"one","reference":"A","prediction":"first"}\\n'
+    dataset.write_text('{"prompt":"changed","reference":"A"}\n', encoding="utf-8")
+    committed = b'{"prompt":"one","reference":"A","prediction":"first"}\n'
     record, _checkpoint_path = _checkpoint(root, committed)
     job_id = record["id"]
     record.update({
@@ -279,7 +279,7 @@ def test_resume_prediction_job_refuses_dataset_fingerprint_changes(tmp_path, mon
         "pending_artifact_sha256": None,
         "runner_pid": 99999999,
         "runner_identity": None,
-        "dataset_sha256": hashlib.sha256(b'{"prompt":"original","reference":"A"}\\n').hexdigest(),
+        "dataset_sha256": hashlib.sha256(b'{"prompt":"original","reference":"A"}\n').hexdigest(),
         "model_fingerprint": "1" * 64,
         "adapter_fingerprint": None,
         "resumption_count": 0,
