@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://axiom-ai.net/schemas/plugin-manifest-v1.schema.json",
+  "$id": "urn:axiom-ai:plugin-manifest:schema:1",
   "title": "AXIOM Declarative Plugin Manifest v1",
   "description": "Metadata-only plugin manifest. It does not define an executable entry point.",
   "type": "object",
@@ -33,7 +33,7 @@
       "type": "string",
       "minLength": 5,
       "maxLength": 64,
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z.-]+))?(?:\\+[0-9A-Za-z.-]+)?$"
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
     },
     "description": {
       "type": "string",
@@ -47,7 +47,11 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "description", "scopes"],
+        "required": [
+          "name",
+          "description",
+          "scopes"
+        ],
         "properties": {
           "name": {
             "type": "string",
@@ -67,7 +71,13 @@
             "uniqueItems": true,
             "items": {
               "type": "string",
-              "enum": ["read", "write", "execution", "network", "secrets"]
+              "enum": [
+                "read",
+                "write",
+                "execution",
+                "network",
+                "secrets"
+              ]
             }
           }
         }

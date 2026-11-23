@@ -70,7 +70,7 @@ def _record_action_event(event_type: str) -> None:
     except SecurityEventError as exc:
         raise HTTPException(
             status_code=503,
-            detail="The MCP permission change may already have taken effect, but the security journal could not record it. Inspect the active policy and journal before retrying.",
+            detail="The policy change may already have taken effect, but the security journal could not record it. Inspect the registry and journal before retrying.",
         ) from exc
 
 

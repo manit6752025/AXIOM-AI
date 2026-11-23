@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 from pathlib import Path
 from typing import Any
 
 from axiom.core.storage import atomic_write_text, file_lock
 from axiom.core.workspace_context import workspace_metadata_dir
+from axiom.path_safety import open_regular_file
 
 PLUGIN_MANIFEST_SCHEMA_VERSION = 1
 MAX_MANIFEST_BYTES = 64 * 1024
@@ -24,8 +27,9 @@ MAX_TOOL_DESCRIPTION_CHARS = 2048
 
 _PLUGIN_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+){1,7}$")
 _PLUGIN_VERSION = re.compile(
-    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
-    r"(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$"
+    r"^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)"
+    r"(?:-([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?"
+    r"(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
 )
 _TOOL_NAME = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
@@ -34,6 +38,15 @@ _ALLOWED_SCOPES = frozenset({"read", "write", "execution", "network", "secrets"}
 
 class PluginManifestError(ValueError):
     """A plugin manifest or permission record failed strict validation."""
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Plugin registry JSON contains duplicate object keys.")
+        result[key] = value
+    return result
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -80,6 +93,10 @@ def _version_key(version: str) -> tuple[Any, ...]:
     return int(major), int(minor), int(patch), pre_key
 
 
+def _version_is_newer(candidate: str, current: str) -> bool:
+    return _version_key(candidate) > _version_key(current)
+
+
 def validate_plugin_manifest(document: Any) -> tuple[dict[str, Any], str]:
     """Validate one declarative schema-v1 manifest and compute its canonical SHA-256."""
     if not isinstance(document, dict):
@@ -104,7 +121,7 @@ def validate_plugin_manifest(document: Any) -> tuple[dict[str, Any], str]:
     tools = document.get("tools")
     if not isinstance(tools, list) or not 1 <= len(tools) <= MAX_TOOLS_PER_MANIFEST:
         raise PluginManifestError(f"Plugin manifest must declare 1 to {MAX_TOOLS_PER_MANIFEST} tools.")
-    normalized_tools = []
+    normalized_tools: list[dict[str, Any]] = []
     seen_names: set[str] = set()
     for item in tools:
         if not isinstance(item, dict) or set(item) != {"name", "description", "scopes"}:
@@ -145,14 +162,6 @@ def validate_plugin_manifest(document: Any) -> tuple[dict[str, Any], str]:
     return normalized, hashlib.sha256(encoded).hexdigest()
 
 
-def _version_is_newer(candidate: str, current: str) -> bool:
-    candidate_key = _version_key(candidate)
-    current_key = _version_key(current)
-    if candidate_key[:3] != current_key[:3]:
-        return candidate_key[:3] > current_key[:3]
-    return candidate_key[3] > current_key[3]
-
-
 class PluginManifestStore:
     """Workspace-local manifest inventory with explicit hash-bound grants."""
 
@@ -168,9 +177,14 @@ class PluginManifestStore:
                 raise PluginManifestError("Plugin manifest store paths must not contain symbolic links.")
         if self.root.exists() and not self.root.is_dir():
             raise PluginManifestError("Plugin manifest store must be a directory.")
+        if self.registry_file.exists() and not self.registry_file.is_file():
+            raise PluginManifestError("Plugin manifest registry must be a regular file.")
         if self.registry_file.exists():
-            if not self.registry_file.is_file() or self.registry_file.stat().st_size > MAX_PLUGIN_STORE_BYTES:
-                raise PluginManifestError("Plugin manifest registry is not a bounded regular file.")
+            try:
+                if self.registry_file.stat().st_size > MAX_PLUGIN_STORE_BYTES:
+                    raise PluginManifestError("Plugin manifest registry exceeds its storage limit.")
+            except OSError:
+                raise PluginManifestError("Plugin manifest registry could not be inspected safely.") from None
         elif require_registry:
             raise PluginManifestError("Plugin manifest registry does not exist.")
 
@@ -180,13 +194,25 @@ class PluginManifestStore:
 
     def _read(self) -> dict[str, Any]:
         self._assert_safe_paths()
-        if not self.registry_file.exists():
-            return self._empty()
         try:
-            raw = self.registry_file.read_text(encoding="utf-8")
-            document = json.loads(raw)
-        except (OSError, UnicodeError, json.JSONDecodeError):
+            with open_regular_file(self.registry_file) as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_PLUGIN_STORE_BYTES:
+                    raise PluginManifestError("Plugin manifest registry is not a bounded regular file.")
+                raw_bytes = stream.read(MAX_PLUGIN_STORE_BYTES + 1)
+            if len(raw_bytes) > MAX_PLUGIN_STORE_BYTES:
+                raise PluginManifestError("Plugin manifest registry exceeds its storage limit.")
+            document = json.loads(
+                raw_bytes.decode("utf-8"),
+                object_pairs_hook=_reject_duplicate_json_keys,
+            )
+        except FileNotFoundError:
+            return self._empty()
+        except PluginManifestError:
+            raise
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
             raise PluginManifestError("Plugin manifest registry could not be read safely.") from None
+
         if (
             not isinstance(document, dict)
             or set(document) != {"store_schema_version", "manifests", "grants"}
@@ -198,7 +224,7 @@ class PluginManifestStore:
         ):
             raise PluginManifestError("Plugin manifest registry has an invalid schema.")
         manifest_ids: set[str] = set()
-        normalized_manifests = []
+        normalized_manifests: list[dict[str, Any]] = []
         for record in document["manifests"]:
             if not isinstance(record, dict) or set(record) != {"manifest", "sha256"}:
                 raise PluginManifestError("Plugin manifest registry contains an invalid record.")
@@ -207,6 +233,7 @@ class PluginManifestStore:
                 raise PluginManifestError("Plugin manifest digest or identity is invalid.")
             manifest_ids.add(manifest["id"])
             normalized_manifests.append({"manifest": manifest, "sha256": digest})
+
         for plugin_id, grant in document["grants"].items():
             if (
                 not isinstance(plugin_id, str)
@@ -224,18 +251,18 @@ class PluginManifestStore:
                 if record["manifest"]["id"] == plugin_id
             )
             stale_grant = grant["manifest_sha256"] != current_record["sha256"]
-            names: set[str] = set()
             declared = {
                 tool["name"]: set(tool["scopes"])
                 for tool in current_record["manifest"]["tools"]
             }
+            seen_names: set[str] = set()
             for tool_grant in grant["tools"]:
                 if (
                     not isinstance(tool_grant, dict)
                     or set(tool_grant) != {"name", "scopes"}
                     or not isinstance(tool_grant.get("name"), str)
                     or not _TOOL_NAME.fullmatch(tool_grant["name"])
-                    or tool_grant["name"] in names
+                    or tool_grant["name"] in seen_names
                     or not isinstance(tool_grant.get("scopes"), list)
                     or not tool_grant["scopes"]
                     or any(
@@ -247,12 +274,16 @@ class PluginManifestStore:
                         not stale_grant
                         and (
                             tool_grant["name"] not in declared
-                            or any(scope not in declared[tool_grant["name"]] for scope in tool_grant["scopes"])
+                            or any(
+                                scope not in declared[tool_grant["name"]]
+                                for scope in tool_grant["scopes"]
+                            )
                         )
                     )
                 ):
                     raise PluginManifestError("Plugin grant contains an unknown tool or undeclared scope.")
-                names.add(tool_grant["name"])
+                seen_names.add(tool_grant["name"])
+
         return {
             "store_schema_version": 1,
             "manifests": normalized_manifests,
@@ -262,7 +293,13 @@ class PluginManifestStore:
     def _write(self, document: dict[str, Any]) -> None:
         self._assert_safe_paths()
         self.root.mkdir(parents=True, exist_ok=True)
-        serialized = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n"
+        serialized = json.dumps(
+            document,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        ) + "\n"
         if len(serialized.encode("utf-8")) > MAX_PLUGIN_STORE_BYTES:
             raise PluginManifestError("Plugin manifest registry exceeds its storage limit.")
         atomic_write_text(self.registry_file, serialized)
@@ -273,7 +310,7 @@ class PluginManifestStore:
         for record in document["manifests"]:
             manifest = record["manifest"]
             grant = document["grants"].get(manifest["id"])
-            if not grant:
+            if not grant or not grant["tools"]:
                 status = "default_deny"
             elif grant["manifest_sha256"] != record["sha256"]:
                 status = "stale_manifest"
@@ -302,8 +339,10 @@ class PluginManifestStore:
         with file_lock(self.lock_file):
             stored = self._read()
             existing_index = next(
-                (index for index, record in enumerate(stored["manifests"])
-                 if record["manifest"]["id"] == manifest["id"]),
+                (
+                    index for index, record in enumerate(stored["manifests"])
+                    if record["manifest"]["id"] == manifest["id"]
+                ),
                 None,
             )
             if existing_index is None:
@@ -346,7 +385,10 @@ class PluginManifestStore:
                 raise PluginManifestError("Plugin manifest is not registered.")
             if record["sha256"] != expected_sha256:
                 raise PluginManifestError("Plugin manifest changed; review the new version before granting permissions.")
-            declared = {tool["name"]: set(tool["scopes"]) for tool in record["manifest"]["tools"]}
+            declared = {
+                tool["name"]: set(tool["scopes"])
+                for tool in record["manifest"]["tools"]
+            }
             normalized_grants = []
             seen: set[str] = set()
             for item in tools:
@@ -362,7 +404,9 @@ class PluginManifestStore:
                     or any(not isinstance(scope, str) or scope not in declared[name] for scope in scopes)
                     or len(set(scopes)) != len(scopes)
                 ):
-                    raise PluginManifestError("Grant must use unique declared tools and a subset of their manifest scopes.")
+                    raise PluginManifestError(
+                        "Grant must use unique declared tools and a subset of their manifest scopes."
+                    )
                 seen.add(name)
                 normalized_grants.append({"name": name, "scopes": sorted(scopes)})
             stored["grants"][plugin_id] = {
@@ -370,7 +414,11 @@ class PluginManifestStore:
                 "tools": sorted(normalized_grants, key=lambda item: item["name"]),
             }
             self._write(stored)
-        return {"plugin_id": plugin_id, "manifest_sha256": expected_sha256, "tools": normalized_grants}
+        return {
+            "plugin_id": plugin_id,
+            "manifest_sha256": expected_sha256,
+            "tools": normalized_grants,
+        }
 
     def revoke(self, plugin_id: str) -> bool:
         if not isinstance(plugin_id, str) or not _PLUGIN_ID.fullmatch(plugin_id):
