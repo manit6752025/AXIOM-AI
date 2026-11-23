@@ -28,7 +28,7 @@ concurrency:
 jobs:
   apple-mps:
     name: Real Apple MPS safetensors and LoRA forward execution
-    runs-on: macos-15
+    runs-on: macos-15-xlarge
     timeout-minutes: 35
     env:
       AXIOM_ACCELERATOR_DEVICE: mps
