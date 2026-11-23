@@ -75,6 +75,60 @@ def test_runtime_status_only_reports_optional_package_presence(monkeypatch):
     assert result["model_loading"] == "local_files_only"
 
 
+
+
+def test_cancel_job_is_idempotent_and_does_not_interrupt_finalization(tmp_path, monkeypatch):
+    import os
+
+    jobs = tmp_path / "jobs"
+    jobs.mkdir(mode=0o700)
+    monkeypatch.setattr(fine_tuning, "jobs_directory", lambda: jobs)
+    job_id = "c" * 32
+    runner_pid = os.getpid()
+    runner_identity = fine_tuning._process_start_identity(runner_pid)
+    running_job = {
+        "schema_version": 1,
+        "id": job_id,
+        "runner_pid": runner_pid,
+        "runner_identity": runner_identity,
+        "status": "running",
+        "cancel_requested": False,
+        "logs": ["Training started."],
+    }
+    job_path = jobs / f"{job_id}.json"
+    job_path.write_text(json.dumps(running_job), encoding="utf-8")
+    job_path.chmod(0o600)
+
+    first = fine_tuning.cancel_finetuning_job(job_id)
+    assert first is not None
+    assert first["status"] == "cancelling"
+    assert first["cancel_requested"] is True
+    assert first["cancellation"]["requested"] is True
+    assert first["cancellation"]["requestable"] is False
+
+    second = fine_tuning.cancel_finetuning_job(job_id)
+    assert second is not None
+    assert second["status"] == "cancelling"
+    assert second["logs"] == first["logs"]
+
+    finalizing_id = "d" * 32
+    finalizing_job = {
+        **running_job,
+        "id": finalizing_id,
+        "status": "finalizing",
+        "cancel_requested": False,
+    }
+    finalizing_path = jobs / f"{finalizing_id}.json"
+    finalizing_path.write_text(json.dumps(finalizing_job), encoding="utf-8")
+    finalizing_path.chmod(0o600)
+    finalizing = fine_tuning.cancel_finetuning_job(finalizing_id)
+    assert finalizing is not None
+    assert finalizing["status"] == "finalizing"
+    assert finalizing["cancel_requested"] is False
+    assert finalizing["cancellation"]["requestable"] is False
+    assert finalizing["cancellation"]["unavailable_reason"] == "finalization_started"
+
+
 def test_job_list_limit_is_bounded():
     with pytest.raises(ValueError, match="between 1 and 100"):
         fine_tuning.list_jobs(101)
@@ -147,3 +201,44 @@ def test_public_job_reports_explicit_cancellation_contract(status, requested, re
         "boundary": "before worker start or between training steps; adapter finalization is not interruptible",
         "unavailable_reason": reason,
     }
+
+
+def test_completed_training_step_is_recorded_before_pending_cancellation(monkeypatch):
+    job = {
+        "id": "c" * 32,
+        "status": "queued",
+        "cancel_requested": False,
+        "config": {"max_steps": 3},
+        "completed_steps": 0,
+        "loss": None,
+        "logs": ["Job queued."],
+    }
+
+    def read_job(_job_id):
+        return dict(job)
+
+    def update_job(_job_id, **changes):
+        target = changes.get("status")
+        if isinstance(target, str):
+            fine_tuning._validate_job_transition(job["status"], target)
+        job.update(changes)
+        return dict(job)
+
+    def run_transformers(_config, progress, **_kwargs):
+        # Simulate cancellation arriving after the optimizer has completed step 1.
+        job.update(status="cancelling", cancel_requested=True)
+        progress(1, 0.25)
+        raise AssertionError("The progress callback should observe cancellation.")
+
+    monkeypatch.setattr(fine_tuning, "_read_job", read_job)
+    monkeypatch.setattr(fine_tuning, "_update_job", update_job)
+    monkeypatch.setattr(fine_tuning, "_run_transformers", run_transformers)
+    monkeypatch.setattr(fine_tuning, "_release_lock", lambda _job_id: None)
+
+    fine_tuning.execute_finetuning_job(job["id"])
+
+    assert job["status"] == "cancelled"
+    assert job["cancel_requested"] is True
+    assert job["completed_steps"] == 1
+    assert job["loss"] == 0.25
+    assert any("Step 1/3" in entry for entry in job["logs"])

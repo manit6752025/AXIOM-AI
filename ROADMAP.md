@@ -94,7 +94,7 @@ feature exists or a delivery-date promise.
 - [R066 · Implemented; tests passing] Add autosave, rename, duplicate, and version history for workflows.
 - [R067 · Implemented; tests passing] Add backend-owned workflow validation before execution is possible.
 - [R068 · Implemented; tests passing] Add planning-only dry-run summaries with estimated resource requirements.
-- [R069 · In progress; validation pending] Define and enforce local training job lifecycle transitions (`queued`, `running`, `cancelling`, `finalizing`, and terminal states), expose cancellation capability/reasons in API summaries, and wire cooperative cancellation through CLI and GUI. Saved workflow graphs remain planning-only until a safe graph runner and per-node I/O contracts exist; verify focused tests, lint, production build, and browser E2E before closing.
+- [R069 · Implemented; tests passing] Enforce persisted local fine-tuning job lifecycle transitions (`queued`, `running`, `cancelling`, `finalizing`, `completed`, `cancelled`, and `failed`); expose explicit cooperative-cancellation capability and unavailable reasons through job summaries; provide API, CLI (`axiom train cancel`), and Training-panel cancellation controls; make cancellation idempotent and close the cancellation window atomically at adapter finalization; persist optimizer-step progress before acknowledging cancellation that arrives during an in-flight step. Visual workflow graphs and dry-runs remain planning-only, not executable. Verified by focused lifecycle/API/CLI tests, the full Python suite, `npm run lint`, `npm run build`, `npm run e2e`, and Ubuntu/Windows/macOS static release checks (quality-gates run #44692420951).
 - [R070 · Planned] Add checkpoint, resume, and output-path policy controls.
 - [R071 · In progress] Export seed and software-version manifests; seeds remain unapplied until an execution runner exists.
 - [R072 · Implemented; tests passing] Keep planning-only states visually distinct from executed training.
@@ -142,7 +142,7 @@ feature exists or a delivery-date promise.
 - [R105 · Implemented; tests passing] Add read-only security audits for config and MCP policy permissions, active tool grants, API token scopes, CORS origins, and AXIOM's loopback/network-exposure contracts through the CLI, API, and Diagnostics page; never return credential values.
 - [R106 · In progress; validation pending] Harden workspace-relative path resolution against symlinked roots and parent-directory swaps on POSIX; add regression tests for traversal inputs, symlinked roots/parents/final files, and path-selection/open races.
 - [R107 · In progress; validation pending] Check installed runtime dependency compatibility and bounded package RECORD hashes, and inspect Python wheel/source release artifacts for metadata, hash integrity, traversal, symlinks, special files, duplicate paths, and archive expansion without extraction or execution.
-- [R108 · Planned] Add security event export and administrator review workflows.
+- [R108 · Implemented; tests passing] Add security event export and administrator review workflows.
 
 ### 10 · API, telemetry, diagnostics, and delivery
 
