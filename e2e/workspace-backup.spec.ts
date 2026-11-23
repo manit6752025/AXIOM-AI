@@ -21,9 +21,7 @@ test("Diagnostics downloads and restores a full workspace into a new isolated wo
   let restored = false;
   let downloadedWorkspaceId: string | null = null;
   let restoreRequestName: string | null = null;
-  const apiPrefix = "**/api/**";
-
-  await page.route(apiPrefix, async (route) => {
+  await page.route((url) => new URL(url).pathname.startsWith("/api/"), async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (url.pathname === "/api/workspaces" && request.method() === "GET") {
