@@ -39,7 +39,7 @@ import {
   type WorkspaceModelCandidate,
   type WorkspaceModelInspection,
 } from "./api/client";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -2583,7 +2583,7 @@ function Training({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
   const [planToolsBusy, setPlanToolsBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const refreshSavedPlans = async () => {
+  const refreshSavedPlans = useCallback(async () => {
     setSavedPlansLoading(true);
     try {
       const page = await axiomApi.experimentsPage({ limit: 100, offset: 0 });
@@ -2596,12 +2596,12 @@ function Training({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
     } finally {
       setSavedPlansLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     axiomApi.runtime().then(setHardware).catch(() => setHardware(null));
     void refreshSavedPlans();
-  }, []);
+  }, [refreshSavedPlans]);
 
   const createPlan = async () => {
     const size = Number(parameterBillions);

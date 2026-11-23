@@ -24,8 +24,10 @@ from axiom.cli.support_bundle import register as register_support_bundle_cli
 from axiom.cli.roadmap import roadmap_app as roadmap_cli_app
 from axiom.datasets.inspector import inspect_dataset
 from axiom.version import __version__
+from axiom.path_safety import SafePathError, open_regular_file
 
 AXIOM_VERSION = __version__
+MAX_CONFIG_VALIDATION_BYTES = 256 * 1024
 console = Console()
 
 PROJECT_PATHS = (
@@ -552,25 +554,57 @@ def register(app, model_app, dataset_app) -> None:
                 "Choose a regular local file path.",
                 "Review the symlink target yourself before copying content; AXIOM will not follow or replace it.",
             ]
-        elif not config.is_file():
+        elif not config.exists():
             error_code = "config_not_found"
             message = "Configuration file was not found."
             suggestions = [
                 "Pass an existing configuration file with --path.",
                 "Create a starter project with axiom init <project-name> if you need a new axiom.yaml.",
             ]
+        elif not config.is_file():
+            error_code = "config_not_regular_file"
+            message = "Configuration path must refer to a regular file."
+            suggestions = [
+                "Choose a regular local YAML file rather than a directory or special filesystem entry.",
+                "Re-run axiom config validate --path <file> after selecting the file.",
+            ]
         else:
             try:
-                config_size = config.stat().st_size
-            except OSError:
-                error_code = "config_unreadable"
-                message = "Configuration metadata could not be read."
+                # Read one byte beyond the limit so growth between metadata checks
+                # cannot turn validation into an unbounded file read.
+                with open_regular_file(config) as handle:
+                    raw_contents = handle.read(MAX_CONFIG_VALIDATION_BYTES + 1)
+            except FileNotFoundError:
+                error_code = "config_not_found"
+                message = "Configuration file was not found."
                 suggestions = [
-                    "Check that the file exists and your account has permission to read it.",
-                    "Choose a regular local file that is at most 256 KiB.",
+                    "Check that the file still exists and pass its current path with --path.",
+                    "Create a starter project with axiom init <project-name> if you need a new axiom.yaml.",
                 ]
+            except SafePathError:
+                error_code = "config_not_regular_file"
+                message = "Configuration path must refer to a regular file."
+                suggestions = [
+                    "Choose a regular local YAML file rather than a directory or special filesystem entry.",
+                    "Re-run axiom config validate --path <file> after selecting the file.",
+                ]
+            except OSError:
+                if config.is_symlink():
+                    error_code = "config_symlink_forbidden"
+                    message = "Configuration path must not be a symbolic link."
+                    suggestions = [
+                        "Choose a regular local file path.",
+                        "Review the symlink target yourself before copying content; AXIOM will not follow or replace it.",
+                    ]
+                else:
+                    error_code = "config_unreadable"
+                    message = "Configuration file could not be read safely."
+                    suggestions = [
+                        "Check that the file exists and your account has permission to read it.",
+                        "Choose a regular local file that is at most 256 KiB.",
+                    ]
             else:
-                if config_size > 256 * 1024:
+                if len(raw_contents) > MAX_CONFIG_VALIDATION_BYTES:
                     error_code = "config_too_large"
                     message = "Configuration exceeds the 256 KiB validation limit."
                     suggestions = [
@@ -579,9 +613,9 @@ def register(app, model_app, dataset_app) -> None:
                     ]
                 else:
                     try:
-                        contents = config.read_text(encoding="utf-8")
+                        contents = raw_contents.decode("utf-8")
                         parsed = yaml.safe_load(contents)
-                    except (OSError, UnicodeError, yaml.YAMLError):
+                    except (UnicodeError, yaml.YAMLError, RecursionError):
                         error_code = "config_invalid"
                         message = "invalid axiom.yaml: configuration could not be parsed as bounded UTF-8 YAML; file values are withheld."
                         suggestions = [
@@ -601,7 +635,7 @@ def register(app, model_app, dataset_app) -> None:
                             known_sections = ("project", "model", "dataset", "training", "evaluation", "deployment")
                             bad_sections = [
                                 key for key in known_sections
-                                if key in parsed and parsed[key] is not None and not isinstance(parsed[key], dict)
+                                if key in parsed and not isinstance(parsed[key], dict)
                             ]
                             if bad_sections:
                                 error_code = "config_section_not_mapping"

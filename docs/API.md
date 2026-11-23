@@ -151,6 +151,14 @@ AXIOM does not delete a successful download while cancelling a later registratio
 step.
 
 
+## Reproducible saved plan snapshots
+
+- `GET /api/workspace/experiments/{experiment_id}/reproducible`: return the deterministic canonical JSON document for a saved plan. The response includes the captured inputs, hardware snapshot, exact saved estimate, planner provenance, execution-not-started marker, and SHA-256 fingerprint.
+- `GET /api/workspace/experiments/{left_id}/diff/{right_id}`: compare two saved snapshots and return a sorted field-level diff, categorized as inputs, hardware, planner provenance, estimate, or format. Missing experiments return HTTP 404; incomplete or invalid saved snapshots return HTTP 422.
+- New experiment records store `planner_algorithm_version` and `axiom_version`. Existing snapshots without those fields remain readable, but the reproducible document reports unknown provenance rather than guessing.
+
+The fingerprint intentionally excludes display names, notes, tags, record IDs, and timestamps. It covers the model/dataset labels, parameter count, requested method, captured hardware, planner provenance, and exact plan estimate. Snapshot printing and diffing are read-only: neither reruns the planner nor creates a job or artifact. A matching fingerprint is not a guarantee of identical runtime behavior or training results.
+
 ## Workspace metadata transfer
 
 - `GET /api/workspace/metadata/export`: returns a versioned ZIP archive with media type `application/vnd.axiom.workspace-metadata+zip`. The archive contains the model registry, workflow designs, experiment plans, evaluation reports, and agent task profiles.

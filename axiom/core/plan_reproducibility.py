@@ -37,7 +37,12 @@ def reproducible_plan_document(record: dict[str, Any]) -> dict[str, Any]:
     hardware = record.get("hardware")
     parameter_billions = record.get("parameter_billions")
     requested_method = record.get("requested_method")
-    if not isinstance(plan, dict) or not plan:
+    required_plan_fields = {
+        "method", "precision", "lora_rank", "batch_size",
+        "gradient_accumulation", "sequence_length", "learning_rate",
+        "estimated_vram_gb", "fits_hardware", "reason",
+    }
+    if not isinstance(plan, dict) or not required_plan_fields.issubset(plan):
         raise ValueError("Saved experiment has no complete training-plan snapshot.")
     if not isinstance(hardware, dict):
         raise ValueError("Saved experiment has no captured hardware snapshot.")
@@ -69,7 +74,7 @@ def reproducible_plan_document(record: dict[str, Any]) -> dict[str, Any]:
             "snapshot_kind": "saved_estimate",
         },
         "inputs": {
-            "parameter_billions": parameter_billions,
+            "parameter_billions": float(parameter_billions),
             "requested_method": requested_method,
             "model": record.get("model"),
             "dataset": record.get("dataset"),

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — reproducible training-plan snapshots
+
+- Added canonical saved-plan JSON printing with stable SHA-256 fingerprints and field-level comparisons across planning inputs, captured hardware, planner provenance, and estimates.
+- Added `axiom experiment print` / `axiom experiment diff`, matching read-only workspace API endpoints, and Training-page saved-plan tools. New snapshots record planner and AXIOM versions; legacy provenance remains explicitly unknown.
+
 ## Unreleased — workspace metadata transfer
 
 - Added a versioned allowlisted workspace metadata ZIP for models, workflows, experiments, evaluations, and agent task profiles, with validated merge/replace import, checksums, size limits, conflict detection, and atomic rollback.
