@@ -2394,32 +2394,38 @@ def resume_prediction_job(job_id: str, root: Path) -> dict[str, Any] | None:
     ):
         raise ValueError("The original prediction dataset fingerprint or row count changed.")
 
-    data_root = _safe_data_root(workspace)
-    destination, parent_fd, _output_name, output_available = open_mcp_workspace_output_parent(
-        recovered["output_path"], workspace
-    )
-    try:
-        if not output_available or not destination.is_relative_to(data_root):
-            raise ValueError("The original prediction output path is no longer available.")
-        checkpoint_stream, _name, _path, _identity, _size, _digest = _open_prediction_checkpoint(
-            workspace,
-            recovered,
-            parent_fd=parent_fd,
-        )
-        checkpoint_stream.close()
-    finally:
-        if parent_fd is not None:
-            try:
-                os.close(parent_fd)
-            except OSError:
-                pass
-
     if not runtime_status().get("ready"):
         raise ValueError("AXIOM Native Engine runtime is not ready in this environment.")
     if _active_training_job_exists():
         raise ValueError("A local training job is active; wait for it to finish before resuming prediction.")
 
+    # Acquire the workspace compute slot before opening the checkpoint read/write;
+    # this prevents concurrent resume requests from truncating the same tail.
     acquire_local_compute_job_lock(job_id)
+    try:
+        data_root = _safe_data_root(workspace)
+        destination, parent_fd, _output_name, output_available = open_mcp_workspace_output_parent(
+            recovered["output_path"], workspace
+        )
+        try:
+            if not output_available or not destination.is_relative_to(data_root):
+                raise ValueError("The original prediction output path is no longer available.")
+            checkpoint_stream, _name, _path, _identity, _size, _digest = _open_prediction_checkpoint(
+                workspace,
+                recovered,
+                parent_fd=parent_fd,
+            )
+            checkpoint_stream.close()
+        finally:
+            if parent_fd is not None:
+                try:
+                    os.close(parent_fd)
+                except OSError:
+                    pass
+    except Exception:
+        release_local_compute_job_lock(job_id)
+        raise
+
     worker_started = False
     cancel_event = threading.Event()
     try:
