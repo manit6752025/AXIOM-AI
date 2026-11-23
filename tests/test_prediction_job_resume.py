@@ -136,3 +136,143 @@ def test_prediction_v1_job_history_migrates_as_non_resumable(tmp_path):
     assert record["resumption_count"] == 0
     assert summary["status"] == "interrupted"
     assert summary["resumable"] is False
+
+def test_resume_prediction_job_revalidates_assets_and_schedules_checkpoint_worker(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    root = tmp_path
+    model = root / "models" / "tiny"
+    model.mkdir(parents=True)
+    data = root / "data"
+    data.mkdir()
+    dataset = data / "eval.jsonl"
+    dataset.write_text(
+        '{"prompt":"one","reference":"A"}\\n{"prompt":"two","reference":"B"}\\n',
+        encoding="utf-8",
+    )
+    committed = b'{"prompt":"one","reference":"A","prediction":"first"}\\n'
+    record, checkpoint_path = _checkpoint(root, committed)
+    job_id = record["id"]
+    manifest = prediction_jobs._preflight_dataset(
+        "data/eval.jsonl", root, prompt_field="prompt", reference_field="reference"
+    )
+    record.update({
+        "status": "interrupted",
+        "created_at": "2026-11-20T00:00:00+00:00",
+        "updated_at": "2026-11-20T00:01:00+00:00",
+        "started_at": "2026-11-20T00:00:01+00:00",
+        "finished_at": "2026-11-20T00:01:00+00:00",
+        "dataset_path": "data/eval.jsonl",
+        "output_path": "data/predictions.jsonl",
+        "model_path": "models/tiny",
+        "adapter_path": None,
+        "max_new_tokens": 16,
+        "temperature": 0.7,
+        "seed": 7,
+        "device": "cpu",
+        "precision": "fp32",
+        "prompt_field": "prompt",
+        "reference_field": "reference",
+        "prediction_field": "prediction",
+        "rows_total": 2,
+        "prompts_truncated": 0,
+        "error_code": "worker_process_exited",
+        "evaluation_run_ids": [],
+        "artifact_identity": None,
+        "artifact_sha256": None,
+        "pending_artifact_identity": None,
+        "pending_artifact_sha256": None,
+        "runner_pid": 99999999,
+        "runner_identity": None,
+        "dataset_sha256": manifest["sha256"],
+        "model_fingerprint": "1" * 64,
+        "adapter_fingerprint": None,
+        "resumption_count": 0,
+    })
+    state_dir = root / ".axiom"
+    state_dir.mkdir()
+    monkeypatch.setattr(prediction_jobs, "_JOBS", {})
+    monkeypatch.setattr(prediction_jobs, "resolve_workspace_input", lambda path, workspace, label: model)
+    monkeypatch.setattr(prediction_jobs, "validate_local_model_tree", lambda path: None)
+    monkeypatch.setattr(prediction_jobs, "_resolve_engine_asset", lambda path, label: path)
+    monkeypatch.setattr(prediction_jobs, "_prediction_asset_fingerprint", lambda path, adapter: "1" * 64)
+    monkeypatch.setattr(prediction_jobs, "runtime_status", lambda: {"ready": True})
+    monkeypatch.setattr(prediction_jobs, "_active_training_job_exists", lambda: False)
+    monkeypatch.setattr(prediction_jobs, "acquire_local_compute_job_lock", lambda job: None)
+    monkeypatch.setattr(prediction_jobs, "release_local_compute_job_lock", lambda job: None)
+    monkeypatch.setattr(prediction_jobs.threading, "Thread", lambda **kwargs: SimpleNamespace(start=lambda: None))
+    prediction_jobs._persist_job_record(root, record)
+
+    resumed = prediction_jobs.resume_prediction_job(job_id, root)
+
+    assert resumed is not None
+    assert resumed["status"] == "queued"
+    assert resumed["resumption_count"] == 1
+    assert resumed["rows_completed"] == 1
+    persisted = next(item for item in prediction_jobs._read_job_records(root) if item["id"] == job_id)
+    assert persisted["status"] == "queued"
+    assert persisted["checkpoint_name"] == checkpoint_path.name
+    assert persisted["checkpoint_sha256"] == hashlib.sha256(committed).hexdigest()
+    assert persisted["runner_pid"] == os.getpid()
+
+
+def test_resume_prediction_job_refuses_dataset_fingerprint_changes(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    root = tmp_path
+    model = root / "models" / "tiny"
+    model.mkdir(parents=True)
+    data = root / "data"
+    data.mkdir()
+    dataset = data / "eval.jsonl"
+    dataset.write_text('{"prompt":"changed","reference":"A"}\\n', encoding="utf-8")
+    committed = b'{"prompt":"one","reference":"A","prediction":"first"}\\n'
+    record, _checkpoint_path = _checkpoint(root, committed)
+    job_id = record["id"]
+    record.update({
+        "status": "interrupted",
+        "created_at": "2026-11-20T00:00:00+00:00",
+        "updated_at": "2026-11-20T00:01:00+00:00",
+        "started_at": "2026-11-20T00:00:01+00:00",
+        "finished_at": "2026-11-20T00:01:00+00:00",
+        "dataset_path": "data/eval.jsonl",
+        "output_path": "data/predictions.jsonl",
+        "model_path": "models/tiny",
+        "adapter_path": None,
+        "max_new_tokens": 16,
+        "temperature": 0.7,
+        "seed": 7,
+        "device": "cpu",
+        "precision": "fp32",
+        "prompt_field": "prompt",
+        "reference_field": "reference",
+        "prediction_field": "prediction",
+        "rows_total": 2,
+        "prompts_truncated": 0,
+        "error_code": "worker_process_exited",
+        "evaluation_run_ids": [],
+        "artifact_identity": None,
+        "artifact_sha256": None,
+        "pending_artifact_identity": None,
+        "pending_artifact_sha256": None,
+        "runner_pid": 99999999,
+        "runner_identity": None,
+        "dataset_sha256": hashlib.sha256(b'{"prompt":"original","reference":"A"}\\n').hexdigest(),
+        "model_fingerprint": "1" * 64,
+        "adapter_fingerprint": None,
+        "resumption_count": 0,
+    })
+    (root / ".axiom").mkdir()
+    monkeypatch.setattr(prediction_jobs, "_JOBS", {})
+    monkeypatch.setattr(prediction_jobs, "resolve_workspace_input", lambda path, workspace, label: model)
+    monkeypatch.setattr(prediction_jobs, "validate_local_model_tree", lambda path: None)
+    monkeypatch.setattr(prediction_jobs, "_resolve_engine_asset", lambda path, label: path)
+    monkeypatch.setattr(prediction_jobs, "_prediction_asset_fingerprint", lambda path, adapter: "1" * 64)
+    prediction_jobs._persist_job_record(root, record)
+
+    with pytest.raises(ValueError, match="dataset fingerprint"):
+        prediction_jobs.resume_prediction_job(job_id, root)
+
+
