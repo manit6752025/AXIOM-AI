@@ -67,9 +67,11 @@ jobs:
           node-version: "22"
           cache: npm
       - name: Install Python package and test dependencies
-        run: python -m pip install -e '.[test,native-inference,embeddings]'
+        run: python -m pip install -e '.[test,native-inference,embeddings,security-audit]'
       - name: Install frontend dependencies
         run: npm ci
+      - name: Verify optional local dependency scanner is installed
+        run: python -m pip_audit --version
       - name: Check Python, Node and OS compatibility
         run: python scripts/check_compatibility.py --json --require-node
       - name: Static acceptance checks
