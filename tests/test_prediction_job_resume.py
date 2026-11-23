@@ -298,7 +298,7 @@ def test_resume_prediction_job_refuses_dataset_fingerprint_changes(tmp_path, mon
 def test_dead_prediction_worker_is_recovered_as_interrupted_with_checkpoint_retained(tmp_path, monkeypatch):
     record, checkpoint_path = _checkpoint(
         tmp_path,
-        b'{"prompt":"one","reference":"A","prediction":"first"}\\n',
+        b'{"prompt":"one","reference":"A","prediction":"first"}\n',
     )
     record.update({
         "status": "running",
