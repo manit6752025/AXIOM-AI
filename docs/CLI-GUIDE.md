@@ -226,13 +226,16 @@ axiom ai policy-audit ./models/my-model --json
 axiom ai plan --model ./models/my-model --json
 axiom project validate --json
 axiom check --json
-axiom config show --path ./axiom.yaml --json
+axiom tools list --json
+axiom config validate --path ./axiom.yaml --json
 axiom tools doctor --json
 axiom tools plan claude-code --json
 axiom engine discover --json
 ```
 
 Configuration JSON uses safe YAML parsing, rejects symlinks and files over 256 KiB, and redacts likely credential values by key name. It does not return the original raw YAML document.
+
+Tool inventory, tool doctor, and tool install-plan outputs are schema-versioned. They report catalog metadata, local executable presence, and whether a credential environment variable is present; they never return credential values or claim that vendor authentication has been verified.
 
 The dataset profile payload includes aggregate counts, field/type summaries,
 privacy flags, optional opt-in PII match counts, and a schema version; it does

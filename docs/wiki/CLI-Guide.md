@@ -102,6 +102,7 @@ axiom ai policy-audit ./models/my-model --json
 axiom ai plan --model ./models/my-model --json
 axiom project validate --json
 axiom check --json
+axiom tools list --json
 axiom tools doctor --json
 axiom tools plan claude-code --json
 ```
