@@ -106,8 +106,9 @@ test("Runtime creates a workspace knowledge base and ingests a local document", 
   await page.getByRole("button", { name: "Search knowledge base" }).click();
   await expect(page.getByText("HYBRID SEARCH", { exact: true })).toBeVisible();
   await expect(page.getByText("AXIOM local retrieval excerpt.", { exact: true })).toBeVisible();
-  await expect(page.getByText("documents/guide.md", { exact: false })).toBeVisible();
-  await expect(page.getByText("SHA-256 " + document.content_sha256, { exact: false })).toBeVisible();
+  const searchResults = page.locator(".knowledge-search-results");
+  await expect(searchResults.getByText("documents/guide.md", { exact: false })).toBeVisible();
+  await expect(searchResults.getByText("SHA-256 " + document.content_sha256, { exact: false })).toBeVisible();
   expect(searchPayload).toMatchObject({
     query: "AXIOM",
     source_prefixes: ["documents"],
