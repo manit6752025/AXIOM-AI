@@ -638,6 +638,8 @@ export type AxiomPredictionJob = {
   evaluation_run_ids: string[];
   error_code: string | null;
   recovery_note?: string;
+  resumable: boolean;
+  resumption_count: number;
   scope: {
     prompts_returned: false;
     predictions_returned: false;
@@ -646,7 +648,7 @@ export type AxiomPredictionJob = {
     output_file_published_only_after_completion: true;
     job_state_persisted: true;
     server_restart_clears_job_state: false;
-    generation_resumed_after_restart: false;
+    generation_resumed_after_restart: boolean;
   };
 };
 export type AxiomPredictionJobPage = {
@@ -3308,6 +3310,17 @@ export const axiomApi = {
   }),
   cancelAxiomPredictionJob: (id: string) =>
     requestJson<AxiomPredictionJobCancellation>(`/api/prediction-jobs/${encodeURIComponent(id)}/cancel`, {
+      method: "POST", body: JSON.stringify({}),
+    }),
+  resumeAxiomPredictionJob: (id: string) =>
+    requestJson<{ schema_version: 1; job: AxiomPredictionJob; scope: {
+      dataset_fingerprint_verified: true;
+      model_and_adapter_fingerprints_verified: true;
+      checkpoint_identity_and_digest_verified: true;
+      partial_output_published: false;
+      prompts_returned: false;
+      predictions_returned: false;
+    } }>(`/api/prediction-jobs/${encodeURIComponent(id)}/resume`, {
       method: "POST", body: JSON.stringify({}),
     }),
   axiomEngineStatus: () => requestJson<AxiomEngineStatus>("/api/engine/status"),
