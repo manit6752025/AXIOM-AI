@@ -77,7 +77,6 @@ def test_trace_records_only_allowlisted_metadata_not_prompt_or_response() -> Non
     clear_runtime_traces()
 
 
-@pytest.mark.parametrize("limit", [0, -1, MAX_RUNTIME_TRACES + 1, True])
 def test_structured_inference_trace_is_allowlisted_and_metadata_only() -> None:
     clear_runtime_traces()
     trace = record_runtime_trace(
@@ -99,6 +98,7 @@ def test_structured_inference_trace_is_allowlisted_and_metadata_only() -> None:
     clear_runtime_traces()
 
 
+@pytest.mark.parametrize("limit", [0, -1, MAX_RUNTIME_TRACES + 1, True])
 def test_trace_listing_rejects_invalid_limits(limit: int) -> None:
     with pytest.raises(ValueError, match="limit"):
         list_runtime_traces(limit)

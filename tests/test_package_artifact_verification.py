@@ -19,7 +19,7 @@ DIST_INFO = f"axiom_all-{VERSION}.dist-info"
 WHEEL_NAME = f"axiom_all-{VERSION}-py3-none-any.whl"
 
 
-def _wheel(path: Path, *, extra: list[tuple[str, bytes, int]] | None = None, entry_point: str = "axiom = axiom.cli.main:app", include_css: bool = True) -> None:
+def _wheel(path: Path, *, extra: list[tuple[str, bytes, int]] | None = None, entry_point: str = "axiom = axiom.cli.main:main", include_css: bool = True) -> None:
     metadata = (
         f"Metadata-Version: 2.1\nName: {PROJECT['name']}\nVersion: {VERSION}\n"
         f"Requires-Python: {PROJECT['requires-python']}\n"
@@ -67,7 +67,7 @@ def _sdist(path: Path, *, extra: tuple[str, bytes, int] | None = None, include_c
 
 def _dist(tmp_path: Path, *, wheel_extra=None, wheel_entry=None, sdist_extra=None, include_css: bool = True, include_sdist_css: bool = True) -> Path:
     (tmp_path / WHEEL_NAME).write_bytes(b"")
-    _wheel(tmp_path / WHEEL_NAME, extra=wheel_extra, entry_point=wheel_entry or "axiom = axiom.cli.main:app", include_css=include_css)
+    _wheel(tmp_path / WHEEL_NAME, extra=wheel_extra, entry_point=wheel_entry or "axiom = axiom.cli.main:main", include_css=include_css)
     _sdist(tmp_path / f"axiom_all-{VERSION}.tar.gz", extra=sdist_extra, include_css=include_sdist_css)
     return tmp_path
 
@@ -76,7 +76,7 @@ def test_verifies_wheel_and_sdist_bundle_cli_and_control_center(tmp_path: Path) 
     report = verify_package_artifacts(_dist(tmp_path))
     assert report["project"] == PROJECT["name"]
     assert report["version"] == PROJECT["version"]
-    assert report["wheel"]["entry_point"] == "axiom = axiom.cli.main:app"
+    assert report["wheel"]["entry_point"] == "axiom = axiom.cli.main:main"
     assert report["wheel"]["bundled_webui"] is True
     assert report["sdist"]["bundled_webui"] is True
     assert report["wheel_installed_and_imported"] is False

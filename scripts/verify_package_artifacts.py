@@ -19,7 +19,7 @@ from typing import Any
 MAX_ARCHIVE_MEMBERS = 25_000
 MAX_MEMBER_BYTES = 512 * 1024 * 1024
 MAX_TOTAL_BYTES = 1536 * 1024 * 1024
-EXPECTED_ENTRY_POINT = "axiom = axiom.cli.main:app"
+EXPECTED_ENTRY_POINT = "axiom = axiom.cli.main:main"
 
 
 class PackageArtifactError(ValueError):
@@ -99,7 +99,7 @@ def _verify_wheel(path: Path, project: dict[str, Any]) -> dict[str, Any]:
             entries_name = prefix + "/entry_points.txt"
             config = ConfigParser()
             config.read_string(archive.read(entries_name).decode("utf-8"))
-            if config.get("console_scripts", "axiom", fallback="").strip() != "axiom.cli.main:app":
+            if config.get("console_scripts", "axiom", fallback="").strip() != "axiom.cli.main:main":
                 raise PackageArtifactError("Wheel is missing the supported axiom CLI entry point.")
             _check_required_payload(files, "Wheel")
             return {

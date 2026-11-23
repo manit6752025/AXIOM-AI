@@ -59,7 +59,7 @@ security-audit = [
 ]
 
 [project.scripts]
-axiom = "axiom.cli.main:app"
+axiom = "axiom.cli.main:main"
 
 [project.urls]
 Homepage = "https://manit6752025.github.io/AXIOM-AI/"
@@ -72,4 +72,4 @@ Changelog = "https://github.com/manit6752025/AXIOM-AI/blob/latest/development/do
 include = ["axiom*"]
 
 [tool.setuptools.package-data]
-axiom = ["webui/*", "webui/**/*"]
+axiom = ["assets/*.svg", "webui/*", "webui/**/*"]

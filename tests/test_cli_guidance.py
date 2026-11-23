@@ -98,6 +98,7 @@ def test_refresh_control_center_runs_lint_then_build_without_deleting_ui(tmp_pat
     import axiom.cli.main as main_cli
 
     (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "package-lock.json").write_text('{"lockfileVersion":3,"packages":{"":{}}}', encoding="utf-8")
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts/copy_webui.mjs").write_text("// copy", encoding="utf-8")
     (tmp_path / "axiom/webui").mkdir(parents=True)
@@ -105,6 +106,7 @@ def test_refresh_control_center_runs_lint_then_build_without_deleting_ui(tmp_pat
     previous_index.write_text("previous UI", encoding="utf-8")
     calls = []
     monkeypatch.setattr(main_cli.shutil, "which", lambda command: "/usr/bin/npm")
+    monkeypatch.setattr(main_cli, "_frontend_runtime_typescript_mismatches", lambda root: [])
 
     def fake_run(args, *, cwd, check):
         calls.append((args, cwd, check))
@@ -114,6 +116,96 @@ def test_refresh_control_center_runs_lint_then_build_without_deleting_ui(tmp_pat
     main_cli._refresh_control_center(tmp_path)
 
     assert [call[0][-1] for call in calls] == ["lint", "build"]
+    assert all(call[1] == tmp_path and call[2] is False for call in calls)
+    assert previous_index.read_text(encoding="utf-8") == "previous UI"
+
+
+def test_refresh_detects_typescript_version_resolved_by_eslint(tmp_path, monkeypatch):
+    import json
+    import types
+    import axiom.cli.main as main_cli
+
+    packages = {
+        "node_modules/typescript": {"version": "6.0.3"},
+        "node_modules/typescript-eslint": {"version": "8.73.0"},
+    }
+    (tmp_path / "package-lock.json").write_text(
+        json.dumps({"lockfileVersion": 3, "packages": packages}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        main_cli.shutil,
+        "which",
+        lambda command: "/usr/bin/node" if command in {"node", "nodejs"} else None,
+    )
+
+    def fake_run(args, *, cwd, capture_output, text, check, timeout):
+        assert args[:2] == ["/usr/bin/node", "-e"]
+        assert cwd == tmp_path and capture_output and text and not check
+        assert timeout == 10
+        return types.SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps([
+                {"importer": "@typescript-eslint/parser", "version": "7.0.0"},
+                {"importer": "@typescript-eslint/typescript-estree", "version": "7.0.0"},
+            ]),
+            stderr="",
+        )
+
+    monkeypatch.setattr(main_cli.subprocess, "run", fake_run)
+    mismatches = main_cli._frontend_runtime_typescript_mismatches(tmp_path)
+
+    assert mismatches == [
+        "@typescript-eslint/parser resolves TypeScript 7.0.0, but package-lock.json pins 6.0.3",
+        "@typescript-eslint/typescript-estree resolves TypeScript 7.0.0, but package-lock.json pins 6.0.3",
+    ]
+
+
+def test_refresh_reinstalls_locked_typescript_before_lint_and_build(tmp_path, monkeypatch):
+    import types
+    import axiom.cli.main as main_cli
+
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "package-lock.json").write_text(
+        '{"lockfileVersion":3,"packages":{"":{}}}', encoding="utf-8"
+    )
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/copy_webui.mjs").write_text("// copy", encoding="utf-8")
+    (tmp_path / "axiom/webui").mkdir(parents=True)
+    previous_index = tmp_path / "axiom/webui/index.html"
+    previous_index.write_text("previous UI", encoding="utf-8")
+    calls = []
+    runtime_checks = iter([
+        ["@typescript-eslint/parser resolves TypeScript 7.0.0, but package-lock.json pins 6.0.3"],
+        [],
+    ])
+    monkeypatch.setattr(
+        main_cli.shutil,
+        "which",
+        lambda command: {
+            "npm": "/usr/bin/npm",
+            "node": "/usr/bin/node",
+            "nodejs": None,
+        }.get(command),
+    )
+    monkeypatch.setattr(
+        main_cli,
+        "_frontend_runtime_typescript_mismatches",
+        lambda root: next(runtime_checks),
+    )
+
+    def fake_run(args, *, cwd, check):
+        calls.append((args, cwd, check))
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(main_cli.subprocess, "run", fake_run)
+    main_cli._refresh_control_center(tmp_path)
+
+    assert [call[0][1:] for call in calls] == [
+        ["ci", "--include=dev", "--no-audit", "--no-fund"],
+        ["run", "lint"],
+        ["run", "build"],
+    ]
     assert all(call[1] == tmp_path and call[2] is False for call in calls)
     assert previous_index.read_text(encoding="utf-8") == "previous UI"
 

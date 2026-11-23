@@ -136,6 +136,10 @@ test("Runtime supports schema-constrained local inference and displays only vali
     properties: {
       answer: { type: "string", minLength: 1, maxLength: 80 },
       confidence: { type: "number", minimum: 0, maximum: 1 },
+      metadata: {
+        type: "object",
+        properties: { source: { type: "string" } },
+      },
     },
     required: ["answer", "confidence"],
   };
@@ -147,6 +151,19 @@ test("Runtime supports schema-constrained local inference and displays only vali
   expect(received).toMatchObject({
     model: "qwen2.5:0.5b",
     prompt: "Return an answer and confidence.",
-    json_schema: { type: "object", additionalProperties: false, required: ["answer", "confidence"] },
+    json_schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["answer", "confidence"],
+      properties: {
+        answer: { type: "string", minLength: 1, maxLength: 80 },
+        confidence: { type: "number", minimum: 0, maximum: 1 },
+        metadata: {
+          type: "object",
+          additionalProperties: false,
+          properties: { source: { type: "string" } },
+        },
+      },
+    },
   });
 });

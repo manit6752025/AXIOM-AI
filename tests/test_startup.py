@@ -32,12 +32,15 @@ def test_render_startup_contains_welcome_and_palette_copy():
     assert "Start here: " in rendered
     assert "axiom guide" in rendered
     assert "Next steps:" in rendered
-    assert COFFEE == "#99684E"
-    assert CREAM == "#DEC2AA"
-    assert AMBER == "#171310"
-    assert "38;2;222;194;170" in rendered
-    assert "38;2;23;19;16" in rendered
-    assert "38;2;153;104;78" in rendered
+    assert "LOCAL-FIRST AI ENGINEERING" in rendered
+    assert "BUILD AI. OWN AI." in rendered
+    assert "▀" in rendered
+    assert COFFEE == "#aab39e"
+    assert CREAM == "#f2f4eb"
+    assert AMBER == "#d9f36a"
+    assert "38;2;242;244;235" in rendered
+    assert "38;2;217;243;106" in rendered
+    assert "38;2;170;179;158" in rendered
 
 
 def test_show_startup_requires_an_interactive_tty(tmp_path: Path):
@@ -171,3 +174,17 @@ def test_daemon_json_option_passes_machine_readable_mode(monkeypatch):
     assert result.exit_code == 0, result.stdout
     assert captured["machine_readable"] is True
     assert result.stdout == ""
+
+
+
+def test_cli_logo_matches_the_first_readme_svg():
+    from axiom.cli.startup import _read_logo_svg
+
+    logo = _read_logo_svg()
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+
+    assert "![AXIOM. Know what fits before you train.](axiom/assets/axiom-logo.svg)" in readme
+    assert 'viewBox="0 0 1440 560"' in logo
+    assert "LOCAL-FIRST AI ENGINEERING" in logo
+    assert "BUILD AI. OWN AI." in logo
+    assert "M36 91" in logo

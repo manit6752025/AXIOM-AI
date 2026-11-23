@@ -227,3 +227,108 @@ def test_json_error_option_can_be_combined_with_quiet_mode():
     assert result.exit_code == 1
     payload = json.loads(result.output)
     assert payload["error"]["code"] == "AXIOM_CLI_ERROR"
+
+
+
+def _write_frontend_fixture(root: Path, installed_typescript: str) -> None:
+    (root / "scripts").mkdir(parents=True)
+    (root / "scripts" / "copy_webui.mjs").write_text("// fixture\\n", encoding="utf-8")
+    (root / "package.json").write_text('{"name":"axiom-ui"}', encoding="utf-8")
+    lock = {
+        "lockfileVersion": 3,
+        "packages": {
+            "": {
+                "dependencies": {"react": "^19.0.0"},
+                "devDependencies": {"typescript": "~6.0.3", "typescript-eslint": "^8.73.0"},
+            },
+            "node_modules/react": {"version": "19.3.1"},
+            "node_modules/typescript": {"version": "6.0.3"},
+            "node_modules/typescript-eslint": {"version": "8.73.0"},
+        },
+    }
+    (root / "package-lock.json").write_text(json.dumps(lock), encoding="utf-8")
+    for name, version in (
+        ("react", "19.3.1"),
+        ("typescript", installed_typescript),
+        ("typescript-eslint", "8.73.0"),
+    ):
+        package_dir = root / "node_modules" / name
+        package_dir.mkdir(parents=True, exist_ok=True)
+        (package_dir / "package.json").write_text(
+            json.dumps({"name": name, "version": version}),
+            encoding="utf-8",
+        )
+
+
+def test_frontend_dependency_check_detects_typescript_lockfile_drift(tmp_path: Path):
+    _write_frontend_fixture(tmp_path, "7.0.0")
+    mismatches = cli_main._frontend_dependency_mismatches(tmp_path)
+    assert mismatches == ["typescript: installed 7.0.0, locked 6.0.3"]
+
+
+def test_gui_refresh_repairs_frontend_dependencies_before_lint_and_build(
+    tmp_path: Path,
+    monkeypatch,
+):
+    _write_frontend_fixture(tmp_path, "7.0.0")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(cli_main.shutil, "which", lambda name: "/usr/bin/npm")
+    monkeypatch.setattr(cli_main, "_frontend_runtime_typescript_mismatches", lambda root: [])
+
+    def fake_run(command, *, cwd, check):
+        commands.append(command)
+        if command[1] == "ci":
+            package = tmp_path / "node_modules" / "typescript" / "package.json"
+            package.write_text('{"name":"typescript","version":"6.0.3"}', encoding="utf-8")
+        return type("Completed", (), {"returncode": 0})()
+
+    monkeypatch.setattr(cli_main.subprocess, "run", fake_run)
+    cli_main._refresh_control_center(tmp_path)
+
+    assert commands == [
+        ["/usr/bin/npm", "ci", "--include=dev", "--no-audit", "--no-fund"],
+        ["/usr/bin/npm", "run", "lint"],
+        ["/usr/bin/npm", "run", "build"],
+    ]
+    assert cli_main._frontend_dependency_mismatches(tmp_path) == []
+
+
+def test_gui_refresh_skips_reinstall_when_dependencies_match_the_lockfile(
+    tmp_path: Path,
+    monkeypatch,
+):
+    _write_frontend_fixture(tmp_path, "6.0.3")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(cli_main.shutil, "which", lambda name: "/usr/bin/npm")
+    monkeypatch.setattr(cli_main, "_frontend_runtime_typescript_mismatches", lambda root: [])
+    monkeypatch.setattr(
+        cli_main.subprocess,
+        "run",
+        lambda command, *, cwd, check: (
+            commands.append(command) or type("Completed", (), {"returncode": 0})()
+        ),
+    )
+
+    cli_main._refresh_control_center(tmp_path)
+    assert commands == [
+        ["/usr/bin/npm", "run", "lint"],
+        ["/usr/bin/npm", "run", "build"],
+    ]
+
+
+def test_gui_help_uses_the_public_axiom_executable_name():
+    result = runner.invoke(app, ["gui", "--help"], prog_name="axiom")
+    assert result.exit_code == 0, result.output
+    assert "Usage: axiom gui" in result.output
+    assert "python -m axiom.cli.main" not in result.output
+
+
+def test_console_entrypoint_pins_the_public_program_name(monkeypatch):
+    received: dict[str, str] = {}
+
+    def fake_app(**kwargs):
+        received.update(kwargs)
+
+    monkeypatch.setattr(cli_main, "app", fake_app)
+    cli_main.main()
+    assert received == {"prog_name": "axiom"}
