@@ -50,9 +50,9 @@ jobs:
               environment: .most_recent_instance.environment
             }' | jq -s 'sort_by(.severity, .rule_id, .path)' > "$RUNNER_TEMP/codeql-open-alerts.json"
 
-          analysis_id="$(gh api --paginate -H "Accept: application/vnd.github+json" \
+          analysis_id="$(gh api -H "Accept: application/vnd.github+json" \
             "/repos/$GH_REPO/code-scanning/analyses?tool_name=CodeQL&per_page=100" \
-            --jq '.[].id' | head -n 1)"
+            --jq '.[0].id // empty')"
           if [ -n "$analysis_id" ]; then
             echo "Latest CodeQL analysis ID: $analysis_id"
             gh api -H "Accept: application/sarif+json" \
