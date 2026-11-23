@@ -121,14 +121,15 @@ jobs:
         with:
           node-version: "22"
           registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Install an npm CLI with OIDC trusted-publishing support
+        run: npm install --global npm@11.15.0
       - uses: actions/download-artifact@v4
         with:
           name: axiom-sdk-release-artifacts
           path: dist
-      - name: Publish package with provenance
+      - name: Publish package with GitHub OIDC and provenance
         run: npm publish dist/typescript/*.tgz --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
 
   verify-python-install:
