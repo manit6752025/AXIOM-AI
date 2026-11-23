@@ -28,7 +28,10 @@ def _checkpoint(root, payload: bytes, *, rows: int = 1):
 
 def test_prediction_checkpoint_verifies_committed_prefix_and_truncates_uncommitted_tail(tmp_path):
     committed = b'{"prompt":"first","reference":"A","prediction":"x"}\n'
-    record, path = _checkpoint(tmp_path, committed + b'{"partial":"uncommitted')
+    record, path = _checkpoint(tmp_path, committed)
+    # Simulate a crash after writing bytes but before checkpoint metadata commits.
+    with path.open("ab") as tail:
+        tail.write(b'{"partial":"uncommitted')
     stream, name, checkpoint_path, identity, size, digest = prediction_jobs._open_prediction_checkpoint(
         tmp_path, record
     )
