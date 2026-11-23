@@ -68,7 +68,7 @@ test("Agent Optimizer submits the chosen profile, model and throughput target", 
 
   await expect(page.getByText("Q4_K_M", { exact: true })).toBeVisible();
   await expect(page.getByText("Qwen/Qwen3-8B", { exact: true })).toBeVisible();
-  await expect(page.getByText("15 tok/s", { exact: true })).toBeVisible();
+  await expect(page.locator("b").filter({ hasText: "15 tok/s" })).toBeVisible();
   expect(getSubmitted()).toEqual({
     model: "Qwen/Qwen3-8B",
     profile: 2,
@@ -90,7 +90,7 @@ test("Quantization Lab renders size and fit comparisons from the bounded plan", 
   await expect(page.getByRole("heading", { name: "Estimated weight sizes" })).toBeVisible();
   await expect(page.getByRole("cell", { name: "INT4" })).toBeVisible();
   await expect(page.getByText("Q4_K_M", { exact: true })).toBeVisible();
-  await expect(page.getByText("15 tok/s", { exact: true })).toBeVisible();
+  await expect(page.locator("b").filter({ hasText: "15 tok/s" })).toBeVisible();
   expect(getSubmitted()).toEqual({
     model: "Qwen/Qwen3-8B",
     profile: 2,

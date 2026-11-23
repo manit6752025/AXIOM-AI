@@ -1159,6 +1159,45 @@ def _tiny_adapter_file(safetensors_torch, torch, root: Path, *, bad_a_shape: boo
     return adapter
 
 
+
+def test_native_lora_adapter_executes_on_cpu_with_real_safetensors(tmp_path: Path) -> None:
+    torch = pytest.importorskip("torch")
+    safetensors_torch = pytest.importorskip("safetensors.torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
+
+    torch.manual_seed(7)
+    root = tmp_path / "trusted"
+    model = root / "base"
+    model.mkdir(parents=True)
+    (model / "config.json").write_text(json.dumps(_config()), encoding="utf-8")
+    (model / "tokenizer.json").write_text("{}", encoding="utf-8")
+    safetensors_torch.save_file(_tiny_weights(torch), str(model / "model.safetensors"))
+    adapter = _tiny_adapter_file(safetensors_torch, torch, root)
+
+    base_runtime = NativeLlamaRuntime.from_directory(
+        model,
+        torch,
+        torch.device("cpu"),
+        trusted_roots=(root.resolve(),),
+    )
+    adapted_runtime = NativeLlamaRuntime.from_directory(
+        model,
+        torch,
+        torch.device("cpu"),
+        adapter_dir=adapter,
+        trusted_roots=(root.resolve(),),
+    )
+    token_ids = torch.tensor([[1, 2, 3]], dtype=torch.long)
+
+    base_logits, _ = base_runtime.forward(token_ids)
+    adapted_logits, _ = adapted_runtime.forward(token_ids)
+
+    assert base_logits.shape == adapted_logits.shape == (1, _config()["vocab_size"])
+    assert torch.isfinite(base_logits).all().item()
+    assert torch.isfinite(adapted_logits).all().item()
+    assert adapted_runtime.adapter
+    assert not torch.allclose(base_logits, adapted_logits)
+
 def test_native_adapter_compatibility_checks_tensor_shapes_and_device_presence(tmp_path: Path) -> None:
     torch = pytest.importorskip("torch")
     safetensors_torch = pytest.importorskip("safetensors.torch")
