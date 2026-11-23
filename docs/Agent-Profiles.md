@@ -24,3 +24,12 @@ axiom agent-profile create "Dataset review" --capability dataset.profile --json
 axiom agent-profile set-capabilities <profile-id> --capability dataset.profile --capability model.inspect
 axiom agent-profile delete <profile-id> --yes
 ```
+
+
+## MCP tool authorization audit
+
+Every registered MCP handler checks its server-side permission before doing work. The authorization boundary records both allowed and denied decisions in the workspace security-event journal. If the policy cannot be read or the decision cannot be durably audited, access is blocked.
+
+Decision records contain the tool name, allow/deny outcome, active profile, a bounded reason code, and argument **names**. Each argument name is paired with the constant marker `[REDACTED]`; argument values are never copied, serialized, hashed, or stored. This prevents prompts, local paths, tokens, and other user-supplied values from entering the journal. The Diagnostics security-event table and JSON export expose the same redacted metadata.
+
+The journal uses schema version 2 for decision records and reads existing version-1 journals. The first successful append after reading a version-1 journal upgrades it atomically to version 2 without discarding prior events. Events remain append-only, hash-chained, bounded, and are not silently rotated. When the journal is full or unavailable, MCP tool execution fails closed.

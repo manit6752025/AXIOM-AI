@@ -1071,8 +1071,8 @@ def axiom_training_job_prediction_compare(
 ) -> dict:
     """Compare a training job's verified base-model and adapter prediction jobs."""
     permissions = ToolPermissionStore()
-    permissions.require("axiom_training_job_status")
-    permissions.require("axiom_prediction_job_compare")
+    permissions.require("axiom_training_job_status", arguments=locals())
+    permissions.require("axiom_prediction_job_compare", arguments=locals())
     root = _mcp_workspace_root()
 
     def unavailable(reason_code: str) -> dict:
@@ -1791,7 +1791,7 @@ def axiom_evaluation_compare_examples(
 def axiom_workspace_context() -> dict:
     """Read bounded local context; suggested commands are not run and need approval."""
     permission_store = ToolPermissionStore()
-    permission_store.require("axiom_workspace_context")
+    permission_store.require("axiom_workspace_context", arguments=locals())
     permission_state = permission_store.list()
     active_profile = next(
         profile
@@ -2176,8 +2176,8 @@ def axiom_workflow_dry_run(
 ) -> dict:
     """Preview the resource plan for a saved design without executing it."""
     permissions = ToolPermissionStore()
-    permissions.require("axiom_workflow_read")
-    permissions.require("axiom_training_plan")
+    permissions.require("axiom_workflow_read", arguments=locals())
+    permissions.require("axiom_training_plan", arguments=locals())
 
     def result_scope() -> dict[str, bool]:
         return {
@@ -2420,8 +2420,8 @@ def axiom_training_job_eval_overlap_preflight(
 ) -> dict:
     """Check current evaluation data against the dataset recorded by a completed training job."""
     permissions = ToolPermissionStore()
-    permissions.require("axiom_training_job_status")
-    permissions.require("axiom_training_eval_overlap_preflight")
+    permissions.require("axiom_training_job_status", arguments=locals())
+    permissions.require("axiom_training_eval_overlap_preflight", arguments=locals())
     root = _mcp_workspace_root()
 
     def inconclusive(reason_code: str, *, status: str | None = None) -> dict:
@@ -3196,8 +3196,8 @@ def axiom_prediction_job_validation_preflight(
 ) -> dict:
     """Compose prompt and engine checks before a user-approved prediction job."""
     permissions = ToolPermissionStore()
-    permissions.require("axiom_prediction_job_preflight")
-    permissions.require("axiom_engine_preflight")
+    permissions.require("axiom_prediction_job_preflight", arguments=locals())
+    permissions.require("axiom_engine_preflight", arguments=locals())
     root = _mcp_workspace_root()
 
     def blocked(
@@ -3660,10 +3660,10 @@ def axiom_training_job_validation_preflight(
 ) -> dict:
     """Build a read-only base-versus-adapter evaluation plan for a completed LoRA job."""
     permissions = ToolPermissionStore()
-    permissions.require("axiom_training_job_status")
-    permissions.require("axiom_training_eval_overlap_preflight")
-    permissions.require("axiom_engine_preflight")
-    permissions.require("axiom_prediction_job_preflight")
+    permissions.require("axiom_training_job_status", arguments=locals())
+    permissions.require("axiom_training_eval_overlap_preflight", arguments=locals())
+    permissions.require("axiom_engine_preflight", arguments=locals())
+    permissions.require("axiom_prediction_job_preflight", arguments=locals())
 
     def actionability_from_checks(
         overlap: dict,
