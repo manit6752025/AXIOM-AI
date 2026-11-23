@@ -98,7 +98,8 @@ export class AxiomClient {
     ) {
       throw new AxiomConfigurationError("baseUrl must be an HTTP(S) origin without credentials, path, query or fragment.");
     }
-    const local = ["localhost", "127.0.0.1", "[::1]", "::1"].includes(parsed.hostname.toLowerCase());
+    const localHostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+    const local = ["localhost", "127.0.0.1", "[::1]", "::1"].includes(localHostname);
     if (parsed.protocol !== "https:" && !local) {
       throw new AxiomConfigurationError("Non-loopback AXIOM services must use HTTPS.");
     }
@@ -158,6 +159,7 @@ export class AxiomClient {
       Accept: "application/json",
       ...this.additionalHeaders,
     });
+    const requestHeaderNames = new Set<string>();
     for (const [name, value] of Object.entries(options.headers ?? {})) {
       const lower = name.toLowerCase();
       if (["authorization", "x-request-id", "x-axiom-workspace-id", "host", "content-length"].includes(lower)) {
@@ -166,6 +168,10 @@ export class AxiomClient {
       if (!name.trim() || /[\u0000-\u001f\u007f]/.test(name + value)) {
         throw new AxiomConfigurationError("Per-request headers must use printable names and values.");
       }
+      if (requestHeaderNames.has(lower)) {
+        throw new AxiomConfigurationError(`The ${name} header was supplied more than once.`);
+      }
+      requestHeaderNames.add(lower);
       headers.set(name, value);
     }
     headers.set("X-Request-ID", id);
@@ -370,7 +376,7 @@ export class AxiomClient {
   downloadWorkspaceBackup(workspaceId: string, options: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Uint8Array> {
     return this.requestBytes("GET", `/api/workspaces/${encodeURIComponent(workspaceId)}/backup`, {
       ...options,
-      timeoutMs: options.timeoutMs ?? 900_000,
+      timeoutMs: options.timeoutMs ?? this.timeoutMs,
     });
   }
 
@@ -381,7 +387,7 @@ export class AxiomClient {
     const pending = await this.checkedResponse(
       "GET",
       `/api/workspaces/${encodeURIComponent(workspaceId)}/backup`,
-      { ...options, timeoutMs: options.timeoutMs ?? 900_000 },
+      { ...options, timeoutMs: options.timeoutMs ?? this.timeoutMs },
     );
     const body = pending.response.body;
     if (!body) {
@@ -433,7 +439,7 @@ export class AxiomClient {
       body: archive,
       contentType: "application/zip",
       ...options,
-      timeoutMs: options.timeoutMs ?? 900_000,
+      timeoutMs: options.timeoutMs ?? this.timeoutMs,
     });
   }
 
