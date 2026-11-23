@@ -124,7 +124,7 @@ test("Runtime creates, probes, uses, and deletes a bounded native serving profil
   await expect(page.getByRole("region", { name: "Native model serving profiles" }).locator("b").filter({ hasText: "Runtime smoke" })).toBeVisible();
 
   await page.getByRole("button", { name: "Probe" }).click();
-  await expect(page.getByText("READY", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Native model serving profiles" }).getByText("READY", { exact: true })).toBeVisible();
 
   await page.getByLabel("Profile for generation").selectOption("a".repeat(32));
   await page.getByLabel("Serving profile prompt").fill("Hello local model");
