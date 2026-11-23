@@ -91,6 +91,32 @@ The report deliberately omits footprint estimates when quantization/dtype is unk
 
 The numerical range is heuristic, not a confidence interval or an execution guarantee. Runtime loading, quality, and speed are not measured by this report.
 
+## Format/runtime compatibility matrix and version evidence
+
+The Models page's **Compatibility matrix** action and `axiom model runtimes`
+command report a local snapshot of candidate runtime installations:
+
+- **Ollama** is checked with `ollama --version` and is listed as a GGUF candidate.
+- **llama.cpp** is checked with an available `llama-cli`, `llama-server`, or legacy `main` version command and is listed as a GGUF candidate.
+- **Hugging Face Transformers** is checked through installed Python distribution metadata and is listed as a Safetensors/PyTorch candidate.
+
+The API endpoint is `GET /api/workspace/models/runtime-matrix`; pass
+`refresh=true` to bypass the 30-second in-process cache. The CLI equivalent is
+`axiom model runtimes --refresh --json`. Command probes use fixed executable
+names and a fixed `--version` argument, no shell, a two-second timeout, and a
+restricted environment. Python package evidence is read without importing the
+runtime package. The response records the evidence method and reported version
+or build identifier, and distinguishes a missing runtime from an installed
+runtime whose version command failed or timed out.
+
+The matrix is deliberately **candidate-only**. It records local availability and
+version evidence; it does not maintain minimum-version guarantees, certify a
+particular model/architecture, download compatibility data, execute model
+weights, or benchmark a runtime. No network requests are made. A detected
+runtime is not proof that its dependencies, tokenizer, operators, adapters,
+quantization, or hardware support are suitable for a specific model. An
+undetected runtime is not proof that a format is unsupported.
+
 ## Validation boundary
 
 Automated Python API tests cover case-insensitive search, exact filters, numeric parameter sorting, unknown-size ordering, invalid sort fields, and pagination after filtering. Dataset inventory tests cover case-insensitive path search, stable ordering, bounded pagination, the 5,000-entry scan cap, and truncation reporting. Playwright coverage verifies the GUI sends the filter/sort contract to the typed API, that saved presets apply after clearing filters, and that browser-local presets survive a page reload. Full validation is recorded in the roadmap issue after the complete Python, lint, production-build, and browser gates pass.

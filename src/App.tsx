@@ -12,6 +12,7 @@ import AgentProfiles from "./components/AgentProfiles";
 import ModelStudioPanel from "./components/ModelStudioPanel";
 import LocalFineTuningPanel from "./components/LocalFineTuningPanel";
 import { downloadBlob } from "./utils/browserDownload";
+import { clearFrontendErrorRecords, frontendErrorRecords, reportFrontendError, type FrontendErrorRecord } from "./utils/errorReporting";
 import {
   clearFrontendErrorReport,
   FRONTEND_ERROR_EVENT,
@@ -53,6 +54,7 @@ import {
   type WorkflowTemplate,
   type WorkspaceModelCandidate,
   type WorkspaceModelInspection,
+  type WorkspaceRuntimeMatrix,
 } from "./api/client";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode } from "react";
@@ -893,6 +895,14 @@ function App() {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [authenticated, preferences.sessionTimeoutMinutes]);
+
+  useEffect(() => {
+    const onError = (event: ErrorEvent) => reportFrontendError("window", event.error ?? event.message);
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => reportFrontendError("promise", event.reason);
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    return () => { window.removeEventListener("error", onError); window.removeEventListener("unhandledrejection", onUnhandledRejection); };
+  }, []);
 
   useEffect(() => {
     if (!authenticated) {
@@ -2054,6 +2064,9 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
   const [compatibilityReport, setCompatibilityReport] = useState<WorkspaceModelCompatibility | null>(null);
   const [compatibilityBusyId, setCompatibilityBusyId] = useState<string | null>(null);
   const [compatibilityError, setCompatibilityError] = useState("");
+  const [runtimeMatrix, setRuntimeMatrix] = useState<WorkspaceRuntimeMatrix | null>(null);
+  const [runtimeMatrixBusy, setRuntimeMatrixBusy] = useState(false);
+  const [runtimeMatrixError, setRuntimeMatrixError] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -2067,6 +2080,7 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
   const [parameters, setParameters] = useState("");
   const [architecture, setArchitecture] = useState("");
   const [license, setLicense] = useState("");
+  const [licenseReview, setLicenseReview] = useState<"unreviewed" | "approved" | "restricted" | "unknown">("unreviewed");
   const [quantization, setQuantization] = useState("");
   const [sizeBytes, setSizeBytes] = useState("");
   const [contentSha256, setContentSha256] = useState("");
@@ -2201,6 +2215,19 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
     }
   };
 
+  const loadRuntimeMatrix = async (forceRefresh = false) => {
+    setRuntimeMatrixBusy(true);
+    setRuntimeMatrixError("");
+    try {
+      const result = await axiomApi.modelRuntimeMatrix(forceRefresh);
+      setRuntimeMatrix(result.matrix);
+    } catch (cause) {
+      setRuntimeMatrixError(cause instanceof Error ? cause.message : "Local runtime evidence could not be collected.");
+    } finally {
+      setRuntimeMatrixBusy(false);
+    }
+  };
+
   const useCandidateMetadata = async (candidate: WorkspaceModelCandidate) => {
     const result = await inspectCandidate(candidate);
     if (!result) return;
@@ -2251,6 +2278,7 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
         parameters: parameters.trim() || null,
         architecture: architecture.trim() || null,
         license: license.trim() || null,
+        license_review: licenseReview,
         quantization: quantization.trim() || null,
         size_bytes: parsedSizeBytes,
         content_sha256: digest || null,
@@ -2263,6 +2291,7 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
       setParameters("");
       setArchitecture("");
       setLicense("");
+      setLicenseReview("unreviewed");
       setQuantization("");
       setSizeBytes("");
       setContentSha256("");
@@ -2337,8 +2366,23 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
   const validSizeBytes = !sizeBytes.trim() || (/^\d+$/.test(sizeBytes.trim()) && Number.isSafeInteger(Number(sizeBytes)));
   const validContentSha256 = !contentSha256.trim() || /^[a-f0-9]{64}$/i.test(contentSha256.trim());
 
-  return <FeaturePage page="models" actions={<><button type="button" className="button secondary-button" onClick={() => void refresh()} disabled={loading}><RefreshCcw size={16} /> Refresh</button><button type="button" className="button secondary-button" onClick={() => void discoverLocalModels()} disabled={discoveryBusy}><Search size={15} /> {discoveryBusy ? "Discovering…" : "Discover local"}</button><button type="button" className="button secondary-button" onClick={() => void exportModels()}><ArrowDownToLine size={15} /> Export</button><button type="button" className="button secondary-button" onClick={() => importRef.current?.click()}><Upload size={15} /> Import</button><input ref={importRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importModels(event)} /><button type="button" className="button primary-button" onClick={() => setFormOpen((open) => !open)}><Plus size={16} /> Register model</button></>}>
+  return <FeaturePage page="models" actions={<><button type="button" className="button secondary-button" onClick={() => void refresh()} disabled={loading}><RefreshCcw size={16} /> Refresh</button><button type="button" className="button secondary-button" onClick={() => void discoverLocalModels()} disabled={discoveryBusy}><Search size={15} /> {discoveryBusy ? "Discovering…" : "Discover local"}</button><button type="button" className="button secondary-button" onClick={() => void loadRuntimeMatrix()} disabled={runtimeMatrixBusy}><Network size={15} /> {runtimeMatrixBusy ? "Checking runtimes…" : "Compatibility matrix"}</button><button type="button" className="button secondary-button" onClick={() => void exportModels()}><ArrowDownToLine size={15} /> Export</button><button type="button" className="button secondary-button" onClick={() => importRef.current?.click()}><Upload size={15} /> Import</button><input ref={importRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importModels(event)} /><button type="button" className="button primary-button" onClick={() => setFormOpen((open) => !open)}><Plus size={16} /> Register model</button></>}>
     <div className="info-grid"><InfoCard icon={BrainCircuit} label="Matching models" value={loading ? "—" : String(modelTotal)} detail={loading ? "Loading inventory" : `${models.filter((model) => model.favorite).length} favorites on this page`} tone={modelTotal ? "success" : "neutral"} /><InfoCard icon={HardDrive} label="Storage" value="Local" detail="Registry metadata only" tone="neutral" /><InfoCard icon={SlidersHorizontal} label="Inventory" value={loading ? "—" : String(models.length)} detail={hasMore ? `Showing ${models.length} of ${modelTotal} matches` : "All matching entries loaded"} tone="info" /></div>
+    {runtimeMatrixError && <InlineAlert tone="warning" role="alert">{runtimeMatrixError}</InlineAlert>}
+    {runtimeMatrix && <Surface title="Format/runtime compatibility" eyebrow="LOCAL VERSION EVIDENCE" action={<button type="button" className="icon-text-button" onClick={() => void loadRuntimeMatrix(true)} disabled={runtimeMatrixBusy}>{runtimeMatrixBusy ? "Refreshing…" : "Refresh evidence"}</button>}>
+      <p className="quiet-note">{runtimeMatrix.scope_note} Probed {new Date(runtimeMatrix.probed_at).toLocaleString()}. Results are cached for {runtimeMatrix.cache_ttl_seconds} seconds unless refreshed. No network requests or model loads are performed.</p>
+      <div className="module-list">
+        {runtimeMatrix.formats.map((formatEntry) => <div className="module-row" key={formatEntry.format}>
+          <span className="module-icon"><Network size={16} /></span>
+          <span className="module-copy">
+            <b>{formatEntry.format}</b>
+            <small>{formatEntry.candidates.map((candidate) => `${candidate.runtime_name}: ${candidate.availability.replaceAll("_", " ")}${candidate.version ? ` · ${candidate.version}` : ""}${candidate.version_evidence ? ` · evidence: ${candidate.version_evidence}` : ""} · candidate only`).join("  |  ")}</small>
+          </span>
+        </div>)}
+      </div>
+      <p className="quiet-note">Version evidence is taken from bounded local probes. Candidate status is not proof of model loadability or runtime support. {runtimeMatrix.limitations[3]}</p>
+    </Surface>}
+
     <Surface title="Find models" eyebrow="SERVER-SIDE SEARCH AND FILTERS">
       <div className="two-column-grid">
         <label className="field"><span className="field-label-row"><span>Search metadata</span></span><input aria-label="Search model registry" value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} maxLength={160} placeholder="Name, source, architecture, license, or tag" /></label>
@@ -2365,8 +2409,12 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
         <label className="field"><span className="field-label-row"><span>Parameters</span></span><input value={parameters} onChange={(event) => setParameters(event.target.value)} maxLength={80} placeholder="8B" /></label>
         <label className="field"><span className="field-label-row"><span>Quantization</span></span><input value={quantization} onChange={(event) => setQuantization(event.target.value)} maxLength={80} placeholder="Q4_K_M" /></label>
         <label className="field"><span className="field-label-row"><span>License</span></span><input value={license} onChange={(event) => setLicense(event.target.value)} maxLength={120} placeholder="Apache-2.0" /></label>
+<<<<<<< HEAD
         <label className="field"><span className="field-label-row"><span>Weight size (bytes)</span></span><input aria-label="Weight size in bytes" type="number" inputMode="numeric" min="0" step="1" value={sizeBytes} onChange={(event) => setSizeBytes(event.target.value)} placeholder="Known combined weight-file size" aria-invalid={!validSizeBytes} /></label>
         <label className="field"><span className="field-label-row"><span>Content SHA-256</span></span><input aria-label="Content SHA-256" value={contentSha256} onChange={(event) => setContentSha256(event.target.value)} maxLength={64} spellCheck={false} placeholder="Optional 64-character digest" aria-invalid={!validContentSha256} /></label>
+=======
+        <label className="field"><span className="field-label-row"><span>License review</span></span><select aria-label="License review state" value={licenseReview} onChange={(event) => setLicenseReview(event.target.value as typeof licenseReview)}><option value="unreviewed">Unreviewed</option><option value="approved">Approved</option><option value="restricted">Restricted</option><option value="unknown">Unknown</option></select></label>
+>>>>>>> dd7291b (feat(models): track license review state)
         <label className="field"><span className="field-label-row"><span>Tags, comma-separated</span></span><input value={tags} onChange={(event) => setTags(event.target.value)} maxLength={1200} placeholder="chat, local, favorite" /></label>
         <label className="field"><span className="field-label-row"><span>Workspace labels, comma-separated</span></span><input aria-label="Workspace labels" value={workspaceLabels} onChange={(event) => setWorkspaceLabels(event.target.value)} maxLength={1200} placeholder="production, reviewed, team-a" /></label>
         <div className="integration-form-actions"><button type="button" className="button secondary-button" onClick={() => setFormOpen(false)}>Cancel</button><button type="submit" className="button primary-button" disabled={saving || !name.trim() || !source.trim() || !format.trim() || !validSizeBytes || !validContentSha256}>{saving ? "Registering…" : "Save to registry"}</button></div>
@@ -2395,13 +2443,17 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
         <InfoCard icon={Gauge} label="GPU memory fit" value={compatibilityReport.gpu_memory_fit.status.toUpperCase()} detail={`${compatibilityReport.hardware.gpu_name || "GPU not identified"} · budget ${formatMemoryValue(compatibilityReport.gpu_memory_fit.budget_gb)}`} tone={fitTone(compatibilityReport.gpu_memory_fit.status)} />
       </div>
       <div className="two-column-grid" style={{ marginTop: 16 }}>
-        <div><p className="eyebrow">FORMAT COMPATIBILITY</p><StatusPill tone={compatibilityReport.format_compatibility.status === "candidate_not_verified" ? "warning" : "neutral"}>{compatibilityReport.format_compatibility.status.replaceAll("_", " ").toUpperCase()}</StatusPill><p>{compatibilityReport.format_compatibility.guidance}</p><p className="quiet-note">Potential runtimes: {compatibilityReport.format_compatibility.likely_runtimes.join(", ") || "unknown"}</p></div>
+        <div><p className="eyebrow">FORMAT COMPATIBILITY</p><StatusPill tone={compatibilityReport.format_compatibility.status === "candidate_not_verified" ? "warning" : "neutral"}>{compatibilityReport.format_compatibility.status.replaceAll("_", " ").toUpperCase()}</StatusPill><p>{compatibilityReport.format_compatibility.guidance}</p><p className="quiet-note">Potential runtimes: {compatibilityReport.format_compatibility.likely_runtimes.join(", ") || "unknown"}</p>{compatibilityReport.format_compatibility.matrix.map((entry) => <p className="quiet-note" key={entry.runtime}><b>{entry.runtime}</b> · {entry.status.replaceAll("_", " ")} · {entry.version_evidence ?? "version not queried"} · {entry.reason}</p>)}</div>
         <div><p className="eyebrow">WARNINGS AND ASSUMPTIONS</p><ul>{compatibilityReport.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul><p className="quiet-note">VRAM evidence: {compatibilityReport.hardware.vram_probe}. No runtime load was attempted.</p></div>
       </div>
     </Surface>}
     <Surface title="Model registry" eyebrow="LOCAL INVENTORY">
       {error ? <InlineAlert tone="warning" role="alert">{error}</InlineAlert> : null}
+<<<<<<< HEAD
       {loading ? <div className="loading-state" role="status">Loading model registry…</div> : models.length ? <><div className="module-list">{models.map((model) => <div className="module-row model-registry-row" key={model.id}><span className="module-icon"><BrainCircuit size={17} /></span><span className="module-copy"><b>{model.name}</b><small>{model.source} · {model.format}{model.parameters ? ` · ${model.parameters}` : ""}{model.quantization ? ` · ${model.quantization}` : ""}{model.architecture ? ` · ${model.architecture}` : ""}{model.license ? ` · ${model.license}` : ""}{model.size_bytes !== null && model.size_bytes !== undefined ? ` · ${formatBytes(model.size_bytes)}` : ""}{model.tags?.length ? ` · ${model.tags.join(", ")}` : ""}{model.workspace_labels?.length ? ` · Workspace: ${model.workspace_labels.join(", ")}` : ""}</small></span><button type="button" className="icon-button" aria-label={`${model.favorite ? "Remove" : "Add"} ${model.name} ${model.favorite ? "favorite" : "to favorites"}`} title={model.favorite ? "Remove favorite" : "Add favorite"} onClick={() => void toggleFavorite(model)}><Star size={15} fill={model.favorite ? "currentColor" : "none"} /></button><button type="button" className="icon-button" aria-label={`Check hardware fit for ${model.name}`} title={compatibilityBusyId === model.id ? "Checking hardware fit…" : "Estimate hardware fit"} disabled={compatibilityBusyId === model.id} onClick={() => void inspectCompatibility(model)}><Gauge size={15} /></button><button type="button" className="icon-button danger-icon-button" aria-label={`Remove ${model.name} from registry`} title="Remove registry entry" onClick={() => setRemoving(model)}><Trash2 size={15} /></button></div>)}</div>{hasMore && <div className="pagination-actions"><button type="button" className="button secondary-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more models"}</button></div>}</> : <EmptyState icon={BrainCircuit} title="Registry is empty" description="Register model metadata here or use the CLI. Model files remain where they are." action={<CliReference command="axiom model add my-model local safetensors" />} />}
+=======
+      {loading ? <div className="loading-state" role="status">Loading model registry…</div> : models.length ? <><div className="module-list">{models.map((model) => <div className="module-row model-registry-row" key={model.id}><span className="module-icon"><BrainCircuit size={17} /></span><span className="module-copy"><b>{model.name}</b><small>Source: {model.source} · {model.format}{model.parameters ? ` · ${model.parameters}` : ""}{model.quantization ? ` · ${model.quantization}` : ""}{model.architecture ? ` · ${model.architecture}` : ""}{model.license ? ` · ${model.license}` : ""} · license {model.license_review ?? "unreviewed"}{model.tags?.length ? ` · ${model.tags.join(", ")}` : ""}</small></span><button type="button" className="icon-button" aria-label={`${model.favorite ? "Remove" : "Add"} ${model.name} ${model.favorite ? "favorite" : "to favorites"}`} title={model.favorite ? "Remove favorite" : "Add favorite"} onClick={() => void toggleFavorite(model)}><Star size={15} fill={model.favorite ? "currentColor" : "none"} /></button><button type="button" className="icon-button" aria-label={`Check hardware fit for ${model.name}`} title={compatibilityBusyId === model.id ? "Checking hardware fit…" : "Estimate hardware fit"} disabled={compatibilityBusyId === model.id} onClick={() => void inspectCompatibility(model)}><Gauge size={15} /></button><button type="button" className="icon-button danger-icon-button" aria-label={`Remove ${model.name} from registry`} title="Remove registry entry" onClick={() => setRemoving(model)}><Trash2 size={15} /></button></div>)}</div>{hasMore && <div className="pagination-actions"><button type="button" className="button secondary-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more models"}</button></div>}</> : <EmptyState icon={BrainCircuit} title="Registry is empty" description="Register model metadata here or use the CLI. Model files remain where they are." action={<CliReference command="axiom model add my-model local safetensors" />} />}
+>>>>>>> dd7291b (feat(models): track license review state)
     </Surface>
     {removing && <ConfirmationDialog titleId="remove-model-title" descriptionId="remove-model-description" eyebrow="CONFIRM REGISTRY CHANGE" title={`Remove ${removing.name}?`} description="This removes only its AXIOM registry metadata. Local model weights will not be deleted." confirmLabel="Remove registry entry" busyLabel="Removing…" busy={removingBusy} onCancel={() => setRemoving(null)} onConfirm={() => void removeModel()} />}
     <ModelStudioPanel />
@@ -4075,7 +4127,14 @@ function SettingsPage({
   const [pendingMetadataImport, setPendingMetadataImport] = useState<{ file: File; replace: boolean } | null>(null);
   const [metadataMessage, setMetadataMessage] = useState("");
   const [metadataError, setMetadataError] = useState("");
+  const [frontendErrors, setFrontendErrors] = useState<readonly FrontendErrorRecord[]>(() => [...frontendErrorRecords()]);
   const conflict = draft.lowPowerMode && draft.dashboardRefreshSeconds > 0;
+
+  useEffect(() => {
+    const refresh = () => setFrontendErrors([...frontendErrorRecords()]);
+    window.addEventListener("axiom:frontend-error", refresh);
+    return () => window.removeEventListener("axiom:frontend-error", refresh);
+  }, []);
 
   const update = <K extends keyof AppPreferences>(key: K, value: AppPreferences[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -4197,6 +4256,10 @@ function SettingsPage({
         <div className="surface-divider" />
         <p className="quiet-note">Deleting a registry entry or saved plan does not delete a checkpoint, dataset, or run output. Files at chosen output paths remain until you remove them yourself.</p>
         <a href="https://github.com/manit6752025/AXIOM-AI/blob/latest/development/docs/DATA-RETENTION.md" target="_blank" rel="noreferrer">Read the data retention and deletion guide</a>
+      </Surface>
+      <Surface title="Frontend error reports" eyebrow="LOCAL / REDACTED" action={<StatusPill tone={frontendErrors.length ? "warning" : "success"}>{frontendErrors.length} RETAINED</StatusPill>}>
+        <p className="quiet-note">AXIOM retains up to 25 recent browser errors for this open tab only. Before an error is displayed or retained, credential fields, authorization values, request tokens, prompts, and data values are replaced with <code>[REDACTED]</code>. Reports are never sent automatically.</p>
+        {frontendErrors.length ? <><div className="frontend-error-list" aria-label="Redacted frontend errors">{frontendErrors.map((entry) => <div className="frontend-error-row" key={entry.id}><b>{entry.source.toUpperCase()}</b><span>{entry.message}</span><small>{formatTimestamp(entry.occurredAt)}</small></div>)}</div><button type="button" className="button secondary-button" onClick={() => clearFrontendErrorRecords()}><Trash2 size={15} /> Clear local reports</button></> : <EmptyState icon={ShieldCheck} title="No frontend errors retained" description="New browser and API errors will appear here only after redaction; nothing is transmitted automatically." />}
       </Surface>
       <Surface title="Workspace metadata transfer" eyebrow="PORTABLE PROJECT METADATA">
         <p className="quiet-note">Export or import the local model registry, workflow designs, experiment plans, evaluation reports, and agent task profiles. Imports are validated and merged by default; conflicts stop the entire import before any records are written.</p>

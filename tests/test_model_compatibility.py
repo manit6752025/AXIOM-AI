@@ -41,6 +41,7 @@ def test_q4_fit_report_returns_explicit_ranges_and_distinguishes_ram_from_vram()
     assert report["system_ram_fit"]["budget_gb"] == 11.2
     assert report["gpu_memory_fit"]["status"] == "unlikely"
     assert report["format_compatibility"]["status"] == "candidate_not_verified"
+    assert report["format_compatibility"]["matrix"][0]["runtime"] == "Ollama"
     assert any("not a benchmark" in item.lower() for item in report["warnings"])
 
 
@@ -53,6 +54,7 @@ def test_missing_vram_is_unknown_not_reported_as_no_gpu() -> None:
     assert report["gpu_memory_fit"]["physical_gb"] is None
     assert any("does not mean a GPU is absent" in item for item in report["warnings"])
     assert report["format_compatibility"]["likely_runtimes"] == ["Transformers", "AXIOM Engine"]
+    assert report["format_compatibility"]["matrix"][0]["runtime"] == "AXIOM Engine"
 
 
 def test_unknown_quantization_omits_memory_estimates_instead_of_guessing() -> None:

@@ -21,6 +21,7 @@ class Model:
     id: str = field(default_factory=new_resource_id)
     architecture: str | None = None
     license: str | None = None
+    license_review: str = "unreviewed"
     tags: list[str] = field(default_factory=list)
     favorite: bool = False
     content_sha256: str | None = None
@@ -43,6 +44,8 @@ class Model:
         ):
             if value is not None and (not isinstance(value, str) or len(value) > limit):
                 raise TypeError(f"Model {label} metadata is invalid.")
+        if self.license_review not in {"unreviewed", "approved", "restricted", "unknown"}:
+            raise TypeError("Model license_review metadata is invalid.")
         if (
             not isinstance(self.tags, list)
             or len(self.tags) > 32

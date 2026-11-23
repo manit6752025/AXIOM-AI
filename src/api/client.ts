@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 import { recordFrontendError } from "../diagnostics/frontendErrors";
+=======
+import { redactErrorText, reportFrontendError } from "../utils/errorReporting";
+>>>>>>> 0150185 (feat(gui): add redacted frontend error reports)
 
 const API_BASE = import.meta.env.VITE_AXIOM_API_URL || "";
 
@@ -524,6 +528,7 @@ export type WorkspaceModel = {
   quantization?: string | null;
   architecture?: string | null;
   license?: string | null;
+  license_review?: "unreviewed" | "approved" | "restricted" | "unknown";
   tags?: string[];
   favorite?: boolean;
   content_sha256?: string | null;
@@ -598,8 +603,47 @@ export type WorkspaceModelCompatibility = {
   estimated_runtime_memory_gb: ModelMemoryRange | null;
   system_ram_fit: WorkspaceMemoryFit;
   gpu_memory_fit: WorkspaceMemoryFit;
-  format_compatibility: { status: "candidate_not_verified" | "unknown"; likely_runtimes: string[]; guidance: string };
+  format_compatibility: { status: "candidate_not_verified" | "unknown"; likely_runtimes: string[]; guidance: string; matrix: Array<{ runtime: string; status: string; version_evidence: string | null; reason: string }> };
   warnings: string[];
+  scope_note: string;
+};
+
+export type WorkspaceRuntimeAvailability =
+  | "installed"
+  | "not_detected"
+  | "installed_version_unavailable"
+  | "version_probe_timed_out"
+  | "version_probe_failed";
+
+export type WorkspaceRuntimeEvidence = {
+  id: string;
+  name: string;
+  availability: WorkspaceRuntimeAvailability;
+  version: string | null;
+  version_evidence: string | null;
+  evidence_method: string;
+  candidate_formats: string[];
+};
+
+export type WorkspaceRuntimeMatrix = {
+  schema_version: 1;
+  probed_at: string;
+  cache_ttl_seconds: number;
+  network_access: false;
+  model_load_tested: false;
+  runtimes: WorkspaceRuntimeEvidence[];
+  formats: Array<{
+    format: string;
+    candidates: Array<{
+      runtime_id: string;
+      runtime_name: string;
+      availability: WorkspaceRuntimeAvailability;
+      version: string | null;
+      version_evidence: string | null;
+      status: "candidate_not_verified";
+    }>;
+  }>;
+  limitations: string[];
   scope_note: string;
 };
 
@@ -1234,7 +1278,9 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
     succeeded = true;
     return payload as T;
   } catch (error) {
+    let safeError: Error;
     if (error instanceof DOMException && error.name === "AbortError") {
+<<<<<<< HEAD
       recordFrontendError({ source: "api.request", category: "api_timeout", errorName: "AbortError" });
       throw new Error(`AXIOM backend did not respond within 15 seconds (request ID ${requestId}).`, { cause: error });
     }
@@ -1243,6 +1289,16 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
       throw new Error(`AXIOM backend is unavailable. Start the local API and try again (request ID ${requestId}).`, { cause: error });
     }
     throw error;
+=======
+      safeError = new Error(`AXIOM backend did not respond within ${Math.round(timeoutMs / 1000)} seconds (request ID ${requestId}).`);
+    } else if (error instanceof TypeError) {
+      safeError = new Error(`AXIOM backend is unavailable. Start the local API and try again (request ID ${requestId}).`);
+    } else {
+      safeError = new Error(redactErrorText(error));
+    }
+    reportFrontendError("api", safeError);
+    throw safeError;
+>>>>>>> 0150185 (feat(gui): add redacted frontend error reports)
   } finally {
     window.clearTimeout(timeout);
     window.dispatchEvent(new CustomEvent("axiom:api-request-end", {
@@ -1419,6 +1475,11 @@ export const axiomApi = {
 
   modelCompatibility: (id: string) =>
     requestJson<{ report: WorkspaceModelCompatibility }>(`/api/workspace/models/${encodeURIComponent(id)}/compatibility`),
+
+  modelRuntimeMatrix: (refresh = false) =>
+    requestJson<{ matrix: WorkspaceRuntimeMatrix }>(
+      `/api/workspace/models/runtime-matrix${refresh ? "?refresh=true" : ""}`,
+    ),
 
   addModel: (model: Omit<WorkspaceModel, "id">) =>
     requestJson<{ model: WorkspaceModel }>("/api/workspace/models", {

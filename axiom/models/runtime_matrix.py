@@ -100,6 +100,7 @@ def _probe_command(spec: dict[str, Any]) -> dict[str, Any]:
         result = subprocess.run(
             [executable_path, "--version"],
             capture_output=True,
+            stdin=subprocess.DEVNULL,
             text=True,
             timeout=PROBE_TIMEOUT_SECONDS,
             check=False,

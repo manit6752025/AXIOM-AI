@@ -2272,6 +2272,13 @@ html[data-accent="violet"] .app-shell.light {
 
 .field-error { display: block; color: var(--danger); font-size: 10px; line-height: 1.5; }
 
+.frontend-error-list { display: grid; gap: 8px; margin: 14px 0; }
+.frontend-error-row { display: grid; grid-template-columns: 66px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px; border: 1px solid var(--line); background: var(--surface-soft); font-size: 10px; }
+.frontend-error-row b { color: var(--danger); font-size: 9px; letter-spacing: .06em; }
+.frontend-error-row span { overflow-wrap: anywhere; }
+.frontend-error-row small { color: var(--muted); white-space: nowrap; }
+@media (max-width: 600px) { .frontend-error-row { grid-template-columns: 1fr; gap: 4px; } .frontend-error-row small { white-space: normal; } }
+
 
 /* Persistent backend, stale-data, and request-loading feedback. */
 .global-api-status { min-width: 0; display: inline-flex; align-items: center; gap: 7px; padding: 0 7px; border-left: 1px solid var(--line); }
