@@ -2612,6 +2612,7 @@ def test_native_lora_adapter_executes_on_configured_accelerator(tmp_path: Path) 
     requested = os.environ["AXIOM_ACCELERATOR_DEVICE"].strip().lower()
     torch = pytest.importorskip("torch")
     safetensors_torch = pytest.importorskip("safetensors.torch")
+    from axiom.core.native_engine import NativeLlamaRuntime
 
     if requested == "cuda":
         assert torch.version.cuda is not None, "CUDA runner needs a CUDA-enabled PyTorch build."
