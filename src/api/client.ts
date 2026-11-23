@@ -1699,6 +1699,31 @@ export type WorkspaceCatalog = {
   workspaces: WorkspaceSummary[];
   scope_note: string;
 };
+
+export type WorkspaceBackupReport = {
+  schema_version: 1;
+  backup_id: string;
+  workspace_label: string;
+  file_count: number;
+  total_bytes: number;
+  archive_bytes?: number;
+  manifest_sha256?: string;
+  skipped: {
+    symlink_files: number;
+    symlink_directories: number;
+    special_files: number;
+    excluded_directories: number;
+  };
+  integrity?: "verified";
+  scope_note: string;
+};
+
+export type WorkspaceBackupRestoreResult = {
+  schema_version: 1;
+  workspace: WorkspaceSummary;
+  backup: WorkspaceBackupReport;
+  scope_note: string;
+};
 export type WorkspaceWorkflowVersion = {
   revision: number;
   updated_at: string;
@@ -2932,6 +2957,20 @@ export const axiomApi = {
     }),
 
   workspaces: () => requestJson<WorkspaceCatalog>("/api/workspaces"),
+
+  workspaceBackupUrl: (workspaceId: string) =>
+    `${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}/backup`,
+
+  restoreWorkspaceBackup: (file: File, name: string) =>
+    requestJson<WorkspaceBackupRestoreResult>(
+      `/api/workspaces/backup/restore?${new URLSearchParams({ name })}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/zip" },
+        body: file,
+      },
+      900_000,
+    ),
 
   createWorkspace: (name: string) => requestJson<{ workspace: WorkspaceSummary }>("/api/workspaces", {
     method: "POST",

@@ -1599,6 +1599,16 @@ function Sidebar({
   }, []);
 
   useEffect(() => {
+    const refreshWorkspaceCatalog = () => {
+      void axiomApi.workspaces().then(setWorkspaceCatalog).catch(() => {
+        setWorkspaceError("Workspace catalog could not be refreshed after the restore operation.");
+      });
+    };
+    window.addEventListener("axiom:workspaces-changed", refreshWorkspaceCatalog);
+    return () => window.removeEventListener("axiom:workspaces-changed", refreshWorkspaceCatalog);
+  }, []);
+
+  useEffect(() => {
     if (!workspaceMenuOpen) return;
     const closeOnPointer = (event: PointerEvent) => {
       if (event.target instanceof Node && !workspaceMenuRef.current?.contains(event.target)) {
@@ -5265,6 +5275,10 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
   const [reviewerLabel, setReviewerLabel] = useState("");
   const [securityEventsBusy, setSecurityEventsBusy] = useState(false);
   const [bundleBusy, setBundleBusy] = useState(false);
+  const [workspaceBackupBusy, setWorkspaceBackupBusy] = useState(false);
+  const [workspaceRestoreBusy, setWorkspaceRestoreBusy] = useState(false);
+  const [workspaceBackupFile, setWorkspaceBackupFile] = useState<File | null>(null);
+  const [workspaceRestoreName, setWorkspaceRestoreName] = useState("Restored workspace");
   const [frontendErrors, setFrontendErrors] = useState(() => getFrontendErrorReport().events);
   const [frontendReportBusy, setFrontendReportBusy] = useState(false);
   const [supplyChainBusy, setSupplyChainBusy] = useState(false);
@@ -5333,6 +5347,61 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
   const clearFrontendErrorsFromView = () => {
     clearFrontendErrorReport();
     setFrontendErrors([]);
+  };
+
+  const downloadWorkspaceBackup = async () => {
+    if (!window.confirm(
+      "Create a full workspace backup? The ZIP can contain project configuration, .axiom metadata, credentials or tokens stored in workspace files, datasets, local models, and generated artifacts. Store it securely and do not share it without inspecting its contents."
+    )) return;
+    setWorkspaceBackupBusy(true);
+    try {
+      const rememberedId = window.localStorage.getItem("axiom-active-workspace");
+      const catalog = await axiomApi.workspaces();
+      const selected = catalog.workspaces.find((workspace) => workspace.id === rememberedId)
+        || catalog.workspaces.find((workspace) => workspace.id === catalog.active_workspace_id);
+      if (!selected) throw new Error("The active workspace could not be identified.");
+      const link = document.createElement("a");
+      link.href = axiomApi.workspaceBackupUrl(selected.id);
+      link.download = "axiom-workspace-backup.zip";
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      onNotify(`Full backup requested for ${selected.name}. The browser will save the ZIP; protect it as sensitive data.`, "success");
+    } catch (cause) {
+      onNotify(cause instanceof Error ? cause.message : "Workspace backup could not be started.", "warning");
+    } finally {
+      setWorkspaceBackupBusy(false);
+    }
+  };
+
+  const restoreWorkspaceBackup = async () => {
+    if (!workspaceBackupFile) {
+      onNotify("Choose an AXIOM workspace backup ZIP first.", "warning");
+      return;
+    }
+    const name = workspaceRestoreName.trim();
+    if (!name || name.length > 64) {
+      onNotify("Enter a new workspace name between 1 and 64 characters.", "warning");
+      return;
+    }
+    if (!window.confirm(
+      `Restore "${workspaceBackupFile.name}" as a new workspace named "${name}"? The archive can contain credentials, project configuration, datasets and model weights. AXIOM verifies paths and checksums before registration. Your current workspace will not be overwritten.`
+    )) return;
+    setWorkspaceRestoreBusy(true);
+    try {
+      const result = await axiomApi.restoreWorkspaceBackup(workspaceBackupFile, name);
+      setWorkspaceBackupFile(null);
+      window.dispatchEvent(new CustomEvent("axiom:workspaces-changed"));
+      onNotify(
+        `Restored ${result.backup.file_count.toLocaleString()} file(s) into new workspace "${result.workspace.name}". Your current workspace remains active.`,
+        "success",
+      );
+    } catch (cause) {
+      onNotify(cause instanceof Error ? cause.message : "Workspace backup could not be restored.", "warning");
+    } finally {
+      setWorkspaceRestoreBusy(false);
+    }
   };
 
   const downloadBundle = async () => {
@@ -5443,6 +5512,39 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
     <button type="button" className="button primary-button" onClick={() => void runScan()} disabled={scanState === "scanning"}><Wrench size={16} /> {scanState === "scanning" ? "Scanning…" : "Run diagnostics"}</button>
   </>}>
     <div className="diagnostic-hero"><div><p className="eyebrow">WORKSPACE READINESS</p><strong>{headline}</strong><p>{systemDescription}{health?.version ? ` · AXIOM ${health.version}` : ""}</p></div><div className={`diagnostic-ring ${scanState === "failed" ? "blocked" : scanState}`}><span>{scanState === "scanning" ? "…" : connected ? "OK" : "N/A"}</span></div></div>
+    <Surface title="Full workspace backup and restore" eyebrow="CHECKSUM-VERIFIED / NEW WORKSPACE">
+      <p className="quiet-note">Unlike a support bundle or metadata-only export, a full backup includes regular project files, .axiom registries, datasets, local model weights and generated workspace artifacts. It may therefore contain credentials or private data saved in workspace files. Excluded: virtual environments, dependency caches, symlinks and special filesystem entries. Archives are not encrypted by AXIOM; protect the ZIP with your own secure storage.</p>
+      <div className="integration-form-actions">
+        <button type="button" className="button secondary-button" onClick={() => void downloadWorkspaceBackup()} disabled={workspaceBackupBusy}>
+          <ArrowDownToLine size={15} /> {workspaceBackupBusy ? "Preparing backup…" : "Download full workspace backup"}
+        </button>
+      </div>
+      <div className="surface-divider" />
+      <form className="profile-create-form" onSubmit={(event) => { event.preventDefault(); void restoreWorkspaceBackup(); }}>
+        <label className="field">
+          <span className="field-label-row"><span>Backup archive (.zip)</span></span>
+          <input
+            type="file"
+            accept=".zip,application/zip,application/octet-stream"
+            onChange={(event) => setWorkspaceBackupFile(event.target.files?.[0] ?? null)}
+            disabled={workspaceRestoreBusy}
+          />
+          {workspaceBackupFile && <small className="quiet-note">{workspaceBackupFile.name} · {formatBytes(workspaceBackupFile.size)}</small>}
+        </label>
+        <label className="field">
+          <span className="field-label-row"><span>Name for restored workspace</span></span>
+          <input value={workspaceRestoreName} onChange={(event) => setWorkspaceRestoreName(event.target.value)} minLength={1} maxLength={64} required disabled={workspaceRestoreBusy} />
+        </label>
+        <div className="integration-form-actions">
+          <button type="submit" className="button primary-button" disabled={workspaceRestoreBusy || !workspaceBackupFile || !workspaceRestoreName.trim()}>
+            <Upload size={15} /> {workspaceRestoreBusy ? "Verifying and restoring…" : "Verify and restore as new workspace"}
+          </button>
+        </div>
+      </form>
+      <Callout tone="warning" title="Restore never overwrites the current workspace">
+        AXIOM verifies the archive manifest, per-file SHA-256 checksums, sizes and safe paths, then extracts into a private staging directory. Only after the complete restore succeeds is a separate managed workspace registered. The active workspace and its files remain unchanged.
+      </Callout>
+    </Surface>
     <div className="diag-list">
       <DiagnosticRow icon={connected ? CircleCheck : TriangleAlert} title="AXIOM API" detail={connected ? `Health endpoint responded${health?.version ? ` · version ${health.version}` : ""}.` : scanState === "scanning" ? "Waiting for the local API response." : "Health endpoint did not respond."} state={connected ? "PASS" : scanState === "scanning" ? "CHECKING" : "FAILED"} tone={connected ? "success" : scanState === "scanning" ? "neutral" : "warning"} />
       <DiagnosticRow icon={hardware ? CircleCheck : TriangleAlert} title="Hardware detection" detail={hardware ? `${hardware.cpu_name} · ${hardware.ram_gb ?? "Unknown"} GB RAM · ${hardware.gpu_name}` : "No hardware snapshot is available."} state={hardware ? "PASS" : scanState === "scanning" ? "CHECKING" : "FAILED"} tone={hardware ? "success" : scanState === "scanning" ? "neutral" : "warning"} />

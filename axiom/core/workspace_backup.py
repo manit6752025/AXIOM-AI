@@ -187,7 +187,7 @@ def _inventory_workspace(root: Path, exclude_paths: list[Path]) -> tuple[list[di
                 if len(entries) >= MAX_BACKUP_FILES:
                     raise WorkspaceBackupError("Workspace contains more than 50,000 files.")
                 digest = _hash_workspace_file(path, info)
-                mode = (stat.S_IMODE(info.st_mode) & 0o755) | 0o600
+                mode = (stat.S_IMODE(info.st_mode) & 0o700) | 0o600
                 entries.append({
                     "path": relative,
                     "size_bytes": info.st_size,
@@ -335,12 +335,36 @@ def _validate_manifest(manifest: Any) -> tuple[list[dict[str, Any]], dict[str, A
         raise WorkspaceBackupError("Unsupported workspace backup schema version.")
     if not isinstance(manifest.get("backup_id"), str) or not _BACKUP_ID.fullmatch(manifest["backup_id"]):
         raise WorkspaceBackupError("Backup identifier is invalid.")
-    if not isinstance(manifest.get("created_at"), str) or len(manifest["created_at"]) > 64:
+    created_at = manifest.get("created_at")
+    if not isinstance(created_at, str) or len(created_at) > 64:
         raise WorkspaceBackupError("Backup creation timestamp is invalid.")
-    if not isinstance(manifest.get("workspace_label"), str) or len(manifest["workspace_label"]) > 64:
+    try:
+        timestamp = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError:
+        raise WorkspaceBackupError("Backup creation timestamp is invalid.") from None
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        raise WorkspaceBackupError("Backup creation timestamp must include a timezone.")
+    workspace_label = manifest.get("workspace_label")
+    if (
+        not isinstance(workspace_label, str)
+        or not 1 <= len(workspace_label) <= 64
+        or any(not character.isprintable() for character in workspace_label)
+    ):
         raise WorkspaceBackupError("Backup workspace label is invalid.")
     if not isinstance(manifest.get("scope_note"), str) or len(manifest["scope_note"]) > 2048:
         raise WorkspaceBackupError("Backup scope note is invalid.")
+    limits = manifest.get("limits")
+    if (
+        not isinstance(limits, dict)
+        or set(limits) != {"maximum_files", "maximum_file_bytes", "maximum_total_bytes"}
+        or type(limits.get("maximum_files")) is not int
+        or limits.get("maximum_files") != MAX_BACKUP_FILES
+        or type(limits.get("maximum_file_bytes")) is not int
+        or limits.get("maximum_file_bytes") != MAX_BACKUP_FILE_BYTES
+        or type(limits.get("maximum_total_bytes")) is not int
+        or limits.get("maximum_total_bytes") != MAX_BACKUP_TOTAL_BYTES
+    ):
+        raise WorkspaceBackupError("Backup manifest limits do not match the supported format version.")
     files = manifest.get("files")
     if not isinstance(files, list) or len(files) > MAX_BACKUP_FILES:
         raise WorkspaceBackupError("Backup file inventory exceeds its limit.")

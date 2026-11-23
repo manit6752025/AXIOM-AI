@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:axiom-ai:workspace-backup-manifest:1",
+  "title": "AXIOM Workspace Backup Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "backup_id",
+    "created_at",
+    "workspace_label",
+    "files",
+    "summary",
+    "skipped",
+    "limits",
+    "scope_note"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "backup_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{32}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "workspace_label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 50000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "size_bytes",
+          "sha256",
+          "mode"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 53687091200
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "mode": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 511
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file_count",
+        "total_bytes"
+      ],
+      "properties": {
+        "file_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50000
+        },
+        "total_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 107374182400
+        }
+      }
+    },
+    "skipped": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symlink_files",
+        "symlink_directories",
+        "special_files",
+        "excluded_directories"
+      ],
+      "properties": {
+        "symlink_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "symlink_directories": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "special_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "excluded_directories": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maximum_files",
+        "maximum_file_bytes",
+        "maximum_total_bytes"
+      ],
+      "properties": {
+        "maximum_files": {
+          "const": 50000,
+          "type": "integer"
+        },
+        "maximum_file_bytes": {
+          "const": 53687091200,
+          "type": "integer"
+        },
+        "maximum_total_bytes": {
+          "const": 107374182400,
+          "type": "integer"
+        }
+      }
+    },
+    "scope_note": {
+      "type": "string",
+      "maxLength": 2048
+    }
+  }
+}
