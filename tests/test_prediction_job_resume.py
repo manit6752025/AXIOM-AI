@@ -460,3 +460,30 @@ def test_prediction_job_recovery_after_real_owner_process_termination(tmp_path):
             worker.kill()
             worker.wait(timeout=10)
 
+def test_prediction_generation_fingerprint_covers_sampling_and_row_mapping_settings():
+    settings = {
+        "max_new_tokens": 64,
+        "temperature": 0.7,
+        "seed": 7,
+        "device": "cpu",
+        "precision": "fp32",
+        "prompt_field": "prompt",
+        "reference_field": "reference",
+        "prediction_field": "prediction",
+    }
+    original = prediction_jobs._prediction_generation_fingerprint(settings)
+    assert len(original) == 64
+    for field, replacement in (
+        ("max_new_tokens", 32),
+        ("temperature", 0.2),
+        ("seed", 8),
+        ("device", "cuda"),
+        ("precision", "bf16"),
+        ("prompt_field", "question"),
+        ("reference_field", "answer"),
+        ("prediction_field", "generated"),
+    ):
+        changed = {**settings, field: replacement}
+        assert prediction_jobs._prediction_generation_fingerprint(changed) != original, field
+
+

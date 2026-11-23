@@ -154,3 +154,13 @@ def test_prediction_job_api_maps_active_compute_slot_to_conflict(tmp_path, monke
         assert response.status_code == 409
         assert "compute job is active" in response.json()["detail"]
 
+def test_prediction_job_api_maps_active_training_job_to_conflict(tmp_path, monkeypatch):
+    def training_active(job_id, root):
+        raise ValueError("A local training job is active; wait before resuming prediction.")
+
+    monkeypatch.setattr(prediction_api, "resume_prediction_job", training_active)
+    with _client(tmp_path, monkeypatch) as client:
+        response = client.post(f"/api/prediction-jobs/{'a' * 32}/resume")
+        assert response.status_code == 409
+        assert "training job is active" in response.json()["detail"]
+
