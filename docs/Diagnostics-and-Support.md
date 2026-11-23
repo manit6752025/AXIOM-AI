@@ -91,3 +91,33 @@ be updated after those gates have been run against the repository checkout.
 The Control Center Module Explorer is a searchable index of the existing GUI pages, CLI command families, and the live `/api/docs` OpenAPI reference. GUI entries navigate to the existing page. CLI-only entries show and copy a command rather than attempting to execute a shell command in the browser. Training and workflow entries keep their planning/design-only limitations visible. The explorer is a discoverability layer, not evidence that every planned roadmap feature is shipped.
 
 The Module Explorer only routes into pages that exist in the current GUI. CLI-only families are displayed as CLI-only and use copyable command examples; they are not misrepresented as in-browser command execution. Planned work remains planned until its source roadmap status and release checks support a change.
+
+
+## Security posture audit
+
+The Diagnostics page, `GET /api/security/audit`, and `axiom security audit`
+share the same read-only security findings. The checks cover project-config
+permissions and symlink paths, `.axiom/tool_permissions.json` permissions,
+active MCP tool grants, API read/write token configuration, the optional
+OpenAI-compatible bearer token, and exact CORS origin safety.
+
+Use:
+
+```bash
+axiom security audit
+axiom security audit --json
+axiom security audit --strict --json
+axiom security audit --daemon-host 0.0.0.0 --allow-network --json
+```
+
+The default daemon profile is loopback-only. The final example evaluates a
+proposed non-loopback daemon profile and reports it as unsafe because the
+lightweight daemon exposes unauthenticated HTTP endpoints; it does not start or
+change a listener. Credential values are never returned. The API reports
+whether scopes are configured, not the tokens themselves.
+
+This audit does not scan operating-system listening sockets, inspect host
+firewall rules, or infer the bind address of servers started outside AXIOM's
+built-in launchers. CORS is not authentication; keep remote origins restricted
+to trusted HTTPS applications and configure API token scopes before exposing
+the FastAPI API beyond loopback.

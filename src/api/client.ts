@@ -1229,6 +1229,15 @@ export type WorkspaceDiagnostics = {
   checks: WorkspaceDiagnosticCheck[];
 };
 
+export type SecurityAudit = {
+  schema_version: number;
+  generated_at: string;
+  status: "pass" | "warn" | "fail";
+  workspace: { name: string };
+  summary: { passed: number; warnings: number; failed: number; informational: number; api_scope_tokens_enabled: boolean };
+  checks: WorkspaceDiagnosticCheck[];
+};
+
 export type RoadmapAuditItem = {
   id: string;
   status: "implemented" | "in_progress" | "planned" | "unknown";
@@ -1677,6 +1686,8 @@ export const axiomApi = {
   },
 
   workspaceDiagnostics: () => requestJson<WorkspaceDiagnostics>("/api/diagnostics/workspace"),
+
+  securityAudit: () => requestJson<SecurityAudit>("/api/security/audit"),
 
   roadmapAudit: () => requestJson<RoadmapAudit>("/api/diagnostics/roadmap"),
 

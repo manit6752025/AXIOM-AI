@@ -6,6 +6,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from axiom.core.tool_permissions import ToolPermissionStore
+from axiom.core.security_audit import audit_security_posture
+from axiom.core.workspace_context import active_workspace_root
 
 router = APIRouter(prefix="/api/security", tags=["security"])
 
@@ -70,3 +72,15 @@ def set_active_profile(request: ActiveProfileInput) -> dict[str, str]:
 
     record_workspace_event("mcp.profile.activated", "Changed the active MCP profile")
     return {"active_profile": request.name}
+
+
+@router.get("/audit")
+def security_audit() -> dict[str, Any]:
+    """Return read-only configuration, permissions, and exposure findings."""
+    try:
+        return audit_security_posture(workspace=active_workspace_root())
+    except (OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Security posture could not be audited safely.",
+        ) from exc
