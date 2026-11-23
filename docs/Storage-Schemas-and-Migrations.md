@@ -82,3 +82,10 @@ The model registry's on-disk format is intentionally a legacy-compatible JSON
 array without a top-level schema version; its API import/export envelope is
 versioned separately. Agent Profiles have no older supported format to migrate.
 These formats should only change through an explicit future schema migration.
+
+
+## Unified LLM provider profiles — schema 1 to 2
+
+The workspace-local `.axiom/llm-provider-profiles.json` document advances from schema version 1 to version 2 to add the optional `api_key_env` field. The field is either null or a validated environment-variable name; it must never contain a credential value. Existing schema-v1 documents remain readable without an eager rewrite. The next successful profile save or delete writes the normalized document as schema v2 and adds `api_key_env: null` to legacy profiles. Unknown fields, embedded keys and malformed references fail closed.
+
+Rollback: stop AXIOM, preserve a backup, then restore a version-1 metadata-only profile file if rolling back to software that only understands schema 1. Do not copy credential values into the file. Environment variables are provisioned separately by the host deployment and are not exported by profile backup or API responses.

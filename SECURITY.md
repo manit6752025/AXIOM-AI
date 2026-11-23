@@ -130,3 +130,10 @@ The beta.5 DMGs are currently unsigned and not notarized. Download only from the
 ## Beta 0.2.0-beta.7 status
 
 The beta.7 release includes cross-platform packaging and validation updates. Open CodeQL path-injection alerts are tracked as unresolved until a subsequent scan closes them. Do not rely on this beta as confirmation that every path-injection finding has been remediated. Report suspected vulnerabilities privately through GitHub Security Advisories.
+
+
+## Environment-backed provider credentials
+
+AXIOM provider profiles may store an allowlisted environment-variable **name** (for example, `AXIOM_DEEPSEEK_API_KEY`), never the credential value. The name is validated and stored in the workspace provider-profile metadata; existing schema-v1 profiles are read and upgraded on the next write. The AXIOM server resolves the value only for a specific outbound provider request. API responses, browser state, profile exports, command output, logs and workspace files must not contain the resolved value. A request-supplied key remains ephemeral and overrides the environment reference only for that request.
+
+Environment variables are not an encrypted vault or hardware-backed secret manager. Host administrators and processes with sufficient operating-system privileges may be able to inspect process environments. Use your deployment platform's secret-injection mechanism, restrict host and process access, rotate credentials through the provider, and never commit populated environment files or values to the repository. A missing or invalid reference fails without printing its value.

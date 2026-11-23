@@ -21,7 +21,91 @@ test("API Playground exposes bounded read-only endpoints and Deep Analysis", asy
 
     const path = url.pathname;
 
-    if (path.endsWith("/health")) {
+    if (path === "/api/contract/examples") {
+      await route.fulfill({ json: {
+        schema_version: 1,
+        api_contract_version: 1,
+        openapi_version: "3.1.0",
+        application_version: "test",
+        source_sha256: "a".repeat(64),
+        operation_count: 2,
+        total_operations: 2,
+        truncated: false,
+        privacy: {
+          credential_values_included: false,
+          environment_values_included: false,
+          schema_defaults_replayed: false,
+          requests_executed: false,
+        },
+        operations: [
+          {
+            operation_id: "get_api_meta",
+            identifier: "GetApiMeta",
+            method: "GET",
+            path: "/api/meta",
+            summary: "Contract metadata",
+            description: "",
+            tags: ["metadata"],
+            side_effecting: false,
+            parameters: [],
+            request: null,
+            response: {
+              status_code: "200",
+              description: "Successful response",
+              content_type: "application/json",
+              schema: { type: "object" },
+              example: { api_contract_version: 1, application_version: "test" },
+              redacted_fields: [],
+              template_fields: [],
+              typescript_type: "{ api_contract_version: number; }",
+            },
+            typescript: "export type GetApiMetaRequest = void;\\nexport type GetApiMetaResponse = { api_contract_version: number; };",
+            curl_template: "curl -X GET http://127.0.0.1:40507/api/meta",
+            scope_note: "Generated schema example only.",
+          },
+          {
+            operation_id: "post_llm_chat",
+            identifier: "PostLlmChat",
+            method: "POST",
+            path: "/api/llm/chat",
+            summary: "Cloud or local chat",
+            description: "",
+            tags: ["llm-client"],
+            side_effecting: true,
+            parameters: [],
+            request: {
+              required: true,
+              content_type: "application/json",
+              schema: {
+                type: "object",
+                properties: {
+                  api_key: { type: "string", format: "password", writeOnly: true, "x-axiom-redacted": true },
+                  provider: { type: "string" },
+                },
+              },
+              example: { provider: "deepseek" },
+              redacted_fields: ["$.body.api_key"],
+              template_fields: [],
+              typescript_type: "{ api_key?: string; provider: string; }",
+            },
+            response: {
+              status_code: "200",
+              description: "Successful response",
+              content_type: "application/json",
+              schema: { type: "object" },
+              example: { execution: "remote" },
+              redacted_fields: [],
+              template_fields: [],
+              typescript_type: "{ execution: string; }",
+            },
+            typescript: "export type PostLlmChatRequest = { api_key?: string; provider: string; };",
+            curl_template: "curl -X POST http://127.0.0.1:40507/api/llm/chat",
+            scope_note: "Generated schema example only.",
+          },
+        ],
+        scope_note: "Generated examples are reference only and are not executed.",
+      } });
+    } else if (path.endsWith("/health")) {
       await route.fulfill({ json: { status: "ok", version: "test" } });
     } else if (path.endsWith("/meta")) {
       await route.fulfill({
@@ -117,6 +201,15 @@ test("API Playground exposes bounded read-only endpoints and Deep Analysis", asy
     page.getByRole("heading", { name: /API Playground/i }),
   ).toBeVisible({ timeout: 10_000 });
   await expect(page.getByLabel("Endpoint")).toBeVisible({ timeout: 10_000 });
+
+  const generated = page.locator(".api-contract-examples");
+  await expect(generated.getByRole("heading", { name: "Typed API examples" })).toBeVisible();
+  const generatedSelect = generated.getByLabel("Generated API operation");
+  await generatedSelect.selectOption("post_llm_chat");
+  await expect(generated.locator(".api-playground-json").first()).toContainText("deepseek");
+  await expect(generated.locator(".api-playground-json").nth(2)).toContainText("PostLlmChatRequest");
+  await expect(generated).toContainText("$.body.api_key");
+  await expect(generated).toContainText("never submitted");
 
   const select = page.getByLabel("Endpoint");
   const options = await select

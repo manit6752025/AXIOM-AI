@@ -89,9 +89,11 @@ def _fallback_workspace_path(
 
 
 def _open_parent(root: Path, parts: tuple[str, ...]) -> tuple[Path, int, str]:
+    # Preserve the explicit symlink/junction-root rejection rather than
+    # collapsing it into the generic descriptor-open failure below.
+    workspace = _workspace_root(root)
     descriptor: int | None = None
     try:
-        workspace = _workspace_root(root)
         process_root = Path.cwd().resolve(strict=True)
         workspace_parts = workspace.relative_to(process_root).parts
         directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)

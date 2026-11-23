@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 
 import typer
 
@@ -14,6 +13,7 @@ from rich.table import Table
 from axiom.cli.interactive import prompt as safe_prompt
 from axiom.core import llm_client
 from axiom.core.llm_profiles import LLMProfileError, LLMProfileStore
+from axiom.core.secret_refs import SecretReferenceError, normalize_secret_reference, resolve_secret_reference
 
 console = Console()
 llm_app = typer.Typer(help="Use the AXIOM local engine or a supported cloud LLM provider.", no_args_is_help=True)
@@ -23,15 +23,23 @@ def _fail(message: str) -> None:
     emit_error(message, code="llm_error")
 
 
-def _credential(provider: str, env_name: str) -> str | None:
+def _credential(provider: str, env_name: str | None) -> str | None:
     if provider in {"axiom-local", "ollama-local"}:
         return None
-    if not env_name or len(env_name) > 128:
-        _fail("API-key environment variable name must be between 1 and 128 characters.")
-    value = os.environ.get(env_name, "")
-    if value.strip():
-        return value
-    return safe_prompt(f"{provider} API key (used once, never saved by AXIOM)", hide_input=True, non_interactive_hint=f"Set {env_name} or pass --api-key-env <ENVIRONMENT_VARIABLE>.")
+    reference = env_name or "AXIOM_LLM_API_KEY"
+    try:
+        normalized_reference = normalize_secret_reference(reference)
+    except SecretReferenceError:
+        _fail("API-key environment variable reference must be a valid variable name.")
+        return None
+    try:
+        return resolve_secret_reference(normalized_reference)
+    except SecretReferenceError:
+        return safe_prompt(
+            f"{provider} API key (used once, never saved by AXIOM)",
+            hide_input=True,
+            non_interactive_hint=f"Set {reference} or pass --api-key-env <ENVIRONMENT_VARIABLE>.",
+        )
 
 
 @llm_app.command("providers")
@@ -77,11 +85,12 @@ def profile_list(
     table.add_column("Name")
     table.add_column("Provider")
     table.add_column("Model")
+    table.add_column("Credential reference")
     table.add_column("Profile ID")
     for item in result["profiles"]:
-        table.add_row(item["name"], item["provider"], item["model"], item["id"])
+        table.add_row(item["name"], item["provider"], item["model"], item.get("api_key_env") or "request-only", item["id"])
     console.print(table)
-    console.print("Credentials, prompts and chat history are never stored in these profiles.")
+    console.print("Only environment-variable names are stored; credential values are resolved for the outgoing request and never displayed.")
 
 
 @profile_app.command("save")
@@ -90,6 +99,7 @@ def profile_save(
     provider: str = typer.Option("axiom-local", "--provider", help="Provider ID from axiom llm providers."),
     model: str = typer.Option(..., "--model", help="Exact provider model ID."),
     base_url: str = typer.Option("", "--base-url", help="Public HTTPS /v1 endpoint for openai-compatible only."),
+    api_key_env: str = typer.Option("", "--api-key-env", help="Optional environment-variable name holding the cloud API key; only the name is stored."),
     json_output: bool = typer.Option(False, "--json", help="Print the saved profile as JSON."),
 ) -> None:
     """Create or update a workspace profile without storing provider credentials."""
@@ -99,6 +109,7 @@ def profile_save(
             provider=provider,
             model=model,
             base_url=base_url or None,
+            api_key_env=api_key_env or None,
         )
     except LLMProfileError as exc:
         _fail(str(exc))
@@ -136,10 +147,10 @@ def profile_delete(
 @profile_app.command("connect")
 def profile_connect(
     profile_id: str = typer.Argument(..., help="Exact profile ID from axiom llm profile list."),
-    api_key_env: str = typer.Option("AXIOM_LLM_API_KEY", "--api-key-env", help="Environment variable to read a cloud API key from."),
+    api_key_env: str = typer.Option("", "--api-key-env", help="Use this variable instead of the saved reference; defaults to AXIOM_LLM_API_KEY."),
     json_output: bool = typer.Option(False, "--json", help="Print the catalogue verification result as JSON."),
 ) -> None:
-    """Verify a provider/model catalogue using a request-only key; no session is retained."""
+    """Verify a provider/model catalogue using a request-only key or saved environment reference."""
     try:
         profile = LLMProfileStore().get(profile_id)
     except LLMProfileError as exc:
@@ -148,7 +159,8 @@ def profile_connect(
     if profile is None:
         _fail("Provider profile not found.")
         return
-    key = _credential(profile["provider"], api_key_env)
+    reference = profile.get("api_key_env") or api_key_env or "AXIOM_LLM_API_KEY"
+    key = _credential(profile["provider"], reference)
     try:
         result = llm_client.list_models(profile["provider"], key, profile["base_url"] or None)
     except (ValueError, llm_client.LLMClientError) as exc:

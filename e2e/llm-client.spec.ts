@@ -42,7 +42,7 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
       } });
     } else if (path === "/api/llm/profiles" && request.method() === "GET") {
       await route.fulfill({ json: {
-        schema_version: 1,
+        schema_version: 2,
         profiles: workspaceProfile ? [workspaceProfile] : [],
         total: workspaceProfile ? 1 : 0,
         max_profiles: 25,
@@ -56,13 +56,15 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
         provider: body.provider,
         model: body.model,
         base_url: body.base_url || "",
+        api_key_env: body.api_key_env || null,
         created_at: "2026-11-20T09:00:00Z",
         updated_at: "2026-11-20T09:00:00Z",
       };
       await route.fulfill({ status: 201, json: { profile: workspaceProfile, credentials_persisted: false } });
     } else if (path.startsWith("/api/llm/profiles/") && path.endsWith("/connect") && request.method() === "POST") {
       const body = request.postDataJSON() as { api_key?: string };
-      expect(body.api_key).toBe("never-return-this");
+      if (body.api_key) expect(body.api_key).toBe("never-return-this");
+      else expect(body.api_key).toBeUndefined();
       await route.fulfill({ json: {
         profile_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         provider: "deepseek",
@@ -71,6 +73,7 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
         checked_at: "2026-11-20T09:00:00Z",
         credential_storage: "not_saved",
         connection_scope: "catalogue_check_only",
+        credential_source: body.api_key ? "request_only" : "environment_reference",
         persistent_connection: false,
       } });
     } else if (path === "/api/llm/providers") {
@@ -96,6 +99,10 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
       } });
     } else if (path === "/api/llm/chat" && request.method() === "POST") {
       const body = request.postDataJSON() as Record<string, unknown>;
+      if (body.profile_id) {
+        expect(body.profile_id).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        expect(body.api_key).toBeUndefined();
+      }
       chatRequests.push(body);
       await route.fulfill({ json: {
         provider: body.provider,
@@ -170,9 +177,11 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
   await expect(panel).not.toContainText("never-return-this");
 
   await panel.getByLabel("Provider profile name").fill("DeepSeek team");
+  await panel.getByLabel("API-key environment reference").fill("AXIOM_DEEPSEEK_API_KEY");
   await panel.getByRole("button", { name: "Save profile" }).click();
   const storedProfiles = await page.evaluate(() => localStorage.getItem("axiom-llm-provider-profiles-v1") || "");
   expect(storedProfiles).toContain("DeepSeek team");
+  expect(storedProfiles).toContain("AXIOM_DEEPSEEK_API_KEY");
   expect(storedProfiles).not.toContain("never-return-this");
   expect(storedProfiles).not.toContain("Hello cloud model");
   expect(workspaceProfile?.["name"]).toBe("DeepSeek team");
@@ -185,12 +194,19 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
   await expect(reloadedPanel.getByLabel("LLM provider")).toHaveValue("deepseek");
   await expect(reloadedPanel.getByLabel("Provider API key")).toHaveValue("");
   await expect(reloadedPanel.getByLabel("Model ID")).toHaveValue("deepseek-chat");
-  await reloadedPanel.getByLabel("Provider API key").fill("never-return-this");
+  await expect(reloadedPanel.getByLabel("API-key environment reference")).toHaveValue("AXIOM_DEEPSEEK_API_KEY");
   await reloadedPanel.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(reloadedPanel.getByRole("button", { name: "Disconnect" })).toBeEnabled();
   await reloadedPanel.getByRole("button", { name: "Disconnect" }).click();
   await expect(reloadedPanel.getByLabel("Provider API key")).toHaveValue("");
-  await expect(reloadedPanel.getByRole("button", { name: "Connect", exact: true })).toBeDisabled();
+  await expect(reloadedPanel.getByRole("button", { name: "Connect", exact: true })).toBeEnabled();
+  await reloadedPanel.getByLabel("Prompt").fill("Use the configured server credential");
+  await reloadedPanel.getByRole("checkbox", { name: /this conversation will be sent to DeepSeek/i }).check();
+  await reloadedPanel.getByRole("button", { name: "Send and generate" }).click();
+  await expect.poll(() => chatRequests.length).toBe(5);
+  expect(chatRequests[4]["profile_id"]).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  expect(chatRequests[4]["api_key"]).toBeUndefined();
+  await expect(reloadedPanel).not.toContainText("never-return-this");
   const afterDisconnect = await page.evaluate(() => localStorage.getItem("axiom-llm-provider-profiles-v1") || "");
   expect(afterDisconnect).not.toContain("never-return-this");
   expect(JSON.stringify(workspaceProfile)).not.toContain("never-return-this");

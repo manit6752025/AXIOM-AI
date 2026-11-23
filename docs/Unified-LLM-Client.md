@@ -17,14 +17,14 @@ Open **Runtime → Unified LLM client**. Choose a provider and load its model ca
 
 Cloud requests are blocked until the user confirms that the selected provider receives the conversation. Provider credentials are sent in the HTTPS provider authorization header and are not written to AXIOM workspace files or settings by this client. The browser form keeps the current key in component memory while the panel is mounted; use **Disconnect** to clear the key, consent and in-memory conversation, or leave the page when finished.
 
-The panel supports up to 25 provider profiles in the active workspace. The API stores only their name, provider ID, model ID and (for the custom adapter) a public HTTPS `/v1` endpoint in `.axiom/llm-provider-profiles.json`; it enforces a 64 KiB store bound, restrictive file permissions, a fixed provider allowlist and schema validation. The browser also maintains a metadata-only cache for offline access. Profiles are available to the CLI through `axiom llm profile list/save/delete/connect`. Neither storage path accepts API keys, prompts, system instructions or chat history. After reloading or changing computers, apply a profile, enter its cloud key again if required, and explicitly **Connect** to verify its model catalogue. The connection indicator reports a successful catalogue check; it is not a persistent socket or a credential vault. CLI/API connect calls likewise verify the catalogue and immediately discard the request key. Cloud chat still requires a separate consent checkbox for every request. A cloud provider processes data under its own policies, so never send secrets or private data without reviewing those terms.
+The panel supports up to 25 provider profiles in the active workspace. The API stores their name, provider ID, model ID and (for the custom adapter) a public HTTPS `/v1` endpoint in `.axiom/llm-provider-profiles.json`; schema v2 also supports an optional validated `api_key_env` reference containing only an environment-variable name. The workspace store is bounded to 64 KiB and uses restrictive file permissions and a fixed provider allowlist. Schema-v1 profiles remain readable and are migrated to v2 on the next profile write. The browser metadata cache may contain the same non-secret variable name, but never its value. Configure the referenced variable in the AXIOM server process environment, then select the saved profile. The API resolves the secret only inside the server process for the outgoing provider request and never returns it to the browser, profile list, connection response, CLI output or workspace file. An optional request-only key can still override the reference for one operation. Profiles are available to the CLI through `axiom llm profile list/save/delete/connect`. Cloud chat still requires explicit per-request consent even when a server-side credential reference is configured. Environment variables are not a hardware-backed vault: host administrators and processes with sufficient OS privileges may be able to inspect process environments, so use the deployment platform's secret injection mechanism and restrict host access. A cloud provider processes data under its own policies, so never send secrets or private data without reviewing those terms.
 
 ## CLI
 
 ```bash
 axiom llm providers
 axiom llm providers --json
-axiom llm profile save "Team DeepSeek" --provider deepseek --model deepseek-chat
+axiom llm profile save "Team DeepSeek" --provider deepseek --model deepseek-chat --api-key-env AXIOM_DEEPSEEK_API_KEY
 axiom llm profile list
 axiom llm profile connect PROFILE_ID
 axiom llm profile delete PROFILE_ID --yes
@@ -35,13 +35,13 @@ axiom llm chat deepseek-chat "Explain KV caching in two sentences." --provider d
 axiom llm chat MODEL_ID "Summarize this local note." --provider axiom-local --device auto --memory-mode auto
 ```
 
-Cloud commands prompt for the API key with hidden input unless the environment variable named by `--api-key-env` is set. The default variable is `AXIOM_LLM_API_KEY`. The default is not to remember or persist credentials. `--send-to-provider` is required for cloud chat to make the user-visible intent explicit. `--base-url` is accepted only with `--provider openai-compatible`.
+Cloud commands prompt for the API key with hidden input unless the environment variable named by `--api-key-env` is set. The default variable is `AXIOM_LLM_API_KEY`. Use `--api-key-env` on `axiom llm profile save` to persist a validated variable name; `axiom llm profile connect` then resolves that variable on demand. The CLI does not print or persist the value. Environment variables remain subject to host process-access controls and are not a hardware-backed vault. `--send-to-provider` is required for cloud chat to make the user-visible intent explicit. `--base-url` is accepted only with `--provider openai-compatible`.
 
 ## HTTP API
 
 - `GET /api/llm/providers` — provider capabilities without credentials or network requests.
-- `GET /api/llm/profiles`, `POST /api/llm/profiles`, and `DELETE /api/llm/profiles/{id}` — manage bounded, workspace-local, metadata-only profiles.
-- `POST /api/llm/profiles/{id}/connect` — perform a one-shot provider catalogue check using an optional request-only key; no socket or credential is retained.
+- `GET /api/llm/profiles`, `POST /api/llm/profiles`, and `DELETE /api/llm/profiles/{id}` — manage bounded, workspace-local, metadata-only profiles and optional environment-variable references.
+- `POST /api/llm/profiles/{id}/connect` — perform a one-shot provider catalogue check using an optional request-only key or the saved environment reference; no socket or credential is retained.
 - `POST /api/llm/models` — list local trusted models or request a cloud provider catalogue.
 - `POST /api/llm/chat` — generate a single text completion with bounded input/output limits.
 
@@ -68,6 +68,6 @@ PrivateLM's [cross-platform-llm-client](https://github.com/orailnoor/cross-platf
 
 - Text only, one completion per chat request (`n=1` for the compatibility bridge).
 - Maximum output is 2,048 tokens; message and combined-character limits are enforced.
-- No persistent credential vault, chat storage, function calling, or tool execution in this interface.
+- No encrypted credential vault, keyring integration, chat storage, function calling, or tool execution in this interface. Environment references are names only; OS-level environment access remains controlled by the host.
 - Native model compatibility depends on AXIOM Native Engine architecture, tensor, and device support; a listed model is not a promise that it fits available memory.
 - Cloud provider model IDs and capabilities can change independently of AXIOM.

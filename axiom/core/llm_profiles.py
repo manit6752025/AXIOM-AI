@@ -11,10 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from axiom.core.resource_ids import new_resource_id
+from axiom.core.secret_refs import normalize_secret_reference
 from axiom.core.storage import atomic_write_text, file_lock
 from axiom.core.workspace_context import workspace_metadata_dir
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_PROFILES = 25
 MAX_STORE_BYTES = 64 * 1024
 PROFILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,47}$")
@@ -123,7 +124,7 @@ class LLMProfileStore:
             raise LLMProfileError("The workspace provider-profile document is malformed.")
         version = raw.get("schema_version")
         profiles = raw.get("profiles")
-        if type(version) is not int or version != SCHEMA_VERSION:
+        if type(version) is not int or version not in {1, SCHEMA_VERSION}:
             raise LLMProfileError("Unsupported workspace provider-profile schema version.")
         if not isinstance(profiles, list) or len(profiles) > MAX_PROFILES:
             raise LLMProfileError("The workspace provider-profile list is invalid or exceeds its limit.")
@@ -131,8 +132,10 @@ class LLMProfileStore:
         normalized: list[dict[str, Any]] = []
         ids: set[str] = set()
         names: set[str] = set()
-        expected_keys = {"id", "name", "provider", "model", "base_url", "created_at", "updated_at"}
+        legacy_keys = {"id", "name", "provider", "model", "base_url", "created_at", "updated_at"}
+        current_keys = legacy_keys | {"api_key_env"}
         for item in profiles:
+            expected_keys = legacy_keys if version == 1 else current_keys
             if not isinstance(item, dict) or set(item) != expected_keys:
                 # Unknown fields fail closed, in particular fields such as api_key or secret.
                 raise LLMProfileError("A provider profile contains unsupported or secret-bearing fields.")
@@ -145,6 +148,14 @@ class LLMProfileStore:
                 model=item.get("model"),
                 base_url=item.get("base_url"),
             )
+            api_key_env = None
+            if version >= 2:
+                try:
+                    api_key_env = normalize_secret_reference(item.get("api_key_env"))
+                except ValueError as exc:
+                    raise LLMProfileError("Provider API-key environment reference is invalid.") from exc
+            if api_key_env and provider in {"axiom-local", "ollama-local"}:
+                raise LLMProfileError("Local providers cannot have cloud API-key references.")
             created_at = item.get("created_at")
             updated_at = item.get("updated_at")
             if (
@@ -162,6 +173,7 @@ class LLMProfileStore:
                 "provider": provider,
                 "model": model,
                 "base_url": base_url,
+                "api_key_env": api_key_env,
                 "created_at": created_at,
                 "updated_at": updated_at,
             })
@@ -196,11 +208,25 @@ class LLMProfileStore:
             except OSError as exc:
                 raise LLMProfileError("Could not secure workspace provider-profile permissions.") from exc
 
-    def save(self, *, name: str, provider: str, model: str, base_url: str | None = None) -> dict[str, Any]:
+    def save(
+        self,
+        *,
+        name: str,
+        provider: str,
+        model: str,
+        base_url: str | None = None,
+        api_key_env: str | None = None,
+    ) -> dict[str, Any]:
         normalized = self._normalize_profile(
             name=name, provider=provider, model=model, base_url=base_url,
         )
         normalized_name, normalized_provider, normalized_model, normalized_url = normalized
+        try:
+            normalized_api_key_env = normalize_secret_reference(api_key_env)
+        except ValueError as exc:
+            raise LLMProfileError("Provider API-key environment reference must be a valid variable name.") from exc
+        if normalized_api_key_env and normalized_provider in {"axiom-local", "ollama-local"}:
+            raise LLMProfileError("Local providers cannot have cloud API-key references.")
         self._check_paths(create=True)
         with file_lock(self.lock_path):
             self._check_paths(create=True)
@@ -219,6 +245,7 @@ class LLMProfileStore:
                     "provider": normalized_provider,
                     "model": normalized_model,
                     "base_url": normalized_url,
+                    "api_key_env": normalized_api_key_env,
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -230,6 +257,7 @@ class LLMProfileStore:
                     "provider": normalized_provider,
                     "model": normalized_model,
                     "base_url": normalized_url,
+                    "api_key_env": normalized_api_key_env,
                     "updated_at": now,
                 }
                 profiles = [profile if item["id"] == existing["id"] else item for item in profiles]

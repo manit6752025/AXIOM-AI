@@ -246,3 +246,84 @@ def test_openai_ollama_multi_choice_is_rejected_without_invoking_ollama(monkeypa
     })
     assert response.status_code == 422
     assert "AXIOM-native models only" in response.json()["error"]["message"]
+
+
+
+def test_llm_chat_resolves_a_saved_environment_reference_without_returning_it(tmp_path, monkeypatch) -> None:
+    from axiom.core.llm_profiles import LLMProfileStore
+
+    monkeypatch.setattr(llm_api, "LLMProfileStore", lambda: LLMProfileStore(tmp_path))
+    monkeypatch.setenv("AXIOM_TEST_CHAT_KEY", "chat-profile-secret-sentinel")
+    profile = LLMProfileStore(tmp_path).save(
+        name="Cloud profile",
+        provider="deepseek",
+        model="deepseek-chat",
+        api_key_env="AXIOM_TEST_CHAT_KEY",
+    )
+    captured = {}
+
+    def fake_chat(provider, model, messages, **kwargs):
+        captured.update(provider=provider, model=model, messages=messages, **kwargs)
+        return {
+            "provider": provider,
+            "model": model,
+            "response": "safe completion",
+            "prompt_tokens": 2,
+            "completion_tokens": 1,
+            "credential_storage": "not_saved",
+            "execution": "remote",
+            "device": None,
+            "generated_at": "2026-11-21T00:00:00Z",
+        }
+
+    monkeypatch.setattr(llm_client, "chat", fake_chat)
+    response = _client(llm_api.router).post("/api/llm/chat", json={
+        "provider": "deepseek",
+        "profile_id": profile["id"],
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": "Hello"}],
+        "consent": True,
+    })
+
+    assert response.status_code == 200, response.text
+    assert response.json()["response"] == "safe completion"
+    assert captured["api_key"] == "chat-profile-secret-sentinel"
+    assert captured["consent"] is True
+    assert "chat-profile-secret-sentinel" not in response.text
+    assert "chat-profile-secret-sentinel" not in LLMProfileStore(tmp_path).path.read_text(encoding="utf-8")
+
+    rejected = _client(llm_api.router).post("/api/llm/chat", json={
+        "provider": "deepseek",
+        "profile_id": profile["id"],
+        "model": "different-model",
+        "messages": [{"role": "user", "content": "Hello"}],
+        "consent": True,
+    })
+    assert rejected.status_code == 422
+
+
+def test_saved_environment_secret_is_not_resolved_before_cloud_consent(tmp_path, monkeypatch) -> None:
+    from axiom.core.llm_profiles import LLMProfileStore
+
+    monkeypatch.setattr(llm_api, "LLMProfileStore", lambda: LLMProfileStore(tmp_path))
+    profile = LLMProfileStore(tmp_path).save(
+        name="Consent gate",
+        provider="deepseek",
+        model="deepseek-chat",
+        api_key_env="AXIOM_CONSENT_GATED_KEY",
+    )
+
+    def unexpected_resolution(_reference):
+        raise AssertionError("secret resolution must not happen before consent")
+
+    monkeypatch.setattr(llm_api, "resolve_secret_reference", unexpected_resolution)
+    response = _client(llm_api.router).post("/api/llm/chat", json={
+        "provider": "deepseek",
+        "profile_id": profile["id"],
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": "Do not send without consent"}],
+        "consent": False,
+    })
+
+    assert response.status_code == 400
+    assert "confirm" in response.json()["detail"].lower()

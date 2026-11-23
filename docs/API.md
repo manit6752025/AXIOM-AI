@@ -196,3 +196,16 @@ tamper resistance, export the journal to storage controlled separately from
 the AXIOM workspace. At capacity, AXIOM refuses further entries instead of
 silently rotating or deleting history; export and archive the journal before
 restarting event capture.
+
+
+## Generated typed API examples (R110)
+
+The supported OpenAPI schema is the source of truth for generated request and response examples.
+
+- `GET /api/contract/examples` returns a bounded, deterministic catalogue of operations, path/query parameters, request and response JSON Schema projections, synthetic JSON payloads, TypeScript request/response aliases, and cURL templates.
+- `axiom api examples` prints a Markdown reference; `axiom api examples --format json` emits the complete machine-readable catalogue. Add `--output path` to create a new file without overwriting an existing one.
+- The API Playground displays these generated examples beside its original allowlisted GET-only inspection workflow. It never executes generated POST, PUT, PATCH, or DELETE operations.
+
+The generator resolves local schema references, bounds operation count, recursion and response size, and produces examples from field types and constraints rather than copying OpenAPI defaults or example values. Credential/password fields are redacted in request templates and omitted from response samples. Environment-reference fields such as `api_key_env` remain typed as variable names and never include the environment's value. Local paths, prompts, IDs and other operator-specific inputs are explicitly marked as templates. Generated cURL commands are illustrative only; normal consent and API-scope protections apply if an operator runs a request separately.
+
+Examples are synthetic contract fixtures, not captured workspace responses, not verified execution plans, and not permission to execute a mutating operation.

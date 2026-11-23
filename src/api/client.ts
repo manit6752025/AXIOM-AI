@@ -112,6 +112,50 @@ export type EngineFabricBenchmarkResult = {
   privacy: { prompt_returned: false; responses_returned: false; results_persisted: false }; scope_note: string;
 };
 
+
+export type ApiContractSchema = {
+  type?: string | string[];
+  title?: string;
+  description?: string;
+  format?: string;
+  enum?: Array<string | number | boolean | null>;
+  required?: string[];
+  properties?: Record<string, ApiContractSchema>;
+  items?: ApiContractSchema;
+  oneOf?: ApiContractSchema[];
+  anyOf?: ApiContractSchema[];
+  allOf?: ApiContractSchema[];
+  "x-axiom-redacted"?: boolean;
+  [key: string]: unknown;
+};
+export type ApiContractParameterExample = {
+  name: string; in: "path" | "query"; required: boolean; description: string;
+  schema: ApiContractSchema; example: unknown; redacted_fields: string[]; template_fields: string[];
+};
+export type ApiContractBodyExample = {
+  required: boolean; content_type: string | null; schema: ApiContractSchema;
+  example: unknown; redacted_fields: string[]; template_fields: string[]; typescript_type: string;
+};
+export type ApiContractResponseExample = {
+  status_code: string; description: string; content_type: string | null;
+  schema: ApiContractSchema | null; example: unknown; redacted_fields: string[];
+  template_fields: string[]; typescript_type: string;
+};
+export type ApiContractExampleOperation = {
+  operation_id: string; identifier: string; method: string; path: string; summary: string;
+  description: string; tags: string[]; side_effecting: boolean;
+  parameters: ApiContractParameterExample[];
+  request: ApiContractBodyExample | null; response: ApiContractResponseExample | null;
+  typescript: string; curl_template: string; scope_note: string;
+};
+export type ApiContractExamples = {
+  schema_version: 1; api_contract_version: number; openapi_version: string; application_version: string;
+  source_sha256: string; operation_count: number; total_operations: number; truncated: boolean;
+  operations: ApiContractExampleOperation[];
+  privacy: { credential_values_included: false; environment_values_included: false; schema_defaults_replayed: false; requests_executed: false };
+  scope_note: string;
+};
+
 export type LocalInferenceStatus = {
   backend: "ollama";
   endpoint: string;
@@ -521,21 +565,22 @@ export type LLMProviderInfo = {
 export type LLMProviderCatalog = { schema_version: 1; providers: LLMProviderInfo[]; credentials_persisted: false };
 export type LLMProviderProfile = {
   id: string; name: string; provider: LLMProvider; model: string; base_url: string;
-  created_at: string; updated_at: string;
+  api_key_env: string | null; created_at: string; updated_at: string;
 };
 export type LLMProviderProfileReport = {
-  schema_version: 1; profiles: LLMProviderProfile[]; total: number; max_profiles: number;
+  schema_version: 2; profiles: LLMProviderProfile[]; total: number; max_profiles: number;
   credentials_persisted: false;
 };
 export type LLMProviderProfileConnection = {
   profile_id: string; provider: LLMProvider; status: "verified"; models: string[];
   checked_at: string; credential_storage: "not_saved" | "not_applicable";
+  credential_source: "none" | "request_only" | "environment_reference";
   connection_scope: "catalogue_check_only"; persistent_connection: false;
 };
-export type LLMModelRequest = { provider: LLMProvider; api_key?: string; base_url?: string };
+export type LLMModelRequest = { provider: LLMProvider; api_key?: string; base_url?: string; profile_id?: string };
 export type LLMModelResult = {
   provider: LLMProvider; models: string[]; model_details?: Array<{ id: string; model_type?: string | null; architecture?: string | null }>;
-  count?: number; credential_storage: "not_saved" | "not_applicable"; execution: "local" | "remote"; note?: string;
+  count?: number; credential_storage: "not_saved" | "not_applicable"; credential_source?: "none" | "request_only" | "environment_reference"; execution: "local" | "remote"; note?: string;
 };
 export type LLMChatMessage = { role: "system" | "user" | "assistant"; content: string };
 export type LLMChatRequest = LLMModelRequest & {
@@ -2421,7 +2466,7 @@ export const axiomApi = {
   modelStudioFiles: (repoId: string) => requestJson<{ repo_id: string; files: ModelStudioFile[]; count: number; url: string; note: string }>(`/api/models/studio/files?${new URLSearchParams({ repo_id: repoId })}`),
   llmProviders: () => requestJson<LLMProviderCatalog>("/api/llm/providers"),
   llmProfiles: () => requestJson<LLMProviderProfileReport>("/api/llm/profiles"),
-  saveLLMProfile: (input: { name: string; provider: LLMProvider; model: string; base_url?: string }) =>
+  saveLLMProfile: (input: { name: string; provider: LLMProvider; model: string; base_url?: string; api_key_env?: string }) =>
     requestJson<{ profile: LLMProviderProfile; credentials_persisted: false }>("/api/llm/profiles", { method: "POST", body: JSON.stringify(input) }),
   deleteLLMProfile: (id: string) =>
     requestJson<{ deleted: LLMProviderProfile; credentials_persisted: false }>(`/api/llm/profiles/${encodeURIComponent(id)}`, { method: "DELETE" }),
@@ -2469,6 +2514,7 @@ export const axiomApi = {
     }),
   deleteAgentProfile: (id: string) =>
     requestJson<{ deleted_id: string; remaining: number }>(`/api/agent-profiles/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  apiContractExamples: () => requestJson<ApiContractExamples>("/api/contract/examples"),
   playgroundRead: (endpoint: PlaygroundEndpoint) => {
     if (!playgroundEndpointPaths.has(endpoint)) {
       throw new Error("This endpoint is not in the read-only API Playground allowlist.");

@@ -36,6 +36,7 @@ from axiom.cli.workflows import register_workflow_cli
 from axiom.cli.evaluation import register_evaluation_cli
 from axiom.cli.inference import infer_app
 from axiom.cli.llm import llm_app
+from axiom.cli.api import api_app
 from axiom.cli.mobile_bridge import register_mobile_bridge
 from axiom.cli.engine import engine_app
 from axiom.core.hardware import detect_hardware, estimate_model_fit
@@ -95,6 +96,7 @@ app.add_typer(mcp_app, name="mcp")
 mcp_app.add_typer(mcp_profile_app, name="profile")
 app.add_typer(tools_app, name="tools")
 app.add_typer(llm_app, name="llm")
+app.add_typer(api_app, name="api")
 register_mobile_bridge(app)
 
 app.add_typer(ai_app, name="ai")

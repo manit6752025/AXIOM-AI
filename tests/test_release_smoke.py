@@ -280,3 +280,38 @@ def test_api_playground_smoke_rejects_unbounded_client_or_missing_disclosure() -
     issues = release_smoke.api_playground_issues(component, client)
     assert any("typed endpoint allowlist" in issue for issue in issues)
     assert any("disclose the allowlist" in issue for issue in issues)
+
+
+
+def test_generated_typed_api_examples_are_wired_from_openapi_to_cli_gui_and_docs() -> None:
+    core = (ROOT / "axiom/core/api_examples.py").read_text(encoding="utf-8")
+    api = (ROOT / "axiom/api/examples.py").read_text(encoding="utf-8")
+    server = (ROOT / "axiom/api/server.py").read_text(encoding="utf-8")
+    cli = (ROOT / "axiom/cli/api.py").read_text(encoding="utf-8")
+    cli_main = (ROOT / "axiom/cli/main.py").read_text(encoding="utf-8")
+    client = (ROOT / "src/api/client.ts").read_text(encoding="utf-8")
+    component = (ROOT / "src/components/ApiPlayground.tsx").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/api-playground.spec.ts").read_text(encoding="utf-8")
+    tests = (ROOT / "tests/test_api_examples.py").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/API.md").read_text(encoding="utf-8")
+    assert release_smoke.api_contract_examples_issues(
+        core, api, server, cli, cli_main, client, component, e2e, tests, docs,
+    ) == []
+
+
+def test_generated_api_example_smoke_detects_missing_secret_redaction_or_gui_binding() -> None:
+    core = (ROOT / "axiom/core/api_examples.py").read_text(encoding="utf-8")
+    api = (ROOT / "axiom/api/examples.py").read_text(encoding="utf-8")
+    server = (ROOT / "axiom/api/server.py").read_text(encoding="utf-8")
+    cli = (ROOT / "axiom/cli/api.py").read_text(encoding="utf-8")
+    cli_main = (ROOT / "axiom/cli/main.py").read_text(encoding="utf-8")
+    client = (ROOT / "src/api/client.ts").read_text(encoding="utf-8")
+    component = (ROOT / "src/components/ApiPlayground.tsx").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/api-playground.spec.ts").read_text(encoding="utf-8")
+    tests = (ROOT / "tests/test_api_examples.py").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/API.md").read_text(encoding="utf-8")
+    broken_core = core.replace("x-axiom-redacted", "x-no-redaction", 1)
+    issues = release_smoke.api_contract_examples_issues(
+        broken_core, api, server, cli, cli_main, client, component, e2e, tests, docs,
+    )
+    assert any("x-axiom-redacted" in issue for issue in issues)
