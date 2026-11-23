@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { ensureAuthenticated } from "./helpers/auth";
 
@@ -173,5 +174,14 @@ test("workflow autosave and dry-run stay planning-only", async ({ page }) => {
   await expect(page.getByText("NOT EXECUTED")).toBeVisible();
   await expect(page.locator("body")).toContainText("8.2 GB");
   await expect(page.getByText(/seed 42 \(not applied\)/i)).toBeVisible();
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Export manifest" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("workflow-workflow-1-reproducibility.json");
   expect(createdJob).toBe(false);
+  const downloaded = await readFile((await download.path()) as string, "utf8");
+  const exportedManifest = JSON.parse(downloaded);
+  expect(exportedManifest).toMatchObject({ workflow_id: "workflow-1", seed: 42, seed_applied: false, execution_status: "not_executable" });
+  expect(downloaded).not.toContain("PRIVATE_WORKFLOW_ROW");
 });

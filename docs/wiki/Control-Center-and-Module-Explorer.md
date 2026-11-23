@@ -30,12 +30,49 @@ JSON API client contribute to a shared in-flight loading count so users can
 see when workspace data is being refreshed.
 
 Health checks run when the authenticated shell opens and then follow the
-Dashboard refresh preference; low-power mode disables periodic checks.
-Manual retry remains available. A successful response from any typed JSON
+Dashboard health refresh preference (Off, 5, 10, 15, 30, 60, or 120 seconds).
+The selected interval is honored as configured; low-power mode disables
+periodic checks. Manual retry remains available. A successful response from any typed JSON
 request refreshes the last-success timestamp. The stale label means no
 successful response has been observed for more than one minute; it is a
 connectivity freshness hint, not a claim that individual cached records have
 expired. Streaming requests are not included in the shared request counter.
+
+## Refresh and motion preferences
+
+Settings lets the user choose a Dashboard health refresh interval from Off to
+two minutes. The authenticated shell applies the selected interval directly;
+the low-power mode disables recurring health checks and combines with reduced
+motion. The separate Reduce motion preference applies a CSS motion override
+without changing the underlying interface layout. Preferences are stored in
+the current browser profile and restored after reload. These settings do not
+change server-side task scheduling or streaming request behavior.
+
+## Responsive phone and tablet layouts
+
+The Control Center shell supports narrow phone widths down to 320 CSS pixels,
+uses a collapsible off-canvas navigation drawer at 780 pixels and below, and
+reflows page headers, forms, status strips, and settings grids for small
+screens. On phone layouts the top-bar search collapses to an icon until focused;
+the profile name and secondary backend status detail are compacted to keep the
+primary navigation and connection retry control reachable. The drawer closes
+after a page is selected. Automated browser checks exercise 320px, 360px,
+390px, 480px, and tablet widths, and check that the document does not introduce
+horizontal overflow. This is responsive regression coverage, not certification
+for every device or browser.
+
+## Export and download boundaries
+
+The Control Center uses distinct export formats for distinct purposes:
+
+- **Model registry JSON** exports the versioned model metadata registry only. It does not download or package model weights.
+- **Dataset manifest JSON** exports file identity, size, lineage, and checksum metadata only; it never contains dataset row values. Dataset quality and cleaning-preview JSONs contain bounded report/preview metadata, not a replacement dataset. A cleaning preview does not write an output file.
+- **Evaluation report JSON** contains aggregate metrics, fingerprints, and optional run provenance. Raw prediction/reference text is not persisted in the report.
+- **Workflow reproducibility JSON** records the saved graph revision, planning inputs, hardware snapshot, seed, and software provenance. Exporting it does not run a workflow or create a job.
+- **Workspace metadata ZIP** includes supported registry/workflow/plan/report/profile metadata. Credentials, MCP grants, external integration secrets/commands, datasets, model weights, checkpoints, and generated files are excluded.
+- **Support bundle ZIP** is a privacy-minimized diagnostic artifact, but it should still be reviewed before sharing because workspace or environment metadata may be sensitive.
+
+Exports are generated as explicit browser downloads with stable filenames. They do not silently copy, move, rewrite, or delete source workspace files.
 
 ## Deep links and browser history
 

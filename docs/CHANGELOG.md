@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — redacted local frontend error reporting
+
+- Added a 50-entry in-memory frontend error ring buffer that stores only timestamps, allowlisted source/category/error names, page IDs, and HTTP status codes; ignores raw messages, stacks, URLs, request IDs, headers, request bodies, prompts, dataset values, credentials, and environment values.
+- Added explicit user-triggered JSON download and clear controls to Diagnostics. Reports are browser-local, cleared on reload, and never uploaded automatically; API HTTP/network/timeout errors and global runtime/unhandled-rejection events feed the redacted store.
+
+## Unreleased — explicit export and local-file boundaries
+
+- Centralized browser Blob download handling with path-component stripping, platform-safe filenames, temporary anchor cleanup, and delayed object-URL revocation across model, dataset, evaluation, workflow, workspace metadata, and support-bundle exports.
+- Expanded browser checks to read generated registry, manifest, evaluation, and workflow files and verify their metadata-only/aggregate-only scope and safe filenames.
+- Added browser coverage for model registry JSON, dataset manifest JSON, evaluation report JSON, workflow reproducibility manifests, workspace metadata ZIP, and diagnostic support-bundle ZIP downloads.
+- Documented which exports contain metadata/aggregate reports, which artifacts are excluded, and why support bundles should be reviewed before sharing.
+
+## Unreleased — refresh cadence and reduced-motion settings
+
+- Honor the selected 5–120 second Control Center health polling interval instead of clamping short user-selected intervals to 15 seconds.
+- Added Playwright fake-clock coverage for 5-second polling, reduced-motion CSS persistence, and low-power mode disabling periodic health checks.
+
+## Unreleased — responsive phone and tablet layouts
+
+- Added Playwright coverage for narrow phone and tablet widths, no horizontal page overflow, compact settings layout, and off-canvas sidebar interaction at 320px.
+
 ## Unreleased — keyboard and screen-reader command navigation
 
 - Added a combobox/listbox accessibility contract to the global command palette, including active-descendant tracking, result position metadata, Home/End navigation, and polite announcements for result counts, selected commands, and no matches.
