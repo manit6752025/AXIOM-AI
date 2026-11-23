@@ -115,3 +115,42 @@ Additive response fields are safe to ignore. Breaking changes require a parallel
 API contract version. Use `axiom.meta()` to discover the contract exposed by
 the running daemon. The operation manifest in the repository is checked against
 the live FastAPI OpenAPI document by the SDK contract tests.
+
+## Local prediction jobs
+
+Prediction jobs consume local compute only after an explicit start or resume
+call. They use local workspace assets and never trigger a model download or
+cloud fallback.
+
+\`\`\`ts
+import { AxiomClient } from "@axiom-ai/sdk";
+
+const axiom = new AxiomClient({ token: process.env.AXIOM_API_WRITE_TOKEN });
+try {
+  const started = await axiom.startPredictionJob({
+    model_path: "models/my-model",
+    dataset_path: "data/evaluation.jsonl",
+    output_path: "data/predictions.jsonl",
+    max_new_tokens: 32,
+    device: "cpu",
+  });
+  const jobId = started.job.id;
+
+  console.log((await axiom.predictionJob(jobId)).job.status);
+  console.log((await axiom.predictionJobs(20)).jobs);
+
+  // Call only after inspecting an interrupted job and choosing to continue it.
+  const resumed = await axiom.resumePredictionJob(jobId);
+  console.log(resumed.job.resumption_count);
+
+  // Cooperative cancellation of an active worker:
+  // await axiom.cancelPredictionJob(jobId);
+} finally {
+  axiom.close();
+}
+\`\`\`
+
+Resume is accepted only after the server verifies the original dataset,
+model/adapter, generation configuration and committed checkpoint identity,
+size and SHA-256. The client cannot bypass those checks. Job summaries omit
+prompts, generated predictions and private filesystem paths.
