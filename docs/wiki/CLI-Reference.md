@@ -49,6 +49,9 @@ axiom check --json
 axiom tools list --json
 axiom tools doctor --json
 axiom tools plan claude-code --json
+axiom hf status --json
+axiom supercompress status --json
+axiom integration doctor --json
 axiom headroom status --json
 axiom knowledge base create "Engineering notes"
 axiom knowledge ingest BASE_ID documents/guide.md

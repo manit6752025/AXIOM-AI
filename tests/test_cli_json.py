@@ -817,3 +817,86 @@ def test_info_json_reports_local_environment_without_collecting_secrets(tmp_path
     assert payload["git_branch"] == "implement/roadmap"
     assert "never-return-this-token" not in result.stdout
     assert "AXIOM_API_TOKEN" not in result.stdout
+
+
+
+def test_huggingface_status_json_reports_unauthenticated_and_authenticated_without_tokens(monkeypatch) -> None:
+    class LocalTokenNotFoundError(Exception):
+        pass
+
+    from axiom.cli import main as cli
+
+    monkeypatch.setattr(cli, "whoami", lambda: (_ for _ in ()).throw(LocalTokenNotFoundError()))
+    unauthenticated = runner.invoke(app, ["hf", "status", "--json"])
+    assert unauthenticated.exit_code == 0, unauthenticated.stdout
+    payload = json.loads(unauthenticated.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["status"] == "not_authenticated"
+    assert payload["authenticated"] is False
+
+    monkeypatch.setattr(cli, "whoami", lambda: {
+        "name": "test-account",
+        "orgs": [{"name": "research-team"}, "open-source"],
+        "token": "do-not-return-token",
+    })
+    authenticated = runner.invoke(app, ["hf", "status", "--json"])
+    assert authenticated.exit_code == 0, authenticated.stdout
+    payload = json.loads(authenticated.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["authenticated"] is True
+    assert payload["account"] == "test-account"
+    assert payload["organizations"] == ["research-team", "open-source"]
+    assert "do-not-return-token" not in authenticated.stdout
+
+
+def test_supercompress_status_json_redacts_credential_and_reports_local_configuration(monkeypatch) -> None:
+    from axiom.cli import main as cli
+
+    monkeypatch.setenv("SUPERCOMPRESS_API_KEY", "private-supercompress-token")
+    monkeypatch.setattr(cli, "redacted_base_url", lambda: "https://api.example.invalid/v1")
+    result = runner.invoke(app, ["supercompress", "status", "--json"])
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["configured"] is True
+    assert payload["credential_reference_available"] is True
+    assert payload["credential_value_returned"] is False
+    assert payload["endpoint"] == "https://api.example.invalid/v1"
+    assert "private-supercompress-token" not in result.stdout
+    assert "SUPERCOMPRESS_API_KEY" not in result.stdout
+
+
+def test_integration_doctor_json_reports_availability_without_commands_or_urls(tmp_path: Path, monkeypatch) -> None:
+    from axiom import cli as _cli_package  # keep module import resolution explicit
+    from axiom.cli import main as cli
+    from axiom.core.integrations import AgentIntegration, IntegrationRegistry, IntegrationType
+
+    monkeypatch.chdir(tmp_path)
+    registry = IntegrationRegistry()
+    registry.add(AgentIntegration(
+        "Local command",
+        IntegrationType.CLI,
+        command="python --token do-not-return-command-token",
+    ))
+    registry.add(AgentIntegration(
+        "Remote endpoint",
+        IntegrationType.HTTP,
+        url="https://user:private@example.invalid/api?token=do-not-return-url-token",
+    ))
+    registry.add(AgentIntegration("Incomplete", IntegrationType.MCP))
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/python" if name == "python" else None)
+
+    result = runner.invoke(app, ["integration", "doctor", "--json"])
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["total"] == 3
+    records = {item["name"]: item for item in payload["integrations"]}
+    assert records["Local command"]["status"] == "available"
+    assert records["Local command"]["executable"] == "python"
+    assert records["Remote endpoint"]["status"] == "configured"
+    assert records["Remote endpoint"]["url_configured"] is True
+    assert records["Incomplete"]["status"] == "incomplete"
+    for secret in ("do-not-return-command-token", "do-not-return-url-token", "private"):
+        assert secret not in result.stdout
+    assert "No command is executed" in payload["scope_note"]

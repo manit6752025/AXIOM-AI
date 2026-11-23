@@ -232,6 +232,9 @@ axiom config show --path ./axiom.yaml --json
 axiom config validate --path ./axiom.yaml --json
 axiom tools doctor --json
 axiom tools plan claude-code --json
+axiom hf status --json
+axiom supercompress status --json
+axiom integration doctor --json
 axiom headroom status --json
 axiom engine discover --json
 ```
