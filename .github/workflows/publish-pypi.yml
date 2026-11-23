@@ -105,7 +105,7 @@ jobs:
           python -m pip check
 
       - name: Upload distributions
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: axiom-python-dist-${{ env.TAG }}
           path: python-dist/

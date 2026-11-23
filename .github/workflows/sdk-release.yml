@@ -50,7 +50,7 @@ jobs:
           npm test --prefix sdk/typescript
           mkdir -p dist/typescript
           npm pack --prefix sdk/typescript --pack-destination dist/typescript
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: axiom-sdk-release-artifacts
           path: dist/
