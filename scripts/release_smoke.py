@@ -1048,6 +1048,7 @@ def prediction_job_resume_issues(
             "resumeAxiomPredictionJob(",
             "job.resumable",
             "Resume from checkpoint",
+            "Resumed after restart",
         )),
         ("prediction resume core tests", core_tests, (
             "test_resume_prediction_job_revalidates_assets_and_schedules_checkpoint_worker",
