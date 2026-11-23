@@ -226,10 +226,13 @@ axiom ai policy-audit ./models/my-model --json
 axiom ai plan --model ./models/my-model --json
 axiom project validate --json
 axiom check --json
+axiom config show --path ./axiom.yaml --json
 axiom tools doctor --json
 axiom tools plan claude-code --json
 axiom engine discover --json
 ```
+
+Configuration JSON uses safe YAML parsing, rejects symlinks and files over 256 KiB, and redacts likely credential values by key name. It does not return the original raw YAML document.
 
 The dataset profile payload includes aggregate counts, field/type summaries,
 privacy flags, optional opt-in PII match counts, and a schema version; it does
