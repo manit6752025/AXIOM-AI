@@ -66,14 +66,34 @@ def _canonical(value: Any) -> bytes:
 def _trusted_model_directory(model_path: str | Path) -> Path | None:
     """Resolve a model through the native engine's allowlisted model inventory."""
     try:
+        supplied = os.path.expanduser(os.fspath(model_path))
+        candidate = Path(os.path.abspath(supplied))
+        current = Path(candidate.anchor)
+        for component in candidate.parts[1:]:
+            current = current / component
+            try:
+                metadata = current.lstat()
+            except OSError:
+                return None
+            reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            is_junction = getattr(current, "is_junction", None)
+            if (
+                stat.S_ISLNK(metadata.st_mode)
+                or (reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag)
+                or (is_junction is not None and is_junction())
+            ):
+                raise BenchmarkProfileError(
+                    "The selected model directory must not contain symbolic links or junctions."
+                )
         from axiom.core.engine import _allowed_model_roots, resolve_local_model_directory
 
-        supplied = os.fspath(model_path)
-        resolved = Path(resolve_local_model_directory(supplied, "Base model"))
+        resolved = Path(resolve_local_model_directory(str(candidate), "Base model"))
         trusted_roots = tuple(Path(root).resolve(strict=True) for root in _allowed_model_roots())
         if not resolved.is_absolute() or not any(resolved.is_relative_to(root) for root in trusted_roots):
             return None
         return resolved
+    except BenchmarkProfileError:
+        raise
     except (OSError, RuntimeError, TypeError, ValueError):
         return None
 
