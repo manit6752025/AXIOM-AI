@@ -809,6 +809,7 @@ export default function LocalAxiomEnginePanel() {
             <span className="module-copy">
               <b>{job.output_path} · {job.status.replaceAll("_", " ")}</b>
               <small>{job.rows_completed.toLocaleString()} / {job.rows_total.toLocaleString()} rows · {job.prompts_truncated} prompt truncation(s) · {job.id.slice(0, 12)}</small>
+              {job.resumption_count > 0 && <small>Resumed after restart · {job.resumption_count} time(s)</small>}
               <progress aria-label={"Progress for prediction job " + job.id} value={job.rows_completed} max={Math.max(1, job.rows_total)} style={{ width: "100%", maxWidth: 440 }} />
               {job.artifact_ready
                 ? <small>Verified output published · run axiom evaluation using {job.output_path} and its prediction/reference fields</small>
