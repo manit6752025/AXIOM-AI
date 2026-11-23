@@ -9,9 +9,11 @@ axiom model provenance ./models/qwen3-8b --model-id 0123456789abcdef0123456789ab
 ~~~
 
 The Control Center exposes the same operation from **Models → Discover local →
-Inspect provenance**. The workspace API accepts a workspace-relative model
-folder at `POST /api/workspace/models/provenance` and optionally a registered
-model ID to attach declared metadata.
+Inspect provenance**. The workspace API accepts a canonical workspace-relative
+model folder at `POST /api/workspace/models/provenance` and optionally a
+registered model ID to attach declared metadata. When an ID is supplied, its
+registered source must resolve to the exact same local directory being
+inspected; metadata from a different model record is rejected.
 
 ## Evidence collected
 

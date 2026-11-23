@@ -35,7 +35,7 @@ class BoundedRequestAdmission:
         self._max_active = max_active
         self._max_queue = max_queue
         self._active = 0
-        self._waiters: deque[object] = deque()
+        self._waiters: deque[tuple[object, str | None]] = deque()
         self._condition = threading.Condition(threading.Lock())
 
     @property
@@ -54,29 +54,46 @@ class BoundedRequestAdmission:
         queue_limit: int,
         timeout_seconds: float,
         cancel_event: Event | None = None,
+        queue_key: str | None = None,
     ) -> dict[str, Any]:
         if type(queue_limit) is not int or not 0 <= queue_limit <= self._max_queue:
             raise ValueError(f"Queue limit must be an integer from 0 through {self._max_queue}.")
         if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)) or not 0 < timeout_seconds <= 900:
             raise ValueError("Admission timeout must be a finite number above zero and at most 900 seconds.")
+        if queue_key is not None and (
+            not isinstance(queue_key, str)
+            or not queue_key.strip()
+            or len(queue_key) > 128
+            or any(ord(character) < 32 or ord(character) == 127 for character in queue_key)
+        ):
+            raise ValueError("Queue key must be 1–128 printable characters when supplied.")
         started = time.monotonic()
         deadline = started + float(timeout_seconds)
         ticket = object()
+        queued_ticket = (ticket, queue_key)
         with self._condition:
             if cancel_event is not None and cancel_event.is_set():
                 raise RequestAdmissionCancelled("Request was cancelled before admission.")
             if self._active < self._max_active and not self._waiters:
                 self._active += 1
                 return {"queue_position": 0, "waited_ms": 0}
-            if queue_limit == 0 or len(self._waiters) >= queue_limit or len(self._waiters) >= self._max_queue:
+            profile_waiters = (
+                sum(1 for _ticket, key in self._waiters if key == queue_key)
+                if queue_key is not None
+                else len(self._waiters)
+            )
+            if queue_limit == 0 or profile_waiters >= queue_limit or len(self._waiters) >= self._max_queue:
                 raise RequestAdmissionQueueFull("The native request queue is full; retry after capacity becomes available.")
-            self._waiters.append(ticket)
-            queue_position = len(self._waiters)
+            self._waiters.append(queued_ticket)
             try:
                 while True:
                     if cancel_event is not None and cancel_event.is_set():
                         raise RequestAdmissionCancelled("Request was cancelled while waiting in the native queue.")
-                    if self._active < self._max_active and self._waiters and self._waiters[0] is ticket:
+                    if self._active < self._max_active and self._waiters and self._waiters[0][0] is ticket:
+                        queue_position = next(
+                            (index + 1 for index, (waiter, _key) in enumerate(self._waiters) if waiter is ticket),
+                            0,
+                        )
                         self._waiters.popleft()
                         self._active += 1
                         self._condition.notify_all()
@@ -89,8 +106,8 @@ class BoundedRequestAdmission:
                         raise RequestAdmissionTimeout("The native request queue wait exceeded the configured timeout.")
                     self._condition.wait(min(0.05, remaining))
             finally:
-                if ticket in self._waiters:
-                    self._waiters.remove(ticket)
+                if queued_ticket in self._waiters:
+                    self._waiters.remove(queued_ticket)
                     self._condition.notify_all()
 
     def release(self) -> None:
