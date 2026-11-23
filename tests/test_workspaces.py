@@ -37,6 +37,40 @@ def test_workspace_registry_preserves_default_and_isolates_new_roots(tmp_path: P
     assert manager.resolve(default_id).root == default
 
 
+def test_workspace_registry_publishes_populated_restore_staging_atomically(tmp_path: Path):
+    default = tmp_path / "project"
+    default.mkdir()
+    manager = WorkspaceRegistry(
+        home=tmp_path / "catalog",
+        workspaces_root=tmp_path / "managed",
+        default_root=default,
+    )
+    staging = manager.create_restore_staging_directory()
+    (staging / "source.txt").write_text("restored bytes", encoding="utf-8")
+    created = manager.create_from_staging_directory("Restored workspace", staging)
+
+    restored = manager.resolve(created["id"])
+    assert restored.managed is True
+    assert restored.root.is_relative_to((tmp_path / "managed").resolve())
+    assert (restored.root / "source.txt").read_text(encoding="utf-8") == "restored bytes"
+    assert staging.exists() is False
+    assert created["status"] == "ready"
+
+
+def test_workspace_registry_rejects_staging_directories_outside_managed_root(tmp_path: Path):
+    default = tmp_path / "project"
+    default.mkdir()
+    manager = WorkspaceRegistry(
+        home=tmp_path / "catalog",
+        workspaces_root=tmp_path / "managed",
+        default_root=default,
+    )
+    outside = tmp_path / ".axiom-restore-outside"
+    outside.mkdir()
+    with pytest.raises(WorkspaceCatalogError, match="direct child"):
+        manager.create_from_staging_directory("Invalid restore", outside)
+
+
 def test_workspace_registry_rejects_duplicate_names_and_unknown_ids(tmp_path: Path):
     default = tmp_path / "project"
     default.mkdir()

@@ -129,6 +129,7 @@ from axiom.cli.fine_tuning import register as register_fine_tuning_cli
 from axiom.cli.workspace_metadata import register as register_workspace_metadata_cli
 from axiom.cli.knowledge import register as register_knowledge_cli
 from axiom.cli.plugins import register as register_plugins_cli
+from axiom.cli.workspace_backup import register as register_workspace_backup_cli
 
 register_extended_cli(app, model_app, dataset_app)
 register_dataset_profile(dataset_app)
@@ -139,6 +140,7 @@ register_tools_cli(app, tools_app)
 register_headroom_cli(app)
 register_fine_tuning_cli(train_app)
 register_workspace_metadata_cli(app)
+register_workspace_backup_cli(workspace_app)
 register_knowledge_cli(app)
 register_plugins_cli(app)
 
