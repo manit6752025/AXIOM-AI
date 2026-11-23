@@ -664,6 +664,7 @@ def _job_summary(job: dict[str, Any]) -> dict[str, Any]:
             and job.get("checkpoint_name")
             and job.get("checkpoint_identity")
             and job.get("checkpoint_sha256")
+            and (job.get("adapter_path") is None or job.get("adapter_fingerprint"))
         ),
         "resumption_count": int(job.get("resumption_count", 0)),
         "scope": {
@@ -1291,6 +1292,10 @@ def _recover_record(root: Path, record: dict[str, Any]) -> dict[str, Any]:
                 artifact_sha256=record["pending_artifact_sha256"],
                 pending_artifact_identity=None,
                 pending_artifact_sha256=None,
+                checkpoint_name=None,
+                checkpoint_identity=None,
+                checkpoint_bytes=0,
+                checkpoint_sha256=None,
             )
             try:
                 _replace_persisted_job(root, completed)
