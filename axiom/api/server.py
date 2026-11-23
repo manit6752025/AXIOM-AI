@@ -19,6 +19,7 @@ from axiom.api.fine_tuning import router as fine_tuning_router
 from axiom.api.diagnostics import router as diagnostics_router
 from axiom.api.runtime_discovery import router as runtime_discovery_router
 from axiom.api.agent_profiles import router as agent_profiles_router
+from axiom.api.prompt_templates import router as prompt_templates_router
 from axiom.api.mcp_inventory import router as mcp_inventory_router
 from axiom.api.inference import router as inference_router
 from axiom.api.engine import router as engine_router
@@ -300,6 +301,7 @@ def create_app() -> Any:
     app.include_router(diagnostics_router)
     app.include_router(runtime_discovery_router)
     app.include_router(agent_profiles_router)
+    app.include_router(prompt_templates_router)
     app.include_router(mcp_inventory_router)
     app.include_router(inference_router)
     app.include_router(engine_router)

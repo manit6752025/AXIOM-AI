@@ -2408,3 +2408,46 @@ html[data-accent="violet"] .app-shell.light {
 .telemetry-export-privacy strong { width: 100%; font-size: 12px; }
 .telemetry-export-privacy label { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; cursor: pointer; }
 .telemetry-export-privacy input { accent-color: var(--accent); }
+
+
+/* Prompt Studio — versioned local templates and safe literal previews */
+.prompt-studio-layout { display: grid; grid-template-columns: minmax(250px, .72fr) minmax(0, 1.55fr); align-items: start; gap: 18px; }
+.prompt-studio-library, .prompt-studio-workspace > .surface { min-width: 0; }
+.prompt-studio-create { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; margin: 17px 0; }
+.prompt-studio-create .field { min-width: 0; }
+.prompt-studio-template-list { display: grid; gap: 5px; margin-top: 14px; }
+.prompt-studio-template { width: 100%; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 10px; border: 1px solid transparent; background: transparent; color: var(--muted); text-align: left; }
+.prompt-studio-template:hover, .prompt-studio-template.selected { border-color: var(--line); background: var(--surface-soft); color: var(--ink-strong); }
+.prompt-studio-template > span { min-width: 0; }
+.prompt-studio-template b, .prompt-studio-template small { display: block; overflow: hidden; text-overflow: ellipsis; }
+.prompt-studio-template b { font-size: 11px; font-weight: 700; }
+.prompt-studio-template small { margin-top: 4px; color: var(--faint); font-size: 9px; }
+.prompt-studio-template > svg { flex: 0 0 auto; color: var(--accent); }
+.prompt-studio-workspace { min-width: 0; }
+.prompt-studio-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.prompt-studio-full { grid-column: 1 / -1; }
+.prompt-studio-fields textarea, .prompt-studio-render textarea { width: 100%; min-width: 0; resize: vertical; padding: 10px 11px; border: 1px solid var(--line); border-radius: 2px; background: var(--surface-soft); color: var(--ink); font: 11px/1.55 "SFMono-Regular", Consolas, monospace; }
+.prompt-studio-fields textarea:focus, .prompt-studio-render textarea:focus { border-color: var(--accent); outline: 0; }
+.prompt-studio-editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 15px; padding-top: 14px; border-top: 1px solid var(--line); }
+.prompt-studio-editor-actions .quiet-note { min-width: 0; margin-left: auto; }
+.prompt-studio-render { display: grid; gap: 10px; margin-top: 22px; padding-top: 17px; border-top: 1px solid var(--line); }
+.prompt-studio-render .surface-head, .prompt-studio-history .surface-head { margin-bottom: 2px; }
+.prompt-studio-render h3, .prompt-studio-history h3 { margin: 0; color: var(--ink-strong); font-size: 13px; }
+.prompt-studio-output { max-height: 320px; overflow: auto; margin: 0; padding: 13px; border: 1px solid var(--line); background: var(--surface-soft); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.6 "SFMono-Regular", Consolas, monospace; }
+.prompt-studio-history { display: grid; gap: 8px; margin-top: 22px; padding-top: 17px; border-top: 1px solid var(--line); }
+.prompt-studio-revision { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.prompt-studio-revision > span:first-child { min-width: 0; }
+.prompt-studio-revision b, .prompt-studio-revision small { display: block; }
+.prompt-studio-revision b { color: var(--ink); font-size: 10px; }
+.prompt-studio-revision small { overflow: hidden; margin-top: 3px; color: var(--faint); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-studio-revision code { color: var(--muted); font-size: 9px; }
+@media (max-width: 1100px) { .prompt-studio-layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 620px) {
+  .prompt-studio-fields { grid-template-columns: minmax(0, 1fr); }
+  .prompt-studio-fields > .field { grid-column: 1; }
+  .prompt-studio-create { grid-template-columns: minmax(0, 1fr); }
+  .prompt-studio-create > .button { justify-self: start; }
+  .prompt-studio-editor-actions .quiet-note { flex-basis: 100%; margin-left: 0; }
+  .prompt-studio-revision { grid-template-columns: minmax(0, 1fr) auto; }
+  .prompt-studio-revision code { grid-column: 1; }
+}

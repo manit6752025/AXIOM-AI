@@ -161,7 +161,7 @@ feature exists or a delivery-date promise.
 
 ### 11 · Applied AI workflows and knowledge infrastructure
 
-- [R121 · In progress; validation pending] Implemented workspace-local reproducibility profiles for native benchmark runs: bounded/locked atomic store, hardware and software environment provenance, model configuration metadata fingerprint, prompt hash-only workload identity, per-run/aggregate metrics, and controlled-versus-descriptive comparison. Wired optional profile saving, listing/comparison API, CLI and Runtime UI; added core/API/CLI tests. Browser acceptance and release-smoke enforcement are being added; full CI and actual native benchmark execution on reference hardware remain required before marking complete.
+- [R121 · Implemented; tests passing] Delivered reproducible workspace-local AXIOM Native Engine benchmark profiles with hardware/software provenance, bounded model-configuration metadata fingerprints, prompt SHA-256-only identity, workload configuration and per-run/aggregate metrics. Implemented safe locked/atomic storage, validation, retention, compare/comparability rules, API, CLI, Runtime GUI, core/API/CLI/browser tests, documentation and release-smoke gates. Full CI passes on Ubuntu, macOS and Windows; hosted CI verifies the profile workflow with fixtures, while actual throughput values are captured by the live native benchmark on the operator's hardware.
 - [R122 · Planned] Add versioned Prompt Studio templates with typed variables, validation, and revision history.
 - [R123 · Planned] Add JSON Schema-constrained local inference with safe schema validation and bounded outputs.
 - [R124 · Planned] Add a local embeddings engine abstraction with bounded batch and chunk processing.
@@ -170,7 +170,7 @@ feature exists or a delivery-date promise.
 - [R127 · Planned] Add hybrid retrieval with chunking, metadata filters, source citations, and bounded search.
 - [R128 · Planned] Add opt-in local multimodal image understanding with explicit model and runtime capability checks.
 - [R129 · Planned] Add local speech-to-text and text-to-speech adapters with resource and privacy controls.
-- [R130 · In progress; validation pending] Added a workspace-local, versioned content-addressed JSONL snapshot store with bounded read-only SHA-256 objects, deduplication, append-only hash-chained manifests, earlier-parent lineage, safe workspace/data path validation, source-change detection, byte/count limits and object verification. API, CLI, Datasets UI, core/API/CLI/browser tests and release-smoke coverage are in place; full CI verification remains pending.
+- [R130 · Implemented; tests passing] Delivered a workspace-local versioned, content-addressed JSONL snapshot store with bounded read-only SHA-256 objects, deduplication, append-only hash-chained manifests, parent lineage, safe workspace/data path validation, source-change detection, byte/count limits and object verification. API, CLI, Datasets UI, core/API/CLI tests, browser acceptance and cross-platform release contracts pass; documentation distinguishes local hash integrity from signed provenance.
 - [R131 · Planned] Add experiment comparison views and machine-readable statistical diffs.
 - [R132 · Planned] Add local model-serving profiles with validated resource limits and readiness probes.
 - [R133 · Planned] Add bounded, cancellable, resumable batch inference jobs with progress checkpoints.
