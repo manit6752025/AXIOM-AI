@@ -1458,3 +1458,66 @@ def test_local_reranking_unload_api_releases_only_cached_runtime(monkeypatch):
     response = _client().post("/api/engine/rerank/unload")
     assert response.status_code == 200
     assert response.json() == expected
+
+
+
+def test_local_vision_api_scopes_image_to_active_workspace_and_forwards_limits(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_vision(model, image_path, prompt, **kwargs):
+        captured.update(model=model, image_path=image_path, prompt=prompt, **kwargs)
+        return {
+            "schema_version": 1,
+            "model": model,
+            "response": "A local image description.",
+            "image": {"format": "png", "width": 8, "height": 4, "size_bytes": 32},
+            "privacy": {"network_used": False, "image_persisted_by_axiom": False},
+        }
+
+    monkeypatch.setattr(engine_api, "active_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(engine_api, "run_local_vision", fake_vision)
+    response = _client().post("/api/engine/vision", json={
+        "model": "llava:latest",
+        "image_path": "data/sample.png",
+        "prompt": "Describe the image.",
+        "max_new_tokens": 80,
+        "timeout_seconds": 45,
+    })
+
+    assert response.status_code == 200, response.text
+    assert response.json()["response"] == "A local image description."
+    assert captured == {
+        "model": "llava:latest",
+        "image_path": "data/sample.png",
+        "prompt": "Describe the image.",
+        "workspace_root": tmp_path,
+        "max_new_tokens": 80,
+        "timeout_seconds": 45,
+    }
+
+
+@pytest.mark.parametrize("payload", [
+    {"model": "llava:latest", "image_path": "../outside.png", "prompt": "Describe it."},
+    {"model": "llava:latest", "image_path": "data/image.svg", "prompt": "Describe it."},
+    {"model": "llava:latest", "image_path": "data/image.png", "prompt": " "},
+    {"model": "llava:latest", "image_path": "data/image.png", "prompt": "Describe it.", "max_new_tokens": 1025},
+    {"model": "llava:latest", "image_path": "data/image.png", "prompt": "Describe it.", "timeout_seconds": 181},
+])
+def test_local_vision_api_rejects_invalid_requests_before_inference(monkeypatch, payload):
+    monkeypatch.setattr(engine_api, "run_local_vision", lambda *_args, **_kwargs: pytest.fail("invalid request reached inference"))
+    response = _client().post("/api/engine/vision", json=payload)
+    assert response.status_code == 422
+
+
+def test_local_vision_api_maps_missing_local_runtime_to_service_unavailable(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine_api, "active_workspace_root", lambda: tmp_path)
+
+    def unavailable(*_args, **_kwargs):
+        raise engine_api.InferenceRuntimeError("Local vision runtime unavailable.")
+
+    monkeypatch.setattr(engine_api, "run_local_vision", unavailable)
+    response = _client().post("/api/engine/vision", json={
+        "model": "llava:latest", "image_path": "data/sample.png", "prompt": "Describe it.",
+    })
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Local vision runtime unavailable."
