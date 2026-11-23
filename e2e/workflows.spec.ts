@@ -216,3 +216,119 @@ test("workflow autosave and dry-run stay planning-only", async ({ page }) => {
   expect(exportedManifest).toMatchObject({ workflow_id: "workflow-1", seed: 42, seed_applied: false, execution_status: "not_executable" });
   expect(downloaded).not.toContain("PRIVATE_WORKFLOW_ROW");
 });
+
+
+
+test("workflow editor creates a branching graph with typed input/output ports", async ({ page }) => {
+  let createdPayload: { name: string; nodes: Array<{ id: string; type: string; ports?: unknown }>; edges: Array<Record<string, string>> } | null = null;
+  let validationPayload: typeof createdPayload = null;
+  let savedWorkflow: Record<string, unknown> | null = null;
+
+  await page.route("**/api/workflows**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === "GET" && url.pathname === "/api/workflows/templates") {
+      await route.fulfill({ json: { templates: [] } });
+      return;
+    }
+    if (request.method() === "GET" && url.pathname === "/api/workflows") {
+      await route.fulfill({
+        json: {
+          workflows: savedWorkflow ? [savedWorkflow] : [],
+          total: savedWorkflow ? 1 : 0,
+          limit: 20,
+          offset: 0,
+          has_more: false,
+          next_cursor: null,
+          filters: { search: "" },
+        },
+      });
+      return;
+    }
+    if (request.method() === "POST" && url.pathname === "/api/workflows/validate") {
+      validationPayload = request.postDataJSON() as typeof createdPayload;
+      await route.fulfill({
+        json: {
+          valid: true,
+          node_count: validationPayload?.nodes.length ?? 0,
+          connection_count: validationPayload?.edges.length ?? 0,
+          missing_inputs: [],
+        },
+      });
+      return;
+    }
+    if (request.method() === "POST" && url.pathname === "/api/workflows") {
+      createdPayload = request.postDataJSON() as typeof createdPayload;
+      const now = "2026-11-20T00:00:00Z";
+      savedWorkflow = {
+        ...createdPayload,
+        id: "workflow-branch",
+        created_at: now,
+        updated_at: now,
+        schema_version: 2,
+        revision: 1,
+        versions: [],
+        execution_status: "not_executable",
+      };
+      await route.fulfill({ status: 201, json: { workflow: savedWorkflow } });
+      return;
+    }
+    await route.continue();
+  });
+
+  await ensureAuthenticated(page);
+  await page.goto("/?page=workflows");
+  await expect(page.getByRole("heading", { level: 1, name: "Workflows", exact: true })).toBeVisible();
+
+  const addStep = page.getByLabel("Add step");
+  await addStep.selectOption("training.plan");
+  await page.getByRole("button", { name: "Add step", exact: true }).click();
+  await addStep.selectOption("dataset.profile");
+  await page.getByRole("button", { name: "Add step", exact: true }).click();
+  await addStep.selectOption("model.inspect");
+  await page.getByRole("button", { name: "Add step", exact: true }).click();
+
+  const source = page.getByLabel("Connection source");
+  const target = page.getByLabel("Connection target");
+  const datasetOption = source.locator("option").filter({ hasText: "Profile dataset" }).first();
+  const datasetId = await datasetOption.getAttribute("value");
+  await source.selectOption(datasetId as string);
+  const planOption = target.locator("option").filter({ hasText: "Create training plan" }).first();
+  const planId = await planOption.getAttribute("value");
+  await target.selectOption(planId as string);
+  await page.getByRole("button", { name: "Add connection" }).click();
+
+  const modelOption = source.locator("option").filter({ hasText: "Inspect model" }).first();
+  const modelId = await modelOption.getAttribute("value");
+  await source.selectOption(modelId as string);
+  await target.selectOption(planId as string);
+  await page.getByRole("button", { name: "Add connection" }).click();
+
+  const connectionList = page.locator(".workflow-edge-list");
+  await expect(connectionList).toContainText("dataset");
+  await expect(connectionList).toContainText("model");
+  await expect(connectionList).toContainText("CONNECTIONS · 2");
+
+  await page.getByLabel("Workflow name").fill("Branched training plan");
+  await page.getByRole("button", { name: "Save workflow", exact: true }).click();
+  await expect.poll(() => createdPayload?.edges.length ?? 0).toBe(2);
+  expect(validationPayload?.edges).toHaveLength(2);
+  expect(createdPayload?.name).toBe("Branched training plan");
+  expect(createdPayload?.edges).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      source: datasetId,
+      target: planId,
+      source_port: "dataset",
+      target_port: "dataset",
+    }),
+    expect.objectContaining({
+      source: modelId,
+      target: planId,
+      source_port: "model",
+      target_port: "model",
+    }),
+  ]));
+  expect(createdPayload?.nodes.every((node) => node.ports)).toBe(true);
+  await expect(page.getByText("Saved · design only · execution is disabled")).toBeVisible();
+});

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from axiom.core.storage import atomic_write_text, file_lock
+from axiom.core.workspace_context import workspace_metadata_dir
 
 
 class ExperimentStore:
@@ -15,7 +16,7 @@ class ExperimentStore:
     SCHEMA_VERSION = 1
 
     def __init__(self, root: Path | None = None) -> None:
-        self.root = Path(root) if root is not None else Path(".axiom")
+        self.root = Path(root) if root is not None else workspace_metadata_dir()
         self.records_file = self.root / "experiments.json"
         self.lock_file = self.root / ".experiments.lock"
 

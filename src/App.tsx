@@ -39,6 +39,7 @@ import {
   type RuntimeSnapshot,
   type TrainingPlan as TrainingPlanResult,
   type WorkspaceDataset,
+  type WorkspaceCatalog,
   type WorkspaceExperiment,
   type ReproduciblePlanSnapshot,
   type SavedPlanDiff,
@@ -49,7 +50,9 @@ import {
   type WorkspaceModel,
   type WorkspaceModelCompatibility,
   type WorkspaceWorkflow,
+  type WorkflowEdge,
   type WorkflowNode,
+  type WorkflowNodePortSchema,
   type WorkflowNodeType,
   type WorkflowDryRun,
   type WorkflowTemplate,
@@ -1088,7 +1091,7 @@ function App() {
 }
 
 function AxiomMark({ small = false }: { small?: boolean }) {
-  return <span className={`axiom-mark ${small ? "small" : ""}`}>A</span>;
+  return <img className={`axiom-mark ${small ? "small" : ""}`} src="/axiom-mark.svg" alt="" aria-hidden="true" draggable={false} />;
 }
 
 function ThemeToggle({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => void }) {
@@ -1492,7 +1495,107 @@ function Sidebar({
   collapsed: boolean;
   toggleCollapsed: () => void;
 }) {
+  const [workspaceCatalog, setWorkspaceCatalog] = useState<WorkspaceCatalog | null>(null);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [workspaceDialog, setWorkspaceDialog] = useState<"create" | "rename" | null>(null);
+  const [workspaceNameInput, setWorkspaceNameInput] = useState("");
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState("");
+  const workspaceNameRef = useRef<HTMLInputElement>(null);
+  const workspaceMenuRef = useRef<HTMLDivElement>(null);
+
+  const activeWorkspace = workspaceCatalog?.workspaces.find(
+    (workspace) => workspace.id === workspaceCatalog.active_workspace_id,
+  ) ?? workspaceCatalog?.workspaces.find((workspace) => workspace.is_default);
+
+  useEffect(() => {
+    let active = true;
+    void axiomApi.workspaces().then((catalog) => {
+      if (!active) return;
+      setWorkspaceCatalog(catalog);
+      const rememberedId = localStorage.getItem("axiom-active-workspace");
+      if (!rememberedId || !catalog.workspaces.some((workspace) => workspace.id === rememberedId)) {
+        localStorage.setItem("axiom-active-workspace", catalog.active_workspace_id);
+      }
+    }).catch(() => {
+      if (!active) return;
+      // A removed workspace must not strand the shell on a permanently invalid header.
+      if (localStorage.getItem("axiom-active-workspace")) {
+        localStorage.removeItem("axiom-active-workspace");
+        window.location.reload();
+        return;
+      }
+      setWorkspaceError("Workspace catalog unavailable.");
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!workspaceMenuOpen) return;
+    const closeOnPointer = (event: PointerEvent) => {
+      if (event.target instanceof Node && !workspaceMenuRef.current?.contains(event.target)) {
+        setWorkspaceMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setWorkspaceMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnPointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [workspaceMenuOpen]);
+
+  const openWorkspaceDialog = (mode: "create" | "rename") => {
+    setWorkspaceNameInput(mode === "rename" ? activeWorkspace?.name ?? "" : "");
+    setWorkspaceError("");
+    setWorkspaceMenuOpen(false);
+    setWorkspaceDialog(mode);
+  };
+
+  const saveWorkspace = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalized = workspaceNameInput.trim();
+    if (!normalized) {
+      setWorkspaceError("Enter a workspace name.");
+      workspaceNameRef.current?.focus();
+      return;
+    }
+    setWorkspaceBusy(true);
+    setWorkspaceError("");
+    try {
+      if (workspaceDialog === "create") {
+        const result = await axiomApi.createWorkspace(normalized);
+        localStorage.setItem("axiom-active-workspace", result.workspace.id);
+        window.location.reload();
+      } else if (workspaceDialog === "rename" && activeWorkspace) {
+        const result = await axiomApi.renameWorkspace(activeWorkspace.id, normalized);
+        setWorkspaceCatalog((current) => current ? {
+          ...current,
+          workspaces: current.workspaces.map((workspace) =>
+            workspace.id === result.workspace.id ? result.workspace : workspace,
+          ),
+        } : current);
+        setWorkspaceDialog(null);
+      }
+    } catch (cause) {
+      setWorkspaceError(cause instanceof Error ? cause.message : "Workspace could not be saved.");
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const switchWorkspace = (workspaceId: string) => {
+    setWorkspaceMenuOpen(false);
+    if (workspaceId === workspaceCatalog?.active_workspace_id) return;
+    localStorage.setItem("axiom-active-workspace", workspaceId);
+    window.location.reload();
+  };
+
   return (
+    <>
     <aside className={`sidebar ${mobileOpen ? "is-open" : ""}`} aria-label="Primary navigation">
       <div className="sidebar-head">
         <button
@@ -1510,10 +1613,44 @@ function Sidebar({
         </button>
       </div>
 
-      <div className="workspace-switcher">
-        <span className="workspace-avatar">A</span>
-        <span><b>Local workspace</b><small>Development</small></span>
-        <ChevronDown size={15} aria-hidden="true" />
+      <div className="workspace-menu-wrap" ref={workspaceMenuRef}>
+        <button
+          type="button"
+          className="workspace-switcher"
+          aria-haspopup="menu"
+          aria-expanded={workspaceMenuOpen}
+          aria-label={`Switch workspace. Current workspace: ${activeWorkspace?.name ?? "Loading"}`}
+          onClick={() => setWorkspaceMenuOpen((open) => !open)}
+        >
+          <span className="workspace-avatar">{(activeWorkspace?.name ?? "A").trim().charAt(0).toUpperCase()}</span>
+          <span><b>{activeWorkspace?.name ?? "Loading workspace…"}</b><small>{activeWorkspace?.is_default ? "Default workspace" : "Local workspace"}</small></span>
+          <ChevronDown size={15} aria-hidden="true" />
+        </button>
+        {workspaceMenuOpen && (
+          <div className="workspace-dropdown" role="menu" aria-label="Workspaces">
+            <div className="workspace-dropdown-heading">YOUR WORKSPACES</div>
+            {workspaceCatalog?.workspaces.map((workspace) => (
+              <button
+                key={workspace.id}
+                type="button"
+                role="menuitemradio"
+                aria-checked={workspace.id === workspaceCatalog.active_workspace_id}
+                className={`workspace-option ${workspace.id === workspaceCatalog.active_workspace_id ? "active" : ""}`}
+                onClick={() => switchWorkspace(workspace.id)}
+                disabled={workspace.status !== "ready"}
+              >
+                <span className="workspace-option-avatar">{workspace.name.charAt(0).toUpperCase()}</span>
+                <span className="workspace-option-copy"><b>{workspace.name}</b><small>{workspace.is_default ? "Default · existing project data" : "Isolated local workspace"}</small></span>
+                {workspace.id === workspaceCatalog.active_workspace_id && <CircleCheck size={15} aria-label="Current workspace" />}
+              </button>
+            ))}
+            <div className="workspace-dropdown-actions">
+              <button type="button" role="menuitem" onClick={() => openWorkspaceDialog("create")}><Plus size={14} /> Create workspace</button>
+              <button type="button" role="menuitem" onClick={() => openWorkspaceDialog("rename")} disabled={!activeWorkspace}><Pencil size={14} /> Rename current</button>
+            </div>
+            {workspaceError && <p className="workspace-dropdown-error" role="status">{workspaceError}</p>}
+          </div>
+        )}
       </div>
 
       <nav className="sidebar-nav">
@@ -1541,6 +1678,49 @@ function Sidebar({
         <p>AXIOM / BUILD AI. OWN AI.</p>
       </div>
     </aside>
+    {workspaceDialog && (
+      <AccessibleDialog
+        titleId="workspace-dialog-title"
+        descriptionId="workspace-dialog-description"
+        onClose={() => { if (!workspaceBusy) setWorkspaceDialog(null); }}
+        closeDisabled={workspaceBusy}
+        initialFocusRef={workspaceNameRef}
+      >
+        <form onSubmit={saveWorkspace} className="workspace-dialog-form">
+          <div className="dialog-head">
+            <div>
+              <p className="eyebrow">WORKSPACE MANAGEMENT</p>
+              <h2 id="workspace-dialog-title">{workspaceDialog === "create" ? "Create workspace" : "Rename workspace"}</h2>
+            </div>
+          </div>
+          <p id="workspace-dialog-description" className="quiet-note">
+            {workspaceDialog === "create"
+              ? "Create an isolated local workspace with its own model registry, native model storage, datasets, evaluations, workflow history and saved connector settings. An already-running Ollama service remains a shared local runtime."
+              : "Rename this workspace without moving or changing any of its local data."}
+          </p>
+          <label className="field">
+            <span className="field-label-row"><span>Workspace name</span></span>
+            <input
+              ref={workspaceNameRef}
+              value={workspaceNameInput}
+              onChange={(event) => setWorkspaceNameInput(event.target.value)}
+              maxLength={64}
+              autoComplete="off"
+              placeholder="e.g. Production models"
+              required
+            />
+          </label>
+          {workspaceError && <InlineAlert tone="warning" role="alert">{workspaceError}</InlineAlert>}
+          <div className="integration-form-actions">
+            <button type="button" className="button secondary-button" onClick={() => setWorkspaceDialog(null)} disabled={workspaceBusy}>Cancel</button>
+            <button type="submit" className="button primary-button" disabled={workspaceBusy || !workspaceNameInput.trim()}>
+              {workspaceBusy ? "Saving…" : workspaceDialog === "create" ? "Create workspace" : "Save name"}
+            </button>
+          </div>
+        </form>
+      </AccessibleDialog>
+    )}
+    </>
   );
 }
 
@@ -3297,6 +3477,88 @@ const workflowNodeLabels: Record<WorkflowNodeType, string> = {
   "report.export": "Export report",
 };
 
+const workflowNodePortSchemas: Record<WorkflowNodeType, WorkflowNodePortSchema> = {
+  "dataset.profile": {
+    inputs: [{ id: "artifact", data_type: "artifact", required: false }],
+    outputs: [
+      { id: "dataset", data_type: "dataset", required: false },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    required_any_inputs: [],
+  },
+  "model.inspect": {
+    inputs: [{ id: "artifact", data_type: "artifact", required: false }],
+    outputs: [
+      { id: "model", data_type: "model", required: false },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    required_any_inputs: [],
+  },
+  "training.plan": {
+    inputs: [
+      { id: "dataset", data_type: "dataset", required: true },
+      { id: "model", data_type: "model", required: true },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    outputs: [
+      { id: "plan", data_type: "plan", required: false },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    required_any_inputs: [],
+  },
+  "evaluation.run": {
+    inputs: [
+      { id: "plan", data_type: "plan", required: true },
+      { id: "dataset", data_type: "dataset", required: false },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    outputs: [
+      { id: "evaluation", data_type: "evaluation", required: false },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    required_any_inputs: [],
+  },
+  "report.export": {
+    inputs: [
+      { id: "dataset", data_type: "dataset", required: false },
+      { id: "plan", data_type: "plan", required: false },
+      { id: "evaluation", data_type: "evaluation", required: false },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    outputs: [
+      { id: "report", data_type: "report", required: false },
+      { id: "artifact", data_type: "artifact", required: false },
+    ],
+    required_any_inputs: ["dataset", "plan", "evaluation"],
+  },
+};
+
+function getWorkflowNodePorts(node: WorkflowNode): WorkflowNodePortSchema {
+  return node.ports ?? workflowNodePortSchemas[node.type];
+}
+
+function createWorkflowEdge(
+  source: WorkflowNode,
+  target: WorkflowNode,
+  allowGenericArtifact = false,
+): WorkflowEdge | null {
+  const sourcePorts = getWorkflowNodePorts(source).outputs;
+  const targetPorts = getWorkflowNodePorts(target).inputs;
+  const candidates = sourcePorts.flatMap((sourcePort) =>
+    targetPorts
+      .filter((targetPort) => targetPort.data_type === sourcePort.data_type)
+      .map((targetPort) => ({ sourcePort, targetPort })),
+  );
+  const selected = candidates.find((candidate) => candidate.sourcePort.data_type !== "artifact")
+    ?? (allowGenericArtifact ? candidates.find((candidate) => candidate.sourcePort.data_type === "artifact") : undefined);
+  return selected ? {
+    source: source.id,
+    target: target.id,
+    source_port: selected.sourcePort.id,
+    target_port: selected.targetPort.id,
+  } : null;
+}
+
 function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => void }) {
   const [workflows, setWorkflows] = useState<WorkspaceWorkflow[]>([]);
   const [workflowTotal, setWorkflowTotal] = useState(0);
@@ -3310,11 +3572,14 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
   const [templateId, setTemplateId] = useState("");
   const [name, setName] = useState("New local workflow");
   const [nodes, setNodes] = useState<WorkflowNode[]>([]);
-  const [edges, setEdges] = useState<Array<{ source: string; target: string }>>([]);
+  const [edges, setEdges] = useState<WorkflowEdge[]>([]);
   const [nodeType, setNodeType] = useState<WorkflowNodeType>("dataset.profile");
+  const [connectionSourceId, setConnectionSourceId] = useState("");
+  const [connectionTargetId, setConnectionTargetId] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [validation, setValidation] = useState("");
+  const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [dryRun, setDryRun] = useState<WorkflowDryRun | null>(null);
   const [dryRunBusy, setDryRunBusy] = useState(false);
@@ -3322,7 +3587,14 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
   const [dryRunMethod, setDryRunMethod] = useState("auto");
   const [dryRunSeed, setDryRunSeed] = useState("42");
   const [autosaveEnabled, setAutosaveEnabled] = useState(true);
+  const [workspaceCatalog, setWorkspaceCatalog] = useState<WorkspaceCatalog | null>(null);
+  const [deployTargetId, setDeployTargetId] = useState("");
+  const [deploymentBusy, setDeploymentBusy] = useState(false);
+  const [deploymentError, setDeploymentError] = useState("");
   const selectedWorkflow = workflows.find((workflow) => workflow.id === workflowId);
+  const deploymentTargets = workspaceCatalog?.workspaces.filter(
+    (workspace) => workspace.id !== workspaceCatalog.active_workspace_id && workspace.status === "ready",
+  ) ?? [];
   const workflowDirty = Boolean(selectedWorkflow && (
     name !== selectedWorkflow.name
     || JSON.stringify(nodes) !== JSON.stringify(selectedWorkflow.nodes)
@@ -3375,6 +3647,20 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
   useEffect(() => { void refresh(); }, []);
 
   useEffect(() => {
+    let active = true;
+    void axiomApi.workspaces().then((catalog) => {
+      if (!active) return;
+      setWorkspaceCatalog(catalog);
+      setDeployTargetId(catalog.workspaces.find(
+        (workspace) => workspace.id !== catalog.active_workspace_id && workspace.status === "ready",
+      )?.id ?? "");
+    }).catch((cause: unknown) => {
+      if (active) setDeploymentError(cause instanceof Error ? cause.message : "Workspace list unavailable.");
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
     if (!autosaveEnabled || !workflowId || !workflowDirty || saving) return;
     const timeout = window.setTimeout(() => {
       setSaving(true);
@@ -3399,7 +3685,10 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
     setName("New local workflow");
     setNodes([]);
     setEdges([]);
+    setConnectionSourceId("");
+    setConnectionTargetId("");
     setValidation("");
+    setValidationWarnings([]);
     setError("");
     setDryRun(null);
   };
@@ -3411,7 +3700,10 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
     setName(selected.name);
     setNodes(selected.nodes);
     setEdges(selected.edges);
+    setConnectionSourceId(selected.nodes[0]?.id ?? "");
+    setConnectionTargetId(selected.nodes.at(-1)?.id ?? "");
     setValidation("");
+    setValidationWarnings([]);
     setError("");
     setDryRun(null);
   };
@@ -3421,9 +3713,12 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
     if (!template) return;
     setWorkflowId(null);
     setName(template.name);
-    setNodes(template.nodes.map((node) => ({ ...node })));
+    setNodes(template.nodes.map((node) => ({ ...node, ports: node.ports ?? workflowNodePortSchemas[node.type] })));
     setEdges(template.edges.map((edge) => ({ ...edge })));
+    setConnectionSourceId(template.nodes[0]?.id ?? "");
+    setConnectionTargetId(template.nodes.at(-1)?.id ?? "");
     setValidation("");
+    setValidationWarnings([]);
     setError("");
     setDryRun(null);
   };
@@ -3438,7 +3733,10 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
       setName(result.workflow.name);
       setNodes(result.workflow.nodes);
       setEdges(result.workflow.edges);
+      setConnectionSourceId(result.workflow.nodes[0]?.id ?? "");
+      setConnectionTargetId(result.workflow.nodes.at(-1)?.id ?? "");
       setValidation("Copied as a new revision-1 design");
+      setValidationWarnings([]);
       setDryRun(null);
       onNotify("Workflow duplicated locally.", "success");
       await refresh();
@@ -3452,18 +3750,79 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
   const addNode = () => {
     if (nodes.length >= 64) return;
     const id = `step-${crypto.randomUUID()}`;
-    const previous = nodes.at(-1);
-    setNodes((current) => [...current, { id, type: nodeType }]);
-    if (previous) setEdges((current) => [...current, { source: previous.id, target: id }]);
+    const node: WorkflowNode = { id, type: nodeType, ports: workflowNodePortSchemas[nodeType] };
+    const occupiedInputs = new Set<string>();
+    const autoConnections = nodes.flatMap((existing) => {
+      const edge = createWorkflowEdge(existing, node);
+      if (!edge || occupiedInputs.has(edge.target_port ?? "")) return [];
+      occupiedInputs.add(edge.target_port ?? "");
+      return [edge];
+    });
+    setNodes((current) => [...current, node]);
+    setEdges((current) => [...current, ...autoConnections]);
+    setConnectionSourceId((current) => current || nodes[0]?.id || id);
+    setConnectionTargetId(id);
     setValidation("");
+    setValidationWarnings([]);
+    setDryRun(null);
+  };
+
+  const addConnection = () => {
+    const source = nodes.find((node) => node.id === connectionSourceId);
+    const target = nodes.find((node) => node.id === connectionTargetId);
+    if (!source || !target) {
+      setError("Choose an existing source step and target step.");
+      return;
+    }
+    if (source.id === target.id) {
+      setError("A workflow step cannot connect to itself.");
+      return;
+    }
+    const edge = createWorkflowEdge(source, target, true);
+    if (!edge) {
+      setError("These steps do not expose compatible output and input ports.");
+      return;
+    }
+    if (edges.some((existing) =>
+      existing.source === edge.source
+      && existing.target === edge.target
+      && existing.source_port === edge.source_port
+      && existing.target_port === edge.target_port
+    )) {
+      setError("That port connection already exists.");
+      return;
+    }
+    if (edges.some((existing) => existing.target === edge.target && existing.target_port === edge.target_port)) {
+      setError(`Input ${edge.target_port} already has a connection.`);
+      return;
+    }
+    setEdges((current) => [...current, edge]);
+    setError("");
+    setValidation("");
+    setValidationWarnings([]);
+    setDryRun(null);
+  };
+
+  const removeConnection = (edge: WorkflowEdge) => {
+    setEdges((current) => current.filter((existing) => !(
+      existing.source === edge.source
+      && existing.target === edge.target
+      && existing.source_port === edge.source_port
+      && existing.target_port === edge.target_port
+    )));
+    setValidation("");
+    setValidationWarnings([]);
     setDryRun(null);
   };
 
   const removeNode = (id: string) => {
     const remaining = nodes.filter((node) => node.id !== id);
     setNodes(remaining);
-    setEdges(remaining.slice(1).map((node, index) => ({ source: remaining[index].id, target: node.id })));
+    setEdges((current) => current.filter((edge) => edge.source !== id && edge.target !== id));
+    if (connectionSourceId === id) setConnectionSourceId(remaining[0]?.id ?? "");
+    if (connectionTargetId === id) setConnectionTargetId(remaining.at(-1)?.id ?? "");
     setValidation("");
+    setValidationWarnings([]);
     setDryRun(null);
   };
 
@@ -3501,10 +3860,13 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
     setValidation("");
     try {
       const result = await axiomApi.validateWorkflow({ name, nodes, edges });
-      setValidation(`${result.node_count} steps · ${result.connection_count} connections · no cycles`);
+      const warnings = (result.missing_inputs ?? []).map((item) => `${item.node_id} · ${item.port_id}: ${item.reason}`);
+      setValidation(`${result.node_count} steps · ${result.connection_count} connections · no cycles${warnings.length ? ` · ${warnings.length} input warning(s)` : " · required inputs connected"}`);
+      setValidationWarnings(warnings);
       return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Workflow validation failed.");
+      setValidationWarnings([]);
       return false;
     }
   };
@@ -3539,12 +3901,50 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
     downloadBlob(blob, `workflow-${dryRun.workflow_id}-reproducibility.json`);
   };
 
+  const deployWorkflow = async () => {
+    if (!workflowId || workflowDirty || !deployTargetId || deploymentBusy) return;
+    setDeploymentBusy(true);
+    setDeploymentError("");
+    try {
+      const result = await axiomApi.deployWorkflow(workflowId, deployTargetId);
+      onNotify(
+        `Published a separate copy of “${result.workflow.name}” to ${result.deployment.target_workspace_name}. No workflow job was executed.`,
+        "success",
+      );
+    } catch (cause) {
+      setDeploymentError(cause instanceof Error ? cause.message : "Workflow could not be published.");
+    } finally {
+      setDeploymentBusy(false);
+    }
+  };
+
   return <FeaturePage page="workflows" actions={<><button type="button" className="button secondary-button" onClick={() => void duplicateWorkflow()} disabled={!workflowId || saving}><Copy size={15} /> Duplicate selected</button><button type="button" className="button secondary-button" onClick={startNew}><Plus size={16} /> New workflow</button></>}>
     <div className="info-grid">
       <InfoCard icon={GitBranch} label="Saved graphs" value={loading ? "—" : String(workflows.length)} detail="Persistent local workflows" tone={workflows.length ? "success" : "neutral"} />
       <InfoCard icon={CircleCheck} label="Validation" value={validation ? "Passed" : "On demand"} detail={validation || "Backend checks graph structure"} tone={validation ? "success" : "neutral"} />
       <InfoCard icon={TriangleAlert} label="Execution" value="Disabled" detail="No training runner is attached" tone="warning" />
     </div>
+    <Surface title="Workspace deployment" eyebrow="PUBLISH A WORKFLOW DESIGN" action={<StatusPill tone="neutral">COPY ONLY</StatusPill>}>
+      <div className="workflow-deploy-row">
+        <div className="workflow-deploy-copy">
+          <b>Publish to another workspace</b>
+          <small>Copy the saved graph into a workspace with its own model registry, native model storage, datasets and workflow history. A running Ollama daemon remains shared. Publishing does not run training or evaluation.</small>
+        </div>
+        <label className="field workflow-deploy-target">
+          <span className="field-label-row"><span>Target workspace</span></span>
+          <select value={deployTargetId} onChange={(event) => setDeployTargetId(event.target.value)} disabled={!deploymentTargets.length}>
+            <option value="">{deploymentTargets.length ? "Choose a workspace" : "Create another workspace first"}</option>
+            {deploymentTargets.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
+          </select>
+        </label>
+        <button type="button" className="button primary-button" onClick={() => void deployWorkflow()} disabled={!workflowId || workflowDirty || !deployTargetId || deploymentBusy}>
+          {deploymentBusy ? "Publishing…" : "Publish workflow copy"}
+        </button>
+      </div>
+      {workflowDirty && workflowId && <p className="quiet-note">Save your unsaved graph changes before publishing.</p>}
+      {deploymentError && <InlineAlert tone="warning" role="alert">{deploymentError}</InlineAlert>}
+      {selectedWorkflow?.deployment && <div className="dataset-quality-check passed"><b>Published copy</b><small>Source: {selectedWorkflow.deployment.source_workspace_name} · published {formatTimestamp(selectedWorkflow.deployment.deployed_at)} · this design remains non-executable.</small></div>}
+    </Surface>
     <div className="two-column-grid workflow-layout">
       <Surface title="Workflow graph" eyebrow="DESIGN / VALIDATE / SAVE" action={<StatusPill tone="neutral">NOT EXECUTABLE</StatusPill>}>
         <div className="workflow-template-row">
@@ -3552,7 +3952,7 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
           <button type="button" className="button secondary-button" onClick={loadTemplate} disabled={!templateId}><FileCode2 size={15} /> Load template</button>
         </div>
         {templateId && <p className="quiet-note">{templates.find((template) => template.id === templateId)?.description}</p>}
-        <label className="field"><span className="field-label-row"><span>Workflow name</span></span><input value={name} maxLength={120} onChange={(event) => { setName(event.target.value); setValidation(""); setDryRun(null); }} /></label>
+        <label className="field"><span className="field-label-row"><span>Workflow name</span></span><input value={name} maxLength={120} onChange={(event) => { setName(event.target.value); setValidation(""); setValidationWarnings([]); setDryRun(null); }} /></label>
         <div className="workflow-builder-controls">
           <label className="field"><span className="field-label-row"><span>Add step</span></span><select value={nodeType} onChange={(event) => setNodeType(event.target.value as WorkflowNodeType)}>{Object.entries(workflowNodeLabels).map(([type, label]) => <option key={type} value={type}>{label}</option>)}</select></label>
           <button type="button" className="button secondary-button" onClick={addNode} disabled={nodes.length >= 64}><Plus size={15} /> {nodes.length >= 64 ? "Step limit reached" : "Add step"}</button>
@@ -3563,12 +3963,55 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
           <label className="field"><span className="field-label-row"><span>Planned seed</span></span><input inputMode="numeric" value={dryRunSeed} onChange={(event) => { setDryRunSeed(event.target.value); setDryRun(null); }} maxLength={10} /></label>
         </div>
         <label className="workflow-autosave-toggle"><input type="checkbox" checked={autosaveEnabled} onChange={(event) => setAutosaveEnabled(event.target.checked)} /><span><b>Autosave selected workflow</b><small>Existing saved designs update locally 900 ms after an edit; new workflows still require Save workflow.</small></span></label>
-        {nodes.length ? <div className="workflow-canvas" aria-label="Workflow steps">{nodes.map((node, index) => <Fragment key={node.id}>
-          {index > 0 && <div className="workflow-connector" aria-hidden="true"><ArrowRight size={16} /></div>}
-          <div className="workflow-node"><span className="workflow-node-number">{String(index + 1).padStart(2, "0")}</span><b>{workflowNodeLabels[node.type]}</b><button type="button" className="workflow-node-remove" onClick={() => removeNode(node.id)} aria-label={`Remove ${workflowNodeLabels[node.type]} step`}><X size={13} /></button><small>{node.type}</small></div>
-        </Fragment>)}</div> : <EmptyState icon={GitBranch} title="Start with a workflow step" description="Add typed steps and the builder will connect them in order. The backend checks IDs, references, duplicates, size, and cycles." />}
+        {nodes.length ? <>
+          <div className="workflow-canvas" aria-label="Workflow graph nodes">
+            {nodes.map((node, index) => {
+              const ports = getWorkflowNodePorts(node);
+              return <div className="workflow-node" key={node.id}>
+                <div className="workflow-node-heading">
+                  <span className="workflow-node-number">{String(index + 1).padStart(2, "0")}</span>
+                  <b>{workflowNodeLabels[node.type]}</b>
+                  <button type="button" className="workflow-node-remove" onClick={() => removeNode(node.id)} aria-label={`Remove ${workflowNodeLabels[node.type]} step`}><X size={13} /></button>
+                </div>
+                <small className="workflow-node-id">{node.id} · {node.type}</small>
+                <div className="workflow-port-columns">
+                  <div><span className="workflow-port-heading">INPUTS</span>{ports.inputs.map((port) => <span className={`workflow-port ${port.required ? "required" : ""}`} key={port.id}>{port.id} · {port.data_type}{port.required ? " · required" : ""}</span>)}</div>
+                  <div><span className="workflow-port-heading">OUTPUTS</span>{ports.outputs.map((port) => <span className="workflow-port" key={port.id}>{port.id} · {port.data_type}</span>)}</div>
+                </div>
+              </div>;
+            })}
+          </div>
+          <div className="workflow-connection-controls">
+            <label className="field"><span className="field-label-row"><span>From step</span></span>
+              <select aria-label="Connection source" value={connectionSourceId} onChange={(event) => setConnectionSourceId(event.target.value)}>
+                <option value="">Choose source</option>
+                {nodes.map((node) => <option key={node.id} value={node.id}>{workflowNodeLabels[node.type]} · {node.id.slice(0, 8)}</option>)}
+              </select>
+            </label>
+            <label className="field"><span className="field-label-row"><span>To step</span></span>
+              <select aria-label="Connection target" value={connectionTargetId} onChange={(event) => setConnectionTargetId(event.target.value)}>
+                <option value="">Choose target</option>
+                {nodes.map((node) => <option key={node.id} value={node.id}>{workflowNodeLabels[node.type]} · {node.id.slice(0, 8)}</option>)}
+              </select>
+            </label>
+            <button type="button" className="button secondary-button" onClick={addConnection} disabled={nodes.length < 2 || saving}><GitBranch size={15} /> Add connection</button>
+          </div>
+          <div className="workflow-edge-list" aria-label="Workflow connections">
+            <div className="workflow-edge-list-heading">CONNECTIONS · {edges.length}</div>
+            {edges.length ? edges.map((edge, index) => {
+              const source = nodes.find((node) => node.id === edge.source);
+              const target = nodes.find((node) => node.id === edge.target);
+              return <div className="workflow-edge-row" key={`${edge.source}:${edge.source_port}:${edge.target}:${edge.target_port}:${index}`}>
+                <span><b>{source ? workflowNodeLabels[source.type] : edge.source}</b><small>{edge.source_port ?? "legacy output"}</small></span>
+                <ArrowRight size={15} aria-hidden="true" />
+                <span><b>{target ? workflowNodeLabels[target.type] : edge.target}</b><small>{edge.target_port ?? "legacy input"}</small></span>
+                <button type="button" className="workflow-node-remove" onClick={() => removeConnection(edge)} aria-label={`Remove connection from ${edge.source} to ${edge.target}`}><X size={13} /></button>
+              </div>;
+            }) : <p className="quiet-note">No connections yet. Add a compatible edge between two steps.</p>}
+          </div>
+        </> : <EmptyState icon={GitBranch} title="Start with a workflow step" description="Add typed steps, then connect their compatible ports. The backend validates port types, required inputs, duplicate links and cycles." />}
         {error && <InlineAlert tone="warning" role="alert">{error}</InlineAlert>}
-        {validation && <InlineAlert tone="success">{validation}</InlineAlert>}
+        {validation && <InlineAlert tone={validationWarnings.length ? "warning" : "success"}>{validation}{validationWarnings.length > 0 && <ul>{validationWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}</InlineAlert>}
         <div className="integration-form-actions">
           <button type="button" className="button secondary-button" onClick={() => void runDryRun()} disabled={!workflowId || workflowDirty || saving || dryRunBusy}>{dryRunBusy ? "Estimating…" : workflowDirty ? "Save to dry-run changes" : "Dry-run saved graph"}</button>
           <button type="button" className="button secondary-button" onClick={() => void validateGraph()} disabled={saving}>Validate graph</button>

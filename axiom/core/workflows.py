@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from axiom.core.storage import atomic_write_text, file_lock
+from axiom.core.workspace_context import workspace_metadata_dir
 
 WORKFLOW_NODE_TYPES = frozenset(
     {"dataset.profile", "model.inspect", "training.plan", "evaluation.run", "report.export"}
@@ -72,6 +73,18 @@ def workflow_node_port_schema(node_type: str) -> dict[str, Any]:
     except KeyError as exc:
         raise ValueError(f"Unsupported workflow node type: {node_type}") from exc
     return json.loads(json.dumps(schema))
+
+
+def _normalize_persisted_workflow_graph(
+    nodes: Any,
+    edges: Any,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    # Older releases allowed an empty draft placeholder in the local store.
+    # Preserve it during reads/migration; actual validation and new saves still
+    # require at least one node.
+    if nodes == [] and edges == []:
+        return [], []
+    return normalize_workflow_graph(nodes, edges)
 
 
 def normalize_workflow_graph(
@@ -237,7 +250,7 @@ class WorkflowStore:
     """Store a bounded list of locally authored workflow graphs."""
 
     def __init__(self, root: Path | None = None) -> None:
-        self.root = Path(root) if root is not None else Path(".axiom")
+        self.root = Path(root) if root is not None else workspace_metadata_dir()
         self.records_file = self.root / "workflows.json"
         self.lock_file = self.root / ".workflows.lock"
 
@@ -274,11 +287,11 @@ class WorkflowStore:
             ):
                 raise ValueError(f"Invalid workflow schema in {self.records_file}")
             try:
-                record["nodes"], record["edges"] = normalize_workflow_graph(
+                record["nodes"], record["edges"] = _normalize_persisted_workflow_graph(
                     record.get("nodes"), record.get("edges"),
                 )
                 for version in record["versions"]:
-                    version["nodes"], version["edges"] = normalize_workflow_graph(
+                    version["nodes"], version["edges"] = _normalize_persisted_workflow_graph(
                         version.get("nodes"), version.get("edges"),
                     )
             except (TypeError, ValueError) as exc:

@@ -33,6 +33,47 @@ labels a saved design `execution_status: not_executable`:
 
     axiom mcp allow axiom_workflow_read
 
+## Schema v2 and typed graph ports
+
+Workflow graphs use schema version 2. Each supported node type receives a
+backend-owned port schema with named input/output ports, data types, required
+flags, and optional "one of" input requirements. The current design node types
+are:
+
+- `dataset.profile`: emits a `dataset` and a generic `artifact`.
+- `model.inspect`: emits a `model` and a generic `artifact`.
+- `training.plan`: requires both `dataset` and `model`; emits a `plan`.
+- `evaluation.run`: requires a `plan`; can also accept a `dataset`; emits an `evaluation`.
+- `report.export`: accepts dataset, plan, evaluation, or generic artifact inputs and requires at least one of the first three.
+
+Connections now identify `source_port` and `target_port` as well as their
+source/target node IDs. The backend checks that both ports exist, their data
+types match, each target input has at most one connection, the graph is
+acyclic, and required inputs are connected. Structural/port errors are
+rejected; missing required inputs are returned as validation warnings so an
+incomplete design can still be saved and edited.
+
+The Models/Workflows graph editor displays node port schemas, automatically
+connects compatible typed ports when adding a step, and allows explicit
+connections between selected nodes. Branching connections are stored and
+autosaved as graph edges; removing a node removes only its attached edges.
+Connection rendering is based on the saved graph rather than the order in
+which nodes were added.
+
+Schema-v1 workflows migrate when read: the backend assigns authoritative
+ports and upgrades untyped legacy edges. When a v1 edge has no matching
+specific data type, it is preserved through the generic `artifact` ports.
+The migration does not delete old workflow data. Saving an updated migrated
+record writes schema version 2 and retains normalized prior revision snapshots.
+Schema-v2 node ports are authoritative; client-supplied port definitions must
+match the backend-owned schema.
+
+The validation endpoint remains backend-owned:
+`POST /api/workflows/validate` returns structural validity, node/connection
+counts, and any missing input warnings. A valid graph or dry-run remains a
+design/planning result only; nodes are not executed and no training or
+evaluation jobs are created.
+
 ## Design is not execution
 
 A valid design or successful dry run does not prove a workload ran. These design tools do not themselves start training/fine-tuning, run inference, create checkpoints, provide production model serving, or prove an external framework is installed and connected.

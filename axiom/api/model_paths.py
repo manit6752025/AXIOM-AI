@@ -11,6 +11,8 @@ import os
 from collections.abc import Iterable
 from pathlib import Path
 
+from axiom.core.workspace_context import active_workspace_root
+
 _MODEL_ROOT_NAMES = (
     "models",
     ".axiom/models",
@@ -22,7 +24,7 @@ _OUTPUT_ROOT_NAMES = (
 
 
 def _trusted_roots(names: Iterable[str]) -> tuple[Path, ...]:
-    base = os.path.realpath(os.getcwd())
+    base = os.path.realpath(os.fspath(active_workspace_root()))
     roots: list[Path] = []
     for name in names:
         roots.append(Path(os.path.realpath(os.path.join(base, name))))

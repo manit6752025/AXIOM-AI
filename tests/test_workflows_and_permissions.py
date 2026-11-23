@@ -1,7 +1,7 @@
 import json
 
 from axiom.core.tool_permissions import TOOL_SCOPES, ToolPermissionStore
-from axiom.core.workflows import WorkflowStore, normalize_workflow_graph, validate_workflow_graph
+from axiom.core.workflows import WorkflowStore, validate_workflow_graph
 
 
 def test_tool_permissions_deny_by_default_and_follow_active_profile(tmp_path):
@@ -162,9 +162,17 @@ def test_workflow_and_mcp_profiles_are_available_through_workspace_api(tmp_path,
 
         template_response = client.get("/api/workflows/templates")
         assert template_response.status_code == 200
-        assert {item["id"] for item in template_response.json()["templates"]} >= {
+        templates = template_response.json()["templates"]
+        assert {item["id"] for item in templates} >= {
             "dataset-audit",
             "supervised-finetuning",
+        }
+        supervised = next(item for item in templates if item["id"] == "supervised-finetuning")
+        assert supervised["schema_version"] == 2
+        plan_edges = [edge for edge in supervised["edges"] if edge["target"] == "plan"]
+        assert {(edge["source"], edge["source_port"], edge["target_port"]) for edge in plan_edges} == {
+            ("dataset", "dataset", "dataset"),
+            ("model", "model", "model"),
         }
 
         validation = client.post("/api/workflows/validate", json=workflow_payload)

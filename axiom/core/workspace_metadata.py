@@ -15,6 +15,8 @@ import tempfile
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
+
+from axiom.core.workspace_context import active_workspace_root
 from typing import Any
 
 from axiom.core.agent_profiles import AgentProfileStore
@@ -54,7 +56,7 @@ _EXCLUDED = [
 
 
 def _workspace_root(workspace: str | Path | None) -> Path:
-    candidate = Path.cwd() if workspace is None else Path(workspace).expanduser()
+    candidate = active_workspace_root() if workspace is None else Path(workspace).expanduser()
     if candidate.is_symlink():
         raise ValueError("Workspace directory must not be a symbolic link.")
     try:

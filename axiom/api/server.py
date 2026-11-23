@@ -23,6 +23,7 @@ from axiom.api.llm_client import router as llm_client_router
 from axiom.api.server_optimizer_routes import register_optimizer_routes
 from axiom.api.security import router as security_router
 from axiom.api.workspace import router as workspace_router
+from axiom.api.workspaces import router as workspaces_router
 from axiom.api.workflows import router as workflows_router
 from axiom.version import __version__
 
@@ -191,9 +192,34 @@ def create_app() -> Any:
                     403,
                 )
 
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-        return response
+        from axiom.core.workspace_context import reset_workspace_context, set_workspace_context
+        from axiom.core.workspaces import WorkspaceCatalogError, WorkspaceNotFoundError, WorkspaceRegistry
+
+        workspace_token = None
+        try:
+            selected_workspace = WorkspaceRegistry().resolve(
+                request.headers.get("X-AXIOM-Workspace-ID")
+            )
+            workspace_token = set_workspace_context(selected_workspace.root, selected_workspace.id)
+        except WorkspaceNotFoundError:
+            return error_response(
+                request, "workspace_not_found", "The selected AXIOM workspace does not exist.",
+                {"header": "X-AXIOM-Workspace-ID"}, 404,
+            )
+        except (OSError, WorkspaceCatalogError):
+            return error_response(
+                request, "workspace_unavailable", "The selected AXIOM workspace is unavailable.",
+                {"header": "X-AXIOM-Workspace-ID"}, 400,
+            )
+
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request_id
+            response.headers["X-AXIOM-Workspace-ID"] = selected_workspace.id
+            return response
+        finally:
+            if workspace_token is not None:
+                reset_workspace_context(workspace_token)
 
     def error_response(
         request: Request,
@@ -255,6 +281,7 @@ def create_app() -> Any:
 
     register_optimizer_routes(app)
     app.include_router(workspace_router)
+    app.include_router(workspaces_router)
     app.include_router(workflows_router)
     app.include_router(security_router)
     app.include_router(evaluation_router)

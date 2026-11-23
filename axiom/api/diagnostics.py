@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
 from axiom.core.diagnostics import create_support_bundle, diagnose_workspace
+from axiom.core.workspace_context import active_workspace_root
 from axiom.core.roadmap import audit_roadmap
 from axiom.core.runtime_traces import clear_runtime_traces, list_runtime_traces
 
@@ -15,7 +16,7 @@ router = APIRouter(prefix="/api/diagnostics", tags=["diagnostics"])
 def workspace_diagnostics() -> dict:
     """Run read-only workspace checks without returning config values."""
     try:
-        return diagnose_workspace()
+        return diagnose_workspace(cwd=active_workspace_root())
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="Workspace diagnostics could not be completed safely.") from exc
 
@@ -24,7 +25,7 @@ def workspace_diagnostics() -> dict:
 def download_support_bundle() -> Response:
     """Download a support archive containing only privacy-safe metadata."""
     try:
-        content = create_support_bundle()
+        content = create_support_bundle(active_workspace_root())
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="The support bundle could not be generated safely.") from exc
     return Response(

@@ -5,12 +5,18 @@ from datetime import UTC, datetime
 from threading import Lock
 from typing import Any, Literal
 
+from axiom.core.workspace_context import active_workspace_id
+
 MAX_RUNTIME_TRACES = 200
 TraceOperation = Literal["inference.generate", "inference.benchmark"]
 TraceStatus = Literal["success", "error"]
 
-_traces: deque[dict[str, Any]] = deque(maxlen=MAX_RUNTIME_TRACES)
+_traces_by_workspace: dict[str, deque[dict[str, Any]]] = {}
 _lock = Lock()
+
+
+def _trace_workspace_key() -> str:
+    return active_workspace_id() or "__default__"
 
 
 def record_runtime_trace(
@@ -64,7 +70,8 @@ def record_runtime_trace(
         "error_code": error_code,
     }
     with _lock:
-        _traces.appendleft(trace)
+        buffer = _traces_by_workspace.setdefault(_trace_workspace_key(), deque(maxlen=MAX_RUNTIME_TRACES))
+        buffer.appendleft(trace)
         return dict(trace)
 
 
@@ -82,8 +89,9 @@ def list_runtime_traces(
         raise ValueError("Runtime trace search must contain at most 120 characters.")
     needle = search.strip().casefold()
     with _lock:
-        retained = [dict(item) for item in _traces]
-        total_retained = len(_traces)
+        buffer = _traces_by_workspace.get(_trace_workspace_key(), ())
+        retained = [dict(item) for item in buffer]
+        total_retained = len(buffer)
     filtered = retained
     if needle:
         filtered = [
@@ -117,8 +125,10 @@ def list_runtime_traces(
 def clear_runtime_traces() -> dict[str, Any]:
     """Clear the in-memory trace buffer and return how many entries were removed."""
     with _lock:
-        cleared = len(_traces)
-        _traces.clear()
+        buffer = _traces_by_workspace.get(_trace_workspace_key())
+        cleared = len(buffer) if buffer is not None else 0
+        if buffer is not None:
+            buffer.clear()
     return {
         "cleared": cleared,
         "remaining": 0,

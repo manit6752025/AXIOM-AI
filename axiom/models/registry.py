@@ -10,6 +10,7 @@ from pathlib import Path
 from axiom.core.resource_ids import legacy_resource_id, new_resource_id
 
 from axiom.core.storage import atomic_write_text, file_lock
+from axiom.core.workspace_context import workspace_metadata_dir
 
 
 @dataclass
@@ -119,7 +120,7 @@ class ModelRegistry:
         *,
         create: bool = True,
     ):
-        self.root = Path(root) if root is not None else Path(".axiom")
+        self.root = Path(root) if root is not None else workspace_metadata_dir()
         self.registry_file = self.root / "models.json"
         self.lock_file = self.root / ".models.lock"
 

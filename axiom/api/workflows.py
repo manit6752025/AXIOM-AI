@@ -19,6 +19,8 @@ from axiom.core.workflows import (
     validate_workflow_graph,
 )
 from axiom.core.workflow_planning import build_workflow_planning_preview
+from axiom.core.workspace_context import active_workspace_id
+from axiom.core.workspaces import WorkspaceCatalogError, WorkspaceNotFoundError, WorkspaceRegistry
 from axiom.version import __version__
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
@@ -92,6 +94,16 @@ class WorkflowDryRunInput(BaseModel):
     parameter_billions: float = Field(default=7.0, gt=0, le=1000)
     method: Literal["auto", "qlora", "lora", "full"] = "auto"
     seed: int = Field(default=42, ge=0, le=4_294_967_295)
+
+
+class WorkflowDeploymentInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    target_workspace_id: str = Field(
+        min_length=22,
+        max_length=35,
+        pattern=r"^(?:local-[a-f0-9]{16}|ws-[a-f0-9]{32})$",
+    )
 
 
 def _validated_payload(request: WorkflowInput) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
@@ -239,6 +251,66 @@ def duplicate_workflow(workflow_id: str) -> dict[str, Any]:
 
     record_workspace_event("workflows.duplicated", "Duplicated a local workflow design")
     return {"workflow": record}
+
+
+@router.post("/{workflow_id}/deploy", status_code=201)
+def deploy_workflow(workflow_id: str, request: WorkflowDeploymentInput) -> dict[str, Any]:
+    """Publish an immutable design copy into a different local workspace; never execute it."""
+    registry = WorkspaceRegistry()
+    source_workspace_id = active_workspace_id() or registry.default_workspace_id()
+    try:
+        source_workspace = registry.resolve(source_workspace_id)
+        target_workspace = registry.resolve(request.target_workspace_id)
+        source = WorkflowStore().get(workflow_id)
+    except WorkspaceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Source or target workspace was not found.") from exc
+    except (OSError, WorkspaceCatalogError) as exc:
+        raise HTTPException(status_code=400, detail="Workspace deployment could not be resolved safely.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="Workflow history is invalid.") from exc
+
+    if source is None:
+        raise HTTPException(status_code=404, detail="Workflow not found.")
+    if target_workspace.id == source_workspace.id:
+        raise HTTPException(status_code=409, detail="Choose a different target workspace.")
+
+    deployed_at = datetime.now(UTC).isoformat()
+    deployed_record = {
+        **source,
+        "id": new_resource_id(),
+        "name": source["name"],
+        "created_at": deployed_at,
+        "updated_at": deployed_at,
+        "revision": 1,
+        "versions": [],
+        "execution_status": "not_executable",
+        "deployment": {
+            "source_workspace_id": source_workspace.id,
+            "source_workspace_name": source_workspace.name,
+            "source_workflow_id": source["id"],
+            "deployed_at": deployed_at,
+            "status": "published_copy",
+        },
+    }
+    try:
+        WorkflowStore(root=target_workspace.root / ".axiom").save(deployed_record)
+    except WorkflowStoreFullError as exc:
+        raise HTTPException(status_code=409, detail="The target workspace workflow history is full.") from exc
+    except (OSError, TimeoutError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail="Workflow copy could not be published.") from exc
+
+    from axiom.api.workspace import record_workspace_event
+
+    record_workspace_event("workflows.deployed", "Published a workflow design to another local workspace")
+    return {
+        "workflow": deployed_record,
+        "deployment": {
+            "target_workspace_id": target_workspace.id,
+            "target_workspace_name": target_workspace.name,
+            "status": "published_copy",
+            "executed": False,
+        },
+    }
 
 
 @router.post("/{workflow_id}/dry-run")

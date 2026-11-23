@@ -1,6 +1,16 @@
 import { recordFrontendError } from "../diagnostics/frontendErrors";
 
 const API_BASE = import.meta.env.VITE_AXIOM_API_URL || "";
+const ACTIVE_WORKSPACE_KEY = "axiom-active-workspace";
+
+function withActiveWorkspace(headers: HeadersInit = {}): Headers {
+  const result = new Headers(headers);
+  try {
+    const workspaceId = window.localStorage.getItem(ACTIVE_WORKSPACE_KEY);
+    if (workspaceId) result.set("X-AXIOM-Workspace-ID", workspaceId);
+  } catch { /* browser storage may be unavailable in restricted contexts */ }
+  return result;
+}
 
 let inFlightApiRequestCount = 0;
 
@@ -1031,8 +1041,42 @@ export type WorkflowNodeType =
   | "evaluation.run"
   | "report.export";
 
-export type WorkflowNode = { id: string; type: WorkflowNodeType };
-export type WorkflowEdge = { source: string; target: string };
+export type WorkflowPortDefinition = {
+  id: string;
+  data_type: string;
+  required: boolean;
+};
+export type WorkflowNodePortSchema = {
+  inputs: WorkflowPortDefinition[];
+  outputs: WorkflowPortDefinition[];
+  required_any_inputs: string[];
+};
+export type WorkflowNode = {
+  id: string;
+  type: WorkflowNodeType;
+  ports?: WorkflowNodePortSchema;
+};
+export type WorkflowEdge = {
+  source: string;
+  target: string;
+  source_port?: string;
+  target_port?: string;
+};
+export type WorkspaceSummary = {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  is_default: boolean;
+  status: "ready" | "missing";
+};
+export type WorkspaceCatalog = {
+  schema_version: 1;
+  active_workspace_id: string;
+  default_workspace_id: string;
+  workspaces: WorkspaceSummary[];
+  scope_note: string;
+};
 export type WorkspaceWorkflowVersion = {
   revision: number;
   updated_at: string;
@@ -1051,6 +1095,13 @@ export type WorkspaceWorkflow = {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   execution_status: "not_executable";
+  deployment?: {
+    source_workspace_id: string;
+    source_workspace_name: string;
+    source_workflow_id: string;
+    deployed_at: string;
+    status: "published_copy";
+  };
 };
 export type WorkflowTemplate = {
   id: string;
@@ -1241,7 +1292,7 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
     ?? `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
-  const headers = new Headers(init.headers);
+  const headers = withActiveWorkspace(init.headers);
   headers.set("Accept", "application/json");
   headers.set("X-Request-ID", requestId);
   if (init.body && !headers.has("Content-Type")) {
@@ -1313,11 +1364,11 @@ async function streamLocalInferenceRequest(
     ?? ("ui-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12));
   const response = await fetch(API_BASE + "/api/inference/generate/stream", {
     method: "POST",
-    headers: {
+    headers: withActiveWorkspace({
       Accept: "application/x-ndjson",
       "Content-Type": "application/json",
       "X-Request-ID": requestId,
-    },
+    }),
     body: JSON.stringify(input),
     signal,
   });
@@ -1392,7 +1443,7 @@ async function streamAxiomEngineRequest(
   });
   const response = await fetch(`${API_BASE}/api/engine/generate/stream`, {
     method: "POST",
-    headers,
+    headers: withActiveWorkspace(headers),
     body: JSON.stringify(input),
     signal,
   });
@@ -1636,7 +1687,7 @@ export const axiomApi = {
     const timeout = window.setTimeout(() => controller.abort(), 30_000);
     try {
       const response = await fetch(`${API_BASE}/api/workspace/metadata/export`, {
-        headers: { Accept: "application/vnd.axiom.workspace-metadata+zip", "X-Request-ID": requestId },
+        headers: withActiveWorkspace({ Accept: "application/vnd.axiom.workspace-metadata+zip", "X-Request-ID": requestId }),
         signal: controller.signal,
         cache: "no-store",
       });
@@ -1672,11 +1723,11 @@ export const axiomApi = {
       const query = replace ? "?replace=true" : "";
       const response = await fetch(`${API_BASE}/api/workspace/metadata/import${query}`, {
         method: "POST",
-        headers: {
+        headers: withActiveWorkspace({
           Accept: "application/json",
           "Content-Type": "application/vnd.axiom.workspace-metadata+zip",
           "X-Request-ID": requestId,
-        },
+        }),
         body: file,
         signal: controller.signal,
         cache: "no-store",
@@ -1713,7 +1764,7 @@ export const axiomApi = {
     const timeout = window.setTimeout(() => controller.abort(), 15_000);
     try {
       const response = await fetch(`${API_BASE}/api/diagnostics/support-bundle`, {
-        headers: { Accept: "application/zip", "X-Request-ID": requestId },
+        headers: withActiveWorkspace({ Accept: "application/zip", "X-Request-ID": requestId }),
         signal: controller.signal,
         cache: "no-store",
       });
@@ -1836,6 +1887,18 @@ export const axiomApi = {
       method: "DELETE",
     }),
 
+  workspaces: () => requestJson<WorkspaceCatalog>("/api/workspaces"),
+
+  createWorkspace: (name: string) => requestJson<{ workspace: WorkspaceSummary }>("/api/workspaces", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  }),
+
+  renameWorkspace: (workspaceId: string, name: string) => requestJson<{ workspace: WorkspaceSummary }>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}`,
+    { method: "PATCH", body: JSON.stringify({ name }) },
+  ),
+
   workflowsPage: (input: { limit?: number; after_workflow_id?: string; q?: string } = {}) => {
     const query = new URLSearchParams({ limit: String(input.limit ?? 20) });
     if (input.after_workflow_id) query.set("after_workflow_id", input.after_workflow_id);
@@ -1865,7 +1928,12 @@ export const axiomApi = {
     name: string;
     nodes: WorkflowNode[];
     edges: WorkflowEdge[];
-  }) => requestJson<{ valid: boolean; node_count: number; connection_count: number }>(
+  }) => requestJson<{
+    valid: boolean;
+    node_count: number;
+    connection_count: number;
+    missing_inputs: Array<{ node_id: string; port_id: string; reason: string }>;
+  }>(
     "/api/workflows/validate",
     { method: "POST", body: JSON.stringify(workflow) },
   ),
@@ -1897,6 +1965,15 @@ export const axiomApi = {
   duplicateWorkflow: (id: string) =>
     requestJson<{ workflow: WorkspaceWorkflow }>(`/api/workflows/${encodeURIComponent(id)}/duplicate`, {
       method: "POST",
+    }),
+
+  deployWorkflow: (id: string, targetWorkspaceId: string) =>
+    requestJson<{
+      workflow: WorkspaceWorkflow;
+      deployment: { target_workspace_id: string; target_workspace_name: string; status: "published_copy"; executed: false };
+    }>(`/api/workflows/${encodeURIComponent(id)}/deploy`, {
+      method: "POST",
+      body: JSON.stringify({ target_workspace_id: targetWorkspaceId }),
     }),
 
   workflowVersions: async (id: string) => {

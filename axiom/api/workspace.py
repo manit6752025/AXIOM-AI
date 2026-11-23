@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from axiom.core.hardware import detect_hardware
+from axiom.core.workspace_context import active_workspace_root
 from axiom.core.experiments import ExperimentStore
 from axiom.datasets.profiler import (
     DEFAULT_MAX_BYTES,
@@ -42,6 +43,7 @@ from axiom.core.plan_reproducibility import (
     reproducible_plan_document,
 )
 from axiom.version import __version__
+from axiom.core.workspace_context import active_workspace_id
 from axiom.core.workspace_metadata import (
     ARCHIVE_FORMAT,
     MAX_ARCHIVE_BYTES,
@@ -50,8 +52,12 @@ from axiom.core.workspace_metadata import (
 )
 
 router = APIRouter(prefix="/api/workspace", tags=["workspace"])
-_events: deque[dict[str, Any]] = deque(maxlen=100)
+_events_by_workspace: dict[str, deque[dict[str, Any]]] = {}
 _events_lock = Lock()
+
+
+def _event_workspace_key() -> str:
+    return active_workspace_id() or "__default__"
 _allowed_actions = {
     "dashboard.module_details",
     "models.add",
@@ -268,7 +274,8 @@ def record_workspace_event(action: str, detail: str | None = None) -> dict[str, 
         "timestamp": datetime.now(UTC).isoformat(),
     }
     with _events_lock:
-        _events.appendleft(event)
+        buffer = _events_by_workspace.setdefault(_event_workspace_key(), deque(maxlen=100))
+        buffer.appendleft(event)
     return event
 
 
@@ -288,7 +295,7 @@ def workspace_events(
 ) -> dict[str, Any]:
     """Return a bounded, newest-first page of recent workspace events."""
     with _events_lock:
-        events = list(_events)
+        events = list(_events_by_workspace.get(_event_workspace_key(), ()))
     needle = search.strip().casefold()
     if needle:
         events = [
@@ -413,7 +420,7 @@ def workspace_export_models() -> dict[str, Any]:
 @router.get("/models/discover")
 def workspace_discover_models() -> dict[str, Any]:
     try:
-        return discover_local_model_folders(Path.cwd() / "models")
+        return discover_local_model_folders(active_workspace_root() / "models")
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="Local model discovery failed safely.") from exc
 
@@ -421,7 +428,7 @@ def workspace_discover_models() -> dict[str, Any]:
 @router.post("/models/inspect")
 def workspace_inspect_model(request: WorkspaceModelInspectInput) -> dict[str, Any]:
     try:
-        model_path = validate_model_path(str(Path.cwd() / "models" / request.path))
+        model_path = validate_model_path(str(active_workspace_root() / "models" / request.path))
         inspection = inspect_model(str(model_path))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Local model folder not found.") from exc
@@ -429,7 +436,7 @@ def workspace_inspect_model(request: WorkspaceModelInspectInput) -> dict[str, An
         raise HTTPException(status_code=422, detail="Model inspection rejected the selected path.") from exc
     return {
         "inspection": {
-            "path": model_path.relative_to(Path.cwd().resolve()).as_posix(),
+            "path": model_path.relative_to(active_workspace_root().resolve()).as_posix(),
             "architecture": inspection.architecture,
             "model_type": inspection.model_type,
             "parameter_count": inspection.parameter_count,
@@ -657,7 +664,7 @@ def workspace_datasets(
             "filters": {"path": path, "search": needle},
         }
 
-    workspace_root = Path.cwd().resolve()
+    workspace_root = active_workspace_root().resolve()
     data_entry = workspace_root / "data"
     if data_entry.is_symlink():
         raise HTTPException(status_code=400, detail="The data directory must not be a symlink.")
@@ -885,7 +892,7 @@ def workspace_dataset_quality(request: WorkspaceDatasetQualityInput) -> dict[str
 
 
 def _workspace_dataset_root() -> Path:
-    workspace_root = Path.cwd().resolve()
+    workspace_root = active_workspace_root().resolve()
     data_entry = workspace_root / "data"
     if data_entry.is_symlink():
         raise HTTPException(status_code=400, detail="The data directory must not be a symlink.")
@@ -963,7 +970,7 @@ def _profile_workspace_dataset(
 def workspace_export_metadata() -> Response:
     """Download a versioned ZIP of allowlisted workspace metadata."""
     try:
-        archive = export_workspace_metadata(Path.cwd())
+        archive = export_workspace_metadata(active_workspace_root())
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=422, detail="Workspace metadata could not be exported safely.") from exc
     return Response(
@@ -998,7 +1005,7 @@ async def workspace_import_metadata(
         chunks.append(chunk)
     data = b"".join(chunks)
     try:
-        result = import_workspace_metadata(data, Path.cwd(), replace=replace)
+        result = import_workspace_metadata(data, active_workspace_root(), replace=replace)
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=422, detail="Workspace metadata archive was rejected; no partial import was applied.") from exc
     return {"schema_version": 1, **result}
