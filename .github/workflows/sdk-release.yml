@@ -100,3 +100,53 @@ jobs:
         run: npm publish dist/typescript/*.tgz --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+
+  verify-python-install:
+    name: Install the published Python SDK from PyPI
+    needs: publish-python
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install the published wheel into a clean virtual environment
+        run: |
+          python -m venv "$RUNNER_TEMP/axiom-python-sdk-verify"
+          source "$RUNNER_TEMP/axiom-python-sdk-verify/bin/activate"
+          python -m pip install --upgrade pip
+          python -m pip install --no-cache-dir "axiom-ai-sdk==1.0.0"
+          python - <<'PY'
+          from importlib.metadata import version
+          from axiom_sdk import AxiomClient, API_CONTRACT_VERSION
+
+          assert version("axiom-ai-sdk") == "1.0.0"
+          assert API_CONTRACT_VERSION == 1
+          assert callable(AxiomClient)
+          print("Published Python SDK installed and imported successfully.")
+          PY
+
+  verify-typescript-install:
+    name: Install the published TypeScript SDK from npm
+    needs: publish-typescript
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install the published package into a clean project
+        run: |
+          mkdir -p "$RUNNER_TEMP/axiom-typescript-sdk-verify"
+          npm install --prefix "$RUNNER_TEMP/axiom-typescript-sdk-verify" --ignore-scripts --no-audit --no-fund "@axiom-ai/sdk@1.0.0"
+          cd "$RUNNER_TEMP/axiom-typescript-sdk-verify"
+          node --input-type=module -e '
+            import assert from "node:assert/strict";
+            import { AxiomClient, API_CONTRACT_VERSION } from "@axiom-ai/sdk";
+            assert.equal(API_CONTRACT_VERSION, 1);
+            assert.equal(typeof AxiomClient, "function");
+            const client = new AxiomClient();
+            client.close();
+            console.log("Published TypeScript SDK installed and imported successfully.");
+          '
