@@ -21,6 +21,7 @@ def test_engine_prediction_job_cli_starts_and_lists_persisted_progress(tmp_path,
         "rows_total": 5,
         "rows_completed": 5,
         "prompts_truncated": 1,
+        "resumption_count": 1,
         "error_code": None,
     }
     captured = {}
@@ -48,9 +49,9 @@ def test_engine_prediction_job_cli_starts_and_lists_persisted_progress(tmp_path,
     assert listed.exit_code == 0, listed.output
     assert json.loads(listed.stdout)["jobs"][0]["rows_completed"] == 5
 
-    shown = runner.invoke(engine_cli.engine_app, ["prediction", "show", summary["id"], "--json"])
+    shown = runner.invoke(engine_cli.engine_app, ["prediction", "show", summary["id"]])
     assert shown.exit_code == 0, shown.output
-    assert json.loads(shown.stdout)["job"]["id"] == summary["id"]
+    assert "Resumed after restart: 1 time(s)" in shown.output
 
 
 def test_engine_prediction_job_cli_cancels_cooperatively(tmp_path, monkeypatch):
