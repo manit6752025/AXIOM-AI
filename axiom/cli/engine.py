@@ -33,6 +33,7 @@ from axiom.core.serving_profiles import (
 from axiom.core.embeddings import EmbeddingEngineError, MAX_EMBEDDING_TOTAL_CHARS, embed_local_texts, unload_local_embeddings
 from axiom.core.reranking import MAX_RERANK_TOTAL_CHARS, RerankerError, rerank_local_documents, unload_local_reranker
 from axiom.core.benchmark_profiles import BenchmarkProfileError, BenchmarkProfileStore
+from axiom.core.inference import InferenceRuntimeError, run_local_vision
 
 engine_app = typer.Typer(help="Run causal language models directly through AXIOM's local engine.", no_args_is_help=True)
 console = Console()
@@ -1230,6 +1231,39 @@ def engine_benchmark_requirements_cli(
         console.print(req["scope_note"])
     if not report["can_benchmark"]:
         raise typer.Exit(code=2)
+
+
+
+@engine_app.command("vision")
+def engine_vision(
+    model: str = typer.Option(..., "--model", help="Installed local Ollama vision model tag; no pull is performed."),
+    image_path: str = typer.Option(..., "--image-path", help="PNG/JPEG image path under the active workspace data/ directory."),
+    prompt: str = typer.Option("Describe the image accurately. Separate observations from uncertainty.", "--prompt", help="Instruction sent with the image to the local vision model."),
+    max_new_tokens: int = typer.Option(256, "--max-new-tokens", min=1, max=1024),
+    timeout_seconds: int = typer.Option(120, "--timeout", min=5, max=180),
+    json_output: bool = typer.Option(False, "--json", help="Emit the bounded response and local-only privacy metadata as JSON."),
+) -> None:
+    """Analyze a workspace PNG/JPEG with an explicitly vision-capable local Ollama model."""
+    try:
+        report = run_local_vision(
+            model,
+            image_path,
+            prompt,
+            workspace_root=active_workspace_root(),
+            max_new_tokens=max_new_tokens,
+            timeout_seconds=timeout_seconds,
+        )
+    except (ValueError, InferenceRuntimeError) as exc:
+        _fail(str(exc))
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, allow_nan=False))
+        return
+    console.print(Panel(report["response"], title=f"Local vision · {report['model']}"))
+    console.print(
+        f"Image: {report['image']['format'].upper()} · {report['image']['width']}×{report['image']['height']} "
+        f"· {report['image']['size_bytes']:,} bytes"
+    )
+    console.print(report["scope_note"])
 
 
 @engine_app.command("embed")
