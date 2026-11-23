@@ -83,8 +83,11 @@ A workspace stores at most 50 manifests, each at most 64 KiB, with at most 32
 tool declarations per manifest. The combined registry is capped at 4 MiB.
 Identifiers, descriptions, semantic versions, scope values, and unique tool
 names are validated. Registry and lock symlink paths are rejected, malformed
-registries fail closed, updates are lock-protected and atomic, and no manifest
-content is treated as executable code.
+registries fail closed, and updates are lock-protected and atomic. On POSIX,
+the metadata directory, lock, registry reads, and replacement writes are
+anchored through no-follow directory/file descriptors to reduce path-swap
+races. Other platforms use the platform's file-lock and safe-file primitives.
+No manifest content is treated as executable code.
 
 A permission grant in this metadata store does not by itself authorize an
 MCP built-in tool or any operating-system action. Built-in MCP tools continue
