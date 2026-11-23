@@ -274,3 +274,71 @@ def test_model_provenance_cli_emits_machine_readable_hash_evidence(tmp_path, mon
     assert report["hash_evidence"]["status"] == "complete"
     assert report["hash_evidence"]["checkpoint_sha256"]
     assert report["security_evidence"]["model_weights_loaded"] is False
+
+
+def test_model_provenance_hashes_a_valid_safetensors_checkpoint_artifact(tmp_path):
+    """Exercise provenance hashing against a real safetensors binary container."""
+    import json
+    import struct
+
+    model = tmp_path / "tiny-model"
+    model.mkdir()
+    (model / "config.json").write_text(
+        json.dumps({"model_type": "llama", "architectures": ["LlamaForCausalLM"]}),
+        encoding="utf-8",
+    )
+    header = json.dumps(
+        {"weight": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    header += b" " * (-len(header) % 8)
+    checkpoint = struct.pack("<Q", len(header)) + header + struct.pack("<f", 1.0)
+    (model / "model.safetensors").write_bytes(checkpoint)
+
+    report = inspect_model_provenance(model)
+
+    assert report["format_evidence"]["detected_formats"] == ["safetensors"]
+    assert report["hash_evidence"]["status"] == "complete"
+    assert report["hash_evidence"]["files"][0]["sha256"] == hashlib.sha256(checkpoint).hexdigest()
+    assert report["hash_evidence"]["files"][0]["size_bytes"] == len(checkpoint)
+    assert report["security_evidence"]["model_weights_loaded"] is False
+
+
+def test_model_provenance_enforces_real_weight_file_count_boundary(tmp_path):
+    model = tmp_path / "large-model"
+    model.mkdir()
+    for index in range(provenance.MAX_PROVENANCE_WEIGHT_FILES + 1):
+        (model / f"shard-{index:04}.safetensors").write_bytes(bytes([index % 256]))
+
+    report = inspect_model_provenance(model)
+
+    assert report["format_evidence"]["weight_file_count"] == provenance.MAX_PROVENANCE_WEIGHT_FILES + 1
+    assert report["hash_evidence"]["status"] == "skipped_size_or_file_count_limit"
+    assert report["hash_evidence"]["hashed_file_count"] == 0
+    assert report["hash_evidence"]["files"] == []
+    assert report["hash_evidence"]["checkpoint_sha256"] is None
+
+
+def test_model_provenance_enforces_real_license_file_count_boundary(tmp_path):
+    model = tmp_path / "license-heavy-model"
+    model.mkdir()
+    for index in range(provenance.MAX_LICENSE_EVIDENCE_FILES + 1):
+        (model / f"LICENSE-{index:03}.txt").write_bytes(b"license evidence")
+
+    report = inspect_model_provenance(model)
+    evidence = report["license_evidence"]
+
+    assert evidence["candidate_file_count"] == provenance.MAX_LICENSE_EVIDENCE_FILES + 1
+    assert evidence["status"] == "skipped_count_or_total_size_limit"
+    assert evidence["files"] == []
+
+
+def test_model_provenance_enforces_real_directory_enumeration_boundary(tmp_path):
+    model = tmp_path / "directory-heavy-model"
+    model.mkdir()
+    for index in range(provenance.MAX_PROVENANCE_DIRECTORIES + 1):
+        (model / f"directory-{index:04}").mkdir()
+
+    with pytest.raises(ModelProvenanceError, match="too many directories"):
+        inspect_model_provenance(model)
+
