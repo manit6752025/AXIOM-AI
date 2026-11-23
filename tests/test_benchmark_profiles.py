@@ -147,7 +147,7 @@ def test_profiles_compare_metrics_only_when_hardware_software_model_and_workload
     assert all(same["match"].values())
     assert same["metrics"]["median_elapsed_ms"] == {"left": 100.0, "right": 90.0, "delta": -10.0}
 
-    _patch_environment(monkeypatch, gpu_name="Different GPU")
+    _patch_environment(monkeypatch, tmp_path, gpu_name="Different GPU")
     third = store.create("Different hardware", _report(80), "same prompt", model)
     different = store.compare(first["id"], third["id"])
     assert different["comparable"] is False
