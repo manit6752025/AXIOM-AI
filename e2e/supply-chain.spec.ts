@@ -164,7 +164,7 @@ test("Diagnostics exports SPDX and requires explicit consent for dependency advi
     consentMessage = dialog.message();
     await dialog.dismiss();
   });
-  await page.getByRole("button", { name: "Scan dependencies (network)" }).click();
+  await page.getByRole("button", { name: "Scan dependencies (network)" }).first().click();
   expect(consentMessage).toContain("may contact external package vulnerability advisory services");
   expect(requests).toHaveLength(0);
 
