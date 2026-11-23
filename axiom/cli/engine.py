@@ -19,6 +19,7 @@ from axiom.core import model_studio
 from axiom.core.engine_fabric import EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
 from axiom.core.engine_fabric_profiles import EngineFabricProfileError, EngineFabricProfileStore
 from axiom.core.embeddings import EmbeddingEngineError, MAX_EMBEDDING_TOTAL_CHARS, embed_local_texts, unload_local_embeddings
+from axiom.core.reranking import MAX_RERANK_TOTAL_CHARS, RerankerError, rerank_local_documents, unload_local_reranker
 from axiom.core.benchmark_profiles import BenchmarkProfileError, BenchmarkProfileStore
 
 engine_app = typer.Typer(help="Run causal language models directly through AXIOM's local engine.", no_args_is_help=True)
@@ -1022,4 +1023,61 @@ def engine_embed_unload() -> None:
     """Unload the cached local embedding model without deleting model files."""
     report = unload_local_embeddings()
     console.print("[green]Embedding model unloaded.[/green]" if report["unloaded"] else "No embedding model was loaded.")
+    console.print(report["scope_note"])
+
+
+@engine_app.command("rerank")
+def engine_rerank(
+    model_path: Path = typer.Option(..., "--model-path", help="Local cross-encoder checkpoint under a trusted model root."),
+    query: str = typer.Option(..., "--query", help="Search query to compare against each document."),
+    documents: list[str] = typer.Option([], "--document", help="Candidate document; repeat to rank multiple documents."),
+    documents_file: Path | None = typer.Option(None, "--documents-file", help="UTF-8 JSON array of candidate strings."),
+    batch_size: int = typer.Option(8, "--batch-size", min=1, max=16),
+    max_length: int = typer.Option(256, "--max-length", min=32, max=512),
+    device: str = typer.Option("auto", "--device", help="Execution device: auto, cpu, cuda, rocm, mps, or xpu."),
+    json_output: bool = typer.Option(False, "--json", help="Return ranked scores as JSON."),
+) -> None:
+    """Rerank bounded text candidates with a local cross-encoder model."""
+    if documents_file is not None and documents:
+        _fail("Supply repeated --document options or one --documents-file, but not both.")
+    if documents_file is not None:
+        try:
+            with documents_file.open("rb") as handle:
+                raw = handle.read(MAX_RERANK_TOTAL_CHARS * 4 + 1)
+            if len(raw) > MAX_RERANK_TOTAL_CHARS * 4:
+                _fail("The candidate file exceeds the bounded UTF-8 input size.")
+            loaded = json.loads(raw.decode("utf-8"))
+            if not isinstance(loaded, list) or any(not isinstance(item, str) for item in loaded):
+                _fail("The candidate file must contain a JSON array of strings.")
+            candidates = loaded
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            _fail(f"Could not read the candidate JSON file: {exc}")
+    else:
+        candidates = documents
+    try:
+        report = rerank_local_documents(
+            str(model_path), query, candidates, batch_size=batch_size,
+            max_length=max_length, device=device,
+        )
+    except (ValueError, RerankerError) as exc:
+        _fail(str(exc))
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
+        return
+    table = Table(title=f"Local reranking · {report['model']['name']}")
+    table.add_column("Rank", justify="right")
+    table.add_column("Input", justify="right")
+    table.add_column("Score", justify="right")
+    table.add_column("Characters", justify="right")
+    for item in report["results"]:
+        table.add_row(str(item["rank"]), str(item["document_index"]), f"{item['score']:.6f}", str(item["document_characters"]))
+    console.print(table)
+    console.print(report["scope_note"])
+
+
+@engine_app.command("rerank-unload")
+def engine_rerank_unload() -> None:
+    """Unload the cached local reranker without deleting model files."""
+    report = unload_local_reranker()
+    console.print("[green]Reranker unloaded.[/green]" if report["unloaded"] else "No reranker was loaded.")
     console.print(report["scope_note"])

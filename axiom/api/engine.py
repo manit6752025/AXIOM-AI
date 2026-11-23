@@ -18,6 +18,7 @@ from axiom.core.engine_fabric_profiles import EngineFabricProfileError, EngineFa
 from axiom.core.benchmark_profiles import BenchmarkProfileError, BenchmarkProfileStore
 from axiom.core.resource_telemetry import ResourceTelemetryError, ResourceTelemetryOptInRequired, ResourceTelemetryStore
 from axiom.core.embeddings import EmbeddingEngineError, embed_local_texts, unload_local_embeddings
+from axiom.core.reranking import RerankerError, rerank_local_documents, unload_local_reranker
 
 from axiom.core.engine import (
     AxiomEngineError,
@@ -907,3 +908,62 @@ def engine_embeddings(request: LocalEmbeddingsRequest) -> dict[str, Any]:
 def engine_embeddings_unload() -> dict[str, Any]:
     """Unload AXIOM's cached embedding model without changing checkpoint files."""
     return unload_local_embeddings()
+
+
+class LocalRerankingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    model_path: str = Field(min_length=1, max_length=4096)
+    query: str = Field(min_length=1, max_length=8192)
+    documents: list[str] = Field(min_length=1, max_length=64)
+    batch_size: int = Field(default=8, ge=1, le=16, strict=True)
+    max_length: int = Field(default=256, ge=32, le=512, strict=True)
+    device: str = Field(default="auto", pattern="^(auto|cpu|cuda|rocm|mps|xpu)$")
+
+    @field_validator("model_path", mode="before")
+    @classmethod
+    def reranker_model_path_must_be_trusted(cls, value: Any) -> Any:
+        return _validated_path(value, "Base model")
+
+    @field_validator("query")
+    @classmethod
+    def query_must_be_nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("The reranking query must contain non-whitespace characters.")
+        return value
+
+    @field_validator("documents")
+    @classmethod
+    def documents_must_be_bounded_and_nonblank(cls, value: list[str]) -> list[str]:
+        from axiom.core.reranking import MAX_RERANK_TEXT_CHARS, MAX_RERANK_TOTAL_CHARS
+        if any(not isinstance(text, str) or not text.strip() for text in value):
+            raise ValueError("Every document must contain non-whitespace characters.")
+        if any(len(text) > MAX_RERANK_TEXT_CHARS for text in value):
+            raise ValueError("A document exceeds the per-document character limit.")
+        return value
+
+    @model_validator(mode="after")
+    def total_text_must_be_bounded(self) -> "LocalRerankingRequest":
+        from axiom.core.reranking import MAX_RERANK_TOTAL_CHARS
+        if len(self.query) + sum(len(item) for item in self.documents) > MAX_RERANK_TOTAL_CHARS:
+            raise ValueError("Combined query and documents exceed the request character limit.")
+        return self
+
+
+@router.post("/rerank")
+def engine_rerank(request: LocalRerankingRequest) -> dict[str, Any]:
+    """Score and sort local query/document pairs without returning source text."""
+    try:
+        return rerank_local_documents(
+            request.model_path, request.query, request.documents,
+            batch_size=request.batch_size, max_length=request.max_length, device=request.device,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except RerankerError:
+        raise HTTPException(status_code=503, detail="The local reranker could not complete this request.") from None
+
+
+@router.post("/rerank/unload")
+def engine_rerank_unload() -> dict[str, Any]:
+    """Unload the cached cross-encoder without modifying checkpoint files."""
+    return unload_local_reranker()

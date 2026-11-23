@@ -70,6 +70,7 @@ import {
   type WorkspaceModelCandidate,
   type WorkspaceModelInspection,
   type WorkspaceRuntimeMatrix,
+  type LocalEmbeddingsReport,
 } from "./api/client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode } from "react";
@@ -4209,6 +4210,87 @@ function Workflows({ onNotify }: { onNotify: (message: string, tone?: Tone) => v
   </FeaturePage>;
 }
 
+function LocalEmbeddingsPanel() {
+  const [modelPath, setModelPath] = useState("");
+  const [sourceText, setSourceText] = useState("");
+  const [device, setDevice] = useState<"auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu">("auto");
+  const [report, setReport] = useState<LocalEmbeddingsReport | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [unloading, setUnloading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    setReport(null);
+    try {
+      setReport(await axiomApi.embedLocalTexts({
+        model_path: modelPath.trim(),
+        texts: [sourceText],
+        device,
+      }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Local embeddings could not be generated.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unload() {
+    setUnloading(true);
+    setError("");
+    try {
+      await axiomApi.unloadLocalEmbeddings();
+      setReport(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The local embedding model could not be unloaded.");
+    } finally {
+      setUnloading(false);
+    }
+  }
+
+  return <Surface
+    title="Local text embeddings"
+    eyebrow="LOCAL RETRIEVAL FOUNDATION"
+    action={<button type="button" className="button secondary-button" onClick={() => void unload()} disabled={unloading || busy}>{unloading ? "Unloading…" : "Unload model"}</button>}
+  >
+    <form className="integration-form" onSubmit={(event) => void submit(event)}>
+      <label className="field">
+        <span className="field-label-row"><span>Local embedding model path</span></span>
+        <input value={modelPath} onChange={(event) => setModelPath(event.target.value)} placeholder="models/my-encoder" maxLength={4096} required />
+      </label>
+      <label className="field">
+        <span className="field-label-row"><span>Text to embed</span><span>{sourceText.length.toLocaleString()} / 65,536</span></span>
+        <textarea value={sourceText} onChange={(event) => setSourceText(event.target.value)} rows={4} maxLength={65536} placeholder="Enter text to embed locally…" required />
+      </label>
+      <label className="field">
+        <span className="field-label-row"><span>Execution device</span></span>
+        <select value={device} onChange={(event) => setDevice(event.target.value as typeof device)}>
+          <option value="auto">Automatic</option>
+          <option value="cpu">CPU</option>
+          <option value="cuda">CUDA</option>
+          <option value="rocm">ROCm</option>
+          <option value="mps">Metal / MPS</option>
+          <option value="xpu">Intel XPU</option>
+        </select>
+      </label>
+      <div className="integration-form-actions">
+        <button type="submit" className="button primary-button" disabled={busy || !modelPath.trim() || !sourceText.trim()}>{busy ? "Generating…" : "Generate local embeddings"}</button>
+        <span className="quiet-note">No model download, cloud call, or source-text persistence.</span>
+      </div>
+    </form>
+    {error && <InlineAlert tone="warning" role="alert">{error}</InlineAlert>}
+    {report && <div className="embedding-result" role="status">
+      <StatusPill tone="success">LOCAL EMBEDDINGS READY</StatusPill>
+      <h3>{report.model.name}</h3>
+      <p>{report.model.dimension.toLocaleString()} dimensions · {report.request.chunk_count} chunk(s) · {report.device} · {report.request.normalized ? "L2 normalized" : "not normalized"}</p>
+      <p className="quiet-note">Vectors are held in this response only. The source text is not returned or saved.</p>
+    </div>}
+  </Surface>;
+}
+
+
 function Runtime() {
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -4237,6 +4319,7 @@ function Runtime() {
     <LocalAxiomEnginePanel />
     <LocalEngineFabricPanel />
     <LocalInferencePanel />
+    <LocalEmbeddingsPanel />
     <LLMClientPanel />
     <RuntimeTracePanel />
     <EngineTelemetryMonitor />
