@@ -159,6 +159,72 @@ def model_compatibility_issues(core_source: str, api_source: str, client_source:
     return issues
 
 
+def model_provenance_issues(
+    core_source: str,
+    api_source: str,
+    cli_source: str,
+    client_source: str,
+    app_source: str,
+    core_tests: str,
+    e2e_source: str,
+    docs_source: str,
+) -> list[str]:
+    """Require bounded, symlink-safe provenance evidence across CLI, API and Models UI."""
+    checks = (
+        ("Provenance core", core_source, (
+            "def inspect_model_provenance(", "MAX_PROVENANCE_DIRECTORIES = 2_000",
+            "MAX_PROVENANCE_FILES = 20_000", "MAX_PROVENANCE_WEIGHT_FILES = 512",
+            "MAX_PROVENANCE_HASH_BYTES = 16 * 1024**3",
+            "MAX_LICENSE_EVIDENCE_BYTES = 1 * 1024**2",
+            "MAX_LICENSE_EVIDENCE_FILES = 64",
+            "MAX_TOTAL_LICENSE_EVIDENCE_BYTES = 16 * 1024**2",
+            "skipped_count_or_total_size_limit",
+            "absolute_requested.parts", "stat.S_ISLNK(component_info.st_mode)",
+        )),
+        ("Provenance API", api_source, (
+            '@router.post("/models/provenance")', "validate_model_path(str(model_root / request.path))",
+            "current.is_symlink()", "require_canonical_workspace_relative_path",
+        )),
+        ("Provenance CLI", cli_source, (
+            '@model_app.command("provenance")', "inspect_model_provenance(",
+            "hash_evidence", "license_evidence['status']",
+        )),
+        ("Typed client", client_source, (
+            "export type WorkspaceModelProvenance", "maximum_total_bytes: number",
+            "skipped_count_or_total_size_limit",
+            '"/api/workspace/models/provenance"',
+        )),
+        ("Models GUI", app_source, (
+            "inspectCandidateProvenance", "Model provenance and security evidence",
+            "candidate_file_count", "maximum_total_bytes",
+            "Evidence is not authenticity or legal approval",
+        )),
+        ("Core tests", core_tests, (
+            "test_model_provenance_hashes_weights_and_license_evidence_deterministically",
+            "test_model_provenance_skips_hashing_above_declared_byte_limit",
+            "test_model_provenance_skips_license_hashing_over_aggregate_bounds",
+            "test_model_provenance_skips_license_hashing_over_total_byte_bound",
+            "test_model_provenance_rejects_symlinked_ancestor_components",
+            "test_model_provenance_api_enforces_workspace_paths_and_labels_registry_claims",
+        )),
+        ("Browser acceptance", e2e_source, (
+            '"/api/workspace/models/provenance"',
+            "Inspect provenance", "Model provenance and security evidence",
+            "network_used: false", "model_weights_loaded: false",
+        )),
+        ("Documentation", docs_source, (
+            "512 weight files", "16 GiB", "64 candidate files", "16 MiB",
+            "skipped_count_or_total_size_limit", "publisher authentication",
+        )),
+    )
+    failures: list[str] = []
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                failures.append(f"Model provenance {label} is missing: {token}")
+    return failures
+
+
 def benchmark_profile_issues(profile_core: str, api_source: str, cli_source: str, client_source: str, panel_source: str, core_tests: str, api_tests: str, cli_tests: str, e2e_source: str, docs_source: str) -> list[str]:
     """Require saved benchmark provenance to be connected to tests and UX."""
     checks = (
@@ -1057,6 +1123,15 @@ def inspect(root: Path) -> dict[str, Any]:
     compatibility_core = (root / "axiom/models/compatibility.py").read_text(encoding="utf-8")
     compatibility_e2e = model_registry_e2e
     failures.extend(model_compatibility_issues(compatibility_core, workspace_api, client, app_source, compatibility_e2e))
+    model_provenance_core = (root / "axiom/models/provenance.py").read_text(encoding="utf-8")
+    model_provenance_cli = (root / "axiom/cli/main.py").read_text(encoding="utf-8")
+    model_provenance_tests = (root / "tests/test_model_provenance.py").read_text(encoding="utf-8")
+    model_provenance_e2e = (root / "e2e/model-provenance.spec.ts").read_text(encoding="utf-8")
+    model_provenance_docs = (root / "docs/Model-Provenance.md").read_text(encoding="utf-8")
+    failures.extend(model_provenance_issues(
+        model_provenance_core, workspace_api, model_provenance_cli, client,
+        app_source, model_provenance_tests, model_provenance_e2e, model_provenance_docs,
+    ))
     inference_core = (root / "axiom/core/inference.py").read_text(encoding="utf-8")
     inference_api = (root / "axiom/api/inference.py").read_text(encoding="utf-8")
     inference_panel = (root / "src/components/LocalInferencePanel.tsx").read_text(encoding="utf-8")

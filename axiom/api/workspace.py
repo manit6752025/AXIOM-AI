@@ -155,6 +155,30 @@ class WorkspaceModelProvenanceInput(BaseModel):
     path: str = Field(min_length=1, max_length=512)
     model_id: str | None = Field(default=None, min_length=32, max_length=32, pattern=r"^[a-f0-9]{32}$")
 
+    @field_validator("path")
+    @classmethod
+    def require_canonical_workspace_relative_path(cls, value: str) -> str:
+        from pathlib import PurePosixPath
+
+        if (
+            not isinstance(value, str)
+            or "\\" in value
+            or "\x00" in value
+            or ":" in value
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)
+        ):
+            raise ValueError("Model provenance path must be a canonical workspace-relative path.")
+        raw_parts = value.split("/")
+        path = PurePosixPath(value)
+        if (
+            path.is_absolute()
+            or not path.parts
+            or any(part in {"", ".", ".."} for part in raw_parts)
+            or path.as_posix() != value
+        ):
+            raise ValueError("Model provenance path must be a canonical workspace-relative path.")
+        return value
+
 
 class WorkspaceTrainingPlanInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -478,12 +502,26 @@ def workspace_inspect_model(request: WorkspaceModelInspectInput) -> dict[str, An
 def workspace_model_provenance(request: WorkspaceModelProvenanceInput) -> dict[str, Any]:
     """Hash local model weights and report source/license evidence without network access."""
     try:
-        model_path = validate_model_path(str(active_workspace_root() / "models" / request.path))
+        model_root = active_workspace_root() / "models"
+        if model_root.is_symlink():
+            raise ValueError("The workspace model root must not be a symbolic link.")
+        current = model_root
+        for component in Path(request.path).parts:
+            current = current / component
+            if current.is_symlink():
+                raise ValueError("Model provenance paths must not traverse symbolic links.")
+        model_path = validate_model_path(str(model_root / request.path))
         registry_metadata = None
         if request.model_id:
             registered = ModelRegistry().get(request.model_id)
             if registered is None:
                 raise HTTPException(status_code=404, detail="Registered model metadata was not found.")
+            registered_path = validate_model_path(str(active_workspace_root() / registered.source))
+            if registered_path != model_path:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Registered model metadata does not refer to the selected local model directory.",
+                )
             registry_metadata = registered.to_dict()
         report = inspect_model_provenance(model_path, registry_metadata=registry_metadata)
     except HTTPException:

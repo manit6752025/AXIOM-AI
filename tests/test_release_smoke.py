@@ -108,6 +108,32 @@ def test_model_registry_smoke_detects_disconnected_filter_controls() -> None:
     assert any("Exact model tag" in issue for issue in issues)
 
 
+def test_model_provenance_is_bounded_and_wired_across_cli_api_and_gui() -> None:
+    core = (ROOT / "axiom" / "models" / "provenance.py").read_text(encoding="utf-8")
+    api = (ROOT / "axiom" / "api" / "workspace.py").read_text(encoding="utf-8")
+    cli = (ROOT / "axiom" / "cli" / "main.py").read_text(encoding="utf-8")
+    client = (ROOT / "src" / "api" / "client.ts").read_text(encoding="utf-8")
+    app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
+    tests = (ROOT / "tests" / "test_model_provenance.py").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e" / "model-provenance.spec.ts").read_text(encoding="utf-8")
+    docs = (ROOT / "docs" / "Model-Provenance.md").read_text(encoding="utf-8")
+    assert release_smoke.model_provenance_issues(core, api, cli, client, app, tests, e2e, docs) == []
+
+
+def test_model_provenance_smoke_detects_missing_aggregate_license_limit() -> None:
+    core = (ROOT / "axiom" / "models" / "provenance.py").read_text(encoding="utf-8")
+    api = (ROOT / "axiom" / "api" / "workspace.py").read_text(encoding="utf-8")
+    cli = (ROOT / "axiom" / "cli" / "main.py").read_text(encoding="utf-8")
+    client = (ROOT / "src" / "api" / "client.ts").read_text(encoding="utf-8")
+    app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
+    tests = (ROOT / "tests" / "test_model_provenance.py").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e" / "model-provenance.spec.ts").read_text(encoding="utf-8")
+    docs = (ROOT / "docs" / "Model-Provenance.md").read_text(encoding="utf-8")
+    broken = core.replace("MAX_TOTAL_LICENSE_EVIDENCE_BYTES = 16 * 1024**2", "MAX_TOTAL_LICENSE_EVIDENCE_BYTES = 1024**4", 1)
+    issues = release_smoke.model_provenance_issues(broken, api, cli, client, app, tests, e2e, docs)
+    assert any("MAX_TOTAL_LICENSE_EVIDENCE_BYTES" in issue for issue in issues)
+
+
 def test_model_compatibility_report_is_wired_into_the_existing_models_page() -> None:
     core_source = (ROOT / "axiom" / "models" / "compatibility.py").read_text(encoding="utf-8")
     api_source = (ROOT / "axiom" / "api" / "workspace.py").read_text(encoding="utf-8")

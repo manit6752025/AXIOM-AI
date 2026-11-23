@@ -2745,6 +2745,11 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
       <p className="quiet-note">{provenance.source_evidence.status.replaceAll("_", " ")} · {provenance.source_evidence.note}</p>
       <p className="quiet-note">{provenance.license_evidence.note}</p>
       {provenance.hash_evidence.files.length > 0 && <div className="module-list">{provenance.hash_evidence.files.slice(0, 8).map((file) => <div className="module-row" key={file.path}><span className="module-icon"><Fingerprint size={16} /></span><span className="module-copy"><b>{file.path}</b><small>{file.format} · {formatBytes(file.size_bytes)} · SHA-256 {file.sha256}</small></span></div>)}</div>}
+      <p className="quiet-note">
+        License evidence inspected: {provenance.license_evidence.files.length.toLocaleString()} of {provenance.license_evidence.candidate_file_count.toLocaleString()} candidate file(s) ({formatBytes(provenance.license_evidence.candidate_total_bytes)} total)
+        · per-file cap {formatBytes(provenance.license_evidence.maximum_file_bytes)}
+        · aggregate cap {formatBytes(provenance.license_evidence.maximum_total_bytes)} / {provenance.license_evidence.maximum_files} files
+      </p>
       {provenance.license_evidence.files.length > 0 && <p className="quiet-note">Local license/notice files: {provenance.license_evidence.files.map((file) => file.path).join(", ")}</p>}
       <p className="quiet-note">Symlinks skipped: {provenance.security_evidence.symlink_files_skipped} files / {provenance.security_evidence.symlink_directories_skipped} directories · network used: no · code executed: no · model weights loaded: no.</p>
       <Callout tone="info" title="Evidence is not authenticity or legal approval">{provenance.scope_note} {provenance.registry_metadata.status === "supplied" ? "Registry source and license fields are user-supplied claims, not independently authenticated." : "Attach registry metadata to the model record to include its declared source and license claims."}</Callout>

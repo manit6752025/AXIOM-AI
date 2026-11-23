@@ -36,7 +36,12 @@ Symlinked entries are skipped. Traversal is bounded to 2,000 directories and
 20,000 files. Per-file inventory and SHA-256 hashing are capped at 512 weight
 files and 16 GiB of combined weight data; a larger checkpoint returns
 `skipped_size_or_file_count_limit` rather than silently returning a partial
-checkpoint digest. License-file hashing is capped at 1 MiB per file.
+checkpoint digest. License evidence is capped at 64 candidate files, 16 MiB
+aggregate candidate bytes, and 1 MiB per file. When the aggregate count or byte
+limit is exceeded, AXIOM reports `skipped_count_or_total_size_limit` and returns
+no partial license-file digest set; the report includes candidate counts/bytes
+and the active limits. Symlink components in the selected model path are
+rejected, not resolved through.
 
 A SHA-256 digest identifies the exact bytes that were scanned. It does not
 authenticate the publisher, prove that files came from a declared repository
