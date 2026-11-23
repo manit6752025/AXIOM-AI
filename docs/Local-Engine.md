@@ -188,3 +188,37 @@ axiom engine profile create workstation --model-path models/qwen --max-queued-re
 ~~~
 
 The queue is workspace-process local, FIFO, and bounded to 32 waiting requests per profile and 32 overall. Requests are rejected immediately with HTTP 429 and Retry-After when capacity is full. Queue wait is included in the profile request timeout; client disconnect and timeout remove a waiting ticket, and cancellation during generation is cooperative. Responses report queue position and wait time. Native inference remains single-worker; a queue does not imply parallel GPU execution.
+
+## Local image understanding
+
+AXIOM can optionally send one workspace image to an already-installed local
+Ollama vision model. This is a separate opt-in workflow; the native causal
+decoder and text-only compatibility endpoints do not claim multimodal support.
+
+~~~bash
+axiom engine vision \
+  --model llava:latest \
+  --image-path data/images/diagram.png \
+  --prompt "Describe the components and any readable labels." \
+  --max-new-tokens 256 \
+  --timeout 120 \
+  --json
+~~~
+
+The selected Ollama model must report the `vision` capability through its
+local `/api/show` metadata. AXIOM does not pull or install a model. Only PNG
+and JPEG files beneath the active workspace `data/` directory are accepted;
+the file must be stable during reading, at most 8 MiB, at most 10,000 pixels
+on either side, and no more than 40 megapixels. Prompts are capped at 8,192
+characters, generated output at 1,024 tokens and 64 KiB, and request timeouts
+at 180 seconds.
+
+An explicit CLI command or Runtime-panel submission sends the image and prompt
+only to `http://127.0.0.1:11434`; proxies and redirects are disabled. The
+browser submits a workspace-relative path, not an upload to a remote provider.
+AXIOM does not persist the image, prompt, or response, and the API response
+does not include image bytes. The local Ollama process and model still handle
+the image in memory and may maintain their own runtime caches; the privacy
+statement applies to AXIOM's handling, not to independently configured
+third-party runtime behaviour. Never treat model output as authoritative
+evidence, and review sensitive images before submitting them.

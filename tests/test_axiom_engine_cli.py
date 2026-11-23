@@ -816,3 +816,46 @@ def test_engine_serving_and_fabric_profiles_use_distinct_cli_groups():
     assert fabric.exit_code == 0, fabric.output
     for command in ("list", "save", "connect"):
         assert command in fabric.output
+
+
+
+def test_engine_vision_cli_emits_json_and_uses_active_workspace(tmp_path, monkeypatch):
+    captured = {}
+    report = {
+        "schema_version": 1,
+        "model": "llava:latest",
+        "response": "A local image description.",
+        "image": {"format": "png", "width": 8, "height": 4, "size_bytes": 32},
+        "privacy": {"network_used": False},
+    }
+
+    def fake_vision(model, image_path, prompt, **kwargs):
+        captured.update(model=model, image_path=image_path, prompt=prompt, **kwargs)
+        return report
+
+    monkeypatch.setattr(engine_cli, "active_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(engine_cli, "run_local_vision", fake_vision)
+    result = runner.invoke(engine_app, [
+        "vision", "--model", "llava:latest", "--image-path", "data/sample.png",
+        "--prompt", "Read the chart.", "--max-new-tokens", "72", "--timeout", "40", "--json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == report
+    assert captured == {
+        "model": "llava:latest",
+        "image_path": "data/sample.png",
+        "prompt": "Read the chart.",
+        "workspace_root": tmp_path,
+        "max_new_tokens": 72,
+        "timeout_seconds": 40,
+    }
+
+
+def test_engine_vision_cli_rejects_bad_image_path_before_inference(monkeypatch):
+    monkeypatch.setattr(engine_cli, "run_local_vision", lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("Image path must be workspace-relative under data/.")))
+    result = runner.invoke(engine_app, [
+        "vision", "--model", "llava:latest", "--image-path", "../outside.png", "--json",
+    ])
+    assert result.exit_code != 0
+    assert "under data" in result.output
