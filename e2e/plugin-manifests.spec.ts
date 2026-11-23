@@ -14,7 +14,7 @@ test("MCP Control Center registers versioned manifests and re-reviews stale scop
       { name: "annotate", description: "Write a review annotation.", scopes: ["read", "write"] },
     ],
   });
-  let currentManifest = manifest("1.0.0");
+  let currentManifest: ReturnType<typeof manifest> | null = null;
   let manifestSha = "a".repeat(64);
   let permissionState: "default_deny" | "granted" | "stale_manifest" = "default_deny";
   let grant: Array<{ name: string; scopes: string[] }> = [];
@@ -56,7 +56,7 @@ test("MCP Control Center registers versioned manifests and re-reviews stale scop
       return;
     }
     if (url.pathname === "/api/security/plugins/manifests" && request.method() === "POST") {
-      const payload = request.postDataJSON() as { manifest: typeof currentManifest };
+      const payload = request.postDataJSON() as { manifest: ReturnType<typeof manifest> };
       currentManifest = payload.manifest;
       manifestSha = currentManifest.version === "1.0.0" ? "a".repeat(64) : "b".repeat(64);
       if (grant.length) permissionState = "stale_manifest";
