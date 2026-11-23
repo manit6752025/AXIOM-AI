@@ -72,8 +72,10 @@ jobs:
         run: npm ci
       - name: Verify optional local dependency scanner is installed
         run: python -m pip_audit --version
-      - name: Audit installed application dependencies against vulnerability advisories
-        run: python -m pip_audit --local --progress-spinner off
+      - name: Upgrade setuptools to a security-fixed build backend
+        run: python -m pip install --upgrade "setuptools>=84.1.0"
+      - name: Audit installed third-party application dependencies against vulnerability advisories
+        run: python -m pip_audit --local --skip-editable --strict --progress-spinner off
       - name: Check Python, Node and OS compatibility
         run: python scripts/check_compatibility.py --json --require-node
       - name: Static acceptance checks
