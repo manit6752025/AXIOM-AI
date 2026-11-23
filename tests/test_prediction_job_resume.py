@@ -165,6 +165,7 @@ def test_resume_prediction_job_revalidates_assets_and_schedules_checkpoint_worke
     model.mkdir(parents=True)
     data = root / "data"
     data.mkdir()
+    monkeypatch.chdir(root)
     dataset = data / "eval.jsonl"
     dataset.write_text(
         '{"prompt":"one","reference":"A"}\n{"prompt":"two","reference":"B"}\n',
@@ -266,6 +267,7 @@ def test_resume_prediction_job_refuses_dataset_fingerprint_changes(tmp_path, mon
     model.mkdir(parents=True)
     data = root / "data"
     data.mkdir()
+    monkeypatch.chdir(root)
     dataset = data / "eval.jsonl"
     dataset.write_text('{"prompt":"changed","reference":"A"}\n', encoding="utf-8")
     committed = b'{"prompt":"one","reference":"A","prediction":"first"}\n'
