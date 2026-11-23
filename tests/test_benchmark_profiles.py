@@ -83,8 +83,12 @@ def _hardware(gpu_name="Test GPU"):
     }
 
 
-def _patch_environment(monkeypatch: pytest.MonkeyPatch, gpu_name="Test GPU"):
-    monkeypatch.setattr(benchmark_profiles, "_trusted_model_directory", lambda value: Path(value).resolve(strict=True))
+def _patch_environment(monkeypatch: pytest.MonkeyPatch, model_root: Path, gpu_name="Test GPU"):
+    from axiom.core import engine
+
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(model_root))
+    engine._trusted_directory_index.cache_clear()
+    engine._trusted_file_entry.cache_clear()
     monkeypatch.setattr(benchmark_profiles, "_hardware_record", lambda: _hardware(gpu_name))
     monkeypatch.setattr(benchmark_profiles, "_software_record", lambda: {
         "axiom_version": "0.3.0-test",
@@ -94,7 +98,7 @@ def _patch_environment(monkeypatch: pytest.MonkeyPatch, gpu_name="Test GPU"):
 
 
 def test_profile_store_records_reproducible_provenance_without_prompt_or_model_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch)
+    _patch_environment(monkeypatch, tmp_path)
     model = tmp_path / "model"
     model.mkdir()
     (model / "config.json").write_text('{"model_type":"qwen3"}', encoding="utf-8")
@@ -130,7 +134,7 @@ def test_profile_store_records_reproducible_provenance_without_prompt_or_model_p
 
 
 def test_profiles_compare_metrics_only_when_hardware_software_model_and_workload_match(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch)
+    _patch_environment(monkeypatch, tmp_path)
     model = tmp_path / "model"
     model.mkdir()
     (model / "config.json").write_text('{"model_type":"qwen3"}', encoding="utf-8")
@@ -152,7 +156,7 @@ def test_profiles_compare_metrics_only_when_hardware_software_model_and_workload
 
 
 def test_profile_store_rejects_duplicate_names_and_invalid_profile_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch)
+    _patch_environment(monkeypatch, tmp_path)
     store = BenchmarkProfileStore(tmp_path / ".axiom")
     store.create("First", _report(), "prompt", tmp_path)
     with pytest.raises(BenchmarkProfileError, match="already exists"):
@@ -168,7 +172,7 @@ def test_profile_store_rejects_duplicate_names_and_invalid_profile_inputs(tmp_pa
 
 
 def test_profile_store_rejects_tampering_unknown_fields_and_future_schema(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch)
+    _patch_environment(monkeypatch, tmp_path)
     store = BenchmarkProfileStore(tmp_path / ".axiom")
     record = store.create("Trusted", _report(), "prompt", tmp_path)
     path = tmp_path / ".axiom" / "benchmark-profiles.json"
@@ -194,7 +198,7 @@ def test_profile_store_rejects_symlinked_store_paths(tmp_path: Path):
 
 
 def test_profile_comparison_requires_two_distinct_existing_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch)
+    _patch_environment(monkeypatch, tmp_path)
     store = BenchmarkProfileStore(tmp_path / ".axiom")
     first = store.create("One", _report(), "prompt", tmp_path)
     with pytest.raises(BenchmarkProfileError, match="Two distinct"):
@@ -204,7 +208,7 @@ def test_profile_comparison_requires_two_distinct_existing_ids(tmp_path: Path, m
 
 
 def test_profile_store_rejects_invalid_sampling_and_untrusted_model_directory_symlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch)
+    _patch_environment(monkeypatch, tmp_path)
     store = BenchmarkProfileStore(tmp_path / ".axiom")
     bad = _report()
     bad["sampling"]["top_p"] = 1.5
@@ -223,7 +227,7 @@ def test_profile_store_rejects_invalid_sampling_and_untrusted_model_directory_sy
 
 
 def test_missing_model_configuration_fingerprint_prevents_controlled_comparison(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch)
+    _patch_environment(monkeypatch, tmp_path)
     store = BenchmarkProfileStore(tmp_path / ".axiom")
     model = tmp_path / "model"
     model.mkdir()
@@ -259,7 +263,7 @@ def test_model_config_fingerprint_opens_fixed_metadata_without_following_symlink
 
 
 def test_profile_store_rejects_model_directory_with_symlinked_ancestor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch)
+    _patch_environment(monkeypatch, tmp_path)
     store = BenchmarkProfileStore(tmp_path / ".axiom")
     real_parent = tmp_path / "real-parent"
     real_parent.mkdir()
