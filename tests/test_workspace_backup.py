@@ -345,3 +345,64 @@ def test_workspace_backup_preserves_ingested_knowledge_store_and_documents(tmp_p
     assert restored_knowledge.read_document(base["id"], document["id"]) == expected_text
     assert (restored / "documents" / "guide.md").read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
 
+
+
+def test_workspace_backup_round_trips_the_full_production_file_count(tmp_path: Path):
+    """Exercise the actual 50,000-entry ZIP64 writer and restore inventory."""
+    workspace = tmp_path / "fifty-thousand-files"
+    workspace.mkdir()
+    for index in range(workspace_backup.MAX_BACKUP_FILES):
+        (workspace / f"shard-{index:05}.bin").touch()
+
+    archive = io.BytesIO()
+    report = create_workspace_backup(workspace, archive)
+    assert report["file_count"] == workspace_backup.MAX_BACKUP_FILES
+    assert report["total_bytes"] == 0
+
+    archive.seek(0)
+    staging = _staging(tmp_path)
+    restored = restore_workspace_backup(archive, staging)
+    assert restored["file_count"] == workspace_backup.MAX_BACKUP_FILES
+    assert len(list(staging.glob("shard-*.bin"))) == workspace_backup.MAX_BACKUP_FILES
+    assert (staging / "shard-00000.bin").stat().st_size == 0
+    assert (staging / f"shard-{workspace_backup.MAX_BACKUP_FILES - 1:05}.bin").stat().st_size == 0
+
+
+def test_workspace_backup_rejects_sparse_file_above_production_per_file_limit_before_hashing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Use a sparse file to exercise the 50 GiB preflight without allocating or reading 50 GiB."""
+    workspace = tmp_path / "oversized-sparse-file"
+    workspace.mkdir()
+    sparse_file = workspace / "oversized.gguf"
+    with sparse_file.open("wb") as stream:
+        stream.seek(workspace_backup.MAX_BACKUP_FILE_BYTES)
+        stream.write(b"\\0")
+
+    assert sparse_file.stat().st_size == workspace_backup.MAX_BACKUP_FILE_BYTES + 1
+    monkeypatch.setattr(
+        workspace_backup,
+        "_hash_workspace_file",
+        lambda *_args: pytest.fail("oversized files must be rejected before any hashing pass"),
+    )
+    with pytest.raises(WorkspaceBackupError, match="50 GiB"):
+        create_workspace_backup(workspace, io.BytesIO())
+
+
+def test_workspace_backup_rejects_aggregate_byte_overflow_independently_of_per_file_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    workspace = tmp_path / "aggregate-limit"
+    workspace.mkdir()
+    (workspace / "one.bin").write_bytes(b"a" * 16)
+    (workspace / "two.bin").write_bytes(b"b" * 16)
+    (workspace / "three.bin").write_bytes(b"c")
+
+    monkeypatch.setattr(workspace_backup, "MAX_BACKUP_FILES", 3)
+    monkeypatch.setattr(workspace_backup, "MAX_BACKUP_FILE_BYTES", 16)
+    monkeypatch.setattr(workspace_backup, "MAX_BACKUP_TOTAL_BYTES", 32)
+
+    with pytest.raises(WorkspaceBackupError, match="100 GiB"):
+        create_workspace_backup(workspace, io.BytesIO())

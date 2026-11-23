@@ -413,3 +413,30 @@ def test_model_provenance_hashes_license_evidence_at_exact_aggregate_byte_limit(
     assert over_limit["status"] == "skipped_count_or_total_size_limit"
     assert over_limit["files"] == []
 
+
+
+def test_model_provenance_rejects_sparse_checkpoint_over_production_hash_limit_without_reading(
+    tmp_path,
+    monkeypatch,
+):
+    """A sparse >16 GiB weight must be rejected on metadata before a digest read."""
+    model = tmp_path / "oversized-sparse-checkpoint"
+    model.mkdir()
+    sparse_weight = model / "large-model.safetensors"
+    with sparse_weight.open("wb") as stream:
+        stream.seek(provenance.MAX_PROVENANCE_HASH_BYTES)
+        stream.write(b"\\0")
+
+    assert sparse_weight.stat().st_size == provenance.MAX_PROVENANCE_HASH_BYTES + 1
+    monkeypatch.setattr(
+        provenance,
+        "_hash_file",
+        lambda *_args, **_kwargs: pytest.fail("over-limit checkpoint must not be opened for hashing"),
+    )
+
+    report = inspect_model_provenance(model)
+    assert report["format_evidence"]["weight_file_count"] == 1
+    assert report["format_evidence"]["weight_size_bytes"] == provenance.MAX_PROVENANCE_HASH_BYTES + 1
+    assert report["hash_evidence"]["status"] == "skipped_size_or_file_count_limit"
+    assert report["hash_evidence"]["checkpoint_sha256"] is None
+    assert report["hash_evidence"]["files"] == []
