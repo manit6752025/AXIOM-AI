@@ -621,3 +621,24 @@ def test_release_smoke_initializes_shared_api_client_before_snapshot_contract(mo
                 if isinstance(target, ast.Name) and target.id == "snapshot_client":
                     snapshot_line = node.lineno
     assert assignments["client"] < snapshot_line
+
+
+def test_benchmark_profile_release_contract_checks_all_integration_layers() -> None:
+    from scripts.release_smoke import benchmark_profile_issues
+
+    core = (ROOT / "axiom/core/benchmark_profiles.py").read_text(encoding="utf-8")
+    api = (ROOT / "axiom/api/engine.py").read_text(encoding="utf-8")
+    cli = (ROOT / "axiom/cli/engine.py").read_text(encoding="utf-8")
+    client = (ROOT / "src/api/client.ts").read_text(encoding="utf-8")
+    panel = (ROOT / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
+    core_tests = (ROOT / "tests/test_benchmark_profiles.py").read_text(encoding="utf-8")
+    api_tests = (ROOT / "tests/test_benchmark_profiles_api.py").read_text(encoding="utf-8")
+    cli_tests = (ROOT / "tests/test_axiom_engine_cli.py").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/axiom-engine.spec.ts").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/Inference-Benchmarking.md").read_text(encoding="utf-8")
+
+    assert benchmark_profile_issues(core, api, cli, client, panel, core_tests, api_tests, cli_tests, e2e, docs) == []
+    assert any("prompt_sha256" in issue for issue in benchmark_profile_issues(
+        core.replace("prompt_sha256", "prompt_hash"), api, cli, client, panel,
+        core_tests, api_tests, cli_tests, e2e, docs,
+    ))

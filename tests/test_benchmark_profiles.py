@@ -160,8 +160,10 @@ def test_profile_store_rejects_duplicate_names_and_invalid_profile_inputs(tmp_pa
         store.create("../escape", _report(), "prompt", tmp_path)
     with pytest.raises(BenchmarkProfileError, match="prompts"):
         store.create("Second", _report(), "   ", tmp_path)
+    invalid_engine_report = _report()
+    invalid_engine_report["engine"] = "other"
     with pytest.raises(BenchmarkProfileError, match="Only AXIOM Native Engine"):
-        store.create("Third", {"schema_version": 1, "engine": "other"}, "prompt", tmp_path)
+        store.create("Third", invalid_engine_report, "prompt", tmp_path)
 
 
 def test_profile_store_rejects_tampering_unknown_fields_and_future_schema(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -198,3 +200,35 @@ def test_profile_comparison_requires_two_distinct_existing_ids(tmp_path: Path, m
         store.compare(first["id"], first["id"])
     with pytest.raises(BenchmarkProfileError, match="not found"):
         store.compare(first["id"], "f" * 32)
+
+
+def test_profile_store_rejects_invalid_sampling_and_untrusted_model_directory_symlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _patch_environment(monkeypatch)
+    store = BenchmarkProfileStore(tmp_path / ".axiom")
+    bad = _report()
+    bad["sampling"]["top_p"] = 1.5
+    with pytest.raises(BenchmarkProfileError, match="sampling"):
+        store.create("Invalid sampling", bad, "prompt", tmp_path)
+
+    model = tmp_path / "model"
+    model.mkdir()
+    link = tmp_path / "model-link"
+    try:
+        link.symlink_to(model, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlink creation is not permitted in this test environment.")
+    with pytest.raises(BenchmarkProfileError, match="symbolic link"):
+        store.create("Symlinked model", _report(), "prompt", link)
+
+
+def test_missing_model_configuration_fingerprint_prevents_controlled_comparison(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _patch_environment(monkeypatch)
+    store = BenchmarkProfileStore(tmp_path / ".axiom")
+    model = tmp_path / "model"
+    model.mkdir()
+    first = store.create("No metadata A", _report(100), "same prompt", model)
+    second = store.create("No metadata B", _report(90), "same prompt", model)
+    comparison = store.compare(first["id"], second["id"])
+    assert comparison["match"]["model_metadata"] is False
+    assert comparison["comparable"] is False
+    assert comparison["metrics"]["median_elapsed_ms"]["delta"] == -10.0

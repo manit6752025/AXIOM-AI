@@ -141,6 +141,48 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
       scope_note: "Planning estimates only. They do not inspect tensor contents, measure physical memory, or predict model quality/speed.",
     } });
   });
+  const savedProfileId = "a".repeat(32);
+  const comparisonProfileId = "e".repeat(32);
+  const savedProfile = {
+    id: savedProfileId, name: "Qwen CPU baseline", created_at: "2026-11-21T00:00:00Z",
+    fingerprint: "b".repeat(64), prompt_sha256: "c".repeat(64), prompt_chars: 11,
+    model_config_sha256: "d".repeat(64),
+    workload: {
+      prompt_sha256: "c".repeat(64), prompt_chars: 11,
+      config: { model: "llama-test", architecture: "LlamaForCausalLM", model_type: "llama", checkpoint_format: "safetensors",
+        warmup_runs: 1, iterations: 2, max_new_tokens: 128,
+        sampling: { temperature: 0.7, top_p: 0.8, top_k: 4, min_p: 0.05, repetition_penalty: 1.1, seed: 42 },
+        device: "cpu", memory_mode: "full", precision: "fp32", adapter_used: false },
+      metrics: { total_wall_time_ms: 88, measured_wall_time_ms: 44, median_elapsed_ms: 22, p95_elapsed_ms: 26,
+        median_prefill_ms: 8, median_decode_ms: 12, median_time_to_first_token_ms: 8,
+        median_generation_tokens_per_second: 21, completion_tokens: 20, prompt_tokens: 10, aggregate_tokens_per_second: 19 },
+    },
+    hardware: { os_name: "Linux", os_release: "6.12", architecture: "x86_64", cpu_cores: 8,
+      ram_bytes: 17179869184, gpu_name: null, vram_bytes: null, cuda_available: false },
+    software: { axiom_version: "0.3.0-test", python_version: "3.11.9", torch_version: "2.9.0" },
+  };
+  const comparisonProfile = { ...savedProfile, id: comparisonProfileId, name: "Qwen CPU repeat", fingerprint: "f".repeat(64) };
+  await page.route("**/api/engine/benchmark-profiles**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith("/compare")) {
+      expect(route.request().url()).toContain("/api/engine/benchmark-profiles/compare");
+      expect(url.searchParams.get("left_id")).toBe(savedProfileId);
+      expect(url.searchParams.get("right_id")).toBe(comparisonProfileId);
+      await route.fulfill({ json: {
+        schema_version: 1, comparable: true,
+        match: { hardware: true, software: true, model: true, model_metadata: true, workload: true, same_prompt: true },
+        left: { id: savedProfileId, name: "Qwen CPU baseline" },
+        right: { id: comparisonProfileId, name: "Qwen CPU repeat" },
+        metrics: { median_elapsed_ms: { left: 22, right: 20, delta: -2 } },
+        note: "The profiles share the same hardware, software, model and workload fingerprints.",
+      } });
+    } else {
+      await route.fulfill({ json: {
+        schema_version: 1, total: 2, profiles: [savedProfile, comparisonProfile],
+        privacy: { prompt_content_included: false, model_paths_included: false, credentials_included: false },
+      } });
+    }
+  });
   await page.route("**/api/engine/benchmark", async (route) => {
     benchmarkCalls += 1;
     if (benchmarkCalls > 1) {
@@ -155,6 +197,7 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
       return;
     }
     const requestBody = route.request().postDataJSON() as Record<string, unknown>;
+    expect(requestBody.profile_name).toBe("Qwen CPU baseline");
     expect(requestBody.prompt).toBe("Say hello.");
     expect(requestBody.warmup_runs).toBe(1);
     expect(requestBody.iterations).toBe(2);
@@ -192,6 +235,7 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
       scope_note: "Measured local AXIOM inference. No prompts or generated responses are returned.",
       privacy: { prompt_returned: false, response_returned: false, results_persisted: false, cloud_provider_used: false },
       generated_at: "2026-10-26T00:00:00Z",
+      profile_record: savedProfile,
     } });
   });
   await page.route("**/api/engine/generate/stream", (route) => {
@@ -316,6 +360,7 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(engine).toContainText("LlamaForCausalLM");
   await expect(engine.getByRole("button", { name: "Unload model" })).toBeVisible();
 
+  await engine.getByLabel("Benchmark profile name").fill("Qwen CPU baseline");
   await engine.getByLabel("Benchmark warm-up runs").fill("1");
   await engine.getByLabel("Measured benchmark runs").fill("2");
   await engine.getByRole("button", { name: "Benchmark native engine" }).click();
@@ -327,6 +372,14 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(transferTelemetry).toContainText("KV cache offloaded");
   await expect(transferTelemetry).toContainText("3.0 MiB");
   await expect(nativeBenchmark).not.toContainText("Say hello.");
+  await expect(nativeBenchmark).toContainText("Saved reproducibility profile");
+  const profiles = engine.getByRole("region", { name: "Saved benchmark profiles" });
+  await expect(profiles).toContainText("Qwen CPU baseline");
+  await profiles.getByRole("button", { name: "Select Qwen CPU baseline as first comparison profile" }).click();
+  await profiles.getByRole("button", { name: "Select Qwen CPU repeat as second comparison profile" }).click();
+  await profiles.getByRole("button", { name: "Compare selected profiles" }).click();
+  await expect(profiles).toContainText("Controlled comparison");
+  await expect(profiles).toContainText("median elapsed ms: 22.00 → 20.00 (Δ -2.00)");
   const resourceTrends = engine.getByRole("region", { name: "Benchmark resource trends" });
   await expect(resourceTrends).toContainText("Resource trends");
   await expect(resourceTrends).toContainText("1/20 runs");
