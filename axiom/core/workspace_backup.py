@@ -532,7 +532,15 @@ def restore_workspace_backup(archive_source: BinaryIO, staging_root: str | Path)
                                 if written > entry["size_bytes"]:
                                     raise WorkspaceBackupError("A restored file exceeded its declared size.")
                                 digest.update(block)
-                                target.write(block)
+                                # Preserve long all-zero extents as filesystem holes
+                                # instead of allocating every byte during restore.
+                                # The content is still fully read, hashed, CRC-checked
+                                # by zipfile, and included in the declared byte count.
+                                if any(block):
+                                    target.write(block)
+                                else:
+                                    target.seek(len(block), os.SEEK_CUR)
+                            target.truncate(entry["size_bytes"])
                             target.flush()
                             os.fsync(target.fileno())
                     if written != entry["size_bytes"] or digest.hexdigest() != entry["sha256"]:
