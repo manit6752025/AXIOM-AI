@@ -728,10 +728,18 @@ def test_prediction_job_restart_resume_release_contract_covers_every_surface() -
         (ROOT / "docs/Local-Engine.md").read_text(encoding="utf-8")
         + (ROOT / "docs/integrations.md").read_text(encoding="utf-8")
     )
+    sdk_python_client = (ROOT / "sdk/python/axiom_sdk/client.py").read_text(encoding="utf-8")
+    sdk_python_types = (ROOT / "sdk/python/axiom_sdk/types.py").read_text(encoding="utf-8")
+    sdk_python_exports = (ROOT / "sdk/python/axiom_sdk/__init__.py").read_text(encoding="utf-8")
+    sdk_typescript_client = (ROOT / "sdk/typescript/src/client.ts").read_text(encoding="utf-8")
+    sdk_typescript_types = (ROOT / "sdk/typescript/src/types.ts").read_text(encoding="utf-8")
+    sdk_typescript_exports = (ROOT / "sdk/typescript/src/index.ts").read_text(encoding="utf-8")
 
     args = (
         core, api, cli, mcp_server, permissions, client, gui,
         core_tests, api_tests, cli_tests, core_tests, e2e, docs,
+        sdk_python_client, sdk_python_types, sdk_python_exports,
+        sdk_typescript_client, sdk_typescript_types, sdk_typescript_exports,
     )
     assert release_smoke.prediction_job_resume_issues(*args) == []
 
