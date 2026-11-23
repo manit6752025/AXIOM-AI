@@ -603,3 +603,23 @@ def test_model_remove_requires_confirmation_and_never_deletes_weight_files(tmp_p
     assert payload["model"]["id"] == model.id
     assert registry.get(model.id) is None
     assert weights.read_bytes() == b"model-weight-fixture"
+
+
+
+def test_dataset_profile_json_is_versioned_privacy_safe_and_preserves_source(tmp_path: Path) -> None:
+    dataset = tmp_path / "private.jsonl"
+    original = '{"email":"private.person@example.com","text":"private row content"}\nnot-json\n'
+    dataset.write_text(original, encoding="utf-8")
+
+    result = runner.invoke(app, ["dataset", "profile", str(dataset), "--json"])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["profile"]["valid_rows"] == 1
+    assert payload["profile"]["invalid_rows"] == 1
+    assert payload["profile"]["privacy_review_recommended"] is True
+    assert "private.person@example.com" not in result.stdout
+    assert "private row content" not in result.stdout
+    assert "matched PII values are never returned" in payload["scope_note"]
+    assert dataset.read_text(encoding="utf-8") == original
