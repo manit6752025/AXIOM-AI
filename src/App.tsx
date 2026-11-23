@@ -5628,7 +5628,7 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
     }
   };
 
-  const runScan = async () => {
+  const runScan = async (announceFailures = false) => {
     setScanState("scanning");
     const [healthResult, hardwareResult, modelResult, datasetResult, workspaceDiagnosticsResult, securityAuditResult, securityEventsResult] = await Promise.allSettled([
       axiomApi.health(),
@@ -5655,7 +5655,13 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
     if (securityEventsResult.status === "fulfilled") setSecurityEvents(securityEventsResult.value);
     else { setSecurityEvents(null); failures.push("security event journal"); }
     setScanState(failures.length ? "failed" : "idle");
-    if (failures.length) onNotify(`Some diagnostics could not complete: ${failures.join(", ")}.`, "warning");
+    // The initial background scan updates the page status but must not replace
+    // a more important action result (for example, a successful workspace
+    // restore) with a delayed warning toast. Only an explicit user-requested
+    // scan announces its failures.
+    if (announceFailures && failures.length) {
+      onNotify(`Some diagnostics could not complete: ${failures.join(", ")}.`, "warning");
+    }
   };
 
   const refreshSecurityEvents = async () => {
@@ -5720,7 +5726,7 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
     <button type="button" className="button secondary-button" onClick={() => void downloadBundle()} disabled={bundleBusy}><ArrowDownToLine size={16} /> {bundleBusy ? "Preparing bundle…" : "Download support bundle"}</button>
     <button type="button" className="button secondary-button" onClick={() => void exportSoftwareBillOfMaterials()} disabled={supplyChainBusy}><ArrowDownToLine size={16} /> Export SPDX SBOM</button>
     <button type="button" className="button secondary-button" onClick={() => void scanDependencyVulnerabilities()} disabled={supplyChainBusy}>{supplyChainBusy ? "Checking dependencies…" : "Scan dependencies (network)"}</button>
-    <button type="button" className="button primary-button" onClick={() => void runScan()} disabled={scanState === "scanning"}><Wrench size={16} /> {scanState === "scanning" ? "Scanning…" : "Run diagnostics"}</button>
+    <button type="button" className="button primary-button" onClick={() => void runScan(true)} disabled={scanState === "scanning"}><Wrench size={16} /> {scanState === "scanning" ? "Scanning…" : "Run diagnostics"}</button>
   </>}>
     <div className="diagnostic-hero"><div><p className="eyebrow">WORKSPACE READINESS</p><strong>{headline}</strong><p>{systemDescription}{health?.version ? ` · AXIOM ${health.version}` : ""}</p></div><div className={`diagnostic-ring ${scanState === "failed" ? "blocked" : scanState}`}><span>{scanState === "scanning" ? "…" : connected ? "OK" : "N/A"}</span></div></div>
     <Surface title="Full workspace backup and restore" eyebrow="CHECKSUM-VERIFIED / NEW WORKSPACE">
