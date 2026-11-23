@@ -256,3 +256,19 @@ def test_model_config_fingerprint_opens_fixed_metadata_without_following_symlink
     monkeypatch.setattr(benchmark_profiles, "_trusted_model_directory", lambda _value: root)
     with pytest.raises(BenchmarkProfileError, match="could not be read safely"):
         benchmark_profiles._model_config_fingerprint(root)
+
+
+def test_profile_store_rejects_model_directory_with_symlinked_ancestor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _patch_environment(monkeypatch)
+    store = BenchmarkProfileStore(tmp_path / ".axiom")
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    model = real_parent / "model"
+    model.mkdir()
+    link_parent = tmp_path / "linked-parent"
+    try:
+        link_parent.symlink_to(real_parent, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlink creation is not permitted in this test environment.")
+    with pytest.raises(BenchmarkProfileError, match="symbolic links or junctions"):
+        store.create("Linked ancestor", _report(), "prompt", link_parent / "model")
