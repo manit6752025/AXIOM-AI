@@ -207,7 +207,7 @@ export default function EngineTelemetryMonitor() {
     anchor.click();
     anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setNotice("Exported the current in-memory resource samples.");
+    setNotice("Exported the selected resource samples with the configured privacy fields.");
   };
 
   const exportCsv = () => {
@@ -304,7 +304,7 @@ export default function EngineTelemetryMonitor() {
     <section className="surface" aria-labelledby="engine-telemetry-title" style={{ marginTop: 18, padding: 18, border: "1px solid var(--line-strong)", borderRadius: 2, background: "var(--surface)" }}>
       <div className="surface-head">
         <div>
-          <p className="surface-eyebrow">OPT-IN · BOUNDED · BROWSER MEMORY</p>
+          <p className="surface-eyebrow">OPT-IN · BOUNDED · WORKSPACE OR BROWSER MEMORY</p>
           <h3 id="engine-telemetry-title"><Activity size={17} style={{ verticalAlign: "middle", marginRight: 8 }} />Resource monitoring</h3>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -332,7 +332,7 @@ export default function EngineTelemetryMonitor() {
         </label>
         <label>Maximum history age
           <select aria-label="Persistent history retention days" value={maxAgeDays} onChange={(event) => setMaxAgeDays(Number(event.target.value))} disabled={recording || historyBusy || !historyReady}>
-            {[7, 30, 90, 365].map((value) => <option key={value} value={value}>{value} days</option>)}
+            {[7, 30, 90, 365, 730, 1825, 3650].map((value) => <option key={value} value={value}>{value < 365 ? `${value} days` : value % 365 === 0 ? `${value / 365} year${value === 365 ? "" : "s"}` : `${value} days`}</option>)}
           </select>
         </label>
         <button type="button" className="button secondary-button" onClick={() => void saveHistorySettings()} disabled={!historyReady || historyBusy || recording}>Save persistent history settings</button>

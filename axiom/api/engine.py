@@ -10,7 +10,7 @@ from threading import Event, Thread
 import time
 from typing import Any, AsyncIterator, Iterator
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.responses import StreamingResponse
 from axiom.core import model_studio
@@ -72,7 +72,7 @@ def _validated_path(value: Any, label: str) -> Any:
 class ResourceTelemetryHistorySettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool
+    enabled: bool = Field(strict=True)
     max_samples: int = Field(default=120, ge=1, le=500, strict=True)
     max_age_days: int = Field(default=30, ge=1, le=3650, strict=True)
 
@@ -274,7 +274,7 @@ def engine_telemetry() -> dict[str, Any]:
 
 
 @router.get("/telemetry-history")
-def engine_telemetry_history(limit: int = 500) -> dict[str, Any]:
+def engine_telemetry_history(limit: int = Query(default=500, ge=1, le=500, strict=True)) -> dict[str, Any]:
     """Read explicit, bounded workspace resource history without probing hardware."""
     try:
         return ResourceTelemetryStore().list(limit=limit)
@@ -300,6 +300,10 @@ def record_engine_telemetry_history() -> dict[str, Any]:
     """Capture one allowlisted local resource sample only after explicit opt-in."""
     store = ResourceTelemetryStore()
     try:
+        if not store.list(limit=1)["settings"]["enabled"]:
+            raise ResourceTelemetryOptInRequired(
+                "Persistent resource history is disabled. Enable it explicitly first."
+            )
         return store.record(runtime_telemetry())
     except ResourceTelemetryOptInRequired:
         raise HTTPException(status_code=409, detail="Persistent resource history is disabled. Enable it explicitly first.") from None

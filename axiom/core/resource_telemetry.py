@@ -348,7 +348,7 @@ class ResourceTelemetryStore:
                 if selected_fd >= 0:
                     descriptor = os.open(
                         self.path.name,
-                        os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                        os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0),
                         dir_fd=selected_fd,
                     )
                     with os.fdopen(descriptor, "rb") as stream:

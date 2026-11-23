@@ -28,7 +28,8 @@ def telemetry_sample():
 def test_resource_telemetry_api_has_explicit_opt_in_record_export_and_clear_lifecycle(tmp_path, monkeypatch) -> None:
     store = ResourceTelemetryStore(tmp_path / ".axiom")
     monkeypatch.setattr(engine_api, "ResourceTelemetryStore", lambda: store)
-    monkeypatch.setattr(engine_api, "runtime_telemetry", telemetry_sample)
+    telemetry_calls = []
+    monkeypatch.setattr(engine_api, "runtime_telemetry", lambda: telemetry_calls.append(True) or telemetry_sample())
     app = FastAPI()
     app.include_router(engine_api.router)
     client = TestClient(app)
@@ -39,6 +40,7 @@ def test_resource_telemetry_api_has_explicit_opt_in_record_export_and_clear_life
     assert initial.json()["samples"] == []
     blocked = client.post("/api/engine/telemetry-history")
     assert blocked.status_code == 409
+    assert telemetry_calls == []
 
     enabled = client.put("/api/engine/telemetry-history/settings", json={
         "enabled": True, "max_samples": 20, "max_age_days": 14,
@@ -51,6 +53,7 @@ def test_resource_telemetry_api_has_explicit_opt_in_record_export_and_clear_life
     assert payload["history"]["total"] == 1
     assert "DO-NOT-RETURN" not in recorded.text
     assert '"pid"' not in recorded.text
+    assert telemetry_calls == [True]
 
     cleared = client.delete("/api/engine/telemetry-history")
     assert cleared.status_code == 200
@@ -72,3 +75,10 @@ def test_resource_telemetry_api_rejects_invalid_retention_settings_and_extra_fie
         "enabled": True, "max_samples": 20, "max_age_days": 14, "hostname": "not-accepted",
     })
     assert extra.status_code == 422
+
+    non_boolean = client.put("/api/engine/telemetry-history/settings", json={
+        "enabled": "true", "max_samples": 20, "max_age_days": 14,
+    })
+    assert non_boolean.status_code == 422
+    invalid_limit = client.get("/api/engine/telemetry-history?limit=501")
+    assert invalid_limit.status_code == 422
