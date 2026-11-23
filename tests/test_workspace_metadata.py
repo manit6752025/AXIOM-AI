@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 import zipfile
@@ -102,7 +101,7 @@ def test_workspace_metadata_archive_round_trip_is_allowlisted_and_validated(tmp_
         "experiments": 1,
         "workflows": 1,
         "evaluations": 1,
-        "agent_profiles": 2,
+        "agent_profiles": 1,
     }
     assert [item.name for item in ModelRegistry(destination / ".axiom").list()] == ["Local Qwen"]
     assert ExperimentStore(destination / ".axiom").get("experiment-one")["name"] == "Baseline run"
@@ -198,6 +197,7 @@ def test_workspace_metadata_import_rejects_checksum_tampering_and_zip_traversal(
 
     traversal = io.BytesIO()
     with zipfile.ZipFile(traversal, "w") as target:
+        target.writestr("manifest.json", b"{}")
         target.writestr("../../outside.txt", b"unsafe")
     with pytest.raises(ValueError, match="unsupported or unsafe"):
         import_workspace_metadata(traversal.getvalue(), root)

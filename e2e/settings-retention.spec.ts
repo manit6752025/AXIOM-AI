@@ -37,3 +37,49 @@ test("Settings persists the selected accent palette and maximum session timeout"
   await expect(page.getByLabel("Session timeout (minutes)")).toHaveValue("300");
   await expect(page.getByLabel("Accent color")).toHaveValue("violet");
 });
+
+
+test("Settings exports and imports a workspace metadata archive", async ({ page }) => {
+  await ensureAuthenticated(page);
+  await page.goto("/?page=settings");
+
+  await expect(page.getByRole("heading", { name: "Workspace metadata transfer", exact: true })).toBeVisible();
+  await expect(page.getByText(/MCP permission grants.*model weights/i)).toBeVisible();
+
+  await page.route("**/api/workspace/metadata/export", async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "application/vnd.axiom.workspace-metadata+zip" },
+      body: Buffer.from("PK\\u0003\\u0004AXIOM-E2E"),
+    });
+  });
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Export workspace metadata" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("axiom-workspace-metadata.zip");
+
+  let uploadedBody: Buffer | null = null;
+  await page.route("**/api/workspace/metadata/import?replace=true", async (route) => {
+    uploadedBody = route.request().postDataBuffer() ?? null;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        schema_version: 1,
+        mode: "replace",
+        imported: { models: 1 },
+        excluded: [],
+      }),
+    });
+  });
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.getByLabel("Replace included metadata collections").check();
+  await page.getByLabel("Import workspace metadata archive").setInputFiles({
+    name: "workspace.zip",
+    mimeType: "application/vnd.axiom.workspace-metadata+zip",
+    buffer: Buffer.from("PK\\u0003\\u0004AXIOM-IMPORT"),
+  });
+  await expect(page.getByRole("status")).toContainText("Metadata replace completed");
+  expect(uploadedBody?.toString()).toBe("PK\\u0003\\u0004AXIOM-IMPORT");
+});
