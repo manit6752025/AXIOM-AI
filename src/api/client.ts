@@ -809,6 +809,46 @@ export type DatasetScanLimits = {
   max_line_bytes: number;
 };
 
+export type DatasetSnapshotManifest = {
+  schema_version: 1;
+  snapshot_id: string;
+  created_at: string;
+  source_path: string;
+  file_name: string;
+  format: "jsonl";
+  file_size_bytes: number;
+  sha256: string;
+  object_name: string;
+  parent_snapshot_id: string | null;
+  parent_manifest_sha256: string | null;
+};
+export type DatasetSnapshotRecord = {
+  sequence: number;
+  manifest: DatasetSnapshotManifest;
+  manifest_sha256: string;
+  previous_record_sha256: string;
+  record_sha256: string;
+};
+export type DatasetSnapshotHistory = {
+  schema_version: 1;
+  snapshots: DatasetSnapshotRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  immutable: true;
+};
+export type DatasetSnapshotVerification = {
+  schema_version: 1;
+  snapshot_id: string;
+  valid: boolean;
+  expected_sha256: string;
+  file_size_bytes: number;
+  manifest_sha256: string;
+  lineage_valid: boolean;
+  immutable: true;
+};
+
 export type DatasetManifest = {
   schema_version: number;
   generated_at: string;
@@ -2031,6 +2071,22 @@ export const axiomApi = {
     );
     return result.profile;
   },
+
+  datasetSnapshots: (limit = 50, offset = 0) => {
+    const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    return requestJson<DatasetSnapshotHistory>(`/api/workspace/dataset-snapshots?${query.toString()}`);
+  },
+
+  createDatasetSnapshot: (input: { path: string; max_bytes: number; parent_snapshot_id?: string }) =>
+    requestJson<{ snapshot: DatasetSnapshotRecord; total: number }>("/api/workspace/dataset-snapshots", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  verifyDatasetSnapshot: (snapshotId: string) =>
+    requestJson<DatasetSnapshotVerification>(
+      `/api/workspace/dataset-snapshots/${encodeURIComponent(snapshotId)}/verify`,
+    ),
 
   datasetManifest: async (path: string, maxBytes: number, parentManifestSha256?: string) => {
     const query = new URLSearchParams({ path, max_bytes: String(maxBytes) });

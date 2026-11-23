@@ -538,3 +538,86 @@ def test_supply_chain_contract_requires_spdx_and_explicit_dependency_audit() -> 
         api, cli, client, gui, core_tests, api_tests, e2e, docs,
     )
     assert any("network authorization" in failure for failure in failures)
+
+
+def test_dataset_snapshot_release_contract_requires_immutable_store_and_lineage_coverage() -> None:
+    from scripts.release_smoke import dataset_snapshot_issues
+
+    core = (
+        "class DatasetSnapshotStore\nMAX_SNAPSHOTS = 250\n"
+        "MAX_DATASET_BYTES = 1024 * 1024 * 1024\nMAX_TOTAL_SNAPSHOT_BYTES = 10 * 1024 * 1024 * 1024\n"
+        "def create_snapshot(\ndef verify(\nfile_lock(\natomic_write_text(\n"
+        "record_sha256\nparent_manifest_sha256\nobject_name"
+    )
+    api = (
+        "class WorkspaceDatasetSnapshotInput(BaseModel)\n"
+        '@router.get("/dataset-snapshots")\n@router.post("/dataset-snapshots", status_code=201)\n'
+        '@router.get("/dataset-snapshots/{snapshot_id}/verify")\n'
+        "DatasetSnapshotStore(active_workspace_root())\nopen_regular_file(candidate)"
+    )
+    cli = (
+        '@dataset_app.command("snapshot")\n@dataset_app.command("snapshots")\n'
+        '@dataset_app.command("snapshot-verify")\nDatasetSnapshotStore(workspace)\n'
+        "find_existing_relative_path(data_root"
+    )
+    client = (
+        "DatasetSnapshotManifest\nDatasetSnapshotHistory\nDatasetSnapshotVerification\n"
+        "datasetSnapshots:\ncreateDatasetSnapshot:\nverifyDatasetSnapshot:"
+    )
+    gui = (
+        "snapshotHistory\nsnapshotParentId\nrunSnapshot\nverifySnapshot\n"
+        "createDatasetSnapshot(\nverifyDatasetSnapshot(\nParent dataset snapshot\n"
+        "Immutable snapshot history\nSnapshot"
+    )
+    core_tests = (
+        "test_snapshot_stores_content_addressed_read_only_object_and_value_free_manifest\n"
+        "test_identical_content_is_deduplicated_and_parent_lineage_is_verifiable\n"
+        "test_parent_must_be_a_valid_earlier_snapshot_in_the_same_workspace\n"
+        "test_snapshot_enforces_source_type_format_and_size_bounds\n"
+        "test_snapshot_rejects_tampered_manifest_index_and_hash_chain\n"
+        "test_snapshot_verification_detects_modified_object_bytes\n"
+        "test_snapshot_rejects_symlinked_workspace_metadata"
+    )
+    api_tests = (
+        "test_dataset_snapshot_api_creates_lists_and_verifies_workspace_snapshots\n"
+        "test_dataset_snapshot_api_rejects_unsafe_sources_parent_and_byte_overflow\n"
+        "test_dataset_snapshot_api_links_parent_manifest_to_prior_snapshot\n"
+        "test_dataset_snapshot_api_returns_not_found_for_unknown_snapshot"
+    )
+    cli_tests = (
+        "test_dataset_snapshot_cli_creates_lists_and_verifies_immutable_history\n"
+        "test_dataset_snapshot_cli_rejects_files_outside_workspace_data"
+    )
+    e2e = (
+        "Datasets creates immutable content-addressed snapshots\nParent dataset snapshot\n"
+        "Verify\nparent_snapshot_id: firstId\nSnapshot content hash and lineage verified."
+    )
+    docs = "content-addressed\nhash-chained\nread-only\nparent_snapshot_id\nnot a signed\naxiom dataset snapshot"
+
+    args = (core, api, cli, client, gui, core_tests, api_tests, cli_tests, e2e, docs)
+    assert dataset_snapshot_issues(*args) == []
+    failures = dataset_snapshot_issues(
+        core.replace("file_lock(", ""),
+        api, cli, client, gui, core_tests, api_tests, cli_tests, e2e, docs,
+    )
+    assert any("file_lock(" in failure for failure in failures)
+
+
+
+def test_release_smoke_initializes_shared_api_client_before_snapshot_contract(monkeypatch, tmp_path) -> None:
+    import ast
+
+    source = (ROOT / "scripts/release_smoke.py").read_text(encoding="utf-8")
+    module = ast.parse(source)
+    inspect_fn = next(node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == "inspect")
+    assignments = {}
+    for node in inspect_fn.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "client":
+                    assignments[target.id] = node.lineno
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "snapshot_client":
+                    snapshot_line = node.lineno
+    assert assignments["client"] < snapshot_line

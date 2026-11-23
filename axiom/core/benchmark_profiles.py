@@ -1,0 +1,385 @@
+"""Reproducible, workspace-local profiles for native inference benchmark runs.
+
+Profiles retain workload settings, allowlisted hardware/software provenance and
+summary metrics. Prompt text and model paths are never persisted.
+"""
+from __future__ import annotations
+
+import hashlib
+import importlib.metadata
+import json
+import os
+import platform
+import re
+import stat
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from axiom.core.hardware import detect_hardware
+from axiom.core.storage import atomic_write_text, file_lock
+from axiom.core.workspace_context import workspace_metadata_dir
+from axiom.version import __version__
+
+SCHEMA_VERSION = 1
+MAX_STORE_BYTES = 4 * 1024 * 1024
+MAX_PROFILES = 100
+MAX_PROFILE_NAME = 64
+_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$")
+_LOCK = ".benchmark-profiles.lock"
+_MODEL_CONFIG_FILES = (
+    "config.json",
+    "tokenizer_config.json",
+    "special_tokens_map.json",
+    "tokenizer.json",
+    "generation_config.json",
+)
+_METRICS = (
+    "total_wall_time_ms",
+    "measured_wall_time_ms",
+    "median_elapsed_ms",
+    "p95_elapsed_ms",
+    "median_prefill_ms",
+    "median_decode_ms",
+    "median_time_to_first_token_ms",
+    "median_generation_tokens_per_second",
+    "completion_tokens",
+    "prompt_tokens",
+    "aggregate_tokens_per_second",
+)
+
+
+class BenchmarkProfileError(ValueError):
+    """Invalid or unsafe benchmark profile operation."""
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _canonical(value: Any) -> bytes:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
+def _model_config_fingerprint(model_path: str | Path) -> str | None:
+    """Hash a bounded set of model configuration files, never model weights."""
+    root = Path(model_path).expanduser()
+    try:
+        root = root.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    if not root.is_dir():
+        return None
+    parts: list[tuple[str, str]] = []
+    total = 0
+    for name in _MODEL_CONFIG_FILES:
+        path = root / name
+        if path.is_symlink():
+            raise BenchmarkProfileError("Model configuration metadata must not use symbolic links.")
+        if not path.exists():
+            continue
+        try:
+            info = path.stat()
+            if not stat.S_ISREG(info.st_mode) or info.st_size > 2 * 1024 * 1024:
+                raise BenchmarkProfileError("A model configuration file exceeds the benchmark provenance limit.")
+            total += info.st_size
+            if total > 8 * 1024 * 1024:
+                raise BenchmarkProfileError("Model configuration metadata exceeds the 8 MiB provenance limit.")
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except BenchmarkProfileError:
+            raise
+        except OSError:
+            raise BenchmarkProfileError("Model configuration metadata could not be read safely.") from None
+        parts.append((name, digest))
+    return hashlib.sha256(_canonical(parts)).hexdigest() if parts else None
+
+
+def _hardware_record() -> dict[str, Any]:
+    hardware = detect_hardware()
+    ram = getattr(hardware, "ram_gb", None)
+    vram = getattr(hardware, "vram_gb", None)
+    return {
+        "os_name": str(getattr(hardware, "os_name", platform.system()))[:64],
+        "os_release": platform.release()[:64],
+        "architecture": str(getattr(hardware, "architecture", platform.machine()))[:64],
+        "cpu_cores": int(getattr(hardware, "cpu_cores", os.cpu_count() or 1)),
+        "ram_bytes": int(round(ram * (1024 ** 3))) if isinstance(ram, (int, float)) and not isinstance(ram, bool) and ram > 0 else None,
+        "gpu_name": str(hardware.gpu_name)[:128] if getattr(hardware, "gpu_name", None) else None,
+        "vram_bytes": int(round(vram * (1024 ** 3))) if isinstance(vram, (int, float)) and not isinstance(vram, bool) and vram > 0 else None,
+        "cuda_available": bool(getattr(hardware, "cuda_available", False)),
+    }
+
+
+def _software_record() -> dict[str, Any]:
+    try:
+        torch_version = importlib.metadata.version("torch")
+    except importlib.metadata.PackageNotFoundError:
+        torch_version = None
+    return {
+        "axiom_version": __version__,
+        "python_version": platform.python_version(),
+        "torch_version": torch_version,
+    }
+
+
+def _validated_report(report: Any) -> dict[str, Any]:
+    required = {"schema_version", "engine", "model", "architecture", "model_type", "device", "precision",
+                "memory_mode", "checkpoint_format", "warmup_runs_requested", "warmup_runs_completed",
+                "iterations_requested", "iterations_completed", "max_new_tokens", "sampling", "metrics",
+                "runs", "memory_stats", "generated_at"}
+    if not isinstance(report, dict) or not required.issubset(report):
+        raise BenchmarkProfileError("The benchmark result is missing required provenance or metrics.")
+    if report.get("schema_version") != 1 or report.get("engine") != "axiom-native-engine":
+        raise BenchmarkProfileError("Only AXIOM Native Engine schema-v1 benchmark results can be profiled.")
+    if not isinstance(report.get("model"), str) or not report["model"] or len(report["model"]) > 128:
+        raise BenchmarkProfileError("The benchmark model label is invalid.")
+    iterations = report.get("iterations_completed")
+    if isinstance(iterations, bool) or not isinstance(iterations, int) or not 1 <= iterations <= 5:
+        raise BenchmarkProfileError("The benchmark result has an invalid measured iteration count.")
+    metrics = report.get("metrics")
+    if not isinstance(metrics, dict):
+        raise BenchmarkProfileError("The benchmark metrics are malformed.")
+    safe_metrics: dict[str, int | float] = {}
+    for key in _METRICS:
+        value = metrics.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= float(value) < 1e15:
+            raise BenchmarkProfileError(f"The benchmark metric {key} is invalid.")
+        safe_metrics[key] = round(float(value), 4)
+    runs = report.get("runs")
+    if not isinstance(runs, list) or len(runs) != iterations:
+        raise BenchmarkProfileError("The benchmark run list does not match its measured iteration count.")
+    safe_runs = []
+    for index, item in enumerate(runs, 1):
+        if not isinstance(item, dict) or item.get("iteration") != index:
+            raise BenchmarkProfileError("The benchmark run ordering is invalid.")
+        row: dict[str, Any] = {"iteration": index}
+        for key in ("elapsed_ms", "prefill_ms", "decode_ms", "time_to_first_token_ms", "generation_tokens_per_second"):
+            value = item.get(key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= float(value) < 1e15:
+                raise BenchmarkProfileError(f"A benchmark run metric {key} is invalid.")
+            row[key] = round(float(value), 4)
+        for key in ("prompt_tokens", "completion_tokens"):
+            value = item.get(key)
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10_000_000:
+                raise BenchmarkProfileError(f"A benchmark run count {key} is invalid.")
+            row[key] = value
+        stop_reason = item.get("stop_reason")
+        if not isinstance(stop_reason, str) or stop_reason not in {"eos", "stop_sequence", "max_new_tokens", "cancelled", "unknown"}:
+            stop_reason = "other"
+        row["stop_reason"] = stop_reason
+        safe_runs.append(row)
+    sampling = report.get("sampling")
+    if not isinstance(sampling, dict):
+        raise BenchmarkProfileError("Benchmark sampling configuration is malformed.")
+    expected_sampling = {"temperature", "top_p", "top_k", "min_p", "repetition_penalty", "seed"}
+    if set(sampling) != expected_sampling:
+        raise BenchmarkProfileError("Benchmark sampling configuration has unsupported fields.")
+    for key in expected_sampling - {"seed"}:
+        value = sampling[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= float(value) <= 100_000:
+            raise BenchmarkProfileError("Benchmark sampling configuration contains an invalid number.")
+    if sampling["seed"] is not None and (isinstance(sampling["seed"], bool) or not isinstance(sampling["seed"], int) or sampling["seed"] < 0):
+        raise BenchmarkProfileError("Benchmark sampling seed is invalid.")
+    memory_stats = report.get("memory_stats")
+    if not isinstance(memory_stats, dict) or len(memory_stats) > 32:
+        raise BenchmarkProfileError("Benchmark memory counters are malformed.")
+    safe_memory = {}
+    for key, value in memory_stats.items():
+        if not isinstance(key, str) or not re.fullmatch(r"[a-z_]{1,64}", key):
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise BenchmarkProfileError("Benchmark memory counters must be non-negative integers.")
+        safe_memory[key] = value
+    for key in ("architecture", "model_type", "device", "precision", "memory_mode", "checkpoint_format"):
+        value = report.get(key)
+        if value is not None and (not isinstance(value, str) or len(value) > 128):
+            raise BenchmarkProfileError(f"Benchmark field {key} is invalid.")
+    for key in ("warmup_runs_requested", "warmup_runs_completed", "iterations_requested", "max_new_tokens"):
+        value = report.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 2048:
+            raise BenchmarkProfileError(f"Benchmark field {key} is invalid.")
+    return {
+        "model": report["model"],
+        "architecture": report.get("architecture"),
+        "model_type": report.get("model_type"),
+        "device": report.get("device"),
+        "precision": report.get("precision"),
+        "memory_mode": report.get("memory_mode"),
+        "checkpoint_format": report.get("checkpoint_format"),
+        "warmup_runs_requested": report["warmup_runs_requested"],
+        "warmup_runs_completed": report["warmup_runs_completed"],
+        "iterations_requested": report["iterations_requested"],
+        "iterations_completed": iterations,
+        "max_new_tokens": report["max_new_tokens"],
+        "sampling": sampling,
+        "metrics": safe_metrics,
+        "runs": safe_runs,
+        "memory_stats": safe_memory,
+    }
+
+
+def _validate_document(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, dict) or set(raw) != {"schema_version", "profiles"} or type(raw.get("schema_version")) is not int or raw["schema_version"] != SCHEMA_VERSION:
+        raise BenchmarkProfileError("The benchmark profile store has an unsupported schema.")
+    profiles = raw.get("profiles")
+    if not isinstance(profiles, list) or len(profiles) > MAX_PROFILES:
+        raise BenchmarkProfileError("The benchmark profile list exceeds its limit.")
+    output = []
+    ids, names = set(), set()
+    for item in profiles:
+        if not isinstance(item, dict) or set(item) != {"id", "name", "created_at", "fingerprint", "prompt_sha256", "prompt_chars", "model_config_sha256", "workload", "hardware", "software"}:
+            raise BenchmarkProfileError("A benchmark profile has unsupported fields.")
+        identity = item["id"]
+        name = item["name"]
+        if not isinstance(identity, str) or not re.fullmatch(r"[0-9a-f]{32}", identity) or identity in ids:
+            raise BenchmarkProfileError("A benchmark profile ID is invalid or duplicated.")
+        if not isinstance(name, str) or not _NAME.fullmatch(name) or name.casefold() in names:
+            raise BenchmarkProfileError("A benchmark profile name is invalid or duplicated.")
+        created_at = item["created_at"]
+        if not isinstance(created_at, str) or len(created_at) > 40:
+            raise BenchmarkProfileError("A benchmark profile timestamp is invalid.")
+        try:
+            parsed = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                raise ValueError
+        except ValueError:
+            raise BenchmarkProfileError("A benchmark profile timestamp must include a timezone.") from None
+        fingerprint = item["fingerprint"]
+        if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+            raise BenchmarkProfileError("A benchmark profile fingerprint is invalid.")
+        payload = {key: value for key, value in item.items() if key != "fingerprint"}
+        if hashlib.sha256(_canonical(payload)).hexdigest() != fingerprint:
+            raise BenchmarkProfileError("A benchmark profile fingerprint does not match its content.")
+        for key, size in (("prompt_sha256", 64), ("model_config_sha256", 64)):
+            value = item[key]
+            if value is not None and (not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{" + str(size) + r"}", value)):
+                raise BenchmarkProfileError("A benchmark profile digest is invalid.")
+        if isinstance(item["prompt_chars"], bool) or not isinstance(item["prompt_chars"], int) or not 1 <= item["prompt_chars"] <= 12000:
+            raise BenchmarkProfileError("A benchmark profile prompt length is invalid.")
+        if not isinstance(item["workload"], dict) or set(item["workload"]) != {"prompt_sha256", "prompt_chars", "config"}:
+            raise BenchmarkProfileError("A benchmark profile workload is malformed.")
+        if item["workload"]["prompt_sha256"] != item["prompt_sha256"] or item["workload"]["prompt_chars"] != item["prompt_chars"]:
+            raise BenchmarkProfileError("A benchmark profile workload fingerprint is inconsistent.")
+        if not isinstance(item["hardware"], dict) or set(item["hardware"]) != {"os_name", "os_release", "architecture", "cpu_cores", "ram_bytes", "gpu_name", "vram_bytes", "cuda_available"}:
+            raise BenchmarkProfileError("A benchmark profile hardware record is malformed.")
+        if not isinstance(item["software"], dict) or set(item["software"]) != {"axiom_version", "python_version", "torch_version"}:
+            raise BenchmarkProfileError("A benchmark profile software record is malformed.")
+        ids.add(identity); names.add(name.casefold()); output.append(item)
+    return output
+
+
+class BenchmarkProfileStore:
+    """Persist explicit, bounded benchmark profiles inside one AXIOM workspace."""
+    def __init__(self, root: Path | None = None) -> None:
+        self.root = Path(root) if root is not None else workspace_metadata_dir()
+        self.path = self.root / "benchmark-profiles.json"
+        self.lock_path = self.root / _LOCK
+
+    def _check_paths(self, *, create: bool = False) -> None:
+        if self.root.is_symlink() or self.path.is_symlink() or self.lock_path.is_symlink():
+            raise BenchmarkProfileError("The benchmark profile store must not use symbolic links.")
+        if self.root.exists() and not self.root.is_dir():
+            raise BenchmarkProfileError("The benchmark profile metadata path is not a directory.")
+        if create:
+            self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if self.root.is_symlink() or self.path.is_symlink() or self.lock_path.is_symlink():
+            raise BenchmarkProfileError("The benchmark profile store path changed unsafely.")
+
+    def _read(self) -> list[dict[str, Any]]:
+        self._check_paths()
+        if not self.path.exists():
+            return []
+        try:
+            info = self.path.stat()
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_STORE_BYTES:
+                raise BenchmarkProfileError("The benchmark profile store exceeds its size or file-type limit.")
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except BenchmarkProfileError:
+            raise
+        except (OSError, UnicodeError, json.JSONDecodeError, RecursionError):
+            raise BenchmarkProfileError("The benchmark profile store could not be read safely.") from None
+        return _validate_document(raw)
+
+    def _write(self, profiles: list[dict[str, Any]]) -> None:
+        content = json.dumps({"schema_version": SCHEMA_VERSION, "profiles": profiles}, ensure_ascii=False, indent=2, allow_nan=False)
+        if len(content.encode("utf-8")) > MAX_STORE_BYTES:
+            raise BenchmarkProfileError("The benchmark profile store exceeds its 4 MiB size limit.")
+        self._check_paths(create=True)
+        try:
+            atomic_write_text(self.path, content)
+            if os.name != "nt":
+                os.chmod(self.path, 0o600)
+        except OSError:
+            raise BenchmarkProfileError("The benchmark profile store could not be saved safely.") from None
+
+    def list(self, limit: int = MAX_PROFILES) -> dict[str, Any]:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_PROFILES:
+            raise BenchmarkProfileError("Benchmark profile limit must be from 1 through 100.")
+        with file_lock(self.lock_path):
+            profiles = self._read()
+        profiles.sort(key=lambda item: item["created_at"], reverse=True)
+        return {"schema_version": SCHEMA_VERSION, "total": len(profiles), "profiles": profiles[:limit],
+                "privacy": {"prompt_content_included": False, "model_paths_included": False, "credentials_included": False}}
+
+    def create(self, name: str, report: dict[str, Any], prompt: str, model_path: str | Path) -> dict[str, Any]:
+        if not isinstance(name, str) or not _NAME.fullmatch(name.strip()):
+            raise BenchmarkProfileError("Benchmark profile names must be 1–64 safe ASCII characters.")
+        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 12000:
+            raise BenchmarkProfileError("Benchmark profile prompts must contain 1–12000 characters.")
+        workload = _validated_report(report)
+        prompt_digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        workload_record = {"prompt_sha256": prompt_digest, "prompt_chars": len(prompt), "config": {
+            "warmup_runs": workload["warmup_runs_requested"], "iterations": workload["iterations_requested"],
+            "max_new_tokens": workload["max_new_tokens"], "sampling": workload["sampling"],
+            "device": workload["device"], "memory_mode": workload["memory_mode"], "precision": workload["precision"],
+            "adapter_used": False,
+        }}
+        hardware = _hardware_record()
+        software = _software_record()
+        payload = {
+            "id": uuid.uuid4().hex,
+            "name": name.strip(),
+            "created_at": _now(),
+            "prompt_sha256": prompt_digest,
+            "prompt_chars": len(prompt),
+            "model_config_sha256": _model_config_fingerprint(model_path),
+            "workload": workload_record,
+            "hardware": hardware,
+            "software": software,
+        }
+        fingerprint = hashlib.sha256(_canonical(payload)).hexdigest()
+        record = {**payload, "fingerprint": fingerprint}
+        with file_lock(self.lock_path):
+            profiles = self._read()
+            if any(item["name"].casefold() == record["name"].casefold() for item in profiles):
+                raise BenchmarkProfileError("A benchmark profile with this name already exists in the workspace.")
+            profiles.insert(0, record)
+            self._write(profiles[:MAX_PROFILES])
+        return record
+
+    def compare(self, left_id: str, right_id: str) -> dict[str, Any]:
+        if not re.fullmatch(r"[0-9a-f]{32}", left_id or "") or not re.fullmatch(r"[0-9a-f]{32}", right_id or "") or left_id == right_id:
+            raise BenchmarkProfileError("Two distinct valid benchmark profile IDs are required.")
+        profiles = self._read()
+        by_id = {item["id"]: item for item in profiles}
+        if left_id not in by_id or right_id not in by_id:
+            raise BenchmarkProfileError("One or both benchmark profiles were not found in this workspace.")
+        left, right = by_id[left_id], by_id[right_id]
+        same = {
+            "hardware": left["hardware"] == right["hardware"],
+            "software": left["software"] == right["software"],
+            "model_metadata": left["model_config_sha256"] == right["model_config_sha256"] and left["workload"]["config"] == right["workload"]["config"],
+            "same_prompt": left["prompt_sha256"] == right["prompt_sha256"],
+        }
+        comparable = all(same.values())
+        metrics = {}
+        for key in ("median_elapsed_ms", "p95_elapsed_ms", "median_generation_tokens_per_second", "aggregate_tokens_per_second"):
+            before = left["workload"].get("metrics", {}).get(key)
+            after = right["workload"].get("metrics", {}).get(key)
+            # Metrics are stored within the summary below, so keep report-vs-report diffs explicit.
+            if isinstance(before, (int, float)) and isinstance(after, (int, float)):
+                metrics[key] = {"left": before, "right": after, "delta": round(after - before, 4)}
+        return {"schema_version": SCHEMA_VERSION, "comparable": comparable, "match": same,
+                "left": {"id": left_id, "name": left["name"]}, "right": {"id": right_id, "name": right["name"]},
+                "metrics": metrics, "note": "A hardware/software/model/workload mismatch means this comparison is descriptive, not a controlled benchmark."}

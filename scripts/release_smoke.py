@@ -739,6 +739,102 @@ def supply_chain_issues(
     return failures
 
 
+def dataset_snapshot_issues(
+    core: str, api: str, cli: str, client: str, gui: str,
+    core_tests: str, api_tests: str, cli_tests: str, e2e: str, docs: str,
+) -> list[str]:
+    """Require immutable content-addressed storage, safe workspace routes and lineage acceptance."""
+    checks = (
+        ("Snapshot store", core, (
+            "class DatasetSnapshotStore",
+            "MAX_SNAPSHOTS = 250",
+            "MAX_DATASET_BYTES = 1024 * 1024 * 1024",
+            "MAX_TOTAL_SNAPSHOT_BYTES = 10 * 1024 * 1024 * 1024",
+            "def create_snapshot(",
+            "def verify(",
+            "file_lock(",
+            "atomic_write_text(",
+            "record_sha256",
+            "parent_manifest_sha256",
+            "object_name",
+        )),
+        ("Workspace API", api, (
+            "class WorkspaceDatasetSnapshotInput(BaseModel)",
+            '@router.get("/dataset-snapshots")',
+            '@router.post("/dataset-snapshots", status_code=201)',
+            '@router.get("/dataset-snapshots/{snapshot_id}/verify")',
+            "DatasetSnapshotStore(active_workspace_root())",
+            "open_regular_file(candidate)",
+        )),
+        ("Dataset CLI", cli, (
+            '@dataset_app.command("snapshot")',
+            '@dataset_app.command("snapshots")',
+            '@dataset_app.command("snapshot-verify")',
+            "DatasetSnapshotStore(workspace)",
+            "find_existing_relative_path(data_root",
+        )),
+        ("Typed client", client, (
+            "DatasetSnapshotManifest",
+            "DatasetSnapshotHistory",
+            "DatasetSnapshotVerification",
+            "datasetSnapshots:",
+            "createDatasetSnapshot:",
+            "verifyDatasetSnapshot:",
+        )),
+        ("Datasets GUI", gui, (
+            "snapshotHistory",
+            "snapshotParentId",
+            "runSnapshot",
+            "verifySnapshot",
+            "createDatasetSnapshot(",
+            "verifyDatasetSnapshot(",
+            "Parent dataset snapshot",
+            "Immutable snapshot history",
+            "Snapshot",
+        )),
+        ("Store regression tests", core_tests, (
+            "test_snapshot_stores_content_addressed_read_only_object_and_value_free_manifest",
+            "test_identical_content_is_deduplicated_and_parent_lineage_is_verifiable",
+            "test_parent_must_be_a_valid_earlier_snapshot_in_the_same_workspace",
+            "test_snapshot_enforces_source_type_format_and_size_bounds",
+            "test_snapshot_rejects_tampered_manifest_index_and_hash_chain",
+            "test_snapshot_verification_detects_modified_object_bytes",
+            "test_snapshot_rejects_symlinked_workspace_metadata",
+        )),
+        ("API regression tests", api_tests, (
+            "test_dataset_snapshot_api_creates_lists_and_verifies_workspace_snapshots",
+            "test_dataset_snapshot_api_rejects_unsafe_sources_parent_and_byte_overflow",
+            "test_dataset_snapshot_api_links_parent_manifest_to_prior_snapshot",
+            "test_dataset_snapshot_api_returns_not_found_for_unknown_snapshot",
+        )),
+        ("CLI regression tests", cli_tests, (
+            "test_dataset_snapshot_cli_creates_lists_and_verifies_immutable_history",
+            "test_dataset_snapshot_cli_rejects_files_outside_workspace_data",
+        )),
+        ("Browser acceptance", e2e, (
+            "Datasets creates immutable content-addressed snapshots",
+            "Parent dataset snapshot",
+            "Verify",
+            "parent_snapshot_id: firstId",
+            "Snapshot content hash and lineage verified.",
+        )),
+        ("Snapshot documentation", docs, (
+            "content-addressed",
+            "hash-chained",
+            "read-only",
+            "parent_snapshot_id",
+            "not a signed",
+            "axiom dataset snapshot",
+        )),
+    )
+    failures: list[str] = []
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                failures.append(f"Dataset snapshot {label} is missing: {token}")
+    return failures
+
+
 def package_verification_issues(
     verifier: str, workflow: str, tests: str, docs: str,
 ) -> list[str]:
@@ -754,7 +850,7 @@ def package_verification_issues(
             "matrix.os", "node-version: \"22\"", "npm ci", "npm run build",
             "python -m build --sdist --wheel --outdir dist",
             "python scripts/verify_package_artifacts.py --dist dist --install-wheel --json",
-            "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py",
+            "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py", "tests/test_dataset_snapshots.py", "tests/test_dataset_snapshots_api.py", "tests/test_dataset_snapshots_cli.py",
         )),
         ("archive regression tests", tests, (
             "test_verifies_wheel_and_sdist_bundle_cli_and_control_center",
@@ -785,12 +881,12 @@ def inspect(root: Path) -> dict[str, Any]:
     required = [
         "pyproject.toml", "axiom/version.py", "ROADMAP.md", "src/App.tsx",
         "src/api/client.ts", "src/components/ApiPlayground.tsx", "src/components/RuntimeConnectorPanel.tsx", "src/components/AgentProfiles.tsx", "src/components/LocalInferencePanel.tsx", "src/components/RuntimeTracePanel.tsx", "src/components/EngineTelemetryMonitor.tsx", "src/components/LocalAxiomEnginePanel.tsx", "src/components/BenchmarkResourceTrends.tsx", "src/components/ModelStudioPanel.tsx", "src/styles.css",
-        "axiom/api/server.py", "axiom/api/workspace.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/api/model_studio.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/model_studio.py", "axiom/core/runtime_traces.py", "axiom/core/resource_telemetry.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/core/engine_fabric_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "axiom/cli/model_studio.py", "scripts/release_smoke.py", "scripts/verify_package_artifacts.py", "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py",
+        "axiom/api/server.py", "axiom/api/workspace.py", "axiom/datasets/snapshots.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/api/model_studio.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/model_studio.py", "axiom/core/runtime_traces.py", "axiom/core/resource_telemetry.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/core/engine_fabric_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "axiom/cli/model_studio.py", "scripts/release_smoke.py", "scripts/verify_package_artifacts.py", "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py",
         "tests/test_release_smoke.py", "tests/test_ollama_service.py", "tests/test_ollama_service_api.py", "tests/test_ollama_model_operations.py", "tests/test_cli_inference.py", "tests/test_axiom_engine.py", "tests/test_axiom_engine_api.py", "tests/test_axiom_engine_cli.py", "tests/test_native_engine.py", "tests/test_model_studio.py", "tests/test_engine_runtime_status.py", "tests/test_cli_model_studio_jobs.py", "e2e/axiom-engine.spec.ts", "e2e/helpers/auth.ts", "e2e/modules.spec.ts", "e2e/workflows.spec.ts", "e2e/evaluation.spec.ts",
-        "e2e/model-registry-filters.spec.ts", "e2e/ollama-service.spec.ts", "e2e/inference-benchmark.spec.ts", "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/axiom-engine.spec.ts", "tests/test_workspace_model_registry_filters.py", "tests/test_workflow_store_pagination.py", "tests/test_workflow_api_pagination.py", "tests/test_workflow_cli.py",
+        "e2e/model-registry-filters.spec.ts", "e2e/ollama-service.spec.ts", "e2e/inference-benchmark.spec.ts", "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/dataset-snapshots.spec.ts", "e2e/axiom-engine.spec.ts", "tests/test_workspace_model_registry_filters.py", "tests/test_workflow_store_pagination.py", "tests/test_workflow_api_pagination.py", "tests/test_workflow_cli.py",
         "tests/test_model_compatibility.py", "tests/test_inference_benchmark.py", "tests/test_inference_benchmark_api.py", "tests/test_runtime_traces.py", "tests/test_runtime_traces_api.py", "tests/test_resource_telemetry.py", "tests/test_resource_telemetry_api.py", "tests/test_runtime_discovery.py", "tests/test_runtime_discovery_api.py", "tests/test_agent_profiles.py", "tests/test_agent_profiles_api.py", "tests/test_agent_profiles_cli.py", "tests/test_engine_fabric_profiles.py", "tests/test_engine_fabric_profiles_api.py", "tests/test_engine_fabric_profiles_cli.py", "e2e/api-playground.spec.ts", "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts", "e2e/engine-fabric.spec.ts",
         "docs/Runtime-Discovery.md", "docs/Agent-Profiles.md", "docs/Api-Playground.md", "docs/Inference-Benchmarking.md", "docs/Local-Engine.md", "docs/Engine-Fabric.md",
-        "docs/wiki/Security-and-Privacy.md", "docs/Packaging.md", "docs/Storage-Schemas-and-Migrations.md", "docs/DATA-RETENTION.md", ".github/workflows/quality-gates.yml", ".github/workflows/nightly-build.yml",
+        "docs/wiki/Security-and-Privacy.md", "docs/Dataset-Snapshots.md", "docs/Packaging.md", "docs/Storage-Schemas-and-Migrations.md", "docs/DATA-RETENTION.md", ".github/workflows/quality-gates.yml", ".github/workflows/nightly-build.yml",
     ]
     for relative in required:
         if not (root / relative).is_file():
@@ -816,11 +912,25 @@ def inspect(root: Path) -> dict[str, Any]:
 
 
     app_source = (root / "src/App.tsx").read_text(encoding="utf-8")
+    client = (root / "src/api/client.ts").read_text(encoding="utf-8")
     failures.extend(page_registration_issues(app_source, "api-playground"))
     failures.extend(page_registration_issues(app_source, "agent-profiles"))
     failures.extend(module_catalog_issues(app_source))
+
+    snapshot_core = (root / "axiom/datasets/snapshots.py").read_text(encoding="utf-8")
+    snapshot_api = workspace_api = (root / "axiom/api/workspace.py").read_text(encoding="utf-8")
+    snapshot_cli = (root / "axiom/cli/dataset_profile.py").read_text(encoding="utf-8")
+    snapshot_client = client
+    snapshot_core_tests = (root / "tests/test_dataset_snapshots.py").read_text(encoding="utf-8")
+    snapshot_api_tests = (root / "tests/test_dataset_snapshots_api.py").read_text(encoding="utf-8")
+    snapshot_cli_tests = (root / "tests/test_dataset_snapshots_cli.py").read_text(encoding="utf-8")
+    snapshot_e2e = (root / "e2e/dataset-snapshots.spec.ts").read_text(encoding="utf-8")
+    snapshot_docs = (root / "docs/Dataset-Snapshots.md").read_text(encoding="utf-8")
+    failures.extend(dataset_snapshot_issues(
+        snapshot_core, snapshot_api, snapshot_cli, snapshot_client, app_source,
+        snapshot_core_tests, snapshot_api_tests, snapshot_cli_tests, snapshot_e2e, snapshot_docs,
+    ))
     component = (root / "src/components/ApiPlayground.tsx").read_text(encoding="utf-8")
-    client = (root / "src/api/client.ts").read_text(encoding="utf-8")
 
     supply_chain_core = (root / "axiom/core/supply_chain.py").read_text(encoding="utf-8")
     supply_chain_api = (root / "axiom/api/security.py").read_text(encoding="utf-8")
