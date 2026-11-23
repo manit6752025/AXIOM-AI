@@ -50,6 +50,35 @@ jobs:
           npm test --prefix sdk/typescript
           mkdir -p dist/typescript
           npm pack --prefix sdk/typescript --pack-destination dist/typescript
+      - name: Install Python wheel from the release artifact in a clean environment
+        if: inputs.package == 'both' || inputs.package == 'python'
+        run: |
+          python -m venv "$RUNNER_TEMP/axiom-sdk-wheel-check"
+          "$RUNNER_TEMP/axiom-sdk-wheel-check/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/axiom-sdk-wheel-check/bin/python" -m pip install --no-deps dist/python/*.whl
+          "$RUNNER_TEMP/axiom-sdk-wheel-check/bin/python" - <<'PY'
+          from importlib.metadata import version
+          from axiom_sdk import AxiomClient, API_CONTRACT_VERSION
+
+          assert version("axiom-ai-sdk") == "1.0.0"
+          assert API_CONTRACT_VERSION == 1
+          assert callable(AxiomClient)
+          print("Built Python wheel installed and imported successfully.")
+          PY
+      - name: Install TypeScript tarball from the release artifact in a clean project
+        if: inputs.package == 'both' || inputs.package == 'typescript'
+        run: |
+          mkdir -p "$RUNNER_TEMP/axiom-sdk-tarball-check"
+          npm install --prefix "$RUNNER_TEMP/axiom-sdk-tarball-check" --ignore-scripts --no-audit --no-fund dist/typescript/*.tgz
+          cd "$RUNNER_TEMP/axiom-sdk-tarball-check"
+          node --input-type=module -e '
+            import assert from "node:assert/strict";
+            import { AxiomClient, API_CONTRACT_VERSION } from "@axiom-ai/sdk";
+            assert.equal(API_CONTRACT_VERSION, 1);
+            const client = new AxiomClient();
+            client.close();
+            console.log("Built TypeScript tarball installed and imported successfully.");
+          '
       - uses: actions/upload-artifact@v4
         with:
           name: axiom-sdk-release-artifacts
