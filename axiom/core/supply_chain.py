@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock, Thread
 from typing import Any, Iterable
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 MAX_DISTRIBUTIONS = 4096
 MAX_RELATIONSHIPS = 20_000
@@ -294,7 +294,50 @@ def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _parse_pip_audit_output(payload: Any, *, generated_at: str, scanner_version: str | None, exit_code: int) -> dict[str, Any]:
+def _exclude_local_axiom_distribution(payload: Any) -> tuple[Any, int]:
+    """Exclude only AXIOM's own local-file install from third-party advisory results.
+
+    pip-audit may emit a null version for the project currently being executed
+    from a local checkout/wheel. That root application is not a third-party
+    dependency; do not relax validation for any other missing version.
+    """
+    if not isinstance(payload, dict):
+        return payload, 0
+    dependencies = payload.get("dependencies")
+    if not isinstance(dependencies, list):
+        return payload, 0
+    try:
+        distribution = importlib.metadata.distribution("axiom-all")
+        raw_direct_url = distribution.read_text("direct_url.json")
+        direct_url = json.loads(raw_direct_url) if raw_direct_url else {}
+        is_local_project = (
+            isinstance(direct_url, dict)
+            and isinstance(direct_url.get("url"), str)
+            and urlsplit(direct_url["url"]).scheme == "file"
+        )
+    except (importlib.metadata.PackageNotFoundError, OSError, ValueError, TypeError):
+        is_local_project = False
+    if not is_local_project:
+        return payload, 0
+
+    filtered: list[Any] = []
+    excluded = 0
+    for dependency in dependencies:
+        if (
+            isinstance(dependency, dict)
+            and isinstance(dependency.get("name"), str)
+            and _canonical_name(dependency["name"]) == "axiom-all"
+            and dependency.get("version") is None
+        ):
+            excluded += 1
+        else:
+            filtered.append(dependency)
+    if not excluded:
+        return payload, 0
+    return {**payload, "dependencies": filtered}, excluded
+
+
+def _parse_pip_audit_output(\n    payload: Any, *, generated_at: str, scanner_version: str | None, exit_code: int,\n    excluded_local_project_count: int = 0,\n) -> dict[str, Any]:
     if isinstance(payload, dict):
         dependencies = payload.get("dependencies")
     else:
@@ -362,9 +405,10 @@ def _parse_pip_audit_output(payload: Any, *, generated_at: str, scanner_version:
         "generated_at": generated_at,
         "scanner": {"name": "pip-audit", "version": scanner_version},
         "status": "complete",
-        "scan_scope": "active Python environment; installed distributions",
+        "scan_scope": "active Python environment; third-party installed distributions (local AXIOM project excluded)",
         "network_accessed": True,
         "dependency_count": len(dependencies),
+        "excluded_local_project_count": excluded_local_project_count,
         "vulnerable_dependency_count": len(vulnerable_packages),
         "vulnerability_count": len(findings),
         "findings": findings,
@@ -577,8 +621,13 @@ def _audit_dependency_vulnerabilities_unlocked(
         payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_json_keys)
     except (UnicodeError, json.JSONDecodeError, RecursionError, ValueError):
         raise SupplyChainError("Dependency scanner returned invalid or ambiguous JSON; no vulnerability conclusion was produced.") from None
+    payload, excluded_local_project_count = _exclude_local_axiom_distribution(payload)
     return _parse_pip_audit_output(
-        payload, generated_at=generated_at, scanner_version=scanner_version, exit_code=return_code
+        payload,
+        generated_at=generated_at,
+        scanner_version=scanner_version,
+        exit_code=return_code,
+        excluded_local_project_count=excluded_local_project_count,
     )
 def audit_dependency_vulnerabilities(
     *,
