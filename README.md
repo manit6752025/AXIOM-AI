@@ -492,6 +492,13 @@ flowchart LR
 Found a vulnerability? Read [SECURITY.md](SECURITY.md). Need help? Run `axiom support-bundle` (diagnostics only, no datasets, models, config values, or logs), review the ZIP, and attach it to an [issue](https://github.com/manit6752025/AXIOM-AI/issues).
 
 ## Automation
+Local security checks include `axiom doctor --strict --json`,
+`axiom security audit --json`, and
+`axiom security artifact inspect ./dist/<artifact> --json`. The artifact
+inspector checks wheel RECORD hashes or source-archive safety without extracting
+or executing release contents; see
+[Diagnostics and Support](docs/Diagnostics-and-Support.md).
+
 
 Most commands accept `--json` and print a versioned payload:
 

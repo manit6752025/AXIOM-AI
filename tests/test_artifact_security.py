@@ -141,3 +141,38 @@ def test_inspect_rejects_empty_archive_and_malformed_zip(tmp_path: Path):
     malformed.write_bytes(b"not a zip")
     with pytest.raises(ValueError, match="malformed"):
         inspect_release_artifact(malformed)
+
+
+@pytest.mark.parametrize(
+    "member_name",
+    [
+        "C:/outside.txt",
+        "demo/CON.txt",
+        "demo/file:alternate-stream",
+        "demo/trailing-dot.",
+        "demo/trailing-space ",
+    ],
+)
+def test_inspect_wheel_rejects_cross_platform_path_aliases(tmp_path: Path, member_name: str):
+    artifact = _wheel(tmp_path / "demo-1.2.3-py3-none-any.whl")
+    with zipfile.ZipFile(artifact, "a") as archive:
+        archive.writestr(member_name, b"ambiguous")
+
+    report = inspect_release_artifact(artifact)
+
+    assert report["status"] == "fail"
+    assert any(item["id"] == "artifact.archive.path" for item in report["checks"])
+
+
+def test_inspect_wheel_rejects_dist_info_directory_name_mismatch(tmp_path: Path):
+    source = _wheel(tmp_path / "source.whl")
+    artifact = tmp_path / "demo-1.2.3-py3-none-any.whl"
+    with zipfile.ZipFile(source, "r") as original, zipfile.ZipFile(artifact, "w") as rewritten:
+        for info in original.infolist():
+            name = info.filename.replace("demo-1.2.3.dist-info/", "other-1.2.3.dist-info/")
+            rewritten.writestr(name, original.read(info.filename))
+
+    report = inspect_release_artifact(artifact)
+
+    assert report["status"] == "fail"
+    assert any(item["id"] == "artifact.wheel.dist_info_name" and item["status"] == "fail" for item in report["checks"])

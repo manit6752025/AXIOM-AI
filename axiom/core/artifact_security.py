@@ -14,6 +14,7 @@ import os
 import re
 import stat
 import tarfile
+import unicodedata
 import zipfile
 from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
@@ -50,19 +51,45 @@ def _safe_member_name(name: str) -> bool:
         raw_parts = raw_parts[:-1]
     if not raw_parts:
         return False
-    return all(part not in {"", ".", ".."} for part in raw_parts)
+    reserved = {"CON", "PRN", "AUX", "NUL"}
+    for part in raw_parts:
+        if part in {"", ".", ".."} or ":" in part or part.endswith((".", " ")):
+            return False
+        device_stem = part.split(".", 1)[0].upper()
+        if device_stem in reserved or re.fullmatch(r"(?:COM|LPT)[1-9¹²³]", device_stem):
+            return False
+    return True
 
 
 def _safe_artifact_file(path: str | Path) -> tuple[Path, BinaryIO, int]:
-    candidate = Path(path).expanduser()
+    """Open a local artifact without following symlinked path components on POSIX."""
+    candidate = Path(os.path.abspath(Path(path).expanduser()))
+    if not candidate.name or len(candidate.parts) < 2:
+        raise ValueError("Release artifact must be a regular file path.")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     try:
-        if candidate.is_symlink():
-            raise ValueError("Release artifact path must not be a symbolic link.")
-        resolved = candidate.resolve(strict=True)
-        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-        if hasattr(os, "O_NOFOLLOW"):
-            flags |= os.O_NOFOLLOW
-        descriptor = os.open(resolved, flags)
+        if os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"):
+            directory_fd = os.open(candidate.anchor, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                for component in candidate.parts[1:-1]:
+                    next_fd = os.open(
+                        component,
+                        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                        dir_fd=directory_fd,
+                    )
+                    os.close(directory_fd)
+                    directory_fd = next_fd
+                descriptor = os.open(
+                    candidate.name,
+                    flags | os.O_NOFOLLOW,
+                    dir_fd=directory_fd,
+                )
+            finally:
+                os.close(directory_fd)
+        else:
+            if candidate.is_symlink():
+                raise ValueError("Release artifact path must not be a symbolic link.")
+            descriptor = os.open(candidate, flags)
         stream = os.fdopen(descriptor, "rb")
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode):
@@ -71,8 +98,10 @@ def _safe_artifact_file(path: str | Path) -> tuple[Path, BinaryIO, int]:
         if info.st_size <= 0 or info.st_size > _MAX_ARTIFACT_BYTES:
             stream.close()
             raise ValueError("Release artifact is empty or exceeds the 256 MiB inspection limit.")
-        return resolved, stream, info.st_size
-    except (OSError, RuntimeError) as exc:
+        return candidate, stream, info.st_size
+    except ValueError:
+        raise
+    except OSError as exc:
         raise ValueError("Release artifact could not be opened safely.") from exc
 
 
@@ -101,8 +130,16 @@ def _zip_inventory(archive: zipfile.ZipFile) -> tuple[list[zipfile.ZipInfo], lis
     for info in infos:
         name = info.filename
         is_directory = info.is_dir()
+        if not is_directory and name.endswith("/"):
+            unsafe = True
+            checks.append(_check(
+                "artifact.archive.path", "Archive member paths", "fail",
+                "A non-directory archive member has a directory-style trailing slash.",
+                "Rebuild the artifact with file and directory entries represented consistently.",
+            ))
+            continue
         normalized = name[:-1] if is_directory and name.endswith("/") else name
-        folded = normalized.casefold()
+        folded = unicodedata.normalize("NFC", normalized).casefold()
         if not _safe_member_name(name):
             unsafe = True
             checks.append(_check(
@@ -235,6 +272,18 @@ def _verify_wheel(archive: zipfile.ZipFile, filename: str) -> dict[str, Any]:
             "artifact.wheel.metadata", "Wheel metadata validity", "pass",
             f"Wheel metadata identifies {package_name} {package_version} with {len(tags)} compatibility tag(s).",
         ))
+    expected_dist_info = f"{re.sub(r'[-_.]+', '_', package_name).lower()}-{package_version}.dist-info"
+    if dist_info != expected_dist_info:
+        checks.append(_check(
+            "artifact.wheel.dist_info_name", "Wheel metadata directory name", "fail",
+            "The .dist-info directory name does not match the embedded distribution Name and Version.",
+            "Rebuild the wheel with a correctly named .dist-info directory.",
+        ))
+    else:
+        checks.append(_check(
+            "artifact.wheel.dist_info_name", "Wheel metadata directory name", "pass",
+            "The .dist-info directory name matches the embedded distribution Name and Version.",
+        ))
 
     parts = Path(filename).name[:-4].split("-")
     if len(parts) not in {5, 6}:
@@ -310,7 +359,11 @@ def _verify_wheel(archive: zipfile.ZipFile, filename: str) -> dict[str, Any]:
             mismatch = True
             continue
         algorithm, separator, expected = hash_value.partition("=")
-        if not separator or algorithm.lower() not in {"sha256", "sha384", "sha512"}:
+        if (
+            not separator
+            or algorithm.lower() not in {"sha256", "sha384", "sha512"}
+            or not re.fullmatch(r"[A-Za-z0-9_-]+", expected)
+        ):
             mismatch = True
             continue
         try:
@@ -351,10 +404,15 @@ def _verify_wheel(archive: zipfile.ZipFile, filename: str) -> dict[str, Any]:
 
 
 def hmac_compare(left: str, right: str) -> bool:
-    """Constant-time string equality for manifest digests."""
+    """Constant-time ASCII equality for manifest digests."""
     import hmac
 
-    return hmac.compare_digest(left.encode("ascii", "ignore"), right.encode("ascii", "ignore"))
+    try:
+        left_bytes = left.encode("ascii")
+        right_bytes = right.encode("ascii")
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(left_bytes, right_bytes)
 
 
 def _verify_zip_sdist(archive: zipfile.ZipFile) -> dict[str, Any]:
@@ -397,7 +455,7 @@ def _verify_tar_sdist(stream: BinaryIO) -> dict[str, Any]:
                         "Rebuild the source archive with normalized relative POSIX paths.",
                     ))
                     continue
-                normalized = member.name.rstrip("/")
+                normalized = unicodedata.normalize("NFC", member.name.rstrip("/")).casefold()
                 if normalized in seen:
                     checks.append(_check(
                         "artifact.archive.duplicates", "Duplicate archive paths", "fail",
@@ -423,14 +481,21 @@ def _verify_tar_sdist(stream: BinaryIO) -> dict[str, Any]:
                         build_manifest = True
             if count == 0:
                 raise ValueError("Source archive contains no entries.")
-    except (tarfile.TarError, OSError) as exc:
+    except (tarfile.TarError, OSError, EOFError) as exc:
         raise ValueError("Source archive is malformed or could not be inspected safely.") from exc
 
-    if checks:
-        if not any(item["status"] == "pass" for item in checks):
-            checks.append(_check("artifact.archive.structure", "Archive structure", "pass", f"Inspected {count} source archive entries without extracting them."))
-    else:
-        checks.append(_check("artifact.archive.structure", "Archive structure", "pass", f"Inspected {count} source archive entries with safe paths and regular file types."))
+    if not any(item["id"] == "artifact.archive.structure" for item in checks):
+        if any(item["status"] == "fail" for item in checks):
+            checks.append(_check(
+                "artifact.archive.structure", "Archive structure", "fail",
+                "The source archive contains unsafe paths or filesystem entries.",
+                "Rebuild the archive with unique relative paths and regular files/directories only.",
+            ))
+        else:
+            checks.append(_check(
+                "artifact.archive.structure", "Archive structure", "pass",
+                f"Inspected {count} source archive entries with safe paths and regular file types.",
+            ))
     checks.append(_check(
         "artifact.sdist.build_metadata", "Source distribution metadata",
         "pass" if build_manifest else "warn",
@@ -455,7 +520,7 @@ def inspect_release_artifact(path: str | Path) -> dict[str, Any]:
             try:
                 with zipfile.ZipFile(stream, "r") as archive:
                     report = _verify_wheel(archive, filename)
-            except (zipfile.BadZipFile, OSError, RuntimeError) as exc:
+            except (zipfile.BadZipFile, OSError, RuntimeError, EOFError) as exc:
                 raise ValueError("Wheel archive is malformed or could not be inspected safely.") from exc
             artifact_format = "wheel"
         elif filename.lower().endswith((".tar.gz", ".tgz")):

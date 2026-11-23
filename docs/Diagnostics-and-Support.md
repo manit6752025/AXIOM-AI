@@ -121,3 +121,35 @@ firewall rules, or infer the bind address of servers started outside AXIOM's
 built-in launchers. CORS is not authentication; keep remote origins restricted
 to trusted HTTPS applications and configure API token scopes before exposing
 the FastAPI API beyond loopback.
+
+
+## Dependency and release-artifact checks
+
+`axiom doctor` checks that the required runtime packages are importable and
+that installed versions meet the minimum versions declared by
+`pyproject.toml`. JSON diagnostics distinguish missing distributions from
+outdated versions. This is a compatibility and local-install check, not a
+vulnerability-database lookup.
+
+Inspect a locally built wheel or source archive without extracting or running
+it:
+
+```bash
+axiom security artifact inspect ./dist/axiom_all-0.3.0-py3-none-any.whl
+axiom security artifact inspect ./dist/axiom_all-0.3.0-py3-none-any.whl --json
+axiom security artifact inspect ./dist/axiom-all-0.3.0.tar.gz --strict --json
+```
+
+For wheels, the inspector checks required Core Metadata/WHEEL files, filename
+consistency, path safety, and the hashes and sizes recorded in `RECORD`.
+For source archives, it checks member paths, duplicate names, link/special-file
+entries, build-manifest presence, and archive expansion bounds. It never
+extracts files or executes `setup.py`, build backends, or project code.
+
+Inspection is bounded to artifacts up to 256 MiB, 10,000 entries, 256 MiB per
+member, and 1 GiB total uncompressed content. Extreme ZIP compression ratios
+and encrypted ZIP members fail closed. Signature sidecars are detected but
+their publisher trust chain is not verified. A successful structural check is
+not a malware scan, a CVE audit, or proof that the artifact came from a trusted
+publisher; use a trusted build pipeline, provenance/signature verification,
+and a vulnerability database scanner for those controls.

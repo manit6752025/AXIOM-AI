@@ -82,6 +82,22 @@ through environment variables, not command-line arguments.
 Destructive confirmations default to **no** when input is unavailable.
 Existing `--yes` flags remain the explicit opt-in for deletion/removal.
 
+## Security checks and release artifacts
+
+Run the local posture audit and inspect release packages without extracting
+or executing them:
+
+```bash
+axiom security audit --json
+axiom security artifact inspect ./dist/axiom_all-0.3.0-py3-none-any.whl --json
+axiom security artifact inspect ./dist/axiom-all-0.3.0.tar.gz --strict --json
+```
+
+The artifact command validates wheel metadata and `RECORD` hashes, or checks
+source-archive paths, links, special entries, duplicate names, and size limits.
+It reads artifacts as data only. It does not verify publisher signatures or
+consult vulnerability databases. Review non-zero exit codes before publishing.
+
 ## Machine-readable CLI errors
 
 Place `--json-errors` before the command to emit a schema-versioned error
