@@ -295,4 +295,86 @@ def test_resume_prediction_job_refuses_dataset_fingerprint_changes(tmp_path, mon
     with pytest.raises(ValueError, match="dataset fingerprint"):
         prediction_jobs.resume_prediction_job(job_id, root)
 
+def test_dead_prediction_worker_is_recovered_as_interrupted_with_checkpoint_retained(tmp_path, monkeypatch):
+    record, checkpoint_path = _checkpoint(
+        tmp_path,
+        b'{"prompt":"one","reference":"A","prediction":"first"}\\n',
+    )
+    record.update({
+        "status": "running",
+        "created_at": "2026-11-20T00:00:00+00:00",
+        "updated_at": "2026-11-20T00:00:10+00:00",
+        "started_at": "2026-11-20T00:00:01+00:00",
+        "finished_at": None,
+        "dataset_path": "data/eval.jsonl",
+        "output_path": "data/predictions.jsonl",
+        "model_path": "models/tiny",
+        "adapter_path": None,
+        "max_new_tokens": 16,
+        "temperature": 0.7,
+        "seed": 7,
+        "device": "cpu",
+        "precision": "fp32",
+        "prompt_field": "prompt",
+        "reference_field": "reference",
+        "prediction_field": "prediction",
+        "rows_total": 2,
+        "prompts_truncated": 0,
+        "error_code": None,
+        "evaluation_run_ids": [],
+        "artifact_identity": None,
+        "artifact_sha256": None,
+        "pending_artifact_identity": None,
+        "pending_artifact_sha256": None,
+        "runner_pid": 99999999,
+        "runner_identity": None,
+        "dataset_sha256": "2" * 64,
+        "model_fingerprint": "1" * 64,
+        "adapter_fingerprint": None,
+        "resumption_count": 0,
+    })
+    (tmp_path / ".axiom").mkdir()
+    prediction_jobs._persist_job_record(tmp_path, record)
+    monkeypatch.setattr(prediction_jobs, "_process_is_alive", lambda pid: False)
+
+    [saved] = prediction_jobs._read_job_records(tmp_path)
+    recovered = prediction_jobs._recover_record(tmp_path, saved)
+
+    assert recovered["status"] == "interrupted"
+    assert recovered["error_code"] == "worker_process_exited"
+    assert recovered["checkpoint_name"] == checkpoint_path.name
+    assert recovered["checkpoint_identity"] == record["checkpoint_identity"]
+    assert recovered["checkpoint_sha256"] == record["checkpoint_sha256"]
+
+
+def test_mcp_prediction_resume_requires_its_own_explicit_permission(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from axiom.core.tool_permissions import TOOL_DESCRIPTIONS, TOOL_SCOPES
+    from axiom.mcp import server as mcp_server
+
+    required = {}
+    job = {
+        "id": "f" * 32,
+        "status": "queued",
+        "resumable": False,
+        "resumption_count": 1,
+    }
+    monkeypatch.setattr(
+        mcp_server,
+        "ToolPermissionStore",
+        lambda: SimpleNamespace(require=lambda name, arguments: required.update(name=name, arguments=arguments)),
+    )
+    monkeypatch.setattr(mcp_server, "_mcp_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(mcp_server, "resume_prediction_job", lambda job_id, root: job)
+
+    result = mcp_server.axiom_prediction_job_resume("f" * 32)
+
+    assert result["resumed"] is True
+    assert result["job"]["resumption_count"] == 1
+    assert required["name"] == "axiom_prediction_job_resume"
+    assert "execution" in TOOL_SCOPES["axiom_prediction_job_resume"]
+    assert "write" in TOOL_SCOPES["axiom_prediction_job_resume"]
+    assert "axiom_prediction_job_resume" in TOOL_DESCRIPTIONS
+    assert result["scope"]["partial_output_published"] is False
 
