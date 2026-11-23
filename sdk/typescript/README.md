@@ -139,9 +139,13 @@ try {
   console.log((await axiom.predictionJob(jobId)).job.status);
   console.log((await axiom.predictionJobs(20)).jobs);
 
-  // Call only after inspecting an interrupted job and choosing to continue it.
-  const resumed = await axiom.resumePredictionJob(jobId);
-  console.log(resumed.job.resumption_count);
+  // Resume only after a process interruption. A normally queued/running
+  // or completed job is not resumable.
+  const job = (await axiom.predictionJob(jobId)).job;
+  if (job.status === "interrupted" && job.resumable) {
+    const resumed = await axiom.resumePredictionJob(jobId);
+    console.log(resumed.scope.generation_resumed_after_restart);
+  }
 
   // Cooperative cancellation of an active worker:
   // await axiom.cancelPredictionJob(jobId);

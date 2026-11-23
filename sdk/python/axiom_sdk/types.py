@@ -129,6 +129,7 @@ class PredictionJobResumeScope(TypedDict):
     dataset_fingerprint_verified: Literal[True]
     model_and_adapter_fingerprints_verified: Literal[True]
     checkpoint_identity_and_digest_verified: Literal[True]
+    generation_configuration_fingerprint_verified: Literal[True]
     partial_output_published: Literal[False]
     prompts_returned: Literal[False]
     predictions_returned: Literal[False]

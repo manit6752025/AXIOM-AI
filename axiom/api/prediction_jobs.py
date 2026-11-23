@@ -166,6 +166,7 @@ def resume_interrupted_prediction_job(job_id: str) -> dict[str, Any]:
             "dataset_fingerprint_verified": True,
             "model_and_adapter_fingerprints_verified": True,
             "checkpoint_identity_and_digest_verified": True,
+            "generation_configuration_fingerprint_verified": True,
             "partial_output_published": False,
             "prompts_returned": False,
             "predictions_returned": False,

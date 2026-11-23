@@ -155,6 +155,15 @@ def test_prediction_v1_job_history_migrates_as_non_resumable(tmp_path):
     [migrated_v2] = prediction_jobs._read_job_records(tmp_path)
     assert migrated_v2["generation_fingerprint"] == prediction_jobs._prediction_generation_fingerprint(migrated_v2)
 
+    # Editing a persisted sampling setting without updating its digest fails closed.
+    tampered = {**migrated_v2, "temperature": 0.2}
+    (state_dir / "prediction_jobs.json").write_text(
+        json.dumps({"schema_version": 3, "jobs": [tampered]}, indent=2),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="generation configuration fingerprint"):
+        prediction_jobs._read_job_records(tmp_path)
+
 
 def test_resume_prediction_job_revalidates_assets_and_schedules_checkpoint_worker(tmp_path, monkeypatch):
     import json
@@ -165,6 +174,7 @@ def test_resume_prediction_job_revalidates_assets_and_schedules_checkpoint_worke
     model.mkdir(parents=True)
     data = root / "data"
     data.mkdir()
+    monkeypatch.chdir(root)
     dataset = data / "eval.jsonl"
     dataset.write_text(
         '{"prompt":"one","reference":"A"}\n{"prompt":"two","reference":"B"}\n',
@@ -246,6 +256,7 @@ def test_resume_prediction_job_revalidates_assets_and_schedules_checkpoint_worke
     assert resumed is not None
     assert resumed["status"] == "completed"
     assert resumed["resumption_count"] == 1
+    assert resumed["scope"]["generation_resumed_after_restart"] is True
     assert resumed["rows_completed"] == 2
     assert generated_prompts == ["two"]
     published = data / "predictions.jsonl"
@@ -266,6 +277,7 @@ def test_resume_prediction_job_refuses_dataset_fingerprint_changes(tmp_path, mon
     model.mkdir(parents=True)
     data = root / "data"
     data.mkdir()
+    monkeypatch.chdir(root)
     dataset = data / "eval.jsonl"
     dataset.write_text('{"prompt":"changed","reference":"A"}\n', encoding="utf-8")
     committed = b'{"prompt":"one","reference":"A","prediction":"first"}\n'

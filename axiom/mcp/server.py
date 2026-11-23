@@ -4257,6 +4257,7 @@ def axiom_prediction_job_resume(job_id: str) -> dict:
             "dataset_fingerprint_verified": True,
             "model_and_adapter_fingerprints_verified": True,
             "checkpoint_identity_and_digest_verified": True,
+            "generation_configuration_fingerprint_verified": True,
             "partial_output_published": False,
             "prompts_returned": False,
             "predictions_returned": False,

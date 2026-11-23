@@ -148,9 +148,12 @@ with AxiomClient(token="WRITE_TOKEN") as axiom:
     print(axiom.prediction_job(job_id)["job"]["status"])
     print(axiom.prediction_jobs(limit=20)["jobs"])
 
-    # Resume only an interrupted job with a verified checkpoint.
-    resumed = axiom.resume_prediction_job(job_id)
-    print(resumed["job"]["resumption_count"])
+    # Resume only after a process interruption. A normally queued/running
+    # or completed job is not resumable.
+    job = axiom.prediction_job(job_id)["job"]
+    if job["status"] == "interrupted" and job.get("resumable"):
+        resumed = axiom.resume_prediction_job(job_id)
+        print(resumed["scope"]["generation_resumed_after_restart"])
 
     # Cancellation is cooperative and only applies while the worker is active.
     # axiom.cancel_prediction_job(job_id)
