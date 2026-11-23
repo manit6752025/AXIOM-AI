@@ -458,6 +458,7 @@ def test_engine_estimate_cli_compares_formats_against_budgets(tmp_path: Path, mo
     assert result.exit_code == 0, result.output
     report = json.loads(result.output)
     assert report["model"]["name"] == "tiny-llama"
+    assert report["model"]["estimated_parameter_count"] == 632
     assert report["request"]["context_length"] == 16
     assert report["assumptions"]["kv_cache_context_length"] == 16
     assert report["assumptions"]["kv_prefill_temporary_context_length"] == 0
@@ -473,6 +474,11 @@ def test_engine_estimate_cli_compares_formats_against_budgets(tmp_path: Path, mo
     assert candidates["fp16"]["native_checkpoint_supported"] is True
     assert report["recommendation"]["status"] == "fits_budget"
     assert report["recommendation"]["format"] == "bf16"
+    assert candidates["bf16"]["estimated_weight_gib"] == 0.000001177
+    assert candidates["bf16"]["estimated_kv_cache_gib"] == 0.000000238
+    assert candidates["bf16"]["estimated_workspace_gib"] == 0.000001907
+    assert candidates["bf16"]["estimated_total_gib"] == 0.000003988
+    assert candidates["bf16"]["estimated_range_gib"] == [0.000003389, 0.000004984]
     assert "not predict model quality/speed" in report["scope_note"]
 
 

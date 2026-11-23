@@ -676,6 +676,30 @@ def inspect(root: Path) -> dict[str, Any]:
         ("native benchmark CLI regression", native_engine_cli_tests, (
             "test_native_engine_benchmark_cli_forwards_bounded_options_and_prints_no_text",
         )),
+        ("native RAM/VRAM estimator formula implementation", engine_source, (
+            "def estimate_native_quantization(",
+            "embedding_params = vocab * hidden",
+            "kv_bytes_total = 2 * layers * kv_heads * head_dim * kv_cache_context * batch_size * kv_bytes",
+            "kv_prefill_temporary_bytes = (",
+            "total_bytes = unbuffered_total * 1.20",
+            '"uncertainty_range_percent": {"low": -15, "high": 25}',
+        )),
+        ("native estimator exact numerical and Mistral regressions", native_engine_api_tests, (
+            "test_quantization_estimator_compares_formats_against_memory_budgets",
+            "expected_numeric = {",
+            "test_quantization_estimator_separates_mistral_retained_cache_and_prefill_temporary",
+            'assert bf16["estimated_total_gib"] == 0.000006706',
+        )),
+        ("native estimator CLI numerical regressions", native_engine_cli_tests, (
+            "test_engine_estimate_cli_compares_formats_against_budgets",
+            'assert candidates["bf16"]["estimated_total_gib"] == 0.000003988',
+        )),
+        ("native estimator calibration boundary documentation", native_engine_docs, (
+            "### Memory estimate calibration boundary",
+            "not calibrated against physical peak allocations",
+            "weight-storage overhead",
+            "Mistral prefill temporary memory",
+        )),
     )
     for label, source, tokens in native_readiness_contracts:
         for token in tokens:
