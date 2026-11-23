@@ -3,7 +3,10 @@
 AXIOM's Diagnostics page and CLI use the same read-only workspace checks. The
 checks cover workspace discovery, `axiom.yaml` parsing, unsafe symlink entries,
 filesystem read/write access, free disk space, Python compatibility, and the
-required Python package imports. Results are structured with stable IDs so the
+required Python package imports and installed distribution versions. Dependency
+minimums are checked against the runtime requirements in `pyproject.toml`.
+On POSIX systems, a project configuration writable by group or other local
+users is reported as a failure. Results are structured with stable IDs so the
 GUI, scripts, and tests can interpret them without parsing human-oriented text.
 
 ## Commands
@@ -11,6 +14,7 @@ GUI, scripts, and tests can interpret them without parsing human-oriented text.
 ```bash
 axiom doctor
 axiom doctor --json
+axiom doctor --strict --json
 axiom status --json
 axiom roadmap audit
 axiom roadmap audit --json
@@ -22,6 +26,21 @@ axiom support-bundle --output ./axiom-support-bundle.zip --force --json
 overrides it for `doctor` and `support-bundle`. Discovery otherwise selects the
 nearest parent containing a regular `axiom.yaml`, then the current directory.
 Caller-provided workspace symlinks are rejected.
+
+The doctor checks the active Python interpreter rather than another Python
+binary found on `PATH`. It verifies that every required runtime module is
+importable and that its installed distribution metadata meets the declared
+minimum version. Missing modules/metadata and outdated distributions are
+reported separately in the JSON `workspace.summary` fields
+`missing_dependencies` and `outdated_dependencies`. Dependency versions are
+also recorded in the support bundle's environment manifest.
+
+On POSIX systems, `axiom.yaml` must not be group- or other-writable. This is a
+tamper-resistance check: diagnostics do not read, print, or export configuration
+values. Use `axiom doctor --strict --json` in CI when workspace warnings should
+also produce a non-zero exit status; ordinary `--json` keeps warnings
+informational for projects that have not created every optional directory.
+
 
 ## Roadmap audit
 
