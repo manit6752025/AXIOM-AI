@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from threading import Event
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 import pytest
@@ -150,6 +151,37 @@ def test_native_benchmark_api_forwards_bounded_local_options_without_response_pa
         "memory_mode": "layer_streaming",
         "precision": "bf16",
     }
+
+
+def test_native_benchmark_api_signals_worker_when_client_disconnects(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "models"
+    model = root / "tiny"
+    model.mkdir(parents=True)
+    (model / "config.json").write_text('{"model_type":"llama"}', encoding="utf-8")
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(root))
+    cancel_observed = Event()
+
+    def fake_benchmark(*_args, cancel_event=None, **_kwargs):
+        assert cancel_event is not None
+        if cancel_event.wait(timeout=5):
+            cancel_observed.set()
+        return {"cancelled": cancel_observed.is_set()}
+
+    class DisconnectedRequest:
+        async def is_disconnected(self) -> bool:
+            await asyncio.sleep(0)
+            return True
+
+    monkeypatch.setattr(engine_api, "benchmark_local", fake_benchmark)
+    request = engine_api.NativeBenchmarkRequest(
+        model_path=str(model), prompt="private benchmark prompt", iterations=1, max_new_tokens=8,
+    )
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(engine_api.engine_benchmark(request, DisconnectedRequest()))
+
+    assert getattr(error.value, "status_code", None) == 499
+    assert cancel_observed.wait(timeout=1)
 
 
 def test_native_benchmark_api_rejects_iterations_or_output_over_the_limit(tmp_path, monkeypatch) -> None:

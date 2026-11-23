@@ -555,12 +555,14 @@ def inspect(root: Path) -> dict[str, Any]:
             'device: str = Field(default="auto", pattern="^(auto|cpu|cuda|rocm|mps|xpu)$")',
             "device_preference=request.device",
         )),
-        ("native API device regression", native_engine_api_tests, (
+        ("native API device and benchmark-cancellation regression", native_engine_api_tests, (
             "test_engine_stream_endpoint_yields_token_snapshots_and_final_metrics",
             'captured["device_preference"] == "cuda"',
+            "test_native_benchmark_api_signals_worker_when_client_disconnects",
         )),
-        ("native CLI device regression", native_engine_cli_tests, (
+        ("native CLI device/readiness regression", native_engine_cli_tests, (
             "test_engine_run_passes_explicit_device_to_native_stream",
+            "test_engine_status_json_reports_readiness_devices_and_local_only_scope",
         )),
         ("native Runtime GUI", native_engine_panel, (
             'aria-label="Execution device"', "status?.devices", "status?.recommended_device",
@@ -570,6 +572,8 @@ def inspect(root: Path) -> dict[str, Any]:
             "stages downloads before publishing", "public Llama/Mistral/Qwen2/Qwen3 safetensors",
             "CPU, NVIDIA CUDA, AMD ROCm, Apple Metal/MPS, and Intel XPU",
             "remote model code", "does not silently route generation through another engine",
+            "### Hardware validation boundary",
+            "does **not** certify execution on physical CUDA, ROCm, Apple Metal/MPS, or Intel XPU hardware.",
         )),
         ("native dependency/device readiness regression tests", native_runtime_status_tests, (
             "test_runtime_status_reports_required_and_optional_dependency_readiness",
@@ -609,7 +613,7 @@ def inspect(root: Path) -> dict[str, Any]:
             "local_only: true", "remote_code: false", "engineLoaded = true",
             'getByRole("button", { name: "Run with AXIOM Engine" })',
             'getByRole("button", { name: "Unload model" })',
-            'getByLabel("Execution device")',
+            'getByLabel("Execution device", { exact: true })',
             'option[value="cuda"]',
             'option[value="rocm"]',
             'option[value="mps"]',

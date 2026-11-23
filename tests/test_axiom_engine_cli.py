@@ -13,6 +13,35 @@ engine_app = engine_cli.engine_app
 runner = CliRunner()
 
 
+def test_engine_status_json_reports_readiness_devices_and_local_only_scope(monkeypatch) -> None:
+    report = {
+        "ready": True,
+        "loaded": False,
+        "architecture": None,
+        "packages": {"torch": True, "tokenizers": True, "safetensors": True},
+        "versions": {"torch": "2.9.0", "tokenizers": "0.22.0", "safetensors": "0.6.0"},
+        "minimum_versions": {"torch": "2.2.0", "tokenizers": "0.19.0", "safetensors": "0.4.0"},
+        "recommended_device": "cpu",
+        "devices": [{"id": "cpu", "name": "CPU", "available": True, "reason": "CPU available."}],
+        "remote_code": False,
+        "execution_backend": "pytorch-native-axiom",
+        "transformers_generation_used": False,
+        "ollama_used": False,
+    }
+    monkeypatch.setattr(engine_cli, "runtime_status", lambda: report)
+
+    result = runner.invoke(engine_app, ["status", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["minimum_versions"]["torch"] == "2.2.0"
+    assert payload["recommended_device"] == "cpu"
+    assert payload["devices"][0]["available"] is True
+    assert payload["remote_code"] is False
+    assert payload["transformers_generation_used"] is False
+    assert payload["ollama_used"] is False
+
+
 def test_engine_discover_json_lists_local_model_and_adapter_metadata(tmp_path: Path, monkeypatch) -> None:
     root = tmp_path / "trusted-models"
     model = root / "tiny-llama"
