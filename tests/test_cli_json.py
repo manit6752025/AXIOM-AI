@@ -867,7 +867,6 @@ def test_supercompress_status_json_redacts_credential_and_reports_local_configur
 
 
 def test_integration_doctor_json_reports_availability_without_commands_or_urls(tmp_path: Path, monkeypatch) -> None:
-    from axiom import cli as _cli_package  # keep module import resolution explicit
     from axiom.cli import main as cli
     from axiom.core.integrations import AgentIntegration, IntegrationRegistry, IntegrationType
 
