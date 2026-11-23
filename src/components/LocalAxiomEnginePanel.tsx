@@ -182,6 +182,7 @@ export default function LocalAxiomEnginePanel() {
   const run = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
+    setBenchmarkError("");
     setLifecycleNotice("");
     setResult(null);
     setBatchResult(null);

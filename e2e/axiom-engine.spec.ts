@@ -5,6 +5,13 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await ensureAuthenticated(page);
   let engineLoaded = false;
   let unloadCalls = 0;
+  let benchmarkCalls = 0;
+  let benchmarkAbortObserved = false;
+  page.on("requestfailed", (request) => {
+    if (request.url().endsWith("/api/engine/benchmark") && benchmarkCalls > 1) {
+      benchmarkAbortObserved = true;
+    }
+  });
 
   await page.route("**/api/workspace/runtime", (route) => route.fulfill({
     json: {
@@ -99,6 +106,18 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
     } });
   });
   await page.route("**/api/engine/benchmark", async (route) => {
+    benchmarkCalls += 1;
+    if (benchmarkCalls > 1) {
+      // Keep the intercepted response pending briefly so the Stop button,
+      // not the mock server, must abort the browser fetch.
+      await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+      try {
+        await route.fulfill({ json: { detail: "The benchmark should have been cancelled by the UI." } });
+      } catch {
+        // AbortController already cancelled/handled the intercepted request.
+      }
+      return;
+    }
     const requestBody = route.request().postDataJSON() as Record<string, unknown>;
     expect(requestBody.prompt).toBe("Say hello.");
     expect(requestBody.warmup_runs).toBe(1);
@@ -220,11 +239,11 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   const executionDevice = engine.getByLabel("Execution device", { exact: true });
   await expect(executionDevice).toHaveValue("auto");
   await expect(engine).toContainText("Recommended: cpu");
-  await expect(executionDevice.locator('option[value="cuda"]')).toBeDisabled();
-  await expect(executionDevice.locator('option[value="rocm"]')).toBeDisabled();
-  await expect(executionDevice.locator('option[value="mps"]')).toBeDisabled();
-  await expect(executionDevice.locator('option[value="xpu"]')).toBeDisabled();
-  await expect(executionDevice.locator('option[value="cpu"]')).toBeEnabled();
+  await expect(executionDevice.locator('option[value="cuda"]')).toHaveAttribute("disabled", "");
+  await expect(executionDevice.locator('option[value="rocm"]')).toHaveAttribute("disabled", "");
+  await expect(executionDevice.locator('option[value="mps"]')).toHaveAttribute("disabled", "");
+  await expect(executionDevice.locator('option[value="xpu"]')).toHaveAttribute("disabled", "");
+  await expect(executionDevice.locator('option[value="cpu"]')).not.toHaveAttribute("disabled");
   await executionDevice.selectOption("cpu");
 
   await engine.getByLabel("Select discovered native model").selectOption("/models/llama-test");
@@ -273,6 +292,12 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await expect(transferTelemetry).toContainText("3.0 MiB");
   await expect(nativeBenchmark).not.toContainText("Say hello.");
 
+  await engine.getByRole("button", { name: "Benchmark native engine" }).click();
+  await expect(engine.getByRole("button", { name: "Stop benchmark" })).toBeVisible();
+  await engine.getByRole("button", { name: "Stop benchmark" }).click();
+  await expect(engine.getByRole("alert")).toContainText("Benchmark cancelled; AXIOM has been asked to stop the native generation loop.");
+  expect(benchmarkAbortObserved).toBe(true);
+
   await engine.getByLabel("AXIOM Native batch prompts").fill("First batch prompt\nSecond batch prompt");
   await engine.getByRole("button", { name: "Run native batch" }).click();
   const batchResults = engine.getByRole("region", { name: "Native batch results" });
@@ -317,6 +342,6 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   await engine.getByRole("button", { name: "Run with AXIOM Engine" }).click();
   await expect(engine.getByRole("button", { name: "Stop generation" })).toBeVisible();
   await engine.getByRole("button", { name: "Stop generation" }).click();
-  await expect(engine.getByRole("alert")).toContainText("Generation cancelled after 0 token(s)");
+  await expect(engine.getByRole("alert").filter({ hasText: "Generation cancelled after 0 token(s)" })).toBeVisible();
   await expect(engine.getByTestId("axiom-engine-output")).toHaveCount(0);
 });
