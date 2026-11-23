@@ -127,7 +127,7 @@ test("Diagnostics lists, verifies, reviews, and exports the redacted security ev
 
   await ensureAuthenticated(page);
   await page.goto("/?page=diagnostics");
-  const journal = page.getByRole("region", { name: /Security event journal/i });
+  const journal = page.locator(".surface").filter({ has: page.getByRole("heading", { name: "Security event journal" }) });
   await expect(page.getByRole("heading", { name: "Security event journal" })).toBeVisible();
   await expect(journal).toContainText("INTEGRITY VALID");
   await expect(journal).toContainText("Created a default-deny MCP profile");

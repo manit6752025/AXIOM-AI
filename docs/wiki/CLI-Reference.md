@@ -71,6 +71,7 @@ control. The API remains bounded by its route schemas and permission policy.
 - `axiom security` reviews workspace permissions, MCP grants, API token-scope presence, CORS origin safety, package integrity, and the configured local network posture.
 - `axiom security audit --json` emits the redacted, machine-readable posture report.
 - `axiom security artifact inspect ./dist/<artifact> --json` checks a wheel or source archive without extracting or executing its contents.
+- `axiom security events list --json`, `verify --json`, `review <event-id> <reviewer-label>`, and `export` list, verify, acknowledge, and export the redacted local security journal.
 
 ## Commands without a one-to-one GUI/API action
 

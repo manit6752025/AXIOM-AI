@@ -1094,7 +1094,7 @@ function App() {
 }
 
 function AxiomMark({ small = false }: { small?: boolean }) {
-  return <img className={`axiom-mark ${small ? "small" : ""}`} src="/axiom-mark.svg" alt="" aria-hidden="true" draggable={false} />;
+  return <img className={`axiom-mark ${small ? "small" : ""}`} src="./axiom-mark.svg" alt="" aria-hidden="true" draggable={false} />;
 }
 
 function ThemeToggle({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => void }) {
@@ -4401,6 +4401,55 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
         const Icon = check.status === "pass" ? CircleCheck : check.status === "fail" ? CircleAlert : TriangleAlert;
         return <DiagnosticRow key={check.id} icon={Icon} title={check.title} detail={`${check.detail}${check.remediation ? ` Next: ${check.remediation}` : ""}`} state={check.status.toUpperCase()} tone={tone} />;
       })}</div>
+    </Surface>}
+    {securityEvents && <Surface
+      title="Security event journal"
+      eyebrow="LOCAL / REDACTED / HASH-CHAINED"
+      action={<StatusPill tone={securityEvents.integrity.valid ? "success" : "danger"}>{securityEvents.integrity.valid ? "INTEGRITY VALID" : "INTEGRITY FAILED"}</StatusPill>}
+    >
+      <p className="quiet-note">
+        {securityEvents.total} security action(s) retained · {securityEvents.integrity.event_count} chain record(s) · capacity {securityEvents.integrity.event_count}/{securityEvents.integrity.max_events}.
+        The journal records allowlisted MCP permission/profile changes only. It never stores credential values, prompts, commands or arbitrary event text.
+      </p>
+      <p className="quiet-note">
+        Reviewer labels are self-attested and are not authenticated identities. The SHA-256 chain detects partial edits or deletion, but a privileged local user who can rewrite the entire journal can recompute it. Export records to separately controlled storage for independent retention.
+      </p>
+      <div className="integration-form-actions">
+        <button type="button" className="button secondary-button" onClick={() => void refreshSecurityEvents()} disabled={securityEventsBusy}>
+          <RefreshCcw size={15} /> Refresh
+        </button>
+        <button type="button" className="button secondary-button" onClick={() => void verifySecurityEvents()} disabled={securityEventsBusy}>
+          <ShieldCheck size={15} /> Verify chain
+        </button>
+        <button type="button" className="button secondary-button" onClick={() => void exportSecurityEvents()} disabled={securityEventsBusy}>
+          <ArrowDownToLine size={15} /> {securityEventsBusy ? "Working…" : "Export redacted JSON"}
+        </button>
+      </div>
+      <div className="settings-field" style={{ maxWidth: 420 }}>
+        <Field label="Reviewer label" htmlFor="security-event-reviewer" hint="Self-attested label only; it does not authenticate an administrator.">
+          <input
+            id="security-event-reviewer"
+            value={reviewerLabel}
+            maxLength={48}
+            autoComplete="off"
+            onChange={(event) => setReviewerLabel(event.target.value)}
+            placeholder="e.g. Security Admin"
+          />
+        </Field>
+      </div>
+      {securityEvents.events.length ? <DataTable<SecurityEventListItem>
+        caption="Recent security events and review acknowledgements"
+        rows={securityEvents.events}
+        rowKey={(event) => event.event_id}
+        columns={[
+          { key: "occurred_at", header: "Time", render: (event) => new Date(event.occurred_at).toLocaleString() },
+          { key: "summary", header: "Action", render: (event) => event.summary },
+          { key: "review", header: "Review", render: (event) => event.reviewed
+            ? `Reviewed by ${event.reviewer_label} · self-attested`
+            : <button type="button" className="button secondary-button" onClick={() => void reviewSecurityEvent(event.event_id)} disabled={securityEventsBusy || !reviewerLabel.trim()}>Mark reviewed</button> },
+        ]}
+      /> : <EmptyState icon={ShieldCheck} title="No security events recorded" description="MCP profile and permission changes will appear here as redacted action metadata." />}
+      {securityEvents.integrity.capacity_reached && <Callout tone="warning" title="Security journal full">New events are refused at capacity rather than silently rotating or deleting audit history. Export and archive the journal separately.</Callout>}
     </Surface>}
     {securityAudit && <Surface title="Security posture" eyebrow="READ-ONLY / CREDENTIAL VALUES WITHHELD" action={<StatusPill tone={securityAudit.status === "pass" ? "success" : securityAudit.status === "fail" ? "danger" : "warning"}>{securityAudit.status.toUpperCase()}</StatusPill>}>
       <p className="quiet-note">{securityAudit.summary.passed} passed · {securityAudit.summary.warnings} warning(s) · {securityAudit.summary.failed} failed. API scope tokens {securityAudit.summary.api_scope_tokens_enabled ? "are configured" : "are not enabled"}. No credential values are returned.</p>

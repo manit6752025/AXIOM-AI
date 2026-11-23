@@ -22,7 +22,7 @@ feature exists or a delivery-date promise.
 - [R009 · Implemented; tests passing] Separate read-only plans from side-effecting jobs in API scopes. Opt-in read/write bearer tokens protect `/api/*` and `/v1/*`; unclassified mutations require write scope, with documented validation/planning allowlists and 401/403 request-ID envelopes.
 - [R010 · Implemented; tests passing] Add read-only workspace health checks for config parsing, path safety, file permissions, free disk, Python compatibility, and required dependency imports.
 - [R011 · In progress; validation pending] Document data retention, browser-local account settings, in-memory request traces, workspace metadata, generated files, and deletion boundaries in Settings and the retention guide.
-- [R012 · In progress; validation pending] Add automated Python/Node/OS runtime compatibility checks to cross-platform release CI.
+- [R012 · Implemented; tests passing] Add automated Python/Node/OS runtime compatibility checks to cross-platform release CI.
 
 ### 02 · CLI experience
 
@@ -86,13 +86,13 @@ feature exists or a delivery-date promise.
 
 ### 06 · Training plans and visual workflows
 
-- [R061 · In progress; validation pending] Add a visual workflow graph using the existing GUI design system.
-- [R062 · In progress; validation pending] Define a versioned workflow schema for nodes, ports, and edges.
-- [R063 · In progress; validation pending] Add validated dataset, model, plan, evaluation, and export nodes.
-- [R064 · In progress; validation pending] Detect missing inputs, invalid edges, and dependency cycles.
-- [R065 · In progress; validation pending] Add workflow templates for common supervised fine-tuning paths.
-- [R066 · In progress; validation pending] Add autosave, rename, duplicate, and version history for workflows.
-- [R067 · In progress; validation pending] Add backend-owned workflow validation before execution is possible.
+- [R061 · Implemented; tests passing] Add a visual workflow graph using the existing GUI design system.
+- [R062 · Implemented; tests passing] Define a versioned workflow schema for nodes, ports, and edges.
+- [R063 · Implemented; tests passing] Add validated dataset, model, plan, evaluation, and export nodes.
+- [R064 · Implemented; tests passing] Detect missing inputs, invalid edges, and dependency cycles.
+- [R065 · Implemented; tests passing] Add workflow templates for common supervised fine-tuning paths.
+- [R066 · Implemented; tests passing] Add autosave, rename, duplicate, and version history for workflows.
+- [R067 · Implemented; tests passing] Add backend-owned workflow validation before execution is possible.
 - [R068 · Implemented; tests passing] Add planning-only dry-run summaries with estimated resource requirements.
 - [R069 · Planned] Add explicit job execution states and cancellation contracts.
 - [R070 · Planned] Add checkpoint, resume, and output-path policy controls.
@@ -139,7 +139,7 @@ feature exists or a delivery-date promise.
 - [R102 · Planned] Add tool/resource schema browsing without tool execution by default.
 - [R103 · Planned] Add per-server trust, ownership, and connection state.
 - [R104 · Planned] Add safe secret references and never render stored secret values.
-- [R105 · In progress; validation pending] Add read-only security audits for config and MCP policy permissions, active tool grants, API token scopes, CORS origins, and AXIOM's loopback/network-exposure contracts through the CLI, API, and Diagnostics page; never return credential values.
+- [R105 · Implemented; tests passing] Add read-only security audits for config and MCP policy permissions, active tool grants, API token scopes, CORS origins, and AXIOM's loopback/network-exposure contracts through the CLI, API, and Diagnostics page; never return credential values.
 - [R106 · In progress; validation pending] Harden workspace-relative path resolution against symlinked roots and parent-directory swaps on POSIX; add regression tests for traversal inputs, symlinked roots/parents/final files, and path-selection/open races.
 - [R107 · In progress; validation pending] Check installed runtime dependency compatibility and bounded package RECORD hashes, and inspect Python wheel/source release artifacts for metadata, hash integrity, traversal, symlinks, special files, duplicate paths, and archive expansion without extraction or execution.
 - [R108 · Planned] Add security event export and administrator review workflows.

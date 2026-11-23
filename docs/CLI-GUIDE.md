@@ -98,6 +98,22 @@ source-archive paths, links, special entries, duplicate names, and size limits.
 It reads artifacts as data only. It does not verify publisher signatures or
 consult vulnerability databases. Review non-zero exit codes before publishing.
 
+
+Inspect and review the bounded local security event journal:
+
+```bash
+axiom security events list --json
+axiom security events verify --json
+axiom security events review <event-id> "Security Admin"
+axiom security events export > axiom-security-events.json
+```
+
+MCP profile creation, permission updates, and profile activation are recorded
+using fixed summaries. Review labels are self-attested, not authenticated
+identities. The export is redacted JSON; retain it outside the workspace for
+independent retention. A full journal refuses new entries rather than silently
+rotating history.
+
 ## Machine-readable CLI errors
 
 Place `--json-errors` before the command to emit a schema-versioned error

@@ -105,3 +105,34 @@ never uploaded automatically. A user may explicitly download the current
 redacted JSON report or clear the in-memory entries. Reloading or closing the
 browser clears the report. The generated download is a user-created local file;
 review it before sharing.
+
+
+## Security event journal
+
+The security event journal is stored per workspace at
+`.axiom/security-events.json`; its lock file is
+`.axiom/security-events.lock`. Only fixed, allowlisted summaries for MCP
+profile creation, permission updates, and profile activation are recorded.
+The journal does not accept arbitrary event text and does not store credential
+values, prompt/response bodies, command lines, profile contents, or API tokens.
+Its file is restricted to owner read/write on POSIX systems.
+
+The journal retains at most 2,000 chain records (including review
+acknowledgements) and 5 MiB. There is no automatic expiry or silent rotation.
+When full, new event writes are refused and the journal must be exported and
+archived separately before an operator deliberately starts a new history.
+AXIOM does not automatically delete an old journal after export.
+
+A review acknowledgement adds a new record; it never edits the original event.
+The reviewer label is self-entered and **not an authenticated identity**.
+The hash chain detects partial edits and deletions, but it is not a digital
+signature and cannot prevent a fully privileged local user from rewriting the
+complete journal and recomputing its hashes. Keep exported copies in storage
+with access controls separate from the AXIOM workspace when independent
+retention or tamper resistance is required.
+
+The Control Center's Diagnostics page can list, verify, acknowledge, and export
+events. The CLI equivalents are `axiom security events list`,
+`axiom security events verify`, `axiom security events review`, and
+`axiom security events export`. JSON exports are explicit user-created files
+and inherit the retention policy of the chosen save location.
