@@ -6,6 +6,7 @@ on:
     paths:
       - "axiom/core/inference.py"
       - "axiom/core/local_speech.py"
+      - "axiom/core/supply_chain.py"
       - "tests/integration/**"
       - ".github/workflows/local-model-integration.yml"
   workflow_dispatch:
