@@ -38,6 +38,8 @@ def register(train_app: typer.Typer) -> None:
         sequence_length: int = typer.Option(512, min=32, max=2048, help="Maximum tokens per example (32–2048)."),
         learning_rate: float = typer.Option(0.0001, min=0.000001, max=0.01, help="LoRA learning rate."),
         lora_rank: int = typer.Option(8, min=1, max=64, help="LoRA adapter rank (1–64)."),
+        checkpoint_interval: int = typer.Option(0, "--checkpoint-interval", min=0, max=1000, help="Save resumable checkpoints every N optimizer steps; 0 disables checkpoints."),
+        output_policy: str = typer.Option("empty", "--output-policy", help="Output directory policy: new, empty, or resume."),
         json_output: bool = typer.Option(False, "--json", help="Print the final job record as JSON."),
     ) -> None:
         """Actually train a local LoRA adapter. This may use substantial CPU/GPU memory."""
@@ -50,6 +52,8 @@ def register(train_app: typer.Typer) -> None:
             "sequence_length": sequence_length,
             "learning_rate": learning_rate,
             "lora_rank": lora_rank,
+            "checkpoint_interval": checkpoint_interval,
+            "output_policy": output_policy,
         }
         def progress(job: dict[str, Any]) -> None:
             if json_output:

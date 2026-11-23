@@ -29,6 +29,8 @@ test("Training page submits a bounded local LoRA job and displays its status", a
       sequence_length: 64,
       learning_rate: 0.0001,
       lora_rank: 4,
+      checkpoint_interval: 0,
+      output_policy: "empty",
     },
     completed_steps: 0,
     loss: null,
@@ -149,6 +151,8 @@ test("Training page submits a bounded local LoRA job and displays its status", a
   await page.getByLabel("Maximum optimization steps").fill("3");
   await page.getByLabel("Sequence length").fill("64");
   await page.getByLabel("LoRA rank").fill("4");
+  await page.getByLabel("Checkpoint interval (steps)").fill("2");
+  await page.getByLabel("Output path policy").selectOption("empty");
 
   const submitButton = page.getByRole("button", {
     name: "Start local fine-tuning",
@@ -183,6 +187,8 @@ test("Training page submits a bounded local LoRA job and displays its status", a
     sequence_length: 64,
     learning_rate: 0.0001,
     lora_rank: 4,
+    checkpoint_interval: 2,
+    output_policy: "empty",
   });
 
   const jobStatus = page.locator('[aria-label="Fine-tuning job status"]');

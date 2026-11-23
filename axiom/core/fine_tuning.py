@@ -515,7 +515,7 @@ def validate_config(
         or not 0 <= checkpoint_interval <= _MAX_CHECKPOINT_INTERVAL
     ):
         raise ValueError(f"Checkpoint interval must be between 0 and {_MAX_CHECKPOINT_INTERVAL} steps.")
-    if output_policy not in {"new", "empty", "resume"}:
+    if not isinstance(output_policy, str) or output_policy not in {"new", "empty", "resume"}:
         raise ValueError("Output policy must be 'new', 'empty', or 'resume'.")
 
     resume_state: dict[str, Any] | None = None
@@ -675,13 +675,20 @@ def _read_job(job_id: str) -> dict[str, Any] | None:
 
 
 def _public_training_job(job: dict[str, Any]) -> dict[str, Any]:
-    """Return a safe job summary with an explicit cooperative-cancellation contract."""
+    """Return safe checkpoint and cooperative-cancellation metadata."""
     public_job = dict(job)
     result = job.get("result")
     if isinstance(result, dict) and "training_dataset_sha256" in result:
         public_result = dict(result)
         public_result.pop("training_dataset_sha256", None)
         public_job["result"] = public_result
+
+    checkpoint = job.get("checkpoint")
+    if isinstance(checkpoint, dict):
+        public_job["checkpoint"] = {
+            key: checkpoint.get(key)
+            for key in ("enabled", "interval", "latest_step", "retained", "last_saved_at", "resume_available")
+        }
 
     status = job.get("status")
     requested = job.get("cancel_requested") is True
@@ -1102,9 +1109,31 @@ def _new_job(
 ) -> dict[str, Any]:
     validated = validate_config(config, workspace_guard=workspace_guard)
     require_runtime()
+    resume_step = 0
+    checkpoint = {
+        "enabled": validated["checkpoint_interval"] > 0,
+        "interval": validated["checkpoint_interval"],
+        "latest_step": 0,
+        "retained": 0,
+        "last_saved_at": None,
+        "resume_available": False,
+    }
+    if validated["output_policy"] == "resume":
+        _, state = latest_checkpoint(Path(validated["output_dir"]))
+        training = state.get("training") if isinstance(state.get("training"), dict) else {}
+        resume_step = state["completed_steps"]
+        checkpoint.update(
+            latest_step=resume_step,
+            retained=checkpoint_count(Path(validated["output_dir"])),
+            last_saved_at=state.get("created_at"),
+            resume_available=True,
+        )
     job_id = new_resource_id()
     _acquire_lock(job_id)
     now = _now()
+    queue_message = "Job queued. The base model and dataset are local inputs; no weights will be downloaded."
+    if resume_step:
+        queue_message = f"Job queued to resume from the latest verified checkpoint at step {resume_step}."
     job: dict[str, Any] = {
         "schema_version": 1,
         "id": job_id,
@@ -1117,11 +1146,12 @@ def _new_job(
         "finished_at": None,
         "config": validated,
         "cancel_requested": False,
-        "completed_steps": 0,
-        "loss": None,
+        "completed_steps": resume_step,
+        "loss": training.get("last_loss") if resume_step and isinstance(training.get("last_loss"), (int, float)) else None,
+        "checkpoint": checkpoint,
         "loss_samples": [],
         "error": None,
-        "logs": ["Job queued. The base model and dataset are local inputs; no weights will be downloaded."],
+        "logs": [queue_message],
     }
     try:
         _write_job(job)
@@ -1238,6 +1268,48 @@ def _assert_output_empty(output_dir: Path) -> None:
     raise FineTuningError("Adapter output directory is no longer empty; refusing to overwrite existing files.")
 
 
+def _prepare_output_directory(config: dict[str, Any]) -> None:
+    output_dir = Path(config["output_dir"])
+    policy = config.get("output_policy", "empty")
+    if policy == "resume":
+        _assert_output_ready_for_finalization(output_dir)
+        return
+    if policy == "new":
+        try:
+            output_dir.mkdir(mode=0o700, exist_ok=False)
+        except FileExistsError:
+            raise FineTuningError("The 'new' output policy path now exists; refusing to use it.") from None
+        except OSError:
+            raise FineTuningError("The new adapter output directory could not be created safely.") from None
+        return
+    if output_dir.exists():
+        _assert_output_empty(output_dir)
+    else:
+        try:
+            output_dir.mkdir(mode=0o700, exist_ok=False)
+        except OSError:
+            raise FineTuningError("The adapter output directory could not be created safely.") from None
+
+
+def _assert_output_ready_for_finalization(output_dir: Path) -> None:
+    if output_dir.is_symlink() or not output_dir.is_dir():
+        raise FineTuningError("Adapter output directory changed or is no longer a safe directory.")
+    try:
+        entries = list(output_dir.iterdir())
+    except OSError:
+        raise FineTuningError("Adapter output directory could not be inspected safely.") from None
+    if not entries:
+        return
+    if len(entries) != 1 or entries[0].name != CHECKPOINT_DIRECTORY:
+        raise FineTuningError("Adapter output contains user-managed files; refusing to overwrite them.")
+    try:
+        retained = checkpoint_count(output_dir)
+    except ValueError as exc:
+        raise FineTuningError(str(exc)) from None
+    if retained < 1:
+        raise FineTuningError("Adapter output contains no complete checkpoint; refusing to save into an uncertain directory.")
+
+
 def _run_transformers(
     config: dict[str, Any],
     progress: Callable[[int, float | None], None],
@@ -1245,15 +1317,17 @@ def _run_transformers(
     begin_finalizing: Callable[[], None] | None = None,
     workspace_guard_check: Callable[[], None] | None = None,
     workspace_guard: dict[str, Any] | None = None,
+    on_checkpoint: Callable[[dict[str, Any]], None] | None = None,
+    on_resume: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
-    """Train a local causal-LM LoRA adapter with AXIOM's own bounded PyTorch loop."""
+    """Train or resume a local causal-LM LoRA adapter with bounded AXIOM checkpoints."""
     if cancel_check:
         cancel_check()
     if workspace_guard_check:
         workspace_guard_check()
     try:
         import torch
-        from peft import LoraConfig, TaskType, get_peft_model
+        from peft import LoraConfig, PeftModel, TaskType, get_peft_model
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except (ImportError, OSError):
         raise FineTuningError(
@@ -1272,8 +1346,25 @@ def _run_transformers(
     model_path = config["model_path"]
     validate_local_model_tree(Path(model_path))
     output_dir = Path(config["output_dir"])
-    if output_dir.exists() and any(output_dir.iterdir()):
-        raise FineTuningError("Adapter output directory is no longer empty; refusing to overwrite existing files.")
+    resume_checkpoint: Path | None = None
+    resume_state: dict[str, Any] | None = None
+    resume_payload: dict[str, Any] | None = None
+    base_model_fingerprint = model_tree_fingerprint(Path(model_path))
+    if config["output_policy"] == "resume":
+        _assert_output_ready_for_finalization(output_dir)
+        try:
+            resume_checkpoint, resume_state = latest_checkpoint(output_dir)
+            _validate_resume_metadata(
+                resume_state,
+                config,
+                dataset_sha256=training_dataset_sha256,
+                base_model_fingerprint=base_model_fingerprint,
+            )
+            loaded = load_checkpoint_payload(resume_checkpoint, torch)
+            resume_state = loaded["state"]
+            resume_payload = loaded["payload"]
+        except ValueError as exc:
+            raise FineTuningError(str(exc)) from None
 
     try:
         if workspace_guard_check:
@@ -1310,30 +1401,46 @@ def _run_transformers(
         "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj",
         "c_attn", "c_proj", "query_key_value", "Wqkv", "query", "value",
     )
-    targets = [name for name in preferred if name in leaf_names]
-    if not targets:
-        raise FineTuningError(
-            "No supported attention/MLP projection layers were found for LoRA. "
-            "AXIOM supports common Llama-style q_proj/k_proj/v_proj/o_proj and several other known projection layouts."
-        )
-
-    try:
-        model = get_peft_model(
-            model,
-            LoraConfig(
-                task_type=TaskType.CAUSAL_LM,
-                r=config["lora_rank"],
-                lora_alpha=max(8, config["lora_rank"] * 2),
-                lora_dropout=0.05,
-                target_modules=targets,
-                bias="none",
-            ),
-        )
-    except Exception as exc:
-        message = _clip(exc, 300)
-        raise FineTuningError(
-            "PEFT could not attach a LoRA adapter to this model architecture." + (f" Detail: {message}" if message else "")
-        ) from None
+    if resume_state is not None:
+        training = resume_state.get("training", {})
+        targets = training.get("target_modules")
+        if not isinstance(targets, list) or not targets or any(target not in leaf_names for target in targets):
+            raise FineTuningError("Resume checkpoint target modules do not match the selected base model.")
+        try:
+            model = PeftModel.from_pretrained(
+                model, str(resume_checkpoint), is_trainable=True, local_files_only=True
+            )
+        except Exception as exc:
+            message = _clip(exc, 300)
+            raise FineTuningError(
+                "PEFT could not restore the adapter from the selected local checkpoint."
+                + (f" Detail: {message}" if message else "")
+            ) from None
+    else:
+        targets = [name for name in preferred if name in leaf_names]
+        if not targets:
+            raise FineTuningError(
+                "No supported attention/MLP projection layers were found for LoRA. "
+                "AXIOM supports common Llama-style q_proj/k_proj/v_proj/o_proj and several other known projection layouts."
+            )
+        try:
+            model = get_peft_model(
+                model,
+                LoraConfig(
+                    task_type=TaskType.CAUSAL_LM,
+                    r=config["lora_rank"],
+                    lora_alpha=max(8, config["lora_rank"] * 2),
+                    lora_dropout=0.05,
+                    target_modules=targets,
+                    bias="none",
+                ),
+            )
+        except Exception as exc:
+            message = _clip(exc, 300)
+            raise FineTuningError(
+                "PEFT could not attach a LoRA adapter to this model architecture."
+                + (f" Detail: {message}" if message else "")
+            ) from None
 
     trainable_parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
     if not trainable_parameters:
@@ -1346,6 +1453,16 @@ def _run_transformers(
     else:
         device = torch.device("cpu")
 
+    if resume_state is None:
+        torch.manual_seed(AXIOM_TRAINING_SEED)
+        if device.type == "cuda":
+            torch.cuda.manual_seed_all(AXIOM_TRAINING_SEED)
+    elif resume_state.get("training", {}).get("device") != str(device):
+        raise FineTuningError(
+            "Resume requires the same compute device as the saved checkpoint; "
+            "select the original device or start a new training run."
+        )
+
     try:
         if cancel_check:
             cancel_check()
@@ -1355,20 +1472,77 @@ def _run_transformers(
     except Exception as exc:
         message = _clip(exc, 240)
         raise FineTuningError(
-            f"Could not place the local model on {device}. The model may exceed available memory." + (f" Detail: {message}" if message else "")
+            f"Could not place the local model on {device}. The model may exceed available memory."
+            + (f" Detail: {message}" if message else "")
         ) from None
 
     if cancel_check:
         cancel_check()
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if workspace_guard_check:
+        workspace_guard_check()
+    _prepare_output_directory(config)
+
     optimizer = torch.optim.AdamW(trainable_parameters, lr=config["learning_rate"])
     rng = random.Random(AXIOM_TRAINING_SEED)
     order: list[int] = []
     position = 0
+    start_step = 0
+    if resume_state is not None and resume_payload is not None:
+        try:
+            optimizer_state = resume_payload.get("optimizer_state_dict")
+            python_rng_state = resume_payload.get("python_rng_state")
+            torch_rng_state = resume_payload.get("torch_cpu_rng_state")
+            saved_order = resume_payload.get("order")
+            saved_position = resume_payload.get("position")
+            if not isinstance(optimizer_state, dict):
+                raise ValueError("optimizer state is missing")
+            if not isinstance(saved_order, list) or len(saved_order) != len(texts):
+                raise ValueError("dataset sampling order does not match the current dataset")
+            if any(isinstance(item, bool) or not isinstance(item, int) for item in saved_order):
+                raise ValueError("dataset sampling order is invalid")
+            if sorted(saved_order) != list(range(len(texts))):
+                raise ValueError("dataset sampling order is not a complete permutation")
+            if isinstance(saved_position, bool) or not isinstance(saved_position, int) or not 0 <= saved_position <= len(texts):
+                raise ValueError("dataset sampling position is invalid")
+            if torch_rng_state is None:
+                raise ValueError("CPU random-number state is missing")
+            optimizer.load_state_dict(optimizer_state)
+            rng.setstate(python_rng_state)
+            torch.set_rng_state(torch_rng_state.cpu())
+            saved_cuda_states = resume_payload.get("torch_cuda_rng_states")
+            if device.type == "cuda":
+                if (
+                    not isinstance(saved_cuda_states, list)
+                    or len(saved_cuda_states) != torch.cuda.device_count()
+                    or training.get("cuda_device_count") != torch.cuda.device_count()
+                ):
+                    raise ValueError("CUDA device count differs from the saved checkpoint")
+                torch.cuda.set_rng_state_all(saved_cuda_states)
+            order = saved_order
+            position = saved_position
+            start_step = int(resume_state["completed_steps"])
+        except Exception as exc:
+            message = _clip(exc, 240)
+            raise FineTuningError(
+                "The local checkpoint optimizer or random-number state could not be restored safely."
+                + (f" Detail: {message}" if message else "")
+            ) from None
+        if on_resume:
+            checkpoint_summary = {
+                "enabled": True,
+                "interval": config["checkpoint_interval"],
+                "latest_step": start_step,
+                "retained": checkpoint_count(output_dir),
+                "last_saved_at": resume_state.get("created_at"),
+                "resume_available": True,
+                "last_loss": resume_state.get("training", {}).get("last_loss"),
+            }
+            on_resume(checkpoint_summary)
+
     model.train()
     optimizer.zero_grad(set_to_none=True)
-
-    for step in range(1, config["max_steps"] + 1):
+    latest_checkpoint_summary: dict[str, Any] | None = None
+    for step in range(start_step + 1, config["max_steps"] + 1):
         if cancel_check:
             cancel_check()
         if position >= len(order):
@@ -1412,6 +1586,54 @@ def _run_transformers(
                 f"Local LoRA training failed at step {step} on {device}. Check available memory and model compatibility."
                 + (f" Detail: {message}" if message else "")
             ) from None
+
+        interval = config["checkpoint_interval"]
+        if interval > 0 and (step % interval == 0 or step == config["max_steps"]):
+            optimizer_payload = {
+                "optimizer_state_dict": optimizer.state_dict(),
+                "python_rng_state": rng.getstate(),
+                "torch_cpu_rng_state": torch.get_rng_state(),
+                "torch_cuda_rng_states": torch.cuda.get_rng_state_all() if device.type == "cuda" else [],
+                "order": order,
+                "position": position,
+            }
+            training_metadata = {
+                "model_path": config["model_path"],
+                "model_fingerprint": base_model_fingerprint,
+                "dataset_path": config["dataset_path"],
+                "dataset_sha256": training_dataset_sha256,
+                "text_field": config["text_field"],
+                "sequence_length": config["sequence_length"],
+                "learning_rate": config["learning_rate"],
+                "lora_rank": config["lora_rank"],
+                "output_dir": config["output_dir"],
+                "seed": AXIOM_TRAINING_SEED,
+                "target_modules": targets,
+                "max_steps_at_save": config["max_steps"],
+                "device": str(device),
+                "cuda_device_count": torch.cuda.device_count() if device.type == "cuda" else 0,
+                "dataset_rows": len(texts),
+                "last_loss": loss_value,
+            }
+            try:
+                latest_checkpoint_summary = save_checkpoint(
+                    output_dir,
+                    step,
+                    model=model,
+                    torch_module=torch,
+                    optimizer_payload=optimizer_payload,
+                    training_metadata=training_metadata,
+                )
+            except Exception as exc:
+                message = _clip(exc, 240)
+                raise FineTuningError(
+                    "Could not persist a verified local training checkpoint."
+                    + (f" Detail: {message}" if message else "")
+                ) from None
+            latest_checkpoint_summary["interval"] = interval
+            if on_checkpoint:
+                on_checkpoint(latest_checkpoint_summary)
+
         progress(step, loss_value)
 
     if begin_finalizing:
@@ -1420,7 +1642,7 @@ def _run_transformers(
         cancel_check()
     if workspace_guard_check:
         workspace_guard_check()
-    _assert_output_empty(output_dir)
+    _assert_output_ready_for_finalization(output_dir)
     try:
         model.save_pretrained(str(output_dir), safe_serialization=True)
         tokenizer.save_pretrained(str(output_dir))
@@ -1443,6 +1665,15 @@ def _run_transformers(
         "device": str(device),
         "engine": "axiom-lora-engine",
         "trainable_parameters": sum(parameter.numel() for parameter in trainable_parameters),
+        "resumed_from_step": start_step,
+        "checkpoint": latest_checkpoint_summary or (resume_state and {
+            "enabled": True,
+            "interval": config["checkpoint_interval"],
+            "latest_step": resume_state["completed_steps"],
+            "retained": checkpoint_count(output_dir),
+            "last_saved_at": resume_state.get("created_at"),
+            "resume_available": True,
+        }),
     }
 
 
@@ -1503,6 +1734,34 @@ def execute_finetuning_job(
                 on_progress(updated)
             check_cancel()
 
+        def checkpoint_progress(summary: dict[str, Any]) -> None:
+            current = _read_job(job_id)
+            if current is None:
+                return
+            message = f"Saved verified checkpoint at step {summary.get('latest_step', 0)}."
+            _update_job(
+                job_id,
+                checkpoint=summary,
+                logs=[*current.get("logs", []), message][-80:],
+            )
+
+        def resume_progress(summary: dict[str, Any]) -> None:
+            current = _read_job(job_id)
+            if current is None:
+                return
+            step = summary.get("latest_step", 0)
+            loss = summary.get("last_loss")
+            changes: dict[str, Any] = {
+                "completed_steps": step,
+                "checkpoint": {
+                    key: value for key, value in summary.items() if key != "last_loss"
+                },
+                "logs": [*current.get("logs", []), f"Resumed verified checkpoint at step {step}."][-80:],
+            }
+            if isinstance(loss, (int, float)) and not isinstance(loss, bool) and math.isfinite(float(loss)):
+                changes["loss"] = float(loss)
+            _update_job(job_id, **changes)
+
         result = _run_transformers(
             job["config"],
             progress,
@@ -1510,6 +1769,8 @@ def execute_finetuning_job(
             begin_finalizing=lambda: _begin_finalizing(job_id),
             workspace_guard_check=check_workspace,
             workspace_guard=workspace_guard,
+            on_checkpoint=checkpoint_progress,
+            on_resume=resume_progress,
         )
         current = _read_job(job_id) or job
         _update_job(

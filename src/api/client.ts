@@ -842,6 +842,7 @@ export type FineTuningRuntime = {
 export type FineTuningConfig = {
   model_path: string; dataset_path: string; output_dir: string; text_field: string;
   max_steps: number; sequence_length: number; learning_rate: number; lora_rank: number;
+  checkpoint_interval?: number; output_policy?: "new" | "empty" | "resume";
 };
 export type FineTuningJob = {
   schema_version: 1; id: string; status: "queued" | "running" | "cancelling" | "finalizing" | "completed" | "cancelled" | "failed";
@@ -851,7 +852,8 @@ export type FineTuningJob = {
     supported: boolean; requested: boolean; requestable: boolean; mode: "cooperative";
     boundary: string; unavailable_reason: "already_requested" | "finalization_started" | "job_terminal" | "job_not_cancellable" | null;
   };
-  logs: string[]; result?: { output_dir: string; adapter_files: string[]; target_modules: string[]; dataset_rows: number; max_steps: number; device?: string; engine?: string; trainable_parameters?: number };
+  checkpoint?: { enabled: boolean; interval: number; latest_step: number; retained: number; last_saved_at: string | null; resume_available: boolean };
+  logs: string[]; result?: { resumed_from_step?: number; checkpoint?: { enabled: boolean; interval: number; latest_step: number; retained: number; last_saved_at: string | null; resume_available: boolean }; output_dir: string; adapter_files: string[]; target_modules: string[]; dataset_rows: number; max_steps: number; device?: string; engine?: string; trainable_parameters?: number };
 };
 export type FineTuningJobPage = {
   jobs: FineTuningJob[]; total: number; limit: number; offset: number;
