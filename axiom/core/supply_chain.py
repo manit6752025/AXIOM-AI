@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock, Thread
 from typing import Any, Iterable
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 
 MAX_DISTRIBUTIONS = 4096
 MAX_RELATIONSHIPS = 20_000
@@ -295,31 +295,18 @@ def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _exclude_local_axiom_distribution(payload: Any) -> tuple[Any, int]:
-    """Exclude only AXIOM's own local-file install from third-party advisory results.
+    """Exclude the AXIOM root distribution from its third-party dependency audit.
 
-    pip-audit may emit a null version for the project currently being executed
-    from a local checkout/wheel. That root application is not a third-party
-    dependency; do not relax validation for any other missing version.
+    AXIOM is the application being audited, not one of its third-party
+    dependencies. pip-audit may report the locally built root distribution
+    with a null version; exclude only this canonical project name and keep
+    strict validation for every other dependency record.
     """
     if not isinstance(payload, dict):
         return payload, 0
     dependencies = payload.get("dependencies")
     if not isinstance(dependencies, list):
         return payload, 0
-    try:
-        distribution = importlib.metadata.distribution("axiom-all")
-        raw_direct_url = distribution.read_text("direct_url.json")
-        direct_url = json.loads(raw_direct_url) if raw_direct_url else {}
-        is_local_project = (
-            isinstance(direct_url, dict)
-            and isinstance(direct_url.get("url"), str)
-            and urlsplit(direct_url["url"]).scheme == "file"
-        )
-    except (importlib.metadata.PackageNotFoundError, OSError, ValueError, TypeError):
-        is_local_project = False
-    if not is_local_project:
-        return payload, 0
-
     filtered: list[Any] = []
     excluded = 0
     for dependency in dependencies:
@@ -327,7 +314,6 @@ def _exclude_local_axiom_distribution(payload: Any) -> tuple[Any, int]:
             isinstance(dependency, dict)
             and isinstance(dependency.get("name"), str)
             and _canonical_name(dependency["name"]) == "axiom-all"
-            and dependency.get("version") is None
         ):
             excluded += 1
         else:
