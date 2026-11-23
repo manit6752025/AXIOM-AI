@@ -232,3 +232,99 @@ def test_invalid_structured_schema_is_rejected_before_loopback(monkeypatch):
             "qwen2.5:0.5b", "Return JSON.",
             response_format={"type": "object", "$ref": "https://example.invalid/schema"},
         )
+
+
+
+def _vision_test_png(width: int = 8, height: int = 4) -> bytes:
+    return b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + width.to_bytes(4, "big") + height.to_bytes(4, "big")
+
+
+def test_local_vision_checks_model_capability_and_sends_only_bounded_workspace_image(tmp_path, monkeypatch):
+    import base64
+
+    monkeypatch.chdir(tmp_path)
+    root = tmp_path / "workspace"
+    (root / "data").mkdir(parents=True)
+    image = _vision_test_png()
+    (root / "data" / "sample.png").write_bytes(image)
+    observed = []
+
+    def fake_request(path, *, payload=None, timeout):
+        observed.append((path, payload, timeout))
+        if path == "/api/show":
+            return {"capabilities": ["completion", "vision"]}
+        return {
+            "response": "A small blue square is visible.",
+            "done": True,
+            "eval_count": 12,
+            "total_duration": 1_500_000_000,
+        }
+
+    monkeypatch.setattr(inference, "_request_json", fake_request)
+    report = inference.run_local_vision(
+        "llava:latest", "data/sample.png", "Describe the visible object.",
+        workspace_root=root, max_new_tokens=96, timeout_seconds=30,
+    )
+
+    assert [item[0] for item in observed] == ["/api/show", "/api/generate"]
+    assert observed[0][1] == {"model": "llava:latest", "verbose": False}
+    payload = observed[1][1]
+    assert payload["model"] == "llava:latest"
+    assert payload["prompt"] == "Describe the visible object."
+    assert payload["stream"] is False
+    assert payload["options"] == {"num_predict": 96}
+    assert payload["images"] == [base64.b64encode(image).decode("ascii")]
+    assert observed[1][2] == 30
+    assert report["response"] == "A small blue square is visible."
+    assert report["image"] == {"format": "png", "width": 8, "height": 4, "size_bytes": len(image)}
+    assert report["generation"]["total_duration_ms"] == 1500.0
+    assert report["privacy"]["network_used"] is False
+    assert report["privacy"]["image_persisted_by_axiom"] is False
+    assert image.hex() not in json.dumps(report)
+
+
+def test_local_vision_refuses_models_without_explicit_vision_capability(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    root = tmp_path / "workspace"
+    (root / "data").mkdir(parents=True)
+    (root / "data" / "sample.png").write_bytes(_vision_test_png())
+    calls = []
+
+    def fake_request(path, *, payload=None, timeout):
+        calls.append(path)
+        return {"capabilities": ["completion"]}
+
+    monkeypatch.setattr(inference, "_request_json", fake_request)
+    with pytest.raises(inference.InferenceRuntimeError, match="did not explicitly report the vision capability"):
+        inference.run_local_vision("qwen2.5:0.5b", "data/sample.png", "Describe it.", workspace_root=root)
+    assert calls == ["/api/show"]
+
+
+@pytest.mark.parametrize("image_path", ["../secret.png", "/etc/passwd", "models/sample.png", "data/../secret.png"])
+def test_local_vision_rejects_non_workspace_image_paths_before_runtime(tmp_path, monkeypatch, image_path):
+    monkeypatch.setattr(inference, "_request_json", lambda *_args, **_kwargs: pytest.fail("runtime must not be contacted"))
+    with pytest.raises(ValueError, match="under data"):
+        inference.run_local_vision("llava:latest", image_path, "Describe it.", workspace_root=tmp_path)
+
+
+def test_local_vision_rejects_oversized_or_malformed_images_before_runtime(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    root = tmp_path / "workspace"
+    (root / "data").mkdir(parents=True)
+    (root / "data" / "invalid.png").write_bytes(b"not a PNG image")
+    (root / "data" / "large.png").write_bytes(_vision_test_png(10_000, 10_000))
+    monkeypatch.setattr(inference, "_request_json", lambda *_args, **_kwargs: pytest.fail("runtime must not be contacted"))
+    with pytest.raises(ValueError, match="signature"):
+        inference.run_local_vision("llava:latest", "data/invalid.png", "Describe it.", workspace_root=root)
+    with pytest.raises(ValueError, match="40-megapixel"):
+        inference.run_local_vision("llava:latest", "data/large.png", "Describe it.", workspace_root=root)
+
+
+def test_local_vision_rejects_invalid_limits_before_reading_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(inference, "open_mcp_workspace_file", lambda *_args: pytest.fail("image must not be opened"))
+    with pytest.raises(ValueError, match="prompt"):
+        inference.run_local_vision("llava:latest", "data/image.png", " ", workspace_root=tmp_path)
+    with pytest.raises(ValueError, match="tokens"):
+        inference.run_local_vision("llava:latest", "data/image.png", "Describe it.", workspace_root=tmp_path, max_new_tokens=1025)
+    with pytest.raises(ValueError, match="timeout"):
+        inference.run_local_vision("llava:latest", "data/image.png", "Describe it.", workspace_root=tmp_path, timeout_seconds=181)
