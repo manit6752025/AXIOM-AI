@@ -27,6 +27,7 @@ from axiom.core.diagnostics import (
     discover_workspace_root,
 )
 from axiom.core.tool_permissions import ToolPermissionStore
+from axiom.path_safety import SafePathError, open_regular_file
 
 _SCHEMA_VERSION = 1
 _TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9._~-]{32,256}$")
@@ -174,8 +175,8 @@ def _package_integrity_check(
     skipped_external = 0
     bounded = True
     verified_bytes = 0
-    for package_file in files:
-        if hashed_files >= 128 or verified_bytes >= 4 * 1024 * 1024:
+    for entry_index, package_file in enumerate(files):
+        if entry_index >= 512 or hashed_files >= 64 or verified_bytes >= 2 * 1024 * 1024:
             bounded = False
             break
         relative = Path(str(package_file))
@@ -209,9 +210,7 @@ def _package_integrity_check(
         try:
             resolved_target = target.resolve(strict=True)
             resolved_target.relative_to(package_root)
-            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-            descriptor = os.open(resolved_target, flags)
-            with os.fdopen(descriptor, "rb") as stream:
+            with open_regular_file(resolved_target) as stream:
                 info = os.fstat(stream.fileno())
                 if not stat.S_ISREG(info.st_mode):
                     problems.append("an installed package RECORD entry is not a regular file")
@@ -220,7 +219,7 @@ def _package_integrity_check(
                 if recorded_size is not None and int(recorded_size) != info.st_size:
                     problems.append("an installed package file size does not match RECORD")
                     continue
-                if info.st_size > 4 * 1024 * 1024 or verified_bytes + info.st_size > 4 * 1024 * 1024:
+                if info.st_size > 2 * 1024 * 1024 or verified_bytes + info.st_size > 2 * 1024 * 1024:
                     bounded = False
                     break
                 hasher = hashlib.new(algorithm)
@@ -236,16 +235,18 @@ def _package_integrity_check(
                 verified += 1
         except FileNotFoundError:
             problems.append("an installed package RECORD entry is missing")
-        except (OSError, RuntimeError, ValueError):
+        except (OSError, RuntimeError, ValueError, SafePathError):
             problems.append("an installed package RECORD entry could not be opened safely")
 
     if hashed_files == 0:
         problems.append("no hashed installation files were available to verify")
+    if skipped_external:
+        problems.append(f"{skipped_external} install-scheme file(s) outside the package directory were not verified")
     if bounded:
         if verified != hashed_files:
             problems.append("not every hashed installation file could be verified")
     else:
-        problems.append("the bounded file or byte inspection limit was reached")
+        problems.append("the 512-entry, 64-file, or 2 MiB per-distribution inspection limit was reached")
 
     if problems:
         status = "fail" if any(
@@ -269,8 +270,6 @@ def _package_integrity_check(
         remediation = "Reinstall the package from a trusted source and review local import paths."
     else:
         detail = f"{distribution_name} {version} meets the minimum {minimum}; verified {verified} installed file hash(es) against RECORD."
-        if skipped_external:
-            detail += f" {skipped_external} install-scheme file(s) outside the package directory were not inspected."
         remediation = None
         status = "pass"
     return _check(

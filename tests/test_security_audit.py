@@ -146,7 +146,7 @@ def test_installed_package_audit_verifies_record_hashes(tmp_path: Path, monkeypa
     package_root = tmp_path / "site-packages"
     package_root.mkdir()
     package_file = package_root / "typer.py"
-    original = b"SAFE_PACKAGE_CONTENT = True\\n"
+    original = b"SAFE_PACKAGE_CONTENT = True\n"
     package_file.write_bytes(original)
     digest = base64.urlsafe_b64encode(hashlib.sha256(original).digest()).rstrip(b"=").decode()
 
@@ -173,7 +173,7 @@ def test_installed_package_audit_verifies_record_hashes(tmp_path: Path, monkeypa
     assert good["status"] == "pass"
     assert "verified 1 installed file hash" in good["detail"]
 
-    package_file.write_bytes(b"EVIL_PACKAGE_CONTENT = True\\n")
+    package_file.write_bytes(b"EVIL_PACKAGE_CONTENT = True\n")
     bad = _package_integrity_check(root, "typer", "typer")
     assert bad["status"] == "fail"
     assert "does not match its RECORD hash" in bad["detail"]
@@ -184,7 +184,7 @@ def test_installed_package_audit_flags_workspace_module_shadowing(tmp_path: Path
     package_root = tmp_path / "site-packages"
     package_root.mkdir()
     package_file = package_root / "typer.py"
-    payload = b"SAFE_PACKAGE_CONTENT\\n"
+    payload = b"SAFE_PACKAGE_CONTENT\n"
     package_file.write_bytes(payload)
     digest = base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).rstrip(b"=").decode()
 

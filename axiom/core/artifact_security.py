@@ -231,7 +231,7 @@ def _zip_read_bounded(archive: zipfile.ZipFile, info: zipfile.ZipInfo, limit: in
 
 
 def _verify_wheel(archive: zipfile.ZipFile, filename: str) -> dict[str, Any]:
-    infos, checks, total_size = _zip_inventory(archive)
+    infos, checks, _total_size = _zip_inventory(archive)
     by_name = {info.filename: info for info in infos}
     dist_info_roots = {
         "/".join(info.filename.split("/")[:i + 1])
@@ -263,10 +263,11 @@ def _verify_wheel(archive: zipfile.ZipFile, filename: str) -> dict[str, Any]:
     metadata = BytesParser().parsebytes(_zip_read_bounded(archive, by_name[metadata_name], 1024 * 1024))
     wheel_metadata = BytesParser().parsebytes(_zip_read_bounded(archive, by_name[wheel_name], 64 * 1024))
     package_name = metadata.get("Name", "").strip()
+    parts = Path(filename).name[:-4].split("-")
     package_version = metadata.get("Version", "").strip()
     wheel_version = wheel_metadata.get("Wheel-Version", "").strip()
     tags = wheel_metadata.get_all("Tag", [])
-    if not package_name or not package_version or not wheel_version.startswith(("1.", "2.")) or not tags:
+    if not package_name or not package_version or not re.fullmatch(r"[12]\.\d+", wheel_version) or not tags:
         checks.append(_check(
             "artifact.wheel.metadata", "Wheel metadata validity", "fail",
             "The wheel's Name, Version, Wheel-Version, or Tag metadata is missing or malformed.",
@@ -277,6 +278,28 @@ def _verify_wheel(archive: zipfile.ZipFile, filename: str) -> dict[str, Any]:
             "artifact.wheel.metadata", "Wheel metadata validity", "pass",
             f"Wheel metadata identifies {package_name} {package_version} with {len(tags)} compatibility tag(s).",
         ))
+    filename_tag_matches = False
+    if len(parts) in {5, 6}:
+        file_python, file_abi, file_platform = parts[-3:]
+        expected_tags = {
+            f"{python}-{abi}-{platform_tag}"
+            for python in file_python.split(".")
+            for abi in file_abi.split(".")
+            for platform_tag in file_platform.split(".")
+        }
+        filename_tag_matches = set(tags) == expected_tags
+    if filename_tag_matches:
+        checks.append(_check(
+            "artifact.wheel.tags", "Wheel compatibility tags", "pass",
+            "Embedded WHEEL compatibility tags match the wheel filename.",
+        ))
+    else:
+        checks.append(_check(
+            "artifact.wheel.tags", "Wheel compatibility tags", "fail",
+            "Embedded WHEEL compatibility tags do not match the wheel filename.",
+            "Rebuild the wheel with matching Python, ABI, and platform tags.",
+        ))
+
     expected_dist_info = f"{re.sub(r'[-_.]+', '_', package_name).lower()}-{package_version}.dist-info"
     if dist_info != expected_dist_info:
         checks.append(_check(
@@ -290,7 +313,6 @@ def _verify_wheel(archive: zipfile.ZipFile, filename: str) -> dict[str, Any]:
             "The .dist-info directory name matches the embedded distribution Name and Version.",
         ))
 
-    parts = Path(filename).name[:-4].split("-")
     if len(parts) not in {5, 6}:
         checks.append(_check(
             "artifact.wheel.filename", "Wheel filename", "fail",
