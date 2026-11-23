@@ -63,6 +63,7 @@ _JOBS_LOCK = threading.RLock()
 _JOBS: dict[str, dict[str, Any]] = {}
 _ACTIVE_JOB_STATUSES = {"queued", "running", "cancelling", "finalizing", "publishing"}
 _TERMINAL_JOB_STATUSES = {"completed", "cancelled", "failed", "interrupted"}
+_FINAL_JOB_STATUSES = {"completed", "cancelled", "failed"}
 _SAFE_JOB_ERROR_CODES = {
     "input_size_limit",
     "input_validation_failed",
@@ -113,7 +114,18 @@ _PERSISTED_JOB_FIELDS = (
     "pending_artifact_sha256",
     "runner_pid",
     "runner_identity",
+    "dataset_sha256",
+    "model_fingerprint",
+    "adapter_fingerprint",
+    "checkpoint_name",
+    "checkpoint_identity",
+    "checkpoint_bytes",
+    "checkpoint_sha256",
+    "resumption_count",
 )
+_LEGACY_PERSISTED_JOB_FIELDS = _PERSISTED_JOB_FIELDS[:-8]
+_CHECKPOINT_EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
+
 
 
 class PredictionJobCancelled(RuntimeError):
@@ -467,6 +479,15 @@ def _job_summary(job: dict[str, Any]) -> dict[str, Any]:
         "prompts_truncated": job.get("prompts_truncated"),
         "evaluation_run_ids": list(job.get("evaluation_run_ids", [])),
         "error_code": job.get("error_code"),
+        "resumable": bool(
+            status == "interrupted"
+            and job.get("dataset_sha256")
+            and job.get("model_fingerprint")
+            and job.get("checkpoint_name")
+            and job.get("checkpoint_identity")
+            and job.get("checkpoint_sha256")
+        ),
+        "resumption_count": int(job.get("resumption_count", 0)),
         "scope": {
             "prompts_returned": False,
             "predictions_returned": False,
@@ -475,14 +496,19 @@ def _job_summary(job: dict[str, Any]) -> dict[str, Any]:
             "output_file_published_only_after_completion": True,
             "job_state_persisted": True,
             "server_restart_clears_job_state": False,
-            "generation_resumed_after_restart": False,
+            "generation_resumed_after_restart": bool(job.get("resumption_count", 0)),
         },
     }
     if status == "interrupted":
         summary["recovery_note"] = (
-            "The worker process ended before completion. AXIOM did not resume generation; "
-            "the output file may be absent or may have been published just before shutdown. "
-            "Inspect it before any path-based evaluation; this job is not eligible for job-ID evaluation."
+            "The worker process ended before completion. "
+            + (
+                "An integrity-checked partial checkpoint is available; use axiom engine prediction resume "
+                "or the Runtime Resume action to continue without duplicating committed rows."
+                if summary["resumable"]
+                else "No safe resume checkpoint is available; start a new job after inspecting any partial file."
+            )
+            + " Partial output is never eligible for evaluation."
         )
     elif status == "recovery_unverified":
         summary["error_code"] = "worker_identity_unverified"
@@ -799,6 +825,50 @@ def _validate_persisted_job(record: Any) -> dict[str, Any]:
     runner_identity = record.get("runner_identity")
     if runner_identity is not None and (not isinstance(runner_identity, str) or len(runner_identity) > 128):
         raise ValueError("Saved prediction job state has an invalid worker identity.")
+    for field in ("dataset_sha256", "model_fingerprint", "adapter_fingerprint", "checkpoint_sha256"):
+        value = record.get(field)
+        if value is not None and (not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)):
+            raise ValueError("Saved prediction job state has an invalid integrity fingerprint.")
+    if record["dataset_sha256"] is not None and record["rows_total"] < 1:
+        raise ValueError("Saved prediction job state has an invalid dataset identity.")
+    if record["adapter_path"] is None and record["adapter_fingerprint"] is not None:
+        raise ValueError("Saved prediction job state has an adapter identity without an adapter path.")
+    checkpoint_name = record.get("checkpoint_name")
+    checkpoint_identity = record.get("checkpoint_identity")
+    checkpoint_bytes = record.get("checkpoint_bytes")
+    checkpoint_digest = record.get("checkpoint_sha256")
+    if checkpoint_name is None:
+        if checkpoint_identity is not None or checkpoint_bytes != 0 or checkpoint_digest is not None:
+            raise ValueError("Saved prediction job state has incomplete checkpoint metadata.")
+    else:
+        match = _TEMP_NAME.fullmatch(checkpoint_name) if isinstance(checkpoint_name, str) else None
+        if match is None or match.group(2) != record["id"]:
+            raise ValueError("Saved prediction job state has an invalid checkpoint name.")
+        if (
+            not isinstance(checkpoint_identity, list)
+            or len(checkpoint_identity) != 2
+            or any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in checkpoint_identity)
+        ):
+            raise ValueError("Saved prediction job state has an invalid checkpoint identity.")
+        if (
+            isinstance(checkpoint_bytes, bool)
+            or not isinstance(checkpoint_bytes, int)
+            or not 0 <= checkpoint_bytes <= _MAX_OUTPUT_BYTES
+            or not isinstance(checkpoint_digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", checkpoint_digest)
+            or checkpoint_bytes > 0 and record["rows_completed"] == 0
+            or record["rows_completed"] > 0 and checkpoint_bytes == 0
+        ):
+            raise ValueError("Saved prediction job state has an invalid checkpoint fingerprint or size.")
+    resumption_count = record.get("resumption_count")
+    if (
+        isinstance(resumption_count, bool)
+        or not isinstance(resumption_count, int)
+        or not 0 <= resumption_count <= 10_000
+    ):
+        raise ValueError("Saved prediction job state has an invalid resumption count.")
+    if record["status"] == "completed" and checkpoint_name is not None:
+        raise ValueError("A completed prediction job cannot retain a partial checkpoint.")
     return record
 
 
@@ -825,11 +895,28 @@ def _read_job_records(root: Path, *, directory_fd: int | None = None) -> list[di
         not isinstance(payload, dict)
         or set(payload) != {"schema_version", "jobs"}
         or type(payload.get("schema_version")) is not int
-        or payload["schema_version"] != 1
+        or payload["schema_version"] not in {1, 2}
         or not isinstance(payload.get("jobs"), list)
         or len(payload["jobs"]) > _MAX_RETAINED_JOBS
     ):
         raise ValueError("Saved prediction job history has an invalid schema.")
+    if payload["schema_version"] == 1:
+        defaults = {
+            "dataset_sha256": None,
+            "model_fingerprint": None,
+            "adapter_fingerprint": None,
+            "checkpoint_name": None,
+            "checkpoint_identity": None,
+            "checkpoint_bytes": 0,
+            "checkpoint_sha256": None,
+            "resumption_count": 0,
+        }
+        migrated = []
+        for item in payload["jobs"]:
+            if not isinstance(item, dict) or set(item) != set(_LEGACY_PERSISTED_JOB_FIELDS):
+                raise ValueError("Saved prediction job history has an invalid legacy schema.")
+            migrated.append({**item, **defaults})
+        payload = {"schema_version": 2, "jobs": migrated}
     try:
         records = [_validate_persisted_job(item) for item in payload["jobs"]]
     except (OverflowError, TypeError):
@@ -854,7 +941,7 @@ def _persist_job_record(root: Path, job: dict[str, Any]) -> dict[str, Any]:
         current = _persisted_job(job)
         previous = next((record for record in records if record["id"] == current["id"]), None)
         if previous is not None:
-            if previous["status"] in _TERMINAL_JOB_STATUSES:
+            if previous["status"] in _FINAL_JOB_STATUSES:
                 current = dict(previous)
             current["evaluation_run_ids"] = list(dict.fromkeys(
                 [*previous["evaluation_run_ids"], *current["evaluation_run_ids"]]
@@ -870,7 +957,7 @@ def _persist_job_record(root: Path, job: dict[str, Any]) -> dict[str, Any]:
             if removable is None or records[removable]["id"] == current["id"]:
                 raise ValueError("Prediction job history is full; no completed job can be pruned safely.")
             records.pop(removable)
-        payload = {"schema_version": 1, "jobs": records}
+        payload = {"schema_version": 2, "jobs": records}
         serialized = json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
         if len(serialized.encode("utf-8")) > _MAX_PERSISTED_JOB_BYTES:
             raise ValueError("Prediction job history exceeds the 512 KiB workspace limit.")
@@ -884,7 +971,7 @@ def _replace_persisted_job(root: Path, record: dict[str, Any]) -> None:
         replacement = _validate_persisted_job(record)
         previous = next((item for item in records if item["id"] == replacement["id"]), None)
         if previous is not None:
-            if previous["status"] in _TERMINAL_JOB_STATUSES:
+            if previous["status"] in _FINAL_JOB_STATUSES:
                 replacement = dict(previous)
             replacement["evaluation_run_ids"] = list(dict.fromkeys(
                 [*previous["evaluation_run_ids"], *replacement["evaluation_run_ids"]]
@@ -892,7 +979,7 @@ def _replace_persisted_job(root: Path, record: dict[str, Any]) -> None:
         records = [item for item in records if item["id"] != replacement["id"]]
         records.append(replacement)
         records.sort(key=lambda item: str(item.get("created_at", "")), reverse=True)
-        payload = {"schema_version": 1, "jobs": records[:_MAX_RETAINED_JOBS]}
+        payload = {"schema_version": 2, "jobs": records[:_MAX_RETAINED_JOBS]}
         serialized = json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
         if len(serialized.encode("utf-8")) > _MAX_PERSISTED_JOB_BYTES:
             raise ValueError("Prediction job history exceeds the 512 KiB workspace limit.")
@@ -1934,6 +2021,14 @@ def start_prediction_job(
                 "workspace_root": str(root),
                 "runner_pid": os.getpid(),
                 "runner_identity": _process_start_identity(os.getpid()),
+                "dataset_sha256": source_manifest["sha256"],
+                "model_fingerprint": _prediction_asset_fingerprint(trusted_model, adapter=False),
+                "adapter_fingerprint": _prediction_asset_fingerprint(trusted_adapter, adapter=True) if trusted_adapter is not None else None,
+                "checkpoint_name": None,
+                "checkpoint_identity": None,
+                "checkpoint_bytes": 0,
+                "checkpoint_sha256": None,
+                "resumption_count": 0,
                 "status": "queued",
                 "created_at": _now(),
                 "updated_at": _now(),
