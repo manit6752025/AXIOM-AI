@@ -6,7 +6,7 @@ import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Mapping
+from typing import Any, BinaryIO, Mapping
 from urllib.parse import quote
 
 from .errors import AxiomAPIError, AxiomConfigurationError, AxiomNetworkError
@@ -36,7 +36,7 @@ class AxiomClient:
         headers: Mapping[str, str] | None = None,
         user_agent: str = "axiom-ai-sdk-python/1.0.0",
     ) -> None:
-        self.base_url = self._validate_base_url(base_url)
+        self._base_url = self._validate_base_url(base_url)
         if token is not None and (not isinstance(token, str) or not token.strip()):
             raise AxiomConfigurationError("Bearer token must be a non-empty string when supplied.")
         if workspace_id is not None and (
@@ -54,6 +54,11 @@ class AxiomClient:
         self.headers = self._validate_extra_headers(headers or {})
         self._closed = False
         self._opener = urllib.request.build_opener(_NoRedirectHandler())
+
+    @property
+    def base_url(self) -> str:
+        """Return the validated API origin; callers cannot replace it in-place."""
+        return self._base_url
 
     @staticmethod
     def _validate_base_url(value: str) -> str:
@@ -283,6 +288,67 @@ class AxiomClient:
         return self.request_bytes(
             "GET", f"/api/workspaces/{quote(workspace_id, safe='')}/backup", timeout=timeout or 900
         )
+
+    def download_workspace_backup_to(
+        self,
+        workspace_id: str,
+        output: BinaryIO,
+        *,
+        timeout: float = 900,
+        chunk_size: int = 1024 * 1024,
+    ) -> int:
+        """Stream a workspace archive into a caller-owned binary file-like object.
+
+        Unlike download_workspace_backup(), this method does not buffer the
+        full archive in memory. The caller controls the output's lifecycle and
+        should use a new/private file or a temporary file where appropriate.
+        """
+        if not callable(getattr(output, "write", None)):
+            raise AxiomConfigurationError("output must be a writable binary stream.")
+        if isinstance(chunk_size, bool) or not isinstance(chunk_size, int) or not 4096 <= chunk_size <= 8 * 1024 * 1024:
+            raise AxiomConfigurationError("chunk_size must be between 4 KiB and 8 MiB.")
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 900:
+            raise AxiomConfigurationError("Request timeout must be greater than 0 and at most 900 seconds.")
+        if self._closed:
+            raise AxiomConfigurationError("AxiomClient is closed.")
+        request_id = secrets.token_hex(16)
+        headers = {
+            "Accept": "application/zip",
+            "User-Agent": self.user_agent,
+            **self.headers,
+            "X-Request-ID": request_id,
+        }
+        if self.workspace_id:
+            headers["X-AXIOM-Workspace-ID"] = self.workspace_id
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        request = urllib.request.Request(
+            self._url(f"/api/workspaces/{quote(workspace_id, safe='')}/backup"),
+            headers=headers,
+            method="GET",
+        )
+        written = 0
+        try:
+            with self._opener.open(request, timeout=float(timeout)) as response:
+                if not 200 <= int(response.status) < 300:
+                    raise self._api_error(int(response.status), response.headers, self._decode_payload(response.read()))
+                while True:
+                    block = response.read(chunk_size)
+                    if not block:
+                        break
+                    result = output.write(block)
+                    if result is not None and result != len(block):
+                        raise AxiomNetworkError("The backup output stream accepted only part of a response chunk.", request_id=request_id)
+                    written += len(block)
+        except urllib.error.HTTPError as exc:
+            raise self._api_error(exc.code, exc.headers or {}, self._decode_payload(exc.read())) from None
+        except AxiomAPIError:
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            reason = getattr(exc, "reason", exc)
+            message = "AXIOM backup download timed out." if isinstance(reason, TimeoutError) else "AXIOM backup could not be downloaded."
+            raise AxiomNetworkError(message, request_id=request_id) from None
+        return written
 
     def restore_workspace_backup(
         self, archive: bytes, name: str, *, timeout: float = 900
