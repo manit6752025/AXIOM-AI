@@ -342,3 +342,36 @@ def test_model_provenance_enforces_real_directory_enumeration_boundary(tmp_path)
     with pytest.raises(ModelProvenanceError, match="too many directories"):
         inspect_model_provenance(model)
 
+def test_model_provenance_enforces_exact_aggregate_license_byte_boundary(tmp_path):
+    model = tmp_path / "license-byte-boundary"
+    model.mkdir()
+    per_file_bytes = provenance.MAX_TOTAL_LICENSE_EVIDENCE_BYTES // provenance.MAX_LICENSE_EVIDENCE_FILES
+    assert per_file_bytes * provenance.MAX_LICENSE_EVIDENCE_FILES == provenance.MAX_TOTAL_LICENSE_EVIDENCE_BYTES
+    for index in range(provenance.MAX_LICENSE_EVIDENCE_FILES):
+        (model / f"LICENSE-{index:03}.txt").write_bytes(b"x" * per_file_bytes)
+
+    at_limit = inspect_model_provenance(model)["license_evidence"]
+    assert at_limit["candidate_file_count"] == provenance.MAX_LICENSE_EVIDENCE_FILES
+    assert at_limit["candidate_total_bytes"] == provenance.MAX_TOTAL_LICENSE_EVIDENCE_BYTES
+    assert at_limit["status"] == "local_files_found"
+    assert len(at_limit["files"]) == provenance.MAX_LICENSE_EVIDENCE_FILES
+    assert all(item["hash_status"] == "complete" for item in at_limit["files"])
+
+    (model / f"LICENSE-{provenance.MAX_LICENSE_EVIDENCE_FILES - 1:03}.txt").write_bytes(
+        b"x" * (per_file_bytes + 1)
+    )
+    over_limit = inspect_model_provenance(model)["license_evidence"]
+    assert over_limit["candidate_total_bytes"] == provenance.MAX_TOTAL_LICENSE_EVIDENCE_BYTES + 1
+    assert over_limit["status"] == "skipped_count_or_total_size_limit"
+    assert over_limit["files"] == []
+
+
+def test_model_provenance_enforces_total_regular_file_inventory_boundary(tmp_path):
+    model = tmp_path / "file-heavy-model"
+    model.mkdir()
+    for index in range(provenance.MAX_PROVENANCE_FILES + 1):
+        (model / f"metadata-{index:05}.txt").touch()
+
+    with pytest.raises(ModelProvenanceError, match="too many files"):
+        inspect_model_provenance(model)
+
