@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import base64
+import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from axiom.api.security import router as security_router
-from axiom.core.security_audit import audit_security_posture
+from axiom.core.security_audit import audit_security_posture, _package_integrity_check
 from axiom.core.tool_permissions import ToolPermissionStore
 
 READ_TOKEN = "read_" + "r" * 40
@@ -136,3 +139,94 @@ def test_security_audit_api_returns_redacted_read_only_report(tmp_path: Path, mo
     assert payload["workspace"]["name"] == tmp_path.name
     assert any(item["id"] == "security.network.daemon_bind" for item in payload["checks"])
     assert not (tmp_path / ".axiom").exists()
+
+
+def test_installed_package_audit_verifies_record_hashes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    root = _project(tmp_path / "workspace")
+    package_root = tmp_path / "site-packages"
+    package_root.mkdir()
+    package_file = package_root / "typer.py"
+    original = b"SAFE_PACKAGE_CONTENT = True\\n"
+    package_file.write_bytes(original)
+    digest = base64.urlsafe_b64encode(hashlib.sha256(original).digest()).rstrip(b"=").decode()
+
+    class FakePackageFile(str):
+        def __new__(cls, value: str):
+            item = super().__new__(cls, value)
+            item.hash = SimpleNamespace(mode="sha256", value=digest)
+            item.size = len(original)
+            return item
+
+    fake_distribution = SimpleNamespace(
+        metadata={"Name": "typer"},
+        version="0.12.5",
+        files=[FakePackageFile("typer.py")],
+        locate_file=lambda value: package_root if str(value) == "" else package_root / str(value),
+    )
+    monkeypatch.setattr("axiom.core.security_audit.importlib.metadata.distribution", lambda _name: fake_distribution)
+    monkeypatch.setattr(
+        "axiom.core.security_audit.importlib.util.find_spec",
+        lambda _name: SimpleNamespace(origin=str(package_file), submodule_search_locations=None),
+    )
+
+    good = _package_integrity_check(root, "typer", "typer")
+    assert good["status"] == "pass"
+    assert "verified 1 installed file hash" in good["detail"]
+
+    package_file.write_bytes(b"EVIL_PACKAGE_CONTENT = True\\n")
+    bad = _package_integrity_check(root, "typer", "typer")
+    assert bad["status"] == "fail"
+    assert "does not match its RECORD hash" in bad["detail"]
+
+
+def test_installed_package_audit_flags_workspace_module_shadowing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    root = _project(tmp_path / "workspace")
+    package_root = tmp_path / "site-packages"
+    package_root.mkdir()
+    package_file = package_root / "typer.py"
+    payload = b"SAFE_PACKAGE_CONTENT\\n"
+    package_file.write_bytes(payload)
+    digest = base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).rstrip(b"=").decode()
+
+    class FakePackageFile(str):
+        def __new__(cls, value: str):
+            item = super().__new__(cls, value)
+            item.hash = SimpleNamespace(mode="sha256", value=digest)
+            item.size = len(payload)
+            return item
+
+    fake_distribution = SimpleNamespace(
+        metadata={"Name": "typer"},
+        version="0.12.5",
+        files=[FakePackageFile("typer.py")],
+        locate_file=lambda value: package_root if str(value) == "" else package_root / str(value),
+    )
+    monkeypatch.setattr("axiom.core.security_audit.importlib.metadata.distribution", lambda _name: fake_distribution)
+    monkeypatch.setattr(
+        "axiom.core.security_audit.importlib.util.find_spec",
+        lambda _name: SimpleNamespace(origin=str(root / "typer.py"), submodule_search_locations=None),
+    )
+
+    result = _package_integrity_check(root, "typer", "typer")
+
+    assert result["status"] == "fail"
+    assert "resolves from the workspace" in result["detail"]
+
+
+def test_security_audit_includes_required_installed_package_integrity_checks(tmp_path: Path):
+    report = audit_security_posture(_project(tmp_path / "project"), environ={})
+    package_checks = [
+        item for item in report["checks"]
+        if item["id"].startswith("security.package.")
+    ]
+
+    assert len(package_checks) == 9
+    assert {item["id"] for item in package_checks} >= {
+        "security.package.click",
+        "security.package.typer",
+        "security.package.pydantic",
+        "security.package.fastapi",
+        "security.package.yaml",
+        "security.package.mcp",
+    }
+    assert all(item["status"] in {"pass", "warn", "fail"} for item in package_checks)

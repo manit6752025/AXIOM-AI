@@ -7,7 +7,11 @@ operator-supplied daemon bind profile.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import hmac
+import importlib.metadata
+import importlib.util
 import os
 import re
 import stat
@@ -16,7 +20,12 @@ from pathlib import Path
 from typing import Mapping
 from urllib.parse import urlsplit
 
-from axiom.core.diagnostics import discover_workspace_root
+from axiom.core.diagnostics import (
+    _MINIMUM_VERSIONS,
+    _REQUIRED_MODULES,
+    _version_at_least,
+    discover_workspace_root,
+)
 from axiom.core.tool_permissions import ToolPermissionStore
 
 _SCHEMA_VERSION = 1
@@ -84,6 +93,202 @@ def _cors_origin_status(origin: str) -> tuple[str, str]:
     if not _is_loopback_origin(hostname):
         return "warn", "A remote HTTPS browser origin is allowed; CORS is not an authentication boundary."
     return "pass", "All configured browser origins are loopback-only."
+
+
+def _package_integrity_check(
+    root: Path,
+    module_name: str,
+    distribution_name: str,
+) -> dict[str, str | None]:
+    """Verify a bounded subset of installed package files against RECORD hashes."""
+    try:
+        distribution = importlib.metadata.distribution(distribution_name)
+    except importlib.metadata.PackageNotFoundError:
+        return _check(
+            f"security.package.{module_name}",
+            f"Installed package: {distribution_name}",
+            "fail",
+            "error",
+            f"{distribution_name} distribution metadata is not installed in the active Python environment.",
+            f"Install {distribution_name}>={_MINIMUM_VERSIONS[distribution_name]} in the active environment.",
+        )
+
+    metadata_name = str(distribution.metadata.get("Name", "")).strip()
+    def canonical_name(value: str) -> str:
+        return re.sub(r"[-_.]+", "-", value).lower()
+    version = str(distribution.version)
+    problems: list[str] = []
+    if not metadata_name or canonical_name(metadata_name) != canonical_name(distribution_name):
+        problems.append("distribution metadata name does not match the required package")
+
+    minimum = _MINIMUM_VERSIONS[distribution_name]
+    if not _version_at_least(version, minimum):
+        problems.append(f"installed version is below the supported minimum {minimum}")
+
+    try:
+        spec = importlib.util.find_spec(module_name)
+    except (ImportError, ValueError, AttributeError):
+        spec = None
+    if spec is None:
+        problems.append("the runtime module cannot be resolved by the active interpreter")
+    else:
+        module_locations: list[str] = []
+        if spec.origin and spec.origin not in {"built-in", "frozen"}:
+            module_locations.append(spec.origin)
+        if spec.submodule_search_locations:
+            module_locations.extend(str(item) for item in spec.submodule_search_locations)
+        for location in module_locations:
+            try:
+                resolved_location = Path(location).resolve(strict=False)
+                if resolved_location == root or root in resolved_location.parents:
+                    problems.append("the runtime module resolves from the workspace instead of the installed package")
+                    break
+            except (OSError, RuntimeError):
+                problems.append("the runtime module origin could not be resolved safely")
+                break
+
+    try:
+        package_root = Path(distribution.locate_file("")).resolve(strict=True)
+        if not package_root.is_dir():
+            raise OSError("package installation root is not a directory")
+    except (OSError, RuntimeError):
+        return _check(
+            f"security.package.{module_name}",
+            f"Installed package: {distribution_name}",
+            "fail",
+            "error",
+            f"{distribution_name} installation location could not be resolved safely.",
+            "Reinstall the package in the active Python environment.",
+        )
+
+    try:
+        files = distribution.files
+    except (OSError, ValueError):
+        files = None
+    if files is None:
+        problems.append("the installation does not expose a RECORD file inventory")
+        files = ()
+
+    verified = 0
+    hashed_files = 0
+    skipped_external = 0
+    bounded = True
+    verified_bytes = 0
+    for package_file in files:
+        if hashed_files >= 128 or verified_bytes >= 4 * 1024 * 1024:
+            bounded = False
+            break
+        relative = Path(str(package_file))
+        if relative.is_absolute() or ".." in relative.parts:
+            # Install schemes may legitimately place console scripts outside site-packages.
+            skipped_external += 1
+            continue
+        if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+            problems.append("the installed RECORD contains an unsafe relative path")
+            continue
+        expected_hash = getattr(package_file, "hash", None)
+        if expected_hash is None:
+            continue
+        hashed_files += 1
+        algorithm = str(getattr(expected_hash, "mode", "")).lower()
+        expected_digest = str(getattr(expected_hash, "value", "")).rstrip("=")
+        if algorithm not in {"sha256", "sha384", "sha512"} or not re.fullmatch(r"[A-Za-z0-9_-]+", expected_digest):
+            problems.append("the installed RECORD contains a weak or malformed file digest")
+            continue
+
+        target = package_root
+        unsafe_component = False
+        for part in relative.parts:
+            target = target / part
+            if target.is_symlink():
+                unsafe_component = True
+                break
+        if unsafe_component:
+            problems.append("an installed package file or parent directory is a symbolic link")
+            continue
+        try:
+            resolved_target = target.resolve(strict=True)
+            resolved_target.relative_to(package_root)
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(resolved_target, flags)
+            with os.fdopen(descriptor, "rb") as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode):
+                    problems.append("an installed package RECORD entry is not a regular file")
+                    continue
+                recorded_size = getattr(package_file, "size", None)
+                if recorded_size is not None and int(recorded_size) != info.st_size:
+                    problems.append("an installed package file size does not match RECORD")
+                    continue
+                if info.st_size > 4 * 1024 * 1024 or verified_bytes + info.st_size > 4 * 1024 * 1024:
+                    bounded = False
+                    break
+                hasher = hashlib.new(algorithm)
+                actual_size = 0
+                while chunk := stream.read(1024 * 1024):
+                    actual_size += len(chunk)
+                    verified_bytes += len(chunk)
+                    hasher.update(chunk)
+                digest = base64.urlsafe_b64encode(hasher.digest()).rstrip(b"=").decode("ascii")
+                if actual_size != info.st_size or not hmac.compare_digest(digest, expected_digest):
+                    problems.append("an installed package file does not match its RECORD hash")
+                    continue
+                verified += 1
+        except FileNotFoundError:
+            problems.append("an installed package RECORD entry is missing")
+        except (OSError, RuntimeError, ValueError):
+            problems.append("an installed package RECORD entry could not be opened safely")
+
+    if hashed_files == 0:
+        problems.append("no hashed installation files were available to verify")
+    if bounded:
+        if verified != hashed_files:
+            problems.append("not every hashed installation file could be verified")
+    else:
+        problems.append("the bounded file or byte inspection limit was reached")
+
+    if problems:
+        status = "fail" if any(
+            phrase in problem
+            for problem in problems
+            for phrase in (
+                "does not match",
+                "symbolic link",
+                "unsafe relative path",
+                "weak or malformed",
+                "is missing",
+                "not a regular file",
+                "name does not match",
+                "below the supported minimum",
+                "resolves from the workspace",
+                "cannot be resolved",
+                "could not be opened safely",
+            )
+        ) else "warn"
+        detail = f"{distribution_name} {version}: " + "; ".join(dict.fromkeys(problems)) + f". Verified {verified} hashed file(s)."
+        remediation = "Reinstall the package from a trusted source and review local import paths."
+    else:
+        detail = f"{distribution_name} {version} meets the minimum {minimum}; verified {verified} installed file hash(es) against RECORD."
+        if skipped_external:
+            detail += f" {skipped_external} install-scheme file(s) outside the package directory were not inspected."
+        remediation = None
+        status = "pass"
+    return _check(
+        f"security.package.{module_name}",
+        f"Installed package: {distribution_name}",
+        status,
+        "error" if status == "fail" else "warning" if status == "warn" else "info",
+        detail,
+        remediation,
+    )
+
+
+def _audit_installed_packages(workspace: Path) -> list[dict[str, str | None]]:
+    """Audit required runtime packages without importing or executing their code."""
+    return [
+        _package_integrity_check(workspace, module_name, distribution_name)
+        for module_name, distribution_name in _REQUIRED_MODULES.items()
+    ]
 
 
 def audit_security_posture(
@@ -354,6 +559,8 @@ def audit_security_posture(
         "This audit does not scan operating-system listeners or inspect services started outside AXIOM's built-in launchers.",
         "Review host firewall rules and externally managed ASGI/server deployments separately.",
     ))
+
+    checks.extend(_audit_installed_packages(root))
 
     failed = sum(item["status"] == "fail" for item in checks)
     warnings = sum(item["status"] == "warn" for item in checks)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import errno
 import hashlib
 import io
 import os
@@ -89,6 +90,8 @@ def _safe_artifact_file(path: str | Path) -> tuple[Path, BinaryIO, int]:
         else:
             if candidate.is_symlink():
                 raise ValueError("Release artifact path must not be a symbolic link.")
+            if any(parent.is_symlink() for parent in candidate.parents):
+                raise ValueError("Release artifact parent path must not contain a symbolic link.")
             descriptor = os.open(candidate, flags)
         stream = os.fdopen(descriptor, "rb")
         info = os.fstat(stream.fileno())
@@ -102,6 +105,8 @@ def _safe_artifact_file(path: str | Path) -> tuple[Path, BinaryIO, int]:
     except ValueError:
         raise
     except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise ValueError("Release artifact path must not be a symbolic link.") from exc
         raise ValueError("Release artifact could not be opened safely.") from exc
 
 
