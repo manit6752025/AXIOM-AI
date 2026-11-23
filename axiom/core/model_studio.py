@@ -21,6 +21,8 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from axiom.path_safety import SafePathError, open_regular_file
+
 from axiom.core.resource_ids import new_resource_id
 from axiom.core.workspace_context import active_workspace_id, active_workspace_root, workspace_metadata_dir
 from typing import Any, Callable
@@ -42,6 +44,7 @@ _SLUG = re.compile(r"[^a-z0-9._-]+")
 _ACTIVE_LOCK = threading.RLock()
 _ACTIVE_CANCEL_EVENTS: dict[str, threading.Event] = {}
 _MODEL_STUDIO_JOB_TIMEOUT_SECONDS = 4 * 60 * 60
+_MAX_MODEL_STUDIO_JOB_STATE_BYTES = 2 * 1024 * 1024
 
 
 def _check_cancel(cancel_event: threading.Event | None, deadline: float | None = None) -> None:
@@ -854,9 +857,10 @@ def convert_local_model_to_gguf(source_dir: str, llama_cpp_dir: str, output_path
 
 
 def _job_path(job_id: str) -> Path:
-    if not re.fullmatch(r"[0-9a-f]{32}", job_id):
+    safe_id = os.path.basename(job_id) if isinstance(job_id, str) else ""
+    if safe_id != job_id or not re.fullmatch(r"[0-9a-f]{32}", safe_id):
         raise ValueError("Invalid Model Studio job ID.")
-    return jobs_directory() / f"{job_id}.json"
+    return jobs_directory() / f"{safe_id}.json"
 
 
 def _write_job(job: dict[str, Any]) -> None:
@@ -869,13 +873,23 @@ def _write_job(job: dict[str, Any]) -> None:
 
 
 def _read_job(job_id: str) -> dict[str, Any] | None:
+    """Read bounded job metadata without following a file or parent symlink."""
     path = _job_path(job_id)
-    if not path.is_file():
-        return None
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        raise ModelStudioError("Saved Model Studio job state could not be read.") from None
+        with open_regular_file(path) as stream:
+            metadata = os.fstat(stream.fileno())
+            if metadata.st_size < 0 or metadata.st_size > _MAX_MODEL_STUDIO_JOB_STATE_BYTES:
+                raise ModelStudioError("Saved Model Studio job state exceeds its 2 MiB limit.")
+            raw = stream.read(_MAX_MODEL_STUDIO_JOB_STATE_BYTES + 1)
+            if len(raw) > _MAX_MODEL_STUDIO_JOB_STATE_BYTES:
+                raise ModelStudioError("Saved Model Studio job state exceeds its 2 MiB limit.")
+        value = json.loads(raw.decode("utf-8"))
+    except FileNotFoundError:
+        return None
+    except ModelStudioError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError, SafePathError):
+        raise ModelStudioError("Saved Model Studio job state could not be read safely.") from None
     return value if isinstance(value, dict) else None
 
 

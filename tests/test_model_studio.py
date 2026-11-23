@@ -394,3 +394,40 @@ def test_model_studio_unquantized_conversion_removes_partial_output_on_cancellat
             quantization="none",
         )
     assert not output.exists()
+
+
+def test_model_studio_job_reader_rejects_symlinked_job_file(tmp_path, monkeypatch):
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    job_id = "d" * 32
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps({"id": job_id, "status": "completed", "secret": "must-not-be-read"}))
+    link = jobs_dir / f"{job_id}.json"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"File symlinks unavailable: {exc}")
+    monkeypatch.setattr(studio, "jobs_directory", lambda: jobs_dir)
+
+    with pytest.raises(studio.ModelStudioError, match="could not be read safely"):
+        studio.get_job(job_id)
+
+
+def test_model_studio_job_reader_rejects_oversized_job_state(tmp_path, monkeypatch):
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    job_id = "e" * 32
+    (jobs_dir / f"{job_id}.json").write_bytes(
+        b" " * (studio._MAX_MODEL_STUDIO_JOB_STATE_BYTES + 1)
+    )
+    monkeypatch.setattr(studio, "jobs_directory", lambda: jobs_dir)
+
+    with pytest.raises(studio.ModelStudioError, match="2 MiB limit"):
+        studio.get_job(job_id)
+
+
+def test_model_studio_job_path_rejects_separator_and_noncanonical_ids(tmp_path, monkeypatch):
+    monkeypatch.setattr(studio, "jobs_directory", lambda: tmp_path / "jobs")
+    for value in ("../" + "a" * 32, "a" * 32 + "/../escape", "A" * 32):
+        with pytest.raises(ValueError, match="Invalid Model Studio job ID"):
+            studio._job_path(value)
