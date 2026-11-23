@@ -68,6 +68,10 @@ test("MCP inventory stays passive until an explicit protocol handshake", async (
       resource_templates: [],
       truncated: { tools: false, resources: false, resource_templates: false },
       duration_ms: 24,
+      connection_state_persisted: true,
+      connection_state: "connected",
+      last_inspected_at: "2026-11-21T00:00:00Z",
+      last_connection_error: null,
       tool_execution_performed: false,
       resource_read_performed: false,
       prompt_execution_performed: false,
@@ -90,6 +94,7 @@ test("MCP inventory stays passive until an explicit protocol handshake", async (
 
   await page.getByRole("button", { name: "Browse schemas" }).click();
   await expect(page.getByText("Advertised schemas")).toBeVisible();
+  await expect(page.getByText(/Last check: connected/)).toBeVisible();
   await expect(page.getByText("search_catalog", { exact: true })).toBeVisible();
   await expect(page.locator(".mcp-schema-preview").first()).toContainText('"query"');
   await expect(page.getByText(/Resource: Catalog/)).toBeVisible();

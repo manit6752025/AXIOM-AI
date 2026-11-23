@@ -6,7 +6,6 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from axiom.core.integrations import IntegrationRegistry
 from axiom.core.mcp_inventory import McpInventoryError, _registry, inspect_mcp_server, list_mcp_servers
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp-inventory"])
@@ -97,5 +96,7 @@ async def inspect_mcp_server_schemas(name: str) -> dict[str, Any]:
             "invalid_name": 422,
             "invalid_timeout": 422,
             "missing_command": 409,
+            "server_unverified": 409,
+            "server_blocked": 403,
         }.get(exc.code, 503)
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc

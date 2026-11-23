@@ -108,7 +108,7 @@ def test_mcp_trust_metadata_rejects_invalid_state_and_owner_label(tmp_path):
 
     with pytest.raises(ValueError, match="Trust status"):
         registry.update_mcp_trust("Local MCP", trust_status="auto-trust")
-    with pytest.raises(ValueError, match="Owner label"):
+    with pytest.raises(ValueError, match="owner label"):
         registry.update_mcp_trust("Local MCP", trust_status="trusted", owner_label="invalid\nowner")
 
 
@@ -267,7 +267,7 @@ def test_inventory_is_passive_bounded_and_only_lists_mcp_servers(tmp_path, monke
         "last_inspected_at": None,
         "last_connection_error": None,
     }]
-    assert "starts the registered process" in result["inspection_note"]
+    assert "Only servers explicitly marked trusted" in result["inspection_note"]
     assert registry.path.exists()
 
 
@@ -725,6 +725,9 @@ def test_schema_browse_negotiates_real_stdio_tool_resource_and_template_metadata
     assert result["resource_read_performed"] is False
     assert result["prompt_execution_performed"] is False
     assert result["connection_state_persisted"] is True
+    assert result["connection_state"] == "connected"
+    assert result["last_inspected_at"]
+    assert result["last_connection_error"] is None
     inventory = mcp_inventory.list_mcp_servers()["servers"][0]
     assert inventory["connection_state"] == "connected"
     assert inventory["last_inspected_at"]
