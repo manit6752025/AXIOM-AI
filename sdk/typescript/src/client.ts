@@ -7,6 +7,12 @@ import type {
   AxiomHealth,
   AxiomKnowledgeBase,
   AxiomPluginManifestRegistry,
+  AxiomPredictionJobCancelResult,
+  AxiomPredictionJobPage,
+  AxiomPredictionJobStartRequest,
+  AxiomPredictionJobStartResult,
+  AxiomPredictionJobStatusResult,
+  AxiomPredictionJobSummary,
   AxiomRequestOptions,
   AxiomTelemetryHistory,
   AxiomTelemetryHistorySettings,
@@ -500,6 +506,63 @@ export class AxiomClient {
       `/api/workspace/knowledge-bases/${encodeURIComponent(baseId)}/search`,
       { jsonBody: { query, ...options } },
     );
+  }
+
+
+  private validatePredictionJobId(jobId: string): void {
+    if (!/^[0-9a-f]{32}$/.test(jobId)) {
+      throw new AxiomConfigurationError("Prediction job ID must be 32 lowercase hexadecimal characters.");
+    }
+  }
+
+  predictionJobs(limit = 20): Promise<AxiomPredictionJobPage> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+      throw new AxiomConfigurationError("Prediction job list limit must be between 1 and 50.");
+    }
+    return this.request("GET", "/api/prediction-jobs", { params: { limit } });
+  }
+
+  startPredictionJob(request: AxiomPredictionJobStartRequest): Promise<AxiomPredictionJobStartResult> {
+    if (!request.model_path?.trim() || !request.dataset_path?.trim() || !request.output_path?.trim()) {
+      throw new AxiomConfigurationError("Prediction job start requires model_path, dataset_path and output_path.");
+    }
+    if (request.max_new_tokens !== undefined && (!Number.isSafeInteger(request.max_new_tokens) || request.max_new_tokens < 1 || request.max_new_tokens > 64)) {
+      throw new AxiomConfigurationError("max_new_tokens must be an integer between 1 and 64.");
+    }
+    if (request.temperature !== undefined && (!Number.isFinite(request.temperature) || request.temperature < 0 || request.temperature > 2)) {
+      throw new AxiomConfigurationError("temperature must be a finite number between 0 and 2.");
+    }
+    if (request.seed !== undefined && request.seed !== null && (!Number.isSafeInteger(request.seed) || request.seed < 0)) {
+      throw new AxiomConfigurationError("seed must be a non-negative safe integer.");
+    }
+    if (request.adapter_path !== undefined && request.adapter_path !== null && !request.adapter_path.trim()) {
+      throw new AxiomConfigurationError("adapter_path must be omitted or contain non-whitespace text.");
+    }
+    for (const [field, value] of Object.entries({
+      prompt_field: request.prompt_field,
+      reference_field: request.reference_field,
+      prediction_field: request.prediction_field,
+    })) {
+      if (value !== undefined && (!value.trim() || value.length > 160)) {
+        throw new AxiomConfigurationError(`${field} must contain 1 to 160 characters.`);
+      }
+    }
+    return this.request("POST", "/api/prediction-jobs", { jsonBody: request });
+  }
+
+  predictionJob(jobId: string): Promise<AxiomPredictionJobStatusResult> {
+    this.validatePredictionJobId(jobId);
+    return this.request("GET", `/api/prediction-jobs/${encodeURIComponent(jobId)}`);
+  }
+
+  resumePredictionJob(jobId: string): Promise<AxiomPredictionJobStartResult> {
+    this.validatePredictionJobId(jobId);
+    return this.request("POST", `/api/prediction-jobs/${encodeURIComponent(jobId)}/resume`);
+  }
+
+  cancelPredictionJob(jobId: string): Promise<AxiomPredictionJobCancelResult> {
+    this.validatePredictionJobId(jobId);
+    return this.request("POST", `/api/prediction-jobs/${encodeURIComponent(jobId)}/cancel`);
   }
 
   pluginManifests(): Promise<AxiomPluginManifestRegistry> {
