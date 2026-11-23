@@ -177,7 +177,7 @@ def test_workspace_restore_rejects_path_traversal_and_removes_partial_staging(tm
     with pytest.raises(WorkspaceBackupError):
         restore_workspace_backup(archive, staging)
     assert outside.exists() is False
-    assert list(staging.iterdir()) == []
+    assert not staging.exists()
 
 
 def test_workspace_restore_rejects_tampered_file_checksum_and_cleans_staging(tmp_path: Path):
@@ -200,7 +200,7 @@ def test_workspace_restore_rejects_tampered_file_checksum_and_cleans_staging(tmp
     staging = _staging(tmp_path)
     with pytest.raises(WorkspaceBackupError, match="size|SHA-256"):
         restore_workspace_backup(tampered, staging)
-    assert list(staging.iterdir()) == []
+    assert not staging.exists()
 
 
 def test_workspace_restore_rejects_symlink_entries(tmp_path: Path):
@@ -231,7 +231,7 @@ def test_workspace_restore_rejects_symlink_entries(tmp_path: Path):
     archive.seek(0)
     with pytest.raises(WorkspaceBackupError, match="non-regular"):
         restore_workspace_backup(archive, staging)
-    assert list(staging.iterdir()) == []
+    assert not staging.exists()
 
 
 def test_workspace_restore_requires_private_empty_staging_directory(tmp_path: Path):
@@ -264,4 +264,4 @@ def test_workspace_backup_restore_enforces_archive_inventory_limits(tmp_path: Pa
     monkeypatch.setattr(workspace_backup, "MAX_BACKUP_FILES", 0)
     with pytest.raises(WorkspaceBackupError, match="entry count|file inventory"):
         restore_workspace_backup(archive, staging)
-    assert list(staging.iterdir()) == []
+    assert not staging.exists()

@@ -130,7 +130,14 @@ def _welch_test(baseline: list[float], candidate: list[float]) -> dict[str, Any]
     baseline_term = baseline_variance / len(baseline)
     candidate_term = candidate_variance / len(candidate)
     standard_error_squared = baseline_term + candidate_term
-    if standard_error_squared == 0.0:
+    # Floating-point means can leave tiny residual variance for groups whose
+    # observations are identical (for example, three repeated 0.4 scores).
+    # Treat both groups as constant only at a scale near machine precision;
+    # a single constant group with a genuinely varying counterpart remains valid.
+    if (
+        math.isclose(baseline_variance, 0.0, rel_tol=0.0, abs_tol=1e-15)
+        and math.isclose(candidate_variance, 0.0, rel_tol=0.0, abs_tol=1e-15)
+    ):
         return {
             "method": "Welch two-sided unequal-variance t-test",
             "status": "degenerate_zero_variance",

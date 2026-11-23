@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import stat
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,15 @@ _LICENSE_NAMES = frozenset({
     "license", "license.md", "license.txt", "copying", "copying.md",
     "copying.txt", "notice", "notice.md", "notice.txt",
 })
+_LICENSE_NAME_PATTERN = re.compile(
+    r"^(?:license|licence|notice|copying)(?:[-_.][a-z0-9][a-z0-9._-]{0,63})?(?:\\.(?:txt|md|rst))?$"
+)
+
+
+def _is_license_filename(value: str) -> bool:
+    name = value.casefold()
+    return name in _LICENSE_NAMES or _LICENSE_NAME_PATTERN.fullmatch(name) is not None
+
 
 
 class ModelProvenanceError(ValueError):
@@ -159,7 +169,7 @@ def inspect_model_provenance(
             weight_files.append((relative, file_path, size, fmt))
             total_weight_bytes += size
             format_counts[fmt] = format_counts.get(fmt, 0) + 1
-        if file_path.name.casefold() in _LICENSE_NAMES:
+        if _is_license_filename(file_path.name):
             license_files.append((relative, file_path, size))
 
     weight_files.sort(key=lambda item: (item[0].casefold(), item[0]))
