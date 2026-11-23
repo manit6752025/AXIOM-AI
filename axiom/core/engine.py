@@ -979,7 +979,13 @@ def estimate_native_quantization(
         per_layer_params += 2 * hidden + 2 * kv_width
     if model_config.get("mlp_bias") is True:
         per_layer_params += 2 * intermediate + hidden
-    estimated_parameters = embedding_params + lm_head_params + layers * per_layer_params + hidden
+    # Qwen3's native decoder requires one head-dimension vector for each
+    # attention Q/K normalization in every transformer layer.
+    qk_norm_parameters = layers * 2 * head_dim if native_config.qk_norm else 0
+    estimated_parameters = (
+        embedding_params + lm_head_params + layers * per_layer_params
+        + qk_norm_parameters + hidden
+    )
 
     gib = 1024 ** 3
     workspace_bytes = max(
@@ -1066,6 +1072,7 @@ def estimate_native_quantization(
                 "int8": "1 byte/parameter plus 5% scales/metadata",
                 "int4": "0.5 bytes/parameter plus 15% scales/metadata",
             },
+            "qk_norm_parameters": qk_norm_parameters,
             "kv_cache_context_length": kv_cache_context,
             "kv_prefill_temporary_context_length": kv_prefill_context,
             "kv_cache_formula": "2 × layers × KV heads × head dimension × retained cache context × batch × KV element bytes; Mistral retained context is bounded by sliding_window",

@@ -68,7 +68,7 @@ The estimate API requires strict integer context and batch values and rejects bo
 The estimator is an analytical planning model derived from the checkpoint configuration. It does not inspect the safetensors tensor index to count exact stored parameters, load weights, or sample actual peak allocations.
 
 Its reported formulas are:
-- **Parameters:** token embeddings + optional untied output head + per-layer attention projections + per-layer MLP projections + normalization parameters (plus configured attention/MLP biases when present).
+- **Parameters:** token embeddings + optional untied output head + per-layer attention projections + per-layer MLP projections + normalization parameters (plus configured attention/MLP biases when present). Qwen3 additionally counts one `q_norm` and one `k_norm` vector of `head_dim` parameters per layer, matching the native loader's required tensor set.
 - **Weights:** estimated parameter count × bytes per parameter × format-specific weight-storage overhead (15% for the INT4 sizing row, 5% for INT8, and no extra scale/metadata overhead for FP16/BF16/FP32 rows).
 - **Retained KV cache:** 2 × layers × KV heads × head dimension × retained cache context × batch × cache element bytes.
 - **Mistral prefill temporary memory:** for a context longer than `sliding_window`, 2 × KV heads × head dimension × full prefill context × batch × cache element bytes for the active layer. This is separate from the bounded retained cache.
