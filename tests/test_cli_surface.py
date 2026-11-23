@@ -266,6 +266,33 @@ def test_frontend_dependency_check_detects_typescript_lockfile_drift(tmp_path: P
     assert mismatches == ["typescript: installed 7.0.0, locked 6.0.3"]
 
 
+def test_frontend_runtime_check_detects_typescript_seven_loaded_by_eslint(tmp_path: Path, monkeypatch):
+    _write_frontend_fixture(tmp_path, "6.0.3")
+    monkeypatch.setattr(cli_main.shutil, "which", lambda name: "/usr/bin/node")
+
+    resolved = [
+        {"importer": "typescript-eslint", "version": "7.0.0"},
+        {"importer": "@typescript-eslint/parser", "version": "7.0.0"},
+        {"importer": "@typescript-eslint/typescript-estree", "version": "7.0.0"},
+    ]
+
+    def fake_run(command, *, cwd, capture_output, text, check, timeout):
+        assert command[0] == "/usr/bin/node"
+        assert command[1] == "-e"
+        return type("Completed", (), {
+            "returncode": 0,
+            "stdout": json.dumps(resolved),
+            "stderr": "",
+        })()
+
+    monkeypatch.setattr(cli_main.subprocess, "run", fake_run)
+    mismatches = cli_main._frontend_runtime_typescript_mismatches(tmp_path)
+
+    assert len(mismatches) == 3
+    assert all("resolves TypeScript 7.0.0" in message for message in mismatches)
+    assert all("package-lock.json pins 6.0.3" in message for message in mismatches)
+
+
 def test_gui_refresh_repairs_frontend_dependencies_before_lint_and_build(
     tmp_path: Path,
     monkeypatch,
