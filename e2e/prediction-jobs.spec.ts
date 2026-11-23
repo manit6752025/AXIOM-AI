@@ -157,7 +157,13 @@ test("Runtime starts, tracks, and cancels a bounded native prediction job", asyn
 
   await page.route("**/api/prediction-jobs/*/resume", async (route) => {
     resumeRequests += 1;
-    if (job) job = { ...job, status: "running", resumable: false, resumption_count: 1 };
+    if (job) job = {
+      ...job,
+      status: "running",
+      resumable: false,
+      resumption_count: 1,
+      scope: { ...(job.scope as Record<string, unknown>), generation_resumed_after_restart: true },
+    };
     await route.fulfill({ status: 202, json: {
       schema_version: 1,
       job,
