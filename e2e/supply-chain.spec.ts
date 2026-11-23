@@ -173,7 +173,7 @@ test("Diagnostics exports SPDX and requires explicit consent for dependency advi
     await dialog.accept();
   });
   const auditDownloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Scan dependencies (network)" }).click();
+  await page.getByRole("button", { name: "Scan dependencies (network)" }).first().click();
   const auditDownload = await auditDownloadPromise;
   expect(auditDownload.suggestedFilename()).toBe("axiom-dependency-vulnerability-report.json");
   const auditPath = await auditDownload.path();
