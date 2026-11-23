@@ -558,14 +558,32 @@ export class AxiomClient {
     )) {
       throw new AxiomConfigurationError("adapter_path must contain 1 to 4096 characters when supplied.");
     }
-    for (const [field, value] of Object.entries({
-      prompt_field: request.prompt_field,
-      reference_field: request.reference_field,
-      prediction_field: request.prediction_field,
-    })) {
-      if (value !== undefined && (typeof value !== "string" || !value.trim() || value.length > 160)) {
-        throw new AxiomConfigurationError(`${field} must contain 1 to 160 characters.`);
+    const fieldNames = [
+      ["prompt_field", request.prompt_field ?? "prompt"],
+      ["reference_field", request.reference_field ?? "reference"],
+      ["prediction_field", request.prediction_field ?? "prediction"],
+    ] as const;
+    const fieldPattern = /^[A-Za-z_][A-Za-z0-9_.-]{0,159}$/;
+    for (const [field, value] of fieldNames) {
+      if (typeof value !== "string" || !fieldPattern.test(value)) {
+        throw new AxiomConfigurationError(`${field} must be a valid JSON field name of at most 160 characters.`);
       }
+    }
+    if (new Set(fieldNames.map(([, value]) => value)).size !== fieldNames.length) {
+      throw new AxiomConfigurationError("Prompt, reference, and prediction fields must be different.");
+    }
+    if (!request.dataset_path.startsWith("data/")) {
+      throw new AxiomConfigurationError("Prediction input must be a workspace-relative path under data/.");
+    }
+    if (
+      !request.output_path.startsWith("data/")
+      || request.output_path.split("/").length !== 2
+      || !request.output_path.toLowerCase().endsWith(".jsonl")
+    ) {
+      throw new AxiomConfigurationError("Prediction output must be a direct-child data/NAME.jsonl path.");
+    }
+    if (request.output_path === request.dataset_path) {
+      throw new AxiomConfigurationError("Prediction output must differ from the source dataset.");
     }
     const devices = new Set(["auto", "cpu", "cuda", "rocm", "mps", "xpu"]);
     const precisions = new Set(["auto", "fp32", "fp16", "bf16"]);
@@ -574,6 +592,9 @@ export class AxiomClient {
     }
     if (request.precision !== undefined && (typeof request.precision !== "string" || !precisions.has(request.precision))) {
       throw new AxiomConfigurationError("precision is not a supported local prediction precision.");
+    }
+    if (request.device === "mps" && request.precision === "bf16") {
+      throw new AxiomConfigurationError("BF16 precision is not supported on Metal/MPS.");
     }
     return this.request("POST", "/api/prediction-jobs", { jsonBody: request });
   }
