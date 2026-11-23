@@ -1002,6 +1002,12 @@ def prediction_job_resume_issues(
     mcp_tests: str,
     e2e: str,
     docs: str,
+    sdk_python_client: str,
+    sdk_python_types: str,
+    sdk_python_exports: str,
+    sdk_typescript_client: str,
+    sdk_typescript_types: str,
+    sdk_typescript_exports: str,
 ) -> list[str]:
     """Require checkpoint integrity and restart-resume wiring across every public surface."""
     failures: list[str] = []
@@ -1070,6 +1076,30 @@ def prediction_job_resume_issues(
             "axiom_prediction_job_resume",
             "checkpoint",
             "generation-settings fingerprint",
+        )),
+        ("Python SDK restart-resume method", sdk_python_client, (
+            "def resume_prediction_job(self, job_id: str) -> PredictionJobResumeResult:",
+        )),
+        ("Python SDK restart-resume contract", sdk_python_types, (
+            "class PredictionJobResumeScope(TypedDict):",
+            "generation_resumed_after_restart: Literal[True]",
+            "class PredictionJobResumeResult(TypedDict):",
+        )),
+        ("Python SDK restart-resume exports", sdk_python_exports, (
+            '"PredictionJobResumeResult"',
+            '"PredictionJobResumeScope"',
+        )),
+        ("TypeScript SDK restart-resume method", sdk_typescript_client, (
+            "resumePredictionJob(jobId: string): Promise<AxiomPredictionJobResumeResult>",
+        )),
+        ("TypeScript SDK restart-resume contract", sdk_typescript_types, (
+            "export interface AxiomPredictionJobResumeScope",
+            "generation_resumed_after_restart: true;",
+            "export interface AxiomPredictionJobResumeResult",
+        )),
+        ("TypeScript SDK restart-resume exports", sdk_typescript_exports, (
+            "AxiomPredictionJobResumeResult",
+            "AxiomPredictionJobResumeScope",
         )),
     )
     for label, source, tokens in checks:
@@ -1827,12 +1857,21 @@ def inspect(root: Path) -> dict[str, Any]:
         (root / "docs/Local-Engine.md").read_text(encoding="utf-8")
         + (root / "docs/integrations.md").read_text(encoding="utf-8")
     )
+    prediction_resume_sdk_python_client = (root / "sdk/python/axiom_sdk/client.py").read_text(encoding="utf-8")
+    prediction_resume_sdk_python_types = (root / "sdk/python/axiom_sdk/types.py").read_text(encoding="utf-8")
+    prediction_resume_sdk_python_exports = (root / "sdk/python/axiom_sdk/__init__.py").read_text(encoding="utf-8")
+    prediction_resume_sdk_typescript_client = (root / "sdk/typescript/src/client.ts").read_text(encoding="utf-8")
+    prediction_resume_sdk_typescript_types = (root / "sdk/typescript/src/types.ts").read_text(encoding="utf-8")
+    prediction_resume_sdk_typescript_exports = (root / "sdk/typescript/src/index.ts").read_text(encoding="utf-8")
     failures.extend(prediction_job_resume_issues(
         prediction_resume_core, prediction_resume_api, prediction_resume_cli,
         prediction_resume_mcp, prediction_resume_permissions, client,
         prediction_resume_gui, prediction_resume_core_tests,
         prediction_resume_api_tests, prediction_resume_cli_tests,
         prediction_resume_core_tests, prediction_resume_e2e, prediction_resume_docs,
+        prediction_resume_sdk_python_client, prediction_resume_sdk_python_types,
+        prediction_resume_sdk_python_exports, prediction_resume_sdk_typescript_client,
+        prediction_resume_sdk_types, prediction_resume_sdk_typescript_exports,
     ))
     for path in (
         "/api/health", "/api/meta", "/api/workspace/runtime",
