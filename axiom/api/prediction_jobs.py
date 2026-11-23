@@ -169,6 +169,7 @@ def resume_interrupted_prediction_job(job_id: str) -> dict[str, Any]:
             "partial_output_published": False,
             "prompts_returned": False,
             "predictions_returned": False,
+            "generation_resumed_after_restart": True,
         },
     }
 
