@@ -118,9 +118,27 @@ def test_integration_list_json_returns_empty_or_registered_records(tmp_path: Pat
     assert payload["integrations"] == []
 
 
-def test_integration_handshake_json_reports_protocol_metadata(tmp_path: Path, monkeypatch) -> None:
-    import asyncio
+def test_integration_mcp_list_json_is_passive_and_redacts_command_arguments(tmp_path: Path, monkeypatch) -> None:
+    from axiom.core.integrations import AgentIntegration, IntegrationRegistry, IntegrationType
 
+    monkeypatch.chdir(tmp_path)
+    registry = IntegrationRegistry()
+    registry.add(AgentIntegration("Private MCP", IntegrationType.MCP, command="python -m private.server --token secret-value"))
+    registry.add(AgentIntegration("Local CLI", IntegrationType.CLI, command="tool"))
+
+    result = runner.invoke(app, ["integration", "mcp-list", "--json"])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["total"] == 1
+    assert payload["servers"][0]["name"] == "Private MCP"
+    assert payload["servers"][0]["executable"] == "python"
+    assert payload["servers"][0]["connection_state"] == "not_inspected"
+    assert "secret-value" not in result.stdout
+    assert "private.server" not in result.stdout
+
+
+def test_integration_handshake_json_reports_protocol_metadata(tmp_path: Path, monkeypatch) -> None:
     from axiom.core.integrations import AgentIntegration, IntegrationRegistry, IntegrationType
     from axiom.core import mcp_inventory
 

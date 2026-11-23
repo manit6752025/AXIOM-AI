@@ -997,6 +997,40 @@ def supercompress_compress(
     )
 
 
+@integration_app.command("mcp-list")
+def integration_mcp_list(
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable MCP server inventory."),
+) -> None:
+    """List registered MCP stdio servers without starting or connecting to them."""
+    from axiom.core.mcp_inventory import McpInventoryError, list_mcp_servers
+
+    try:
+        inventory = list_mcp_servers()
+    except McpInventoryError as exc:
+        _cli_error(str(exc), code="mcp_inventory_error")
+
+    if json_output:
+        typer.echo(json.dumps(inventory, ensure_ascii=False, sort_keys=True))
+        return
+
+    table = Table(title="AXIOM MCP Server Inventory")
+    table.add_column("Name")
+    table.add_column("Transport")
+    table.add_column("Executable")
+    table.add_column("Arguments", justify="right")
+    table.add_column("State")
+    for server in inventory["servers"]:
+        table.add_row(
+            server["name"],
+            server["transport"],
+            server["executable"] or "Not configured",
+            str(server["argument_count"]),
+            "Not inspected" if server["configured"] else "Invalid command",
+        )
+    console.print(table)
+    console.print("Inventory is passive; no server processes were started.")
+
+
 @integration_app.command("list")
 def integration_list(
     json_output: bool = typer.Option(False, "--json", help="Emit integration records as JSON."),
@@ -1170,11 +1204,11 @@ def integration_handshake(
         typer.echo(json.dumps(result, ensure_ascii=False, sort_keys=True))
     elif result["status"] == "ok":
         console.print(Panel(
-            f"Server: {result['server_name'] or name}\\n"
-            f"Version: {result['server_version'] or 'Not reported'}\\n"
-            f"Protocol: {result['protocol_version'] or 'Not reported'}\\n"
-            f"Capabilities: {', '.join(key for key, enabled in result['capabilities'].items() if enabled) or 'none reported'}\\n"
-            f"Duration: {result['duration_ms']} ms\\n"
+            f"Server: {result['server_name'] or name}\n"
+            f"Version: {result['server_version'] or 'Not reported'}\n"
+            f"Protocol: {result['protocol_version'] or 'Not reported'}\n"
+            f"Capabilities: {', '.join(key for key, enabled in result['capabilities'].items() if enabled) or 'none reported'}\n"
+            f"Duration: {result['duration_ms']} ms\n"
             "Tools executed: no · Schemas enumerated: no",
             title="MCP protocol handshake",
         ))

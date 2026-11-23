@@ -36,13 +36,16 @@ class McpInventoryError(ValueError):
 
 def _registry() -> IntegrationRegistry:
     registry = IntegrationRegistry(create=False)
-    if registry.root.is_symlink() or registry.path.is_symlink():
-        raise McpInventoryError("MCP integration registry path is unsafe.")
-    if registry.root.exists() and not registry.root.is_dir():
-        raise McpInventoryError("MCP integration registry directory is invalid.")
-    if registry.path.exists():
-        if not registry.path.is_file() or registry.path.stat().st_size > MAX_REGISTRY_BYTES:
-            raise McpInventoryError("MCP integration registry is not a bounded regular file.")
+    try:
+        if registry.root.is_symlink() or registry.path.is_symlink():
+            raise McpInventoryError("MCP integration registry path is unsafe.")
+        if registry.root.exists() and not registry.root.is_dir():
+            raise McpInventoryError("MCP integration registry directory is invalid.")
+        if registry.path.exists():
+            if not registry.path.is_file() or registry.path.stat().st_size > MAX_REGISTRY_BYTES:
+                raise McpInventoryError("MCP integration registry is not a bounded regular file.")
+    except OSError as exc:
+        raise McpInventoryError("MCP integration registry could not be inspected safely.") from exc
     return registry
 
 

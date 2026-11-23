@@ -538,7 +538,7 @@ The Control Center's **MCP tools and permission profiles** page and the CLI can
 show the workspace's registered MCP stdio servers:
 
 ```bash
-axiom integration list --json
+axiom integration mcp-list --json
 ```
 
 The API's `GET /api/mcp/servers` endpoint is a passive inventory. It reads the

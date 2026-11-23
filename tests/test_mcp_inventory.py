@@ -20,6 +20,32 @@ def _add_server(command: str = 'python -u -m example.server --config "private pa
     )
 
 
+def test_mcp_inventory_api_routes_are_registered_with_expected_methods():
+    from axiom.api.mcp_inventory import router
+
+    routes = {
+        route.path: route.methods
+        for route in router.routes
+    }
+
+    assert routes["/api/mcp/servers"] == {"GET"}
+    assert routes["/api/mcp/servers/{name}/handshake"] == {"POST"}
+
+
+def test_mcp_inventory_api_maps_missing_server_to_not_found(monkeypatch):
+    from fastapi import HTTPException
+    from axiom.api import mcp_inventory as api_module
+
+    async def missing(_name: str):
+        raise mcp_inventory.McpInventoryError("not found", code="not_found")
+
+    monkeypatch.setattr(api_module, "inspect_mcp_server", missing)
+    with pytest.raises(HTTPException) as response:
+        asyncio.run(api_module.inspect_mcp_server_handshake("missing"))
+
+    assert response.value.status_code == 404
+
+
 def test_inventory_is_passive_bounded_and_only_lists_mcp_servers(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     registry = IntegrationRegistry()
@@ -166,6 +192,52 @@ def test_handshake_failures_do_not_disclose_command_or_exception_details(tmp_pat
     assert result["error_code"] == "handshake_failed"
     assert "secret-value" not in str(result)
     assert "private path.json" not in str(result)
+
+
+def test_inventory_rejects_nul_and_oversized_commands(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    registry = IntegrationRegistry()
+    registry.add(AgentIntegration("NUL command", IntegrationType.MCP, command="python\x00secret"))
+    registry.add(AgentIntegration("Large command", IntegrationType.MCP, command="x" * (mcp_inventory.MAX_COMMAND_CHARS + 1)))
+
+    result = mcp_inventory.list_mcp_servers()
+
+    assert result["total"] == 2
+    assert all(server["configured"] is False for server in result["servers"])
+    assert "secret" not in str(result)
+
+
+def test_handshake_negotiates_with_real_mcp_stdio_server(tmp_path, monkeypatch):
+    import shlex
+    import sys
+
+    monkeypatch.chdir(tmp_path)
+    server_script = tmp_path / "mcp_probe.py"
+    server_script.write_text(
+        "from mcp.server import MCPServer\n"
+        "server = MCPServer('AXIOM Inventory Probe')\n"
+        "if __name__ == '__main__':\n"
+        "    server.run()\n",
+        encoding="utf-8",
+    )
+    IntegrationRegistry().add(
+        AgentIntegration(
+            "Process Probe",
+            IntegrationType.MCP,
+            command=shlex.join([sys.executable, str(server_script)]),
+        )
+    )
+
+    result = asyncio.run(
+        mcp_inventory.inspect_mcp_server("Process Probe", timeout_seconds=10)
+    )
+
+    assert result["status"] == "ok", result
+    assert result["transport"] == "stdio"
+    assert result["server_name"] == "AXIOM Inventory Probe"
+    assert result["protocol_version"]
+    assert result["tool_execution_performed"] is False
+    assert result["schemas_enumerated"] is False
 
 
 def test_handshake_rejects_unknown_server_and_invalid_timeout(tmp_path, monkeypatch):
