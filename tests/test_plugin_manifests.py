@@ -109,6 +109,7 @@ def test_manifest_versions_follow_semver_and_duplicate_ids_are_rejected(tmp_path
     store = PluginManifestStore(tmp_path / ".axiom")
     store.register(manifest("1.0.0-alpha.1"))
     store.register(manifest("1.0.0-alpha.2"))
+    store.register(manifest("1.0.0-alpha.10"))
     store.register(manifest("1.0.0"))
     with pytest.raises(PluginManifestError, match="newer"):
         store.register(manifest("1.0.0-beta.1"))
@@ -123,6 +124,37 @@ def test_manifest_semver_rejects_empty_segments_and_compares_numeric_prerelease_
     _, first_hash = validate_plugin_manifest(manifest("1.0.0-alpha.2"))
     _, second_hash = validate_plugin_manifest(manifest("1.0.0-alpha.10"))
     assert first_hash != second_hash
+
+
+def test_manifest_store_serializes_concurrent_registrations_without_lost_updates(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    root = tmp_path / ".axiom"
+
+    def register(index: int) -> str:
+        candidate = manifest()
+        candidate["id"] = f"org.example.plugin{index}"
+        return PluginManifestStore(root).register(candidate)["manifest"]["id"]
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        registered = list(executor.map(register, range(16)))
+
+    assert len(set(registered)) == 16
+    records = PluginManifestStore(root).list()["manifests"]
+    assert {record["manifest"]["id"] for record in records} == set(registered)
+
+
+def test_manifest_store_files_and_directory_use_private_permissions(tmp_path):
+    import os
+    import stat
+
+    if os.name != "posix":
+        pytest.skip("POSIX permission bits are not portable to this platform")
+    store = PluginManifestStore(tmp_path / ".axiom")
+    store.register(manifest())
+    assert stat.S_IMODE(store.root.stat().st_mode) == 0o700
+    assert stat.S_IMODE(store.registry_file.stat().st_mode) == 0o600
+    assert stat.S_IMODE(store.lock_file.stat().st_mode) == 0o600
 
 
 def test_manifest_registry_lock_and_registry_symlinks_are_rejected_without_writes(tmp_path):
@@ -195,14 +227,15 @@ def test_manifest_store_rejects_malformed_unhashable_grant_scopes_and_duplicate_
         store.list()
 
 
-def test_empty_plugin_grant_is_still_default_deny(tmp_path):
+def test_empty_plugin_grants_are_rejected_and_leave_default_deny(tmp_path):
     store = PluginManifestStore(tmp_path / ".axiom")
     registered = store.register(manifest())
-    store.grant(
-        "com.example.research",
-        expected_sha256=registered["sha256"],
-        tools=[],
-    )
+    with pytest.raises(PluginManifestError, match="at least one"):
+        store.grant(
+            "com.example.research",
+            expected_sha256=registered["sha256"],
+            tools=[],
+        )
     assert store.list()["manifests"][0]["permission_status"] == "default_deny"
     assert store.is_allowed("com.example.research", "search", ["read"]) is False
 
@@ -245,6 +278,12 @@ def test_plugin_manifest_api_keeps_registration_default_deny_and_invalidates_gra
             },
         )
         assert denied.status_code == 422
+
+        empty_grant = client.put(
+            f"/api/security/plugins/{plugin_id}/permissions",
+            json={"manifest_sha256": digest, "tools": []},
+        )
+        assert empty_grant.status_code == 422
 
         grant = client.put(
             f"/api/security/plugins/{plugin_id}/permissions",
@@ -299,6 +338,24 @@ def test_plugin_manifest_api_keeps_registration_default_deny_and_invalidates_gra
             "plugin.permissions.granted",
             "plugin.permissions.revoked",
         ]
+
+
+def test_plugin_manifest_api_reports_durable_audit_failure_after_registry_mutation(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from axiom.api.server import create_app
+    from axiom.core.plugin_manifests import PluginManifestStore
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "axiom.api.security.record_security_event",
+        lambda _event_type: (_ for _ in ()).throw(OSError("journal unavailable")),
+    )
+    with TestClient(create_app()) as client:
+        response = client.post("/api/security/plugins/manifests", json={"manifest": manifest()})
+        assert response.status_code == 503
+        assert "may already have taken effect" in response.json()["detail"]
+    assert PluginManifestStore().list()["manifests"][0]["manifest"]["id"] == "com.example.research"
 
 
 def test_plugin_manifest_api_rejects_non_object_and_extra_envelope_fields(tmp_path, monkeypatch):

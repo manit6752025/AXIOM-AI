@@ -45,7 +45,7 @@ class PluginPermissionsInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     manifest_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    tools: list[PluginToolGrantInput] = Field(max_length=32)
+    tools: list[PluginToolGrantInput] = Field(min_length=1, max_length=32)
 
 
 class ActiveProfileInput(BaseModel):
