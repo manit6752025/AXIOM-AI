@@ -443,6 +443,7 @@ axiom mcp profile use readonly
 | `axiom_prediction_job_status` | Counts and workspace-relative paths |
 | `axiom_prediction_job_wait` | Wait up to 30 seconds. Uses the status permission |
 | `axiom_prediction_job_cancel` | Cancel before artifact finalization |
+| `axiom_prediction_job_resume` | Resume an interrupted job after dataset, model/adapter and checkpoint verification |
 | `axiom_prediction_job_evaluate` | Score a completed job. Uses the `axiom_evaluation_run` permission |
 | `axiom_prediction_job_examples` | Up to three verified mismatches |
 | `axiom_prediction_job_compare` | Exact-match transitions and metric deltas between two jobs |
