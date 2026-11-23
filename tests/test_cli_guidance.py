@@ -120,6 +120,40 @@ def test_refresh_control_center_runs_lint_then_build_without_deleting_ui(tmp_pat
     assert previous_index.read_text(encoding="utf-8") == "previous UI"
 
 
+def test_frontend_dependency_audit_detects_missing_bundled_lucide_types(tmp_path):
+    import json
+    import axiom.cli.main as main_cli
+
+    package_root = tmp_path / "node_modules" / "lucide-react"
+    package_root.mkdir(parents=True)
+    (package_root / "package.json").write_text(
+        json.dumps({
+            "name": "lucide-react",
+            "version": "1.77.0",
+            "typings": "dist/lucide-react.d.ts",
+        }),
+        encoding="utf-8",
+    )
+    lock = {
+        "lockfileVersion": 3,
+        "packages": {
+            "": {"dependencies": {"lucide-react": "^1.77.0"}},
+            "node_modules/lucide-react": {"version": "1.77.0"},
+        },
+    }
+    (tmp_path / "package-lock.json").write_text(json.dumps(lock), encoding="utf-8")
+
+    missing = main_cli._frontend_dependency_mismatches(tmp_path)
+    assert missing == [
+        "lucide-react: bundled TypeScript declarations are missing; restore node_modules with npm ci"
+    ]
+
+    declarations = package_root / "dist" / "lucide-react.d.ts"
+    declarations.parent.mkdir()
+    declarations.write_text("export type LucideIcon = unknown;\n", encoding="utf-8")
+    assert main_cli._frontend_dependency_mismatches(tmp_path) == []
+
+
 def test_refresh_detects_typescript_version_resolved_by_eslint(tmp_path, monkeypatch):
     import json
     import types

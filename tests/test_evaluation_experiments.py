@@ -28,13 +28,21 @@ def test_welch_comparison_requires_replicates_and_returns_bounded_statistics():
 def test_api_compares_repeated_evaluations_linked_to_saved_plan_snapshots(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    rows = [
-        {"reference": "yes", "baseline_a": "yes", "baseline_b": "yes", "candidate_a": "yes", "candidate_b": "no"},
-        {"reference": "yes", "baseline_a": "yes", "baseline_b": "no", "candidate_a": "no", "candidate_b": "no"},
-        {"reference": "no", "baseline_a": "no", "baseline_b": "no", "candidate_a": "no", "candidate_b": "no"},
-    ]
-    source = data_dir / "predictions.jsonl"
-    source.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    references = ("yes", "yes", "no")
+    outputs = {
+        "baseline-a.jsonl": ("yes", "yes", "no"),
+        "baseline-b.jsonl": ("yes", "no", "no"),
+        "candidate-a.jsonl": ("yes", "no", "no"),
+        "candidate-b.jsonl": ("no", "no", "no"),
+    }
+    for filename, predictions in outputs.items():
+        rows = [
+            {"reference": reference, "prediction": prediction}
+            for reference, prediction in zip(references, predictions, strict=True)
+        ]
+        (data_dir / filename).write_text(
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8",
+        )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         workspace,
@@ -59,14 +67,14 @@ def test_api_compares_repeated_evaluations_linked_to_saved_plan_snapshots(tmp_pa
         candidate_id = candidate_response.json()["experiment"]["id"]
 
         run_ids = {baseline_id: [], candidate_id: []}
-        for experiment_id, prediction_fields in (
-            (baseline_id, ("baseline_a", "baseline_b")),
-            (candidate_id, ("candidate_a", "candidate_b")),
+        for experiment_id, filenames in (
+            (baseline_id, ("baseline-a.jsonl", "baseline-b.jsonl")),
+            (candidate_id, ("candidate-a.jsonl", "candidate-b.jsonl")),
         ):
-            for prediction_field in prediction_fields:
+            for filename in filenames:
                 response = client.post("/api/evaluation/runs", json={
-                    "path": "predictions.jsonl",
-                    "prediction_field": prediction_field,
+                    "path": filename,
+                    "prediction_field": "prediction",
                     "reference_field": "reference",
                     "experiment_id": experiment_id,
                 })
@@ -93,6 +101,19 @@ def test_api_compares_repeated_evaluations_linked_to_saved_plan_snapshots(tmp_pa
         assert comparison["difference"]["direction"] == "regressed"
         assert comparison["statistical_test"]["status"] == "computed"
         assert 0 <= comparison["statistical_test"]["p_value"] <= 1
+
+        from typer.testing import CliRunner
+        from axiom.cli.main import app
+
+        cli_result = CliRunner().invoke(app, [
+            "evaluation", "compare-experiments", baseline_id, candidate_id,
+            "--metric", "exact_match", "--json",
+        ])
+        assert cli_result.exit_code == 0, cli_result.stdout
+        cli_comparison = json.loads(cli_result.stdout)
+        assert cli_comparison["baseline"]["replicate_count"] == 2
+        assert cli_comparison["candidate"]["replicate_count"] == 2
+        assert cli_comparison["statistical_test"]["p_value"] is not None
 
         missing = client.post("/api/evaluation/experiment-comparisons", json={
             "baseline_experiment_id": "0" * 32,

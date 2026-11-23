@@ -7,6 +7,7 @@ import logging
 from datetime import UTC, datetime
 from queue import Full, Queue
 from threading import Event, Thread
+import time
 from typing import Any, AsyncIterator, Iterator
 
 from fastapi import APIRouter, HTTPException, Request
@@ -19,6 +20,15 @@ from axiom.core.benchmark_profiles import BenchmarkProfileError, BenchmarkProfil
 from axiom.core.resource_telemetry import ResourceTelemetryError, ResourceTelemetryOptInRequired, ResourceTelemetryStore
 from axiom.core.embeddings import EmbeddingEngineError, embed_local_texts, unload_local_embeddings
 from axiom.core.reranking import RerankerError, rerank_local_documents, unload_local_reranker
+from axiom.core.serving_profiles import (
+    ServingProfileError,
+    ServingProfileStore,
+    generate_from_profile,
+    readiness_probe,
+    release_profile_request,
+    reserve_profile_request,
+    validate_serving_prompt,
+)
 
 from axiom.core.engine import (
     AxiomEngineError,
@@ -29,6 +39,7 @@ from axiom.core.engine import (
     generate_local,
     generate_local_batch,
     generate_local_stream,
+    inspect_native_model_context,
     resolve_local_model_directory,
     runtime_status,
     runtime_telemetry,
@@ -908,6 +919,213 @@ def engine_embeddings(request: LocalEmbeddingsRequest) -> dict[str, Any]:
 def engine_embeddings_unload() -> dict[str, Any]:
     """Unload AXIOM's cached embedding model without changing checkpoint files."""
     return unload_local_embeddings()
+
+
+class ServingProfileCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    name: str = Field(min_length=1, max_length=48, pattern=r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,47}$")
+    model_path: str = Field(min_length=1, max_length=4096)
+    adapter_path: str | None = Field(default=None, max_length=4096)
+    device_preference: str = Field(default="auto", pattern="^(auto|cpu|cuda|rocm|mps|xpu)$")
+    memory_mode: str = Field(default="auto", pattern="^(auto|full|layer_streaming|disk_streaming)$")
+    precision: str = Field(default="auto", pattern="^(auto|fp32|fp16|bf16)$")
+    context_length: int = Field(default=4096, ge=1, le=131072, strict=True)
+    max_new_tokens: int = Field(default=256, ge=1, le=2048, strict=True)
+    max_prompt_chars: int = Field(default=12000, ge=1, le=12000, strict=True)
+    max_concurrent_requests: int = Field(default=1, ge=1, le=1, strict=True)
+    max_queued_requests: int = Field(default=0, ge=0, le=0, strict=True)
+    request_timeout_seconds: int = Field(default=300, ge=5, le=900, strict=True)
+
+    @field_validator("model_path", mode="before")
+    @classmethod
+    def serving_base_model_must_be_trusted(cls, value: Any) -> Any:
+        return _validated_path(value, "Base model")
+
+    @field_validator("adapter_path", mode="before")
+    @classmethod
+    def serving_adapter_must_be_trusted(cls, value: Any) -> Any:
+        return _validated_path(value, "LoRA adapter")
+
+
+class ServingProfileGenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    prompt: str = Field(min_length=1, max_length=12000)
+    max_new_tokens: int | None = Field(default=None, ge=1, le=2048, strict=True)
+    temperature: float = Field(default=0.7, ge=0, le=2, allow_inf_nan=False)
+    top_p: float = Field(default=0.9, gt=0, le=1, allow_inf_nan=False)
+    top_k: int = Field(default=0, ge=0, le=100000, strict=True)
+    min_p: float = Field(default=0.0, ge=0, le=1, allow_inf_nan=False)
+    repetition_penalty: float = Field(default=1.0, ge=0.1, le=5, allow_inf_nan=False)
+    seed: int | None = Field(default=None, ge=0, le=9223372036854775807, strict=True)
+    stop_sequences: list[str] = Field(default_factory=list, max_length=16)
+
+    @field_validator("prompt")
+    @classmethod
+    def serving_prompt_must_be_nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Prompt must contain non-whitespace text.")
+        return value
+
+    @field_validator("stop_sequences")
+    @classmethod
+    def serving_stops_must_be_bounded(cls, value: list[str]) -> list[str]:
+        unique: list[str] = []
+        for sequence in value:
+            if not isinstance(sequence, str) or not sequence.strip() or len(sequence) > 256:
+                raise ValueError("Stop sequences must be nonblank text up to 256 characters.")
+            if sequence not in unique:
+                unique.append(sequence)
+        return unique
+
+
+@router.get("/serving-profiles")
+def list_engine_serving_profiles() -> dict[str, Any]:
+    try:
+        return ServingProfileStore().list()
+    except ServingProfileError:
+        raise HTTPException(status_code=409, detail="Serving profile history could not be read safely.") from None
+
+
+@router.post("/serving-profiles", status_code=201)
+def create_engine_serving_profile(request: ServingProfileCreateRequest) -> dict[str, Any]:
+    try:
+        model_context = inspect_native_model_context(request.model_path)
+        if request.context_length > model_context["effective_max_position_embeddings"]:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Context length exceeds this checkpoint's supported limit of "
+                    f"{model_context['effective_max_position_embeddings']} tokens."
+                ),
+            )
+        profile = ServingProfileStore().save(request.model_dump())
+        return {
+            "profile": profile,
+            "model_context": model_context,
+            "scope": {"weights_loaded": False, "service_started": False, "network_used": False},
+        }
+    except HTTPException:
+        raise
+    except (ServingProfileError, OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@router.get("/serving-profiles/{profile_id}")
+def get_engine_serving_profile(profile_id: str) -> dict[str, Any]:
+    try:
+        profile = ServingProfileStore().get(profile_id)
+    except ServingProfileError:
+        raise HTTPException(status_code=422, detail="Serving profile ID is invalid.") from None
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Serving profile not found.")
+    return {"profile": profile}
+
+
+@router.delete("/serving-profiles/{profile_id}")
+def delete_engine_serving_profile(profile_id: str) -> dict[str, Any]:
+    try:
+        deleted = ServingProfileStore().delete(profile_id)
+    except ServingProfileError:
+        raise HTTPException(status_code=422, detail="Serving profile ID is invalid.") from None
+    if deleted is None:
+        raise HTTPException(status_code=404, detail="Serving profile not found.")
+    return {"deleted": deleted, "model_files_deleted": False}
+
+
+@router.post("/serving-profiles/{profile_id}/readiness")
+def probe_engine_serving_profile(profile_id: str) -> dict[str, Any]:
+    try:
+        profile = ServingProfileStore().get(profile_id)
+        if profile is None:
+            raise HTTPException(status_code=404, detail="Serving profile not found.")
+        return readiness_probe(profile)
+    except HTTPException:
+        raise
+    except (ServingProfileError, OSError, RuntimeError, ValueError):
+        raise HTTPException(status_code=409, detail="Serving profile readiness could not be verified safely.") from None
+
+
+@router.post("/serving-profiles/{profile_id}/generate")
+async def generate_with_engine_serving_profile(
+    profile_id: str,
+    request: ServingProfileGenerateRequest,
+    raw_request: Request,
+) -> dict[str, Any]:
+    try:
+        profile = ServingProfileStore().get(profile_id)
+    except ServingProfileError:
+        raise HTTPException(status_code=422, detail="Serving profile ID is invalid.") from None
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Serving profile not found.")
+
+    readiness = readiness_probe(profile)
+    if readiness.get("ready") is not True:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "Serving profile is not ready.", "readiness": readiness},
+        )
+    try:
+        budget = validate_serving_prompt(profile, request.prompt, request.max_new_tokens)
+    except ServingProfileError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    try:
+        reserve_profile_request(profile_id)
+    except ServingProfileError as exc:
+        raise HTTPException(status_code=429, detail=str(exc), headers={"Retry-After": "1"}) from None
+
+    cancel_event = Event()
+    worker = asyncio.create_task(asyncio.to_thread(
+        generate_from_profile,
+        profile,
+        request.prompt,
+        max_new_tokens=budget["max_new_tokens"],
+        temperature=request.temperature,
+        top_p=request.top_p,
+        top_k=request.top_k,
+        min_p=request.min_p,
+        repetition_penalty=request.repetition_penalty,
+        seed=request.seed,
+        stop_sequences=request.stop_sequences,
+        cancel_event=cancel_event,
+        prompt_budget=budget,
+    ))
+    release_scheduled = False
+    started = time.monotonic()
+    try:
+        while not worker.done():
+            if await raw_request.is_disconnected():
+                cancel_event.set()
+                worker.add_done_callback(lambda _task: release_profile_request(profile_id))
+                release_scheduled = True
+                raise HTTPException(status_code=499, detail="Serving profile generation cancelled after client disconnect.")
+            if time.monotonic() - started >= profile["request_timeout_seconds"]:
+                cancel_event.set()
+                worker.add_done_callback(lambda _task: release_profile_request(profile_id))
+                release_scheduled = True
+                raise HTTPException(status_code=504, detail="Serving profile request exceeded its configured timeout.")
+            await asyncio.sleep(0.05)
+        result = await worker
+        return {
+            "schema_version": 1,
+            "profile": {"id": profile["id"], "name": profile["name"]},
+            "request_budget": budget,
+            "result": result,
+            "scope": {"local_only": True, "network_used": False, "profile_persisted": False},
+        }
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except AxiomEngineError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    finally:
+        if not release_scheduled:
+            if worker.done():
+                release_profile_request(profile_id)
+            else:
+                cancel_event.set()
+                worker.add_done_callback(lambda _task: release_profile_request(profile_id))
 
 
 class LocalRerankingRequest(BaseModel):
