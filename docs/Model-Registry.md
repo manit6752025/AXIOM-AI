@@ -37,4 +37,4 @@ The numerical range is heuristic, not a confidence interval or an execution guar
 
 ## Validation boundary
 
-Automated Python API tests cover case-insensitive search, exact filters, numeric parameter sorting, unknown-size ordering, invalid sort fields, and pagination after filtering. Playwright coverage exercises the GUI query contract and saved-preset interaction. Treat this roadmap work as in progress until CI reports the complete Python, lint, production-build, and browser test suite passing.
+Automated Python API tests cover case-insensitive search, exact filters, numeric parameter sorting, unknown-size ordering, invalid sort fields, and pagination after filtering. Dataset inventory tests cover case-insensitive path search, stable ordering, bounded pagination, the 5,000-entry scan cap, and truncation reporting. Playwright coverage verifies the GUI sends the filter/sort contract to the typed API, that saved presets apply after clearing filters, and that browser-local presets survive a page reload. Full validation is recorded in the roadmap issue after the complete Python, lint, production-build, and browser gates pass.

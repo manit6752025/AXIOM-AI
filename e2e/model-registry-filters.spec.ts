@@ -100,6 +100,11 @@ test("model registry filters and saved presets use the real typed API query cont
   await page.getByRole("textbox", { name: "Saved filter name" }).fill("Favorite Qwen chat models");
   await page.getByRole("button", { name: "Save current filters" }).click();
   await expect(page.getByText("Favorite Qwen chat models", { exact: true })).toBeVisible();
+
+  // Browser-local filter presets are restored after a Control Center reload.
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1, name: "Models", exact: true })).toBeVisible();
+  await expect(page.getByText("Favorite Qwen chat models", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
   await expect(page.getByText("Qwen Mini", { exact: true })).toBeVisible();
 

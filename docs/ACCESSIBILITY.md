@@ -22,12 +22,29 @@ The Control Center uses shared components in `src/components/ui/AccessiblePatter
 - `FormField` provides a visible programmatic label and associates optional hints/errors with the control using `aria-describedby` and `aria-invalid`.
 - `DataTable` renders a semantic table with a caption, column headers, and a clear empty-row message.
 - `AccessibleDialog` provides a labelled modal, initial focus, Escape handling, and a keyboard focus loop.
+- `ConfirmationDialog` standardizes destructive-action copy, safe initial focus on Cancel, busy-state locking, and explicit cancel/confirm controls; use it for registry removal, report deletion, and archive replacement.
 - `EmptyState` announces dynamically rendered no-data states politely through a status region.
 
 Use these patterns when adding new forms, tabular data, confirmation dialogs, or
 empty views. They are UI building blocks, not a guarantee that every existing
 control has been migrated or that all screen-reader/browser combinations have
 been audited.
+
+## Keyboard navigation and live announcements
+
+The global Ctrl/Command+K palette follows the combobox/listbox interaction
+pattern. Arrow Up/Down moves the active result, Home/End jumps to the first or
+last result, Enter executes the active page or local action, and Escape closes
+the palette. The input exposes its active option through
+`aria-activedescendant`; a polite live region announces the result count,
+current selection, and no-match state. Result options expose their position in
+the filtered set.
+
+The shared interface also uses labelled modal dialogs with focus management,
+polite status regions for loading/operation feedback, and descriptive live
+updates for backend connection and in-flight requests. Automated browser tests
+verify these specific contracts; they do not replace testing with multiple
+screen readers and browser combinations.
 
 ## Contributor expectations
 

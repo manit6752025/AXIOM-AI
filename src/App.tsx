@@ -13,6 +13,7 @@ import ModelStudioPanel from "./components/ModelStudioPanel";
 import LocalFineTuningPanel from "./components/LocalFineTuningPanel";
 import {
   AccessibleDialog,
+  ConfirmationDialog,
   DataTable,
   EmptyState,
   FormField as Field,
@@ -170,6 +171,14 @@ type CommandPaletteItem = {
 type Notice = {
   message: string;
   tone: Tone;
+};
+
+type BackendStatus = "checking" | "online" | "offline";
+
+type BackendConnection = {
+  status: BackendStatus;
+  lastCheckedAt: number | null;
+  lastSuccessAt: number | null;
 };
 
 const navItems: NavItem[] = [
@@ -720,6 +729,13 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [backendConnection, setBackendConnection] = useState<BackendConnection>({
+    status: "checking",
+    lastCheckedAt: null,
+    lastSuccessAt: null,
+  });
+  const [pendingApiRequests, setPendingApiRequests] = useState(0);
+  const [clockNow, setClockNow] = useState(() => Date.now());
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -728,6 +744,65 @@ function App() {
     document.documentElement.dataset.accent = preferences.accentColor;
     document.documentElement.dataset.reducedMotion = String(preferences.reduceMotion || preferences.lowPowerMode);
   }, [theme, preferences]);
+
+  const checkBackend = useCallback(async () => {
+    setBackendConnection((current) => ({
+      ...current,
+      status: current.status === "online" ? "online" : "checking",
+    }));
+    try {
+      const health = await axiomApi.health();
+      const checkedAt = Date.now();
+      setBackendConnection((current) => ({
+        status: health.status === "ok" ? "online" : "offline",
+        lastCheckedAt: checkedAt,
+        lastSuccessAt: health.status === "ok" ? checkedAt : current.lastSuccessAt,
+      }));
+    } catch {
+      setBackendConnection((current) => ({
+        ...current,
+        status: "offline",
+        lastCheckedAt: Date.now(),
+      }));
+    }
+  }, []);
+
+  useEffect(() => {
+    const onRequestStart = () => setPendingApiRequests((count) => count + 1);
+    const onRequestEnd = (event: Event) => {
+      setPendingApiRequests((count) => Math.max(0, count - 1));
+      const detail = (event as CustomEvent<{ ok?: boolean; at?: number }>).detail;
+      if (detail?.ok && typeof detail.at === "number") {
+        setBackendConnection((current) => ({ ...current, lastSuccessAt: detail.at ?? current.lastSuccessAt }));
+      }
+    };
+    window.addEventListener("axiom:api-request-start", onRequestStart);
+    window.addEventListener("axiom:api-request-end", onRequestEnd);
+    return () => {
+      window.removeEventListener("axiom:api-request-start", onRequestStart);
+      window.removeEventListener("axiom:api-request-end", onRequestEnd);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authenticated) {
+      setBackendConnection({ status: "checking", lastCheckedAt: null, lastSuccessAt: null });
+      return;
+    }
+    void checkBackend();
+    const intervalSeconds = preferences.lowPowerMode ? 0 : preferences.dashboardRefreshSeconds;
+    const timer = intervalSeconds > 0
+      ? window.setInterval(() => void checkBackend(), Math.max(15, intervalSeconds) * 1000)
+      : undefined;
+    return () => {
+      if (timer !== undefined) window.clearInterval(timer);
+    };
+  }, [authenticated, preferences.lowPowerMode, preferences.dashboardRefreshSeconds, checkBackend]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const restorePage = () => setPage(pageFromLocation());
@@ -840,6 +915,10 @@ function App() {
     setNotice({ message, tone });
   };
 
+  const backendStale = backendConnection.status === "online"
+    && backendConnection.lastSuccessAt !== null
+    && clockNow - backendConnection.lastSuccessAt > 60_000;
+
   const navigate = (nextPage: Page) => {
     if (nextPage !== page) {
       const url = new URL(window.location.href);
@@ -942,6 +1021,12 @@ function App() {
           onLogout={logout}
           onChangePassword={() => setChangePasswordOpen(true)}
           navigate={navigate}
+          backendStatus={backendConnection.status}
+          backendStale={backendStale}
+          backendLastSuccessAt={backendConnection.lastSuccessAt}
+          pendingApiRequests={pendingApiRequests}
+          clockNow={clockNow}
+          onRetryBackend={() => void checkBackend()}
         />
 
         <main id="main-content" className="page-wrap" tabIndex={-1}>
@@ -1444,6 +1529,12 @@ function Topbar({
   onLogout,
   onChangePassword,
   navigate,
+  backendStatus,
+  backendStale,
+  backendLastSuccessAt,
+  pendingApiRequests,
+  clockNow,
+  onRetryBackend,
 }: {
   theme: Theme;
   setTheme: (theme: Theme) => void;
@@ -1453,6 +1544,12 @@ function Topbar({
   onLogout: () => void;
   onChangePassword: () => void;
   navigate: (page: Page) => void;
+  backendStatus: BackendStatus;
+  backendStale: boolean;
+  backendLastSuccessAt: number | null;
+  pendingApiRequests: number;
+  clockNow: number;
+  onRetryBackend: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1460,6 +1557,15 @@ function Topbar({
   const [profileOpen, setProfileOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const meta = pageMeta[page];
+  const backendLabel = backendStatus === "checking" ? "CHECKING"
+    : backendStatus === "offline" ? "OFFLINE"
+      : backendStale ? "STALE" : "ONLINE";
+  const backendTone: Tone = backendStatus === "offline" || backendStale
+    ? "warning" : backendStatus === "online" ? "success" : "neutral";
+  const backendDetail = backendStatus === "offline"
+    ? backendLastSuccessAt === null ? "No successful response yet" : `Last success ${Math.max(0, Math.floor((clockNow - backendLastSuccessAt) / 1000))}s ago`
+    : backendStale ? "No successful response in the last minute"
+      : backendStatus === "checking" ? "Checking local API" : "Local API connected";
   const results = useMemo<CommandPaletteItem[]>(() => {
     const pages: CommandPaletteItem[] = navItems.map((item) => ({
       id: `page:${item.id}`,
@@ -1543,8 +1649,15 @@ function Topbar({
             value={query}
             placeholder="Search pages and actions"
             aria-label="Search pages and actions"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-haspopup="listbox"
             aria-expanded={searchOpen}
             aria-controls="workspace-search-results"
+            aria-activedescendant={searchOpen && results[activeResult]
+              ? `command-result-${results[activeResult].id.replaceAll(":", "-")}`
+              : undefined}
+            aria-describedby="command-palette-keyboard-hint"
             onFocus={() => setSearchOpen(true)}
             onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }}
             onKeyDown={(event) => {
@@ -1559,6 +1672,14 @@ function Topbar({
               if (event.key === "ArrowUp" && results.length) {
                 event.preventDefault();
                 setActiveResult((current) => (current - 1 + results.length) % results.length);
+              }
+              if (event.key === "Home" && results.length) {
+                event.preventDefault();
+                setActiveResult(0);
+              }
+              if (event.key === "End" && results.length) {
+                event.preventDefault();
+                setActiveResult(results.length - 1);
               }
               if (event.key === "Enter" && results[activeResult]) {
                 event.preventDefault();
@@ -1575,10 +1696,14 @@ function Topbar({
                 return (
                   <button
                     type="button"
+                    id={`command-result-${item.id.replaceAll(":", "-")}`}
                     role="option"
                     aria-selected={index === activeResult}
+                    aria-posinset={index + 1}
+                    aria-setsize={results.length}
                     key={item.id}
                     onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setActiveResult(index)}
                     onClick={() => executeResult(item)}
                   >
                     <Icon size={16} />
@@ -1587,9 +1712,31 @@ function Topbar({
                   </button>
                 );
               }) : <div className="command-empty">No matching pages or actions for "{query}".</div>}
-              <div className="command-hint"><kbd>↑↓</kbd> move <kbd>↵</kbd> open <kbd>esc</kbd> close</div>
+              <div className="command-hint"><kbd>↑↓</kbd> move <kbd>Home/End</kbd> jump <kbd>↵</kbd> run <kbd>esc</kbd> close</div>
             </div>
           )}
+          <span id="command-palette-keyboard-hint" className="sr-only">Use Up and Down arrow keys to move through command results, Home or End to jump to the first or last result, Enter to run the selected result, and Escape to close the palette.</span>
+          <span id="command-palette-announcement" className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+            {searchOpen
+              ? results.length === 0
+                ? `No pages or actions match ${query.trim() || "the current search"}.`
+                : `${results.length} results. ${results[activeResult]?.label ?? results[0].label} selected. Use arrow keys to move, Home or End to jump, Enter to run, and Escape to close.`
+              : ""}
+          </span>
+        </div>
+        <div className="global-api-status" role="group" aria-label="Backend connection">
+          <span role="status" aria-live="polite" title={backendDetail}>
+            <StatusPill tone={backendTone}>{backendLabel}</StatusPill>
+          </span>
+          <span className="global-api-status-copy">{backendDetail}</span>
+          {pendingApiRequests > 0 && (
+            <span className="global-api-loading" role="status" aria-live="polite">
+              {pendingApiRequests} {pendingApiRequests === 1 ? "REQUEST" : "REQUESTS"} LOADING
+            </span>
+          )}
+          <button type="button" className="global-api-retry" aria-label="Retry backend connection" title="Recheck the local API connection" onClick={onRetryBackend}>
+            <RefreshCcw size={13} />
+          </button>
         </div>
         <ThemeToggle theme={theme} setTheme={setTheme} />
         <div className="profile-menu">
@@ -2223,7 +2370,7 @@ function Models({ onNotify }: { onNotify: (message: string, tone?: Tone) => void
       {error ? <InlineAlert tone="warning" role="alert">{error}</InlineAlert> : null}
       {loading ? <div className="loading-state" role="status">Loading model registry…</div> : models.length ? <><div className="module-list">{models.map((model) => <div className="module-row model-registry-row" key={model.id}><span className="module-icon"><BrainCircuit size={17} /></span><span className="module-copy"><b>{model.name}</b><small>{model.source} · {model.format}{model.parameters ? ` · ${model.parameters}` : ""}{model.quantization ? ` · ${model.quantization}` : ""}{model.architecture ? ` · ${model.architecture}` : ""}{model.license ? ` · ${model.license}` : ""}{model.tags?.length ? ` · ${model.tags.join(", ")}` : ""}</small></span><button type="button" className="icon-button" aria-label={`${model.favorite ? "Remove" : "Add"} ${model.name} ${model.favorite ? "favorite" : "to favorites"}`} title={model.favorite ? "Remove favorite" : "Add favorite"} onClick={() => void toggleFavorite(model)}><Star size={15} fill={model.favorite ? "currentColor" : "none"} /></button><button type="button" className="icon-button" aria-label={`Check hardware fit for ${model.name}`} title={compatibilityBusyId === model.id ? "Checking hardware fit…" : "Estimate hardware fit"} disabled={compatibilityBusyId === model.id} onClick={() => void inspectCompatibility(model)}><Gauge size={15} /></button><button type="button" className="icon-button danger-icon-button" aria-label={`Remove ${model.name} from registry`} title="Remove registry entry" onClick={() => setRemoving(model)}><Trash2 size={15} /></button></div>)}</div>{hasMore && <div className="pagination-actions"><button type="button" className="button secondary-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more models"}</button></div>}</> : <EmptyState icon={BrainCircuit} title="Registry is empty" description="Register model metadata here or use the CLI. Model files remain where they are." action={<CliReference command="axiom model add my-model local safetensors" />} />}
     </Surface>
-    {removing && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !removingBusy) setRemoving(null); }}><section className="dialog" role="dialog" aria-modal="true" aria-labelledby="remove-model-title"><div className="dialog-head"><div><p className="eyebrow">CONFIRM REGISTRY CHANGE</p><h2 id="remove-model-title">Remove {removing.name}?</h2></div><button type="button" className="icon-button" aria-label="Close confirmation" onClick={() => setRemoving(null)} disabled={removingBusy}><X size={16} /></button></div><p className="quiet-note">This removes only its AXIOM registry metadata. Local model weights will not be deleted.</p><div className="integration-form-actions"><button type="button" className="button secondary-button" onClick={() => setRemoving(null)} disabled={removingBusy}>Cancel</button><button type="button" className="button danger-button" onClick={() => void removeModel()} disabled={removingBusy}>{removingBusy ? "Removing…" : "Remove registry entry"}</button></div></section></div>}
+    {removing && <ConfirmationDialog titleId="remove-model-title" descriptionId="remove-model-description" eyebrow="CONFIRM REGISTRY CHANGE" title={`Remove ${removing.name}?`} description="This removes only its AXIOM registry metadata. Local model weights will not be deleted." confirmLabel="Remove registry entry" busyLabel="Removing…" busy={removingBusy} onCancel={() => setRemoving(null)} onConfirm={() => void removeModel()} />}
     <ModelStudioPanel />
   </FeaturePage>;
 }
@@ -3059,8 +3206,8 @@ function Evaluation({ onNotify }: { onNotify: (message: string, tone?: Tone) => 
     </Surface>
     <Callout tone="info" title="Precomputed outputs only">Evaluation scores compare existing reference and prediction text. AXIOM does not execute a model, and these text metrics are not a substitute for task-specific human review. Prediction-job provenance records paths and generation settings so you can identify the run later; it cannot guarantee exact reproduction if model files, runtime versions, or hardware change.</Callout>
     {editing && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setEditing(null); }}><section className="dialog" role="dialog" aria-modal="true" aria-labelledby="edit-experiment-title"><div className="dialog-head"><div><p className="eyebrow">METADATA ONLY</p><h2 id="edit-experiment-title">Edit {editing.name}</h2></div><button type="button" className="icon-button" aria-label="Close edit dialog" onClick={() => setEditing(null)} disabled={saving}><X size={16} /></button></div><p className="quiet-note">Editing does not change the saved hardware-aware plan snapshot.</p><label className="field"><span className="field-label-row"><span>Name</span></span><input value={editName} onChange={(event) => setEditName(event.target.value)} maxLength={120} /></label><label className="field"><span className="field-label-row"><span>Notes</span></span><textarea value={editNotes} onChange={(event) => setEditNotes(event.target.value)} maxLength={1000} rows={3} /></label><label className="field"><span className="field-label-row"><span>Tags, comma separated</span></span><input value={editTags} onChange={(event) => setEditTags(event.target.value)} maxLength={1400} placeholder="baseline, review" /></label><div className="integration-form-actions"><button type="button" className="button secondary-button" onClick={() => setEditing(null)} disabled={saving}>Cancel</button><button type="button" className="button primary-button" onClick={() => void saveMetadata()} disabled={saving || !editName.trim()}>{saving ? "Saving…" : "Save metadata"}</button></div></section></div>}
-    {deleting && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setDeleting(null); }}><section className="dialog" role="dialog" aria-modal="true" aria-labelledby="delete-experiment-title"><div className="dialog-head"><div><p className="eyebrow">CONFIRM DELETION</p><h2 id="delete-experiment-title">Delete {deleting.name}?</h2></div><button type="button" className="icon-button" aria-label="Close delete confirmation" onClick={() => setDeleting(null)} disabled={saving}><X size={16} /></button></div><p className="quiet-note">This removes the saved plan record only. No model, dataset, or run artifacts are deleted.</p><div className="integration-form-actions"><button type="button" className="button secondary-button" onClick={() => setDeleting(null)} disabled={saving}>Cancel</button><button type="button" className="button danger-button" onClick={() => void removeExperiment()} disabled={saving}>{saving ? "Deleting…" : "Delete plan record"}</button></div></section></div>}
-    {deletingRun && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setDeletingRun(null); }}><section className="dialog" role="dialog" aria-modal="true" aria-labelledby="delete-evaluation-title"><div className="dialog-head"><div><p className="eyebrow">CONFIRM DELETION</p><h2 id="delete-evaluation-title">Delete {deletingRun.name}?</h2></div><button type="button" className="icon-button" aria-label="Close delete confirmation" onClick={() => setDeletingRun(null)} disabled={saving}><X size={16} /></button></div><p className="quiet-note">This removes only the saved aggregate report. The source dataset is unchanged.</p><div className="integration-form-actions"><button type="button" className="button secondary-button" onClick={() => setDeletingRun(null)} disabled={saving}>Cancel</button><button type="button" className="button danger-button" onClick={() => void removeEvaluationRun()} disabled={saving}>{saving ? "Deleting…" : "Delete report"}</button></div></section></div>}
+    {deleting && <ConfirmationDialog titleId="delete-experiment-title" descriptionId="delete-experiment-description" eyebrow="CONFIRM DELETION" title={`Delete ${deleting.name}?`} description="This removes the saved plan record only. No model, dataset, or run artifacts are deleted." confirmLabel="Delete plan record" busyLabel="Deleting…" busy={saving} onCancel={() => setDeleting(null)} onConfirm={() => void removeExperiment()} />}
+    {deletingRun && <ConfirmationDialog titleId="delete-evaluation-title" descriptionId="delete-evaluation-description" eyebrow="CONFIRM DELETION" title={`Delete ${deletingRun.name}?`} description="This removes only the saved aggregate report. The source dataset is unchanged." confirmLabel="Delete report" busyLabel="Deleting…" busy={saving} onCancel={() => setDeletingRun(null)} onConfirm={() => void removeEvaluationRun()} />}
   </FeaturePage>;
 }
 
@@ -3867,6 +4014,7 @@ function SettingsPage({
   const [saved, setSaved] = useState(false);
   const [metadataBusy, setMetadataBusy] = useState(false);
   const [metadataReplace, setMetadataReplace] = useState(false);
+  const [pendingMetadataImport, setPendingMetadataImport] = useState<{ file: File; replace: boolean } | null>(null);
   const [metadataMessage, setMetadataMessage] = useState("");
   const [metadataError, setMetadataError] = useState("");
   const conflict = draft.lowPowerMode && draft.dashboardRefreshSeconds > 0;
@@ -3908,22 +4056,25 @@ function SettingsPage({
     }
   };
 
-  const importWorkspaceMetadata = async (file: File | null) => {
+  const importWorkspaceMetadata = (file: File | null) => {
     if (!file) return;
-    if (!window.confirm(
-      metadataReplace
-        ? "Replace the matching metadata collections in this workspace? Other files will not be changed."
-        : "Merge the metadata from this archive into this workspace? Existing records are preserved and conflicts are rejected.",
-    )) return;
+    setMetadataError("");
+    setPendingMetadataImport({ file, replace: metadataReplace });
+  };
+
+  const confirmWorkspaceMetadataImport = async () => {
+    if (!pendingMetadataImport) return;
     setMetadataBusy(true);
     setMetadataError("");
     setMetadataMessage("");
     try {
-      const result = await axiomApi.importWorkspaceMetadata(file, metadataReplace);
+      const result = await axiomApi.importWorkspaceMetadata(pendingMetadataImport.file, pendingMetadataImport.replace);
       const counts = Object.entries(result.imported).map(([name, count]) => `${name.replaceAll("_", " ")}: ${count}`).join(" · ");
       setMetadataMessage(`Metadata ${result.mode} completed. ${counts}`);
+      setPendingMetadataImport(null);
     } catch (error) {
       setMetadataError(error instanceof Error ? error.message : "Workspace metadata import failed.");
+      setPendingMetadataImport(null);
     } finally {
       setMetadataBusy(false);
     }
@@ -4036,6 +4187,21 @@ function SettingsPage({
         <Callout tone="info" title="Local API integration">The dashboard, model registry, dataset profiler, training planner, hardware snapshot, persistent plan history, diagnostics, and event log share the local FastAPI contract. CLI mapping opens these GUI equivalents rather than pretending terminal-only shell operations run inside the browser.</Callout>
       </Surface>
     </div>
+    {pendingMetadataImport && <ConfirmationDialog
+      titleId="metadata-import-title"
+      descriptionId="metadata-import-description"
+      eyebrow={pendingMetadataImport.replace ? "REPLACE WORKSPACE METADATA" : "MERGE WORKSPACE METADATA"}
+      title={pendingMetadataImport.replace ? "Replace included collections?" : "Merge workspace metadata?"}
+      description={pendingMetadataImport.replace
+        ? "Matching collections present in this archive will be replaced. Collections omitted from the archive and unrelated files remain unchanged."
+        : "Metadata from this archive will be merged into the workspace. Existing records are preserved and conflicting IDs are rejected."}
+      confirmLabel={pendingMetadataImport.replace ? "Replace included collections" : "Merge metadata"}
+      confirmTone={pendingMetadataImport.replace ? "danger" : "primary"}
+      busyLabel="Importing…"
+      busy={metadataBusy}
+      onCancel={() => setPendingMetadataImport(null)}
+      onConfirm={() => void confirmWorkspaceMetadataImport()}
+    />}
   </FeaturePage>;
 }
 

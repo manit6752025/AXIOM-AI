@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — keyboard and screen-reader command navigation
+
+- Added a combobox/listbox accessibility contract to the global command palette, including active-descendant tracking, result position metadata, Home/End navigation, and polite announcements for result counts, selected commands, and no matches.
+- Added Playwright coverage for keyboard selection, active option exposure, result announcements, and empty-result feedback.
+
+## Unreleased — consistent destructive-action confirmations
+
+- Added a shared accessible confirmation dialog and migrated model registry removal, saved-plan and evaluation-report deletion, and workspace metadata merge/replace. Confirmation starts with Cancel focused and disables dismissal while an operation is in flight.
+- Added browser coverage that cancellation makes no DELETE request and confirmation performs exactly one, plus an accessible archive-replace confirmation flow.
+
+## Unreleased — global API status and loading feedback
+
+- Added shared request lifecycle signals in the typed API client and a persistent top-bar backend status with stale-response detection, in-flight request count, manual retry, and preference-aware health polling.
+- Added browser acceptance for offline-to-online recovery and loading feedback while a workspace request is pending.
+
+## Unreleased — workspace deep links and history
+
+- Documented direct `?page=` links for Control Center views and added browser coverage for reload persistence, sidebar navigation, back/forward restoration, API Playground links, and unsupported page fallback.
+
 ## Unreleased — global command palette
 
 - Extended the Ctrl/Command+K palette to search and execute page navigation plus local actions for theme switching, password changes, and sign-out; added keyboard and browser regression tests.

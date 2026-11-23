@@ -44,3 +44,40 @@ test("mobile sidebar navigation closes after selection and browser history resto
   await expect(page.locator(".topbar-context")).toContainText("Control center");
   await expect(sidebar.getByRole("button", { name: "Control center" })).toHaveAttribute("aria-current", "page");
 });
+
+
+test("workspace deep links survive reload and browser back/forward restore the selected page", async ({ page }) => {
+  await ensureAuthenticated(page);
+
+  await page.goto("/?page=settings");
+  const navigation = page.getByLabel("Primary navigation");
+  await expect(page).toHaveURL(/page=settings/);
+  await expect(page.locator(".topbar-context")).toContainText("Settings");
+  await expect(navigation.getByRole("button", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+
+  await page.reload();
+  await expect(page.locator(".topbar-context")).toContainText("Settings");
+  await expect(navigation.getByRole("button", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+
+  await navigation.getByRole("button", { name: "Models" }).click();
+  await expect(page).toHaveURL(/page=models/);
+  await expect(page.locator(".topbar-context")).toContainText("Models");
+  await navigation.getByRole("button", { name: "Datasets" }).click();
+  await expect(page).toHaveURL(/page=datasets/);
+  await expect(page.locator(".topbar-context")).toContainText("Datasets");
+
+  await page.goBack();
+  await expect(page).toHaveURL(/page=models/);
+  await expect(navigation.getByRole("button", { name: "Models" })).toHaveAttribute("aria-current", "page");
+  await page.goForward();
+  await expect(page).toHaveURL(/page=datasets/);
+  await expect(navigation.getByRole("button", { name: "Datasets" })).toHaveAttribute("aria-current", "page");
+
+  await page.goto("/?page=api-playground");
+  await expect(page.locator(".topbar-context")).toContainText("API Playground");
+  await expect(navigation.getByRole("button", { name: "API Playground" })).toHaveAttribute("aria-current", "page");
+
+  await page.goto("/?page=not-a-workspace-page");
+  await expect(page.locator(".topbar-context")).toContainText("Control center");
+  await expect(navigation.getByRole("button", { name: "Control center" })).toHaveAttribute("aria-current", "page");
+});
