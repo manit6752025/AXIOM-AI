@@ -17,6 +17,7 @@ from .types import (
     PredictionJobPage,
     PredictionJobStartRequest,
     PredictionJobStartResult,
+    PredictionJobResumeResult,
     PredictionJobStatusResult,
     TelemetryHistory,
     WorkspaceBackupRestoreResult,
@@ -536,7 +537,7 @@ class AxiomClient:
         self._validate_prediction_job_id(job_id)
         return self.request_json("GET", f"/api/prediction-jobs/{quote(job_id, safe='')}")
 
-    def resume_prediction_job(self, job_id: str) -> PredictionJobStartResult:
+    def resume_prediction_job(self, job_id: str) -> PredictionJobResumeResult:
         """Resume an interrupted job after AXIOM verifies its saved inputs and checkpoint."""
         self._validate_prediction_job_id(job_id)
         return self.request_json("POST", f"/api/prediction-jobs/{quote(job_id, safe='')}/resume")
