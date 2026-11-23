@@ -42,8 +42,26 @@ jobs:
               path: .most_recent_instance.location.path,
               start_line: .most_recent_instance.location.start_line,
               end_line: .most_recent_instance.location.end_line,
-              message: .most_recent_instance.message.text
+              message: .most_recent_instance.message.text,
+              instance_ref: .most_recent_instance.ref,
+              instance_commit: .most_recent_instance.commit_sha,
+              analysis_key: .most_recent_instance.analysis_key,
+              category: .most_recent_instance.category,
+              environment: .most_recent_instance.environment
             }' | jq -s 'sort_by(.severity, .rule_id, .path)' > "$RUNNER_TEMP/codeql-open-alerts.json"
+
+          analysis_id="$(gh api --paginate -H "Accept: application/vnd.github+json" \
+            "/repos/$GH_REPO/code-scanning/analyses?tool_name=CodeQL&per_page=100" \
+            --jq '.[].id' | head -n 1)"
+          if [ -n "$analysis_id" ]; then
+            echo "Latest CodeQL analysis ID: $analysis_id"
+            gh api -H "Accept: application/sarif+json" \
+              "/repos/$GH_REPO/code-scanning/analyses/$analysis_id/sarif" \
+              > "$RUNNER_TEMP/codeql-latest.sarif"
+          else
+            echo "No CodeQL analysis ID was returned." >&2
+            exit 1
+          fi
       - name: Summarize open alerts without printing source code
         env:
           ALERTS_FILE: ${{ runner.temp }}/codeql-open-alerts.json
@@ -70,10 +88,12 @@ jobs:
                   )
               )
           PY
-      - name: Upload read-only alert inventory
+      - name: Upload alert inventory and CodeQL SARIF data-flow report
         uses: actions/upload-artifact@v4
         with:
-          name: axiom-codeql-open-alert-inventory
-          path: ${{ runner.temp }}/codeql-open-alerts.json
+          name: axiom-codeql-alert-details
+          path: |
+            ${{ runner.temp }}/codeql-open-alerts.json
+            ${{ runner.temp }}/codeql-latest.sarif
           if-no-files-found: error
           retention-days: 14
