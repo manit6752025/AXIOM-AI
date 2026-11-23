@@ -15,6 +15,7 @@ from axiom.evaluation.jsonl import (
     create_output_manifest,
 )
 from axiom.evaluation.store import EvaluationStore
+from axiom.evaluation.experiments import EvaluationExperimentNotFoundError, validate_saved_experiment
 from axiom.version import __version__
 
 _PROVENANCE_JOB_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -204,6 +205,7 @@ def persist_evaluation_run(
     regression_tolerance: float = 0.05,
     python_version: str | None = None,
     provenance: dict[str, Any] | None = None,
+    experiment_id: str | None = None,
 ) -> dict[str, Any]:
     """Compare against a baseline, then persist aggregate metrics and optional provenance."""
     if not isinstance(report, dict):
@@ -217,6 +219,7 @@ def persist_evaluation_run(
         raise ValueError("A partial evaluation cannot be marked as a baseline.")
     if baseline and not comparison_corpus_available:
         raise ValueError("A run without a complete comparison fingerprint cannot be marked as a baseline.")
+    validate_saved_experiment(experiment_id)
     validated_provenance = validate_prediction_provenance(provenance)
     if validated_provenance is not None:
         report_fields = report.get("fields", {})
@@ -244,6 +247,8 @@ def persist_evaluation_run(
             raise EvaluationHistoryReadError("Evaluation history could not be read safely.") from None
         if baseline_record is None:
             raise EvaluationBaselineNotFoundError("Baseline evaluation run was not found.")
+        if baseline_record.get("experiment_id") != experiment_id:
+            raise ValueError("Baseline and candidate evaluation runs must be linked to the same saved experiment.")
         if baseline_record.get("baseline") is not True:
             raise EvaluationBaselinePermissionError(
                 "Only a run explicitly marked as a baseline can be compared."
@@ -280,6 +285,7 @@ def persist_evaluation_run(
         "name": name or f"{report.get('file_name', 'dataset')} offline evaluation",
         "created_at": now,
         "model_label": model_label,
+        "experiment_id": experiment_id,
         "baseline": baseline,
         "comparison": comparison,
         "status": "complete" if complete else "partial",

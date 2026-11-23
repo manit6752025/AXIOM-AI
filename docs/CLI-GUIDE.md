@@ -377,5 +377,13 @@ Knowledge bases are scoped to the active workspace. Ingestion supports UTF-8
 TXT, Markdown, RST, CSV, JSON, and JSONL files (up to 8 MiB each); source
 paths must be workspace-relative, symlinks and traversal are rejected, and
 the original source file is never changed. Private copies and SHA-256 metadata
-live under the workspace's .axiom/knowledge directory. See
-[Workspace Knowledge](Local-Knowledge.md).
+live under the workspace's .axiom/knowledge directory. ~~~bash
+axiom knowledge search BASE_ID --query "local inference" --json
+axiom knowledge search BASE_ID --query "local inference" --format md --source-prefix documents/engineering
+axiom knowledge search BASE_ID --query "local inference" --model-path ./models/my-encoder --vector-weight 0.35 --device cpu --json
+~~~
+
+Search uses bounded BM25 lexical scoring by default. Supplying a trusted local
+embedding model path enables dense-vector fusion. Results carry source paths,
+SHA-256 hashes, chunk numbers, and character offsets; no hosted embedding API
+is used. See [Workspace Knowledge and Retrieval](Local-Knowledge.md).

@@ -173,6 +173,8 @@ def test_knowledge_api_hybrid_search_invokes_local_embeddings_only_when_model_pa
         base = client.post("/api/workspace/knowledge-bases", json={"name": "Hybrid"}).json()["knowledge_base"]
         client.post(f"/api/workspace/knowledge-bases/{base['id']}/documents", json={"path": "notes.md"})
         captured = {}
+        model_path = str((tmp_path / "models" / "encoder").resolve())
+        monkeypatch.setattr(knowledge_api, "resolve_local_model_directory", lambda value, label: model_path)
         def fake_search(store, base_id, query, **kwargs):
             captured.update(base_id=base_id, query=query, **kwargs)
             return {"schema_version": 1, "engine": "axiom-hybrid-knowledge-search", "results": []}
