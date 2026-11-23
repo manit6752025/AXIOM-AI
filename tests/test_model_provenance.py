@@ -440,3 +440,28 @@ def test_model_provenance_rejects_sparse_checkpoint_over_production_hash_limit_w
     assert report["hash_evidence"]["status"] == "skipped_size_or_file_count_limit"
     assert report["hash_evidence"]["checkpoint_sha256"] is None
     assert report["hash_evidence"]["files"] == []
+
+
+def test_model_provenance_hashes_at_exact_configured_weight_byte_limit(tmp_path, monkeypatch):
+    model = tmp_path / "exact-weight-byte-limit"
+    model.mkdir()
+    weight = b"0123456789abcdef"
+    path = model / "model.safetensors"
+    path.write_bytes(weight)
+    monkeypatch.setattr(provenance, "MAX_PROVENANCE_HASH_BYTES", len(weight))
+
+    at_limit = inspect_model_provenance(model)
+    assert at_limit["hash_evidence"]["status"] == "complete"
+    assert at_limit["hash_evidence"]["checkpoint_sha256"]
+    assert at_limit["hash_evidence"]["files"] == [{
+        "path": "model.safetensors",
+        "format": "safetensors",
+        "size_bytes": len(weight),
+        "sha256": hashlib.sha256(weight).hexdigest(),
+    }]
+
+    path.write_bytes(weight + b"x")
+    above_limit = inspect_model_provenance(model)
+    assert above_limit["hash_evidence"]["status"] == "skipped_size_or_file_count_limit"
+    assert above_limit["hash_evidence"]["checkpoint_sha256"] is None
+    assert above_limit["hash_evidence"]["files"] == []
