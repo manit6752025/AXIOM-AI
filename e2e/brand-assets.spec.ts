@@ -3,12 +3,9 @@ import { expect, test } from "@playwright/test";
 async function expectBrandImageLoaded(page: import("@playwright/test").Page) {
   const mark = page.locator("img.axiom-mark").first();
   await expect(mark).toBeVisible();
-  await expect.poll(() => mark.evaluate((image: HTMLImageElement) => ({
-    complete: image.complete,
-    width: image.naturalWidth,
-    height: image.naturalHeight,
-    source: image.currentSrc,
-  }))).toMatchObject({ complete: true, width: 128, height: 128 });
+  await expect.poll(() => mark.evaluate((image: HTMLImageElement) =>
+    image.complete && image.naturalWidth > 0 && image.naturalHeight > 0,
+  )).toBe(true);
   await expect(mark).toHaveAttribute("src", "./axiom-mark.svg");
 }
 

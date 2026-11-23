@@ -78,3 +78,72 @@ def test_runtime_status_only_reports_optional_package_presence(monkeypatch):
 def test_job_list_limit_is_bounded():
     with pytest.raises(ValueError, match="between 1 and 100"):
         fine_tuning.list_jobs(101)
+
+@pytest.mark.parametrize(
+    ("current", "target"),
+    [
+        ("queued", "running"),
+        ("queued", "cancelling"),
+        ("queued", "failed"),
+        ("running", "cancelling"),
+        ("running", "finalizing"),
+        ("running", "failed"),
+        ("cancelling", "cancelled"),
+        ("cancelling", "failed"),
+        ("finalizing", "completed"),
+        ("finalizing", "failed"),
+        ("completed", "completed"),
+        ("cancelled", "cancelled"),
+        ("failed", "failed"),
+    ],
+)
+def test_job_lifecycle_accepts_only_documented_forward_transitions(current, target):
+    fine_tuning._validate_job_transition(current, target)
+
+
+@pytest.mark.parametrize(
+    ("current", "target"),
+    [
+        ("queued", "completed"),
+        ("running", "completed"),
+        ("cancelling", "running"),
+        ("cancelling", "finalizing"),
+        ("finalizing", "cancelling"),
+        ("completed", "running"),
+        ("cancelled", "completed"),
+        ("failed", "cancelling"),
+        ("unknown", "running"),
+    ],
+)
+def test_job_lifecycle_rejects_invalid_or_terminal_transitions(current, target):
+    with pytest.raises(fine_tuning.FineTuningError, match="Invalid fine-tuning job transition"):
+        fine_tuning._validate_job_transition(current, target)
+
+
+@pytest.mark.parametrize(
+    ("status", "requested", "requestable", "reason"),
+    [
+        ("queued", False, True, None),
+        ("running", False, True, None),
+        ("cancelling", True, False, "already_requested"),
+        ("finalizing", False, False, "finalization_started"),
+        ("completed", False, False, "job_terminal"),
+        ("cancelled", True, False, "job_terminal"),
+        ("failed", False, False, "job_terminal"),
+    ],
+)
+def test_public_job_reports_explicit_cancellation_contract(status, requested, requestable, reason):
+    public = fine_tuning._public_training_job({
+        "id": "a" * 32,
+        "status": status,
+        "cancel_requested": requested,
+        "config": {"model_path": "/local/model"},
+    })
+    assert public["cancellation"] == {
+        "supported": True,
+        "requested": requested,
+        "requestable": requestable,
+        "mode": "cooperative",
+        "boundary": "before worker start or between training steps; adapter finalization is not interruptible",
+        "unavailable_reason": reason,
+    }

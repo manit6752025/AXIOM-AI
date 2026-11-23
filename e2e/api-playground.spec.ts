@@ -35,6 +35,45 @@ test("API Playground exposes bounded read-only endpoints and Deep Analysis", asy
       });
     } else if (path.endsWith("/datasets")) {
       await route.fulfill({ json: { datasets: [] } });
+    } else if (path === "/api/security/audit") {
+      await route.fulfill({ json: {
+        schema_version: 1,
+        generated_at: "2026-11-20T06:00:00Z",
+        status: "pass",
+        workspace: { name: "test-workspace" },
+        summary: {
+          passed: 0,
+          warnings: 0,
+          failed: 0,
+          informational: 0,
+          api_scope_tokens_enabled: true,
+        },
+        checks: [],
+      } });
+    } else if (path === "/api/security/events") {
+      await route.fulfill({ json: {
+        schema_version: 1,
+        events: [],
+        total: 0,
+        limit: 50,
+        offset: 0,
+        has_more: false,
+        integrity: {
+          schema_version: 1,
+          valid: true,
+          event_count: 0,
+          max_events: 2000,
+          head_hash: "0".repeat(64),
+          capacity_reached: false,
+        },
+        privacy: {
+          event_summaries_allowlisted: true,
+          credential_values_stored: false,
+          arbitrary_user_text_stored: false,
+          reviewer_identity_authenticated: false,
+          journal_is_append_only: true,
+        },
+      } });
     } else if (path.endsWith("/events")) {
       await route.fulfill({ json: { events: [] } });
     } else if (path.endsWith("/diagnostics/workspace")) {

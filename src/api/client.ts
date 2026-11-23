@@ -847,6 +847,10 @@ export type FineTuningJob = {
   schema_version: 1; id: string; status: "queued" | "running" | "cancelling" | "finalizing" | "completed" | "cancelled" | "failed";
   created_at: string; updated_at: string; started_at: string | null; finished_at: string | null;
   config: FineTuningConfig; cancel_requested?: boolean; completed_steps: number; loss: number | null; error: string | null;
+  cancellation: {
+    supported: boolean; requested: boolean; requestable: boolean; mode: "cooperative";
+    boundary: string; unavailable_reason: "already_requested" | "finalization_started" | "job_terminal" | "job_not_cancellable" | null;
+  };
   logs: string[]; result?: { output_dir: string; adapter_files: string[]; target_modules: string[]; dataset_rows: number; max_steps: number; device?: string; engine?: string; trainable_parameters?: number };
 };
 export type FineTuningJobPage = {
@@ -1250,7 +1254,7 @@ export type SecurityEventRecord = {
   target_event_id?: string;
 };
 
-export type SecurityEventListItem = SecurityEventRecord & {
+export type SecurityEventListItem = Omit<SecurityEventRecord, "reviewer_label"> & {
   reviewed: boolean;
   reviewed_at: string | null;
   reviewer_label: string | null;
