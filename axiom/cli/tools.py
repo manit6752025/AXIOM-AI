@@ -231,18 +231,23 @@ def register(app: typer.Typer, tools_app: typer.Typer) -> None:
         """List supported developer tools and their local status."""
 
         if as_json:
-            payload = [
+            records = [
                 {
                     "id": tool.id,
                     "name": tool.name,
                     "kind": tool.kind,
                     "status": _status(tool),
                     "executables": list(tool.executable_names),
-                    "platform": _platform_name(),
                 }
                 for tool in TOOLS
             ]
-            typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+            typer.echo(json.dumps({
+                "schema_version": 1,
+                "platform": _platform_name(),
+                "total": len(records),
+                "tools": records,
+                "scope_note": "Local catalog and executable/environment-variable presence only; credential values and vendor authentication state are not returned or verified.",
+            }, ensure_ascii=False, indent=2, sort_keys=True))
             return
 
         table = Table(title=f"AXIOM Developer Tools · {_platform_name()}")
