@@ -286,6 +286,24 @@ test("validates prediction job identifiers and required local start paths", () =
     () => client.startPredictionJob({ model_path: "", dataset_path: "data/eval.jsonl", output_path: "data/out.jsonl" }),
     AxiomConfigurationError,
   );
+  assert.throws(
+    () => client.startPredictionJob({
+      model_path: "models/tiny",
+      dataset_path: "data/eval.jsonl",
+      output_path: "data/out.jsonl",
+      unexpected: true,
+    }),
+    AxiomConfigurationError,
+  );
+  assert.throws(
+    () => client.startPredictionJob({
+      model_path: "models/tiny",
+      dataset_path: "data/eval.jsonl",
+      output_path: "data/out.jsonl",
+      device: "cloud",
+    }),
+    AxiomConfigurationError,
+  );
   client.close();
 });
 
