@@ -20,6 +20,7 @@ from typing import Any
 from axiom.core.hardware import detect_hardware
 from axiom.core.storage import atomic_write_text, file_lock
 from axiom.core.workspace_context import workspace_metadata_dir
+from axiom.path_safety import SafePathError, open_regular_file
 from axiom.version import __version__
 
 SCHEMA_VERSION = 1
@@ -62,52 +63,75 @@ def _canonical(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
-def _canonical_model_root(model_path: str | Path) -> Path | None:
-    """Resolve an explicitly selected model directory to a canonical filesystem root."""
+def _trusted_model_directory(model_path: str | Path) -> Path | None:
+    """Resolve a model through the native engine's allowlisted model inventory."""
     try:
         supplied = os.path.expanduser(os.fspath(model_path))
-        if not supplied:
-            return None
         candidate = Path(os.path.abspath(supplied))
-        if candidate.is_symlink():
-            raise BenchmarkProfileError("The selected model directory must not be a symbolic link.")
-        root = Path(os.path.realpath(candidate))
+        current = Path(candidate.anchor)
+        for component in candidate.parts[1:]:
+            current = current / component
+            try:
+                metadata = current.lstat()
+            except OSError:
+                return None
+            reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            is_junction = getattr(current, "is_junction", None)
+            if (
+                stat.S_ISLNK(metadata.st_mode)
+                or (reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag)
+                or (is_junction is not None and is_junction())
+            ):
+                raise BenchmarkProfileError(
+                    "The selected model directory must not contain symbolic links or junctions."
+                )
+        from axiom.core.engine import _allowed_model_roots, resolve_local_model_directory
+
+        resolved = Path(resolve_local_model_directory(str(candidate), "Base model"))
+        trusted_roots = tuple(Path(root).resolve(strict=True) for root in _allowed_model_roots())
+        if not resolved.is_absolute() or not any(resolved.is_relative_to(root) for root in trusted_roots):
+            return None
+        return resolved
     except BenchmarkProfileError:
         raise
     except (OSError, RuntimeError, TypeError, ValueError):
         return None
-    return root if root.is_dir() else None
 
 
 def _model_config_fingerprint(model_path: str | Path) -> str | None:
-    """Hash a bounded set of model configuration files, never model weights."""
-    root = _canonical_model_root(model_path)
+    """Hash fixed-name configuration metadata from an allowlisted local model."""
+    root = _trusted_model_directory(model_path)
     if root is None:
         return None
     parts: list[tuple[str, str]] = []
     total = 0
     for name in _MODEL_CONFIG_FILES:
-        safe_name = os.path.basename(name)
-        if safe_name != name or safe_name not in _MODEL_CONFIG_FILES:
+        if name != os.path.basename(name) or name not in _MODEL_CONFIG_FILES:
             raise BenchmarkProfileError("Model configuration filename is invalid.")
-        path = root / safe_name
-        if path.is_symlink():
-            raise BenchmarkProfileError("Model configuration metadata must not use symbolic links.")
-        if not path.exists():
-            continue
+        path = root / name
         try:
-            info = path.stat()
-            if not stat.S_ISREG(info.st_mode) or info.st_size > 2 * 1024 * 1024:
-                raise BenchmarkProfileError("A model configuration file exceeds the benchmark provenance limit.")
-            total += info.st_size
-            if total > 8 * 1024 * 1024:
-                raise BenchmarkProfileError("Model configuration metadata exceeds the 8 MiB provenance limit.")
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            with open_regular_file(path) as stream:
+                before = os.fstat(stream.fileno())
+                if not stat.S_ISREG(before.st_mode) or before.st_size < 0 or before.st_size > 2 * 1024 * 1024:
+                    raise BenchmarkProfileError("A model configuration file exceeds the benchmark provenance limit.")
+                total += before.st_size
+                if total > 8 * 1024 * 1024:
+                    raise BenchmarkProfileError("Model configuration metadata exceeds the 8 MiB provenance limit.")
+                raw = stream.read(2 * 1024 * 1024 + 1)
+                after = os.fstat(stream.fileno())
+            if len(raw) > 2 * 1024 * 1024 or len(raw) != before.st_size:
+                raise BenchmarkProfileError("A model configuration file changed during provenance inspection.")
+            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
+            ):
+                raise BenchmarkProfileError("A model configuration file changed during provenance inspection.")
+        except FileNotFoundError:
+            continue
         except BenchmarkProfileError:
             raise
-        except OSError:
+        except (OSError, SafePathError):
             raise BenchmarkProfileError("Model configuration metadata could not be read safely.") from None
-        parts.append((name, digest))
+        parts.append((name, hashlib.sha256(raw).hexdigest()))
     return hashlib.sha256(_canonical(parts)).hexdigest() if parts else None
 
 
