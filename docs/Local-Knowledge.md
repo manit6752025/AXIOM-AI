@@ -19,7 +19,7 @@ axiom knowledge base remove BASE_ID --yes
 
 The Control Center's Runtime page has the same create/select/ingest/list/remove
 workflow. The API uses /api/workspace/knowledge-bases and its document routes.
-API responses and CLI list output contain metadata, not stored source text.
+API responses and CLI list output contain metadata, not stored source text. Search results intentionally return bounded snippets together with SHA-256 hashes and character offsets for citations.
 
 ## Supported formats and bounds
 
@@ -43,6 +43,26 @@ never modified. Content does not go to a network service, logs, runtime traces,
 or API list responses. When a document or knowledge base is removed, AXIOM
 deletes only its own generated copy. The original workspace files remain.
 
-This is a storage and ingestion layer. Chunking, embeddings, lexical/vector
-retrieval, ranking, and citations are separate roadmap deliverables; a stored
-document is not automatically searchable until those components are enabled.
+## Bounded lexical and hybrid retrieval
+
+~~~bash
+axiom knowledge search BASE_ID --query "local inference" --json
+axiom knowledge search BASE_ID --query "local inference" --source-prefix documents/engineering
+axiom knowledge search BASE_ID --query "local inference" --model-path ./models/my-encoder --vector-weight 0.35 --device cpu --json
+~~~
+
+Search uses deterministic BM25 lexical scoring, paragraph-aware character
+chunking with overlap, and optional local dense-vector fusion. Vector inference
+is performed only when a trusted local embedding model path is explicitly
+provided; no hosted embedding provider or network lookup is used. You can
+filter by format, workspace-relative source prefixes, and document IDs.
+
+Requests are bounded to 64 documents, 128 chunks, 16 MiB of source bytes,
+1,048,576 scanned characters, 8,192 query characters, and 20 results. Chunk
+sizes are 256–4,096 characters with 0–512 character overlap. Search does not
+change source documents or persist its results. Returned snippets are limited
+to 320 characters and carry source path, format, content SHA-256, document ID,
+chunk number, and start/end character offsets so callers can verify provenance.
+BM25 and cosine-derived fusion scores are ranking signals, not calibrated
+relevance probabilities. This is retrieval, not answer synthesis; AXIOM does
+not claim that the returned snippets constitute a complete answer.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+import axiom.api.knowledge as knowledge_api
 from axiom.api.server import create_app
 
 
@@ -60,6 +61,7 @@ def test_knowledge_api_rejects_unsafe_and_unsupported_document_paths(tmp_path, m
     documents = tmp_path / "documents"
     documents.mkdir()
     (documents / "source.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    (documents / "unsupported.pdf").write_bytes(b"%PDF-1.7")
     (documents / "binary.txt").write_bytes(b"\x00\x01")
     (tmp_path / "outside.md").write_text("outside", encoding="utf-8")
     (documents / "external.md").symlink_to(tmp_path / "outside.md")
@@ -67,7 +69,7 @@ def test_knowledge_api_rejects_unsafe_and_unsupported_document_paths(tmp_path, m
     with _client(tmp_path, monkeypatch) as client:
         base = client.post("/api/workspace/knowledge-bases", json={"name": "Safe"}).json()["knowledge_base"]
         traversal = client.post(f"/api/workspace/knowledge-bases/{base['id']}/documents", json={"path": "../outside.md"})
-        unsupported = client.post(f"/api/workspace/knowledge-bases/{base['id']}/documents", json={"path": "outside.md"})
+        unsupported = client.post(f"/api/workspace/knowledge-bases/{base['id']}/documents", json={"path": "documents/unsupported.pdf"})
         symlink = client.post(f"/api/workspace/knowledge-bases/{base['id']}/documents", json={"path": "documents/external.md"})
         binary = client.post(f"/api/workspace/knowledge-bases/{base['id']}/documents", json={"path": "documents/binary.txt"})
         extra = client.post(f"/api/workspace/knowledge-bases/{base['id']}/documents", json={

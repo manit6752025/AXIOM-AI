@@ -68,4 +68,34 @@ test("Runtime creates a workspace knowledge base and ingests a local document", 
   await expect(page.getByText("guide.md", { exact: true })).toBeVisible();
   expect(createPayload).toMatchObject({ name: "Engineering", description: "Team notes" });
   expect(ingestPayload).toEqual({ path: "documents/guide.md" });
+
+  let searchPayload: Record<string, unknown> | null = null;
+  await page.route("**/api/workspace/knowledge-bases/*/search", async (route) => {
+    searchPayload = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ json: {
+      schema_version: 1,
+      engine: "axiom-lexical-knowledge-search",
+      knowledge_base: base,
+      query: { character_count: 5, candidate_documents: 1, chunks_scanned: 1, result_limit: 8,
+        chunk_size_chars: 1200, chunk_overlap_chars: 160, vector_enabled: false, vector_weight: 0,
+        formats: [], source_prefixes: ["documents"], document_ids: [] },
+      results: [{
+        score: 0.87, lexical_score: 0.87, vector_score: null, snippet: "AXIOM local retrieval excerpt.",
+        citation: { document_id: document.id, file_name: document.file_name, source_path: document.source_path,
+          format: "md", content_sha256: document.content_sha256, chunk_index: 1, start_char: 0,
+          end_char: 22, character_count: 22 },
+      }],
+      total_results: 1,
+      privacy: { source_documents_modified: false, results_persisted: false, network_used: false,
+        full_source_documents_returned: false, snippets_returned: true },
+      scope_note: "Local search with source offsets.",
+    } });
+  });
+  await page.getByLabel("Search query").fill("AXIOM");
+  await page.getByLabel("Source path prefix (optional)").fill("documents");
+  await page.getByRole("button", { name: "Search knowledge base" }).click();
+  await expect(page.getByText("LEXICAL SEARCH", { exact: true })).toBeVisible();
+  await expect(page.getByText("AXIOM local retrieval excerpt.", { exact: true })).toBeVisible();
+  expect(searchPayload).toMatchObject({ query: "AXIOM", source_prefixes: ["documents"], max_documents: 64 });
+
 });

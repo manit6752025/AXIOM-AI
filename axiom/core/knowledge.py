@@ -229,7 +229,7 @@ class KnowledgeBaseStore:
             if len(records) >= MAX_KNOWLEDGE_BASES:
                 raise KnowledgeStoreCapacityError("The workspace already has the maximum number of knowledge bases.")
             if any(item["name"].casefold() == normalized_name.casefold() for item in records):
-                raise KnowledgeStoreError("A knowledge base with this name already exists.")
+                raise KnowledgeStoreError("Knowledge base names must be unique within a workspace; this name already exists.")
             now = _now()
             base = {
                 "id": uuid.uuid4().hex, "name": normalized_name, "description": normalized_description,

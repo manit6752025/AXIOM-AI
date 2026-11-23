@@ -243,6 +243,11 @@ axiom knowledge remove-document BASE_ID DOCUMENT_ID --yes
 
 Knowledge bases are workspace-scoped. AXIOM ingests bounded UTF-8 TXT, Markdown, RST, CSV, JSON, and JSONL files into private workspace storage; original source files are never changed. See [Workspace Knowledge](docs/Local-Knowledge.md).
 
+~~~bash
+axiom knowledge search BASE_ID --query "local inference" --source-prefix documents/engineering --json
+~~~
+
+Search uses bounded BM25 lexical ranking by default. Add `--model-path` to enable local dense-vector fusion; each result includes a source path, SHA-256 content hash, chunk index, and character offsets. See [Workspace Knowledge and Retrieval](docs/Local-Knowledge.md).
 </details>
 
 <details>
