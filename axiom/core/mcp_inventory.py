@@ -11,6 +11,7 @@ import os
 import shlex
 import time
 from pathlib import Path
+from itertools import islice
 from typing import Any
 
 from mcp import Client, StdioServerParameters
@@ -247,7 +248,7 @@ def _safe_schema(value: object, *, depth: int = 0, budget: list[int] | None = No
 
     if isinstance(value, dict):
         result: dict[str, object] = {}
-        for key, item in list(value.items())[:64]:
+        for key, item in islice(value.items(), 64):
             if not isinstance(key, str) or key not in _SAFE_SCHEMA_KEYS:
                 continue
             if key in {"title", "description", "format", "pattern", "type"}:
@@ -278,7 +279,7 @@ def _safe_schema(value: object, *, depth: int = 0, budget: list[int] | None = No
                 if isinstance(item, dict):
                     result[key] = {
                         name[:96]: _safe_schema(schema, depth=depth + 1, budget=budget)
-                        for name, schema in list(item.items())[:64]
+                        for name, schema in islice(item.items(), 64)
                         if isinstance(name, str) and name.isprintable()
                     }
                 continue
@@ -323,7 +324,11 @@ def _safe_resource_uri(value: object) -> str | None:
         return f"file://…/{filename[:128]}" if filename else "file://…"
     if parsed.hostname:
         host = parsed.hostname[:128]
-        port = f":{parsed.port}" if parsed.port is not None else ""
+        try:
+            parsed_port = parsed.port
+        except ValueError:
+            return "[REDACTED URI]"
+        port = f":{parsed_port}" if parsed_port is not None else ""
         return f"{scheme}://{host}{port}/…"
     return f"{scheme}:…" 
 

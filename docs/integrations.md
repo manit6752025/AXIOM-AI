@@ -569,3 +569,29 @@ capabilities. It does not call `tools/list`, `resources/list`,
 any remote capability. Schema browsing is a separate feature and remains
 opt-in. A timeout or failed handshake returns a bounded status and generic
 message without exposing command arguments, child output, or exception text.
+
+
+## Read-only MCP tool and resource schema browsing
+
+Once a server is registered, choose **Browse schemas** in the Control Center,
+or run:
+
+```bash
+axiom integration schemas "Local MCP" --json
+```
+
+The explicit `POST /api/mcp/servers/{name}/schemas` action starts the selected
+stdio process, negotiates the protocol, and requests only the paginated
+`tools/list`, `resources/list`, and `resources/templates/list` metadata.
+It does not issue `tools/call`, `resources/read`, prompt execution, or
+completion requests. Browsing a schema never grants permission to invoke that
+tool; the existing AXIOM default-deny policy is unchanged.
+
+Output is bounded to at most four pages and 100 records per collection.
+Pagination truncation is reported rather than silently represented as a
+complete listing. Input/output JSON Schema is reduced to a safe allowlist of
+structural and validation fields; defaults, examples, arbitrary extensions,
+and other unneeded values are omitted. Resource URIs omit local directories,
+credentials, query values, and fragments. The subprocess environment remains
+the MCP SDK's minimal allow-listed environment and the process is time-limited.
+Failed checks return generic errors without child stderr or exception details.

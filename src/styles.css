@@ -2353,3 +2353,10 @@ html[data-accent="violet"] .app-shell.light {
   white-space: nowrap !important;
   border: 0 !important;
 }
+
+
+/* Read-only MCP schema browser */
+.mcp-schema-results { margin-top: 14px; padding: 12px 0 2px; border-top: 1px solid var(--line); }
+.mcp-schema-detail { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.mcp-schema-detail summary { color: var(--ink-strong); font-size: 11px; line-height: 1.5; cursor: pointer; }
+.mcp-schema-preview { max-height: 280px; margin: 10px 0 14px; font-size: 10px; }

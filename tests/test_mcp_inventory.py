@@ -30,6 +30,7 @@ def test_mcp_inventory_api_routes_are_registered_with_expected_methods():
 
     assert routes["/api/mcp/servers"] == {"GET"}
     assert routes["/api/mcp/servers/{name}/handshake"] == {"POST"}
+    assert routes["/api/mcp/servers/{name}/schemas"] == {"POST"}
 
 
 def test_mcp_inventory_api_maps_missing_server_to_not_found(monkeypatch):
