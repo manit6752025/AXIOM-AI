@@ -37,16 +37,6 @@ test("Diagnostics exports a local SPDX SBOM and gates online vulnerability scans
       relatedSpdxElement: "SPDXRef-Package-test",
     }],
     annotations: [],
-    axiom: {
-      schema_version: 1,
-      package_count: 1,
-      relationship_count: 1,
-      content_sha256: "a".repeat(64),
-      scope: "active Python environment",
-      file_contents_collected: false,
-      host_paths_collected: false,
-      network_access_performed: false,
-    },
   };
   const vulnerabilityReport = {
     schema_version: 1,

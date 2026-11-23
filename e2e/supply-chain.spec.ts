@@ -38,16 +38,6 @@ test("Diagnostics exports SPDX and requires explicit consent for dependency advi
       relatedSpdxElement: "SPDXRef-Package-abc",
     }],
     annotations: [],
-    axiom: {
-      schema_version: 1,
-      package_count: 1,
-      relationship_count: 1,
-      content_sha256: "a".repeat(64),
-      scope: "active Python environment; installed distribution metadata only",
-      file_contents_collected: false,
-      host_paths_collected: false,
-      network_access_performed: false,
-    },
   };
   const vulnerabilityReport = {
     schema_version: 1,

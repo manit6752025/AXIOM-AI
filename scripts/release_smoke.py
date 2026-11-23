@@ -780,7 +780,8 @@ def supply_chain_issues(
     checks = (
         ("SPDX inventory", core, (
             "def generate_spdx_sbom(", '"SPDX-2.3"', '"PACKAGE-MANAGER"',
-            '"DEPENDS_ON"', "MAX_DISTRIBUTIONS = 4096",
+            '"DEPENDS_ON"', "MAX_DISTRIBUTIONS = 4096", "MAX_TOTAL_REQUIREMENTS = 50_000",
+            "content_sha256=", "network_access_performed=false", "host_paths_collected=false",
             "host_paths_collected", "network_access_performed",
         )),
         ("Dependency audit", core, (
@@ -808,7 +809,10 @@ def supply_chain_issues(
         )),
         ("Core regression tests", tests, (
             "test_spdx_sbom_contains_package_urls_versions_and_installed_dependency_relationships",
+            "test_spdx_sbom_validates_against_the_official_23_json_schema",
+            "test_spdx_sbom_bounds_aggregate_requirement_metadata",
             "test_spdx_sbom_rejects_unbounded_or_invalid_installed_metadata",
+            "test_pip_audit_parser_rejects_exit_status_and_finding_mismatches",
             "test_report_export_rejects_symlinked_parent_and_existing_symlink",
             "test_vulnerability_scan_requires_explicit_network_authorization",
             "test_vulnerability_scan_reports_unavailable_scanner_without_claiming_clean",

@@ -5310,7 +5310,7 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
       const report = await axiomApi.securitySoftwareBillOfMaterials();
       const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/spdx+json" });
       downloadBlob(blob, "axiom-installed-environment.spdx.json");
-      onNotify("SPDX 2.3 SBOM exported · " + report.axiom.package_count + " package(s). No package code was executed.", "success");
+      onNotify("SPDX 2.3 SBOM exported · " + report.packages.length + " package(s). No package code was executed.", "success");
     } catch (cause) {
       onNotify(cause instanceof Error ? cause.message : "Software bill of materials could not be exported.", "warning");
     } finally {

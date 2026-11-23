@@ -11,7 +11,7 @@ import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from threading import Thread
+from threading import Lock, Thread
 from typing import Any, Iterable
 from urllib.parse import quote
 
@@ -24,6 +24,7 @@ MAX_AUDIT_STDERR_BYTES = 1 * 1024 * 1024
 MAX_SCAN_SECONDS = 90
 _NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
 _VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.+!_-]{0,199}$")
+_AUDIT_LOCK = Lock()
 _DEPENDENCY_NAME_PATTERN = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]{0,199})")
 
 
@@ -284,6 +285,15 @@ def write_report_new(path: str | Path, content: str) -> Path:
                 pass
     return target
 
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise SupplyChainError("Dependency scanner JSON contains duplicate object keys.")
+        result[key] = value
+    return result
+
+
 def _parse_pip_audit_output(payload: Any, *, generated_at: str, scanner_version: str | None, exit_code: int) -> dict[str, Any]:
     if isinstance(payload, dict):
         dependencies = payload.get("dependencies")
@@ -400,7 +410,7 @@ def _scanner_failure(generated_at: str, scanner_version: str | None, message: st
     }
 
 
-def audit_dependency_vulnerabilities(
+def _audit_dependency_vulnerabilities_unlocked(
     *,
     allow_network: bool,
     timeout_seconds: int = MAX_SCAN_SECONDS,
@@ -436,7 +446,12 @@ def audit_dependency_vulnerabilities(
     except importlib.metadata.PackageNotFoundError:
         scanner_version = None
     executable = python_executable or sys.executable
-    if not isinstance(executable, str) or not executable or len(executable) > 4096:
+    if (
+        not isinstance(executable, str)
+        or not executable
+        or len(executable) > 4096
+        or any(ord(character) < 32 or ord(character) == 127 for character in executable)
+    ):
         raise SupplyChainError("Python scanner executable is invalid.")
 
     # Do not pass arbitrary environment variables (notably PIP_INDEX_URL, private index URLs, or tokens)
@@ -552,9 +567,36 @@ def audit_dependency_vulnerabilities(
             "exit_code": return_code,
         }
     try:
-        payload = json.loads(raw.decode("utf-8"))
-    except (UnicodeError, json.JSONDecodeError):
-        raise SupplyChainError("Dependency scanner returned invalid JSON; no vulnerability conclusion was produced.") from None
+        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_json_keys)
+    except (UnicodeError, json.JSONDecodeError, RecursionError, ValueError):
+        raise SupplyChainError("Dependency scanner returned invalid or ambiguous JSON; no vulnerability conclusion was produced.") from None
     return _parse_pip_audit_output(
         payload, generated_at=generated_at, scanner_version=scanner_version, exit_code=return_code
     )
+def audit_dependency_vulnerabilities(
+    *,
+    allow_network: bool,
+    timeout_seconds: int = MAX_SCAN_SECONDS,
+    python_executable: str | None = None,
+) -> dict[str, Any]:
+    """Run at most one bounded advisory scan in this AXIOM process at a time."""
+    if type(allow_network) is not bool or not allow_network:
+        raise SupplyChainError("A dependency vulnerability scan requires explicit network authorization.")
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= 300:
+        raise SupplyChainError("Dependency scan timeout must be an integer between 1 and 300 seconds.")
+    if not _AUDIT_LOCK.acquire(blocking=False):
+        return _scanner_failure(
+            _utc_timestamp(),
+            None,
+            "Another dependency scan is already active in this AXIOM process; no second scanner was started.",
+            network_accessed=False,
+        )
+    try:
+        return _audit_dependency_vulnerabilities_unlocked(
+            allow_network=allow_network,
+            timeout_seconds=timeout_seconds,
+            python_executable=python_executable,
+        )
+    finally:
+        _AUDIT_LOCK.release()
+
