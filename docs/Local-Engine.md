@@ -177,3 +177,14 @@ A worker exit is recorded as interrupted or recovery-unverified. This version
 persists progress for inspection but does not resume generation after a
 process restart. Inspect any published file before evaluation; incomplete jobs
 are not evidence of complete datasets or successful model runs.
+
+
+## Native request admission
+
+Serving profiles keep native generation concurrency at one, protecting the shared model/runtime from simultaneous access. Configure a bounded FIFO queue with the max-queued-requests option when creating a profile:
+
+~~~bash
+axiom engine profile create workstation --model-path models/qwen --max-queued-requests 4 --json
+~~~
+
+The queue is workspace-process local, FIFO, and bounded to 32 waiting requests per profile and 32 overall. Requests are rejected immediately with HTTP 429 and Retry-After when capacity is full. Queue wait is included in the profile request timeout; client disconnect and timeout remove a waiting ticket, and cancellation during generation is cooperative. Responses report queue position and wait time. Native inference remains single-worker; a queue does not imply parallel GPU execution.

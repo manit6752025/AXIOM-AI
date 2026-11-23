@@ -80,7 +80,7 @@ def test_serving_profile_store_is_bounded_unique_and_workspace_local(tmp_path):
     {"max_new_tokens": 2049},
     {"max_prompt_chars": 12001},
     {"max_concurrent_requests": 2},
-    {"max_queued_requests": 1},
+    {"max_queued_requests": 33},
     {"request_timeout_seconds": 4},
     {"device_preference": "remote"},
     {"memory_mode": "unsafe"},
@@ -109,6 +109,12 @@ def test_serving_profile_store_rejects_tampered_schema_and_symlink(tmp_path):
         ServingProfileStore(root).list()
 
 
+
+
+def test_serving_profile_schema_supports_bounded_opt_in_queue_depth(tmp_path):
+    profile = ServingProfileStore(tmp_path / ".axiom").save(_config(tmp_path, max_queued_requests=8))
+    assert profile["max_concurrent_requests"] == 1
+    assert profile["max_queued_requests"] == 8
 def test_serving_profile_readiness_reports_runtime_device_and_context_without_loading_weights(tmp_path, monkeypatch):
     profile = ServingProfileStore(tmp_path / ".axiom").save(_config(tmp_path))
     monkeypatch.setattr(engine_core, "runtime_status", _ready_runtime)
@@ -329,13 +335,10 @@ def test_serving_profile_api_applies_busy_admission_without_queueing(tmp_path, m
         profile = client.post("/api/engine/serving-profiles", json=_config(
             tmp_path, model_path=str(model), name="Busy profile",
         )).json()["profile"]
-        reserve_profile_request(profile["id"])
-        try:
-            busy = client.post(f"/api/engine/serving-profiles/{profile['id']}/generate", json={"prompt": "hi"})
-            assert busy.status_code == 429
-            assert busy.headers["retry-after"] == "1"
-        finally:
-            release_profile_request(profile["id"])
+        monkeypatch.setattr(engine_api.NATIVE_PROFILE_ADMISSION, "acquire", lambda **kwargs: (_ for _ in ()).throw(engine_api.RequestAdmissionQueueFull("The native request queue is full.")))
+        busy = client.post(f"/api/engine/serving-profiles/{profile['id']}/generate", json={"prompt": "hi"})
+        assert busy.status_code == 429
+        assert busy.headers["retry-after"] == "1"
 
 
 
@@ -389,3 +392,11 @@ def test_serving_profile_cli_creates_probes_runs_lists_and_deletes(tmp_path, mon
     ])
     assert removed.exit_code == 0, removed.output
     assert json.loads(removed.stdout)["model_files_deleted"] is False
+
+
+def test_serving_profile_schema_accepts_bounded_queue_depth(tmp_path):
+    profile = ServingProfileStore(tmp_path / ".axiom").save(
+        _config(tmp_path, max_queued_requests=8)
+    )
+    assert profile["max_concurrent_requests"] == 1
+    assert profile["max_queued_requests"] == 8

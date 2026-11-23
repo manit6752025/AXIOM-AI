@@ -24,6 +24,57 @@ def test_welch_comparison_requires_replicates_and_returns_bounded_statistics():
     assert result["t_statistic"] > 0
     assert result["degrees_of_freedom"] > 0
 
+    # A Welch p-value is not defined when both groups have no observed
+    # within-group variance, even when their sample means differ.
+    degenerate = _welch_test([0.4, 0.4, 0.4], [0.6, 0.6, 0.6])
+    assert degenerate["status"] == "degenerate_zero_variance"
+    assert degenerate["degenerate_zero_variance"] is True
+    assert degenerate["t_statistic"] is None
+    assert degenerate["degrees_of_freedom"] is None
+    assert degenerate["p_value"] is None
+    assert "zero within-group variance" in degenerate["note"]
+
+    # A single zero-variance group remains statistically computable when
+    # the other group supplies a positive variance estimate.
+    one_constant_group = _welch_test([0.4, 0.4, 0.4], [0.5, 0.6, 0.7])
+    assert one_constant_group["status"] == "computed"
+    assert one_constant_group["p_value"] is not None
+    assert 0 <= one_constant_group["p_value"] <= 1
+
+
+def test_cli_explains_degenerate_zero_variance_welch_result(monkeypatch):
+    from typer.testing import CliRunner
+    from axiom.cli import evaluation as evaluation_cli
+    from axiom.cli.main import app
+
+    note = "Both groups have zero within-group variance; an inferential p-value is undefined."
+    report = {
+        "metric": "exact_match",
+        "baseline": {
+            "replicate_count": 3, "mean": 0.4, "sample_standard_deviation": 0.0,
+            "minimum": 0.4, "maximum": 0.4,
+        },
+        "candidate": {
+            "replicate_count": 3, "mean": 0.6, "sample_standard_deviation": 0.0,
+            "minimum": 0.6, "maximum": 0.6,
+        },
+        "difference": {"candidate_minus_baseline_mean": 0.2, "direction": "improved"},
+        "statistical_test": {
+            "status": "degenerate_zero_variance", "p_value": None,
+            "t_statistic": None, "degrees_of_freedom": None, "note": note,
+        },
+        "scope_note": "The comparison is descriptive when an inferential test is undefined.",
+    }
+    monkeypatch.setattr(evaluation_cli, "compare_experiment_evaluations", lambda *_args, **_kwargs: report)
+
+    result = CliRunner().invoke(app, [
+        "evaluation", "compare-experiments", "1" * 32, "2" * 32,
+    ])
+    assert result.exit_code == 0, result.stdout
+    assert "Statistical test undefined:" in result.stdout
+    assert note in result.stdout
+    assert "insufficient replicates" not in result.stdout.lower()
+
 
 def test_api_compares_repeated_evaluations_linked_to_saved_plan_snapshots(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"

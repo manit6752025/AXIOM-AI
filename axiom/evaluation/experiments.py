@@ -133,12 +133,13 @@ def _welch_test(baseline: list[float], candidate: list[float]) -> dict[str, Any]
     if standard_error_squared == 0.0:
         return {
             "method": "Welch two-sided unequal-variance t-test",
-            "status": "computed",
+            "status": "degenerate_zero_variance",
             "minimum_replicates_per_group": 2,
             "t_statistic": None,
             "degrees_of_freedom": None,
-            "p_value": 1.0 if baseline_mean == candidate_mean else 0.0,
+            "p_value": None,
             "degenerate_zero_variance": True,
+            "note": "Both groups have zero within-group variance; a finite t statistic and inferential p-value are undefined.",
         }
     standard_error = math.sqrt(standard_error_squared)
     statistic = (candidate_mean - baseline_mean) / standard_error

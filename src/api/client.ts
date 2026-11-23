@@ -658,7 +658,7 @@ export type AxiomEngineServingProfile = {
   max_new_tokens: number;
   max_prompt_chars: number;
   max_concurrent_requests: 1;
-  max_queued_requests: 0;
+  max_queued_requests: number;
   request_timeout_seconds: number;
   created_at: string;
   updated_at: string;
@@ -1577,12 +1577,13 @@ export type EvaluationExperimentComparison = {
   };
   statistical_test: {
     method: string;
-    status: "computed" | "insufficient_replicates";
+    status: "computed" | "insufficient_replicates" | "degenerate_zero_variance";
     minimum_replicates_per_group: 2;
     t_statistic: number | null;
     degrees_of_freedom: number | null;
     p_value: number | null;
     degenerate_zero_variance?: boolean;
+    note?: string;
   };
   generated_at: string;
   scope_note: string;
@@ -3033,7 +3034,7 @@ export const axiomApi = {
     memory_mode: AxiomEngineServingProfile["memory_mode"];
     precision: AxiomEngineServingProfile["precision"];
     context_length: number; max_new_tokens: number; max_prompt_chars: number;
-    max_concurrent_requests: 1; max_queued_requests: 0; request_timeout_seconds: number;
+    max_concurrent_requests: 1; max_queued_requests: number; request_timeout_seconds: number;
   }) => requestJson<{ profile: AxiomEngineServingProfile; scope: { weights_loaded: false; service_started: false; network_used: false } }>(
     "/api/engine/serving-profiles", { method: "POST", body: JSON.stringify(input) },
   ),
