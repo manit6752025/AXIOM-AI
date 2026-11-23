@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import pytest
 
 from axiom.core.embeddings import split_text_into_chunks, validate_embedding_inputs

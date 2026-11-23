@@ -36,3 +36,35 @@ def test_rerank_input_validation_enforces_candidate_query_and_device_bounds():
         validate_rerank_inputs("query", ["one"], device="remote")
     with pytest.raises(ValueError, match="Device"):
         validate_rerank_inputs("query", ["one"], device=[])
+
+
+def test_reranker_executes_a_real_local_safetensors_checkpoint_on_cpu(tiny_local_transformer_checkpoints):
+    from axiom.core.reranking import rerank_local_documents, unload_local_reranker
+
+    checkpoint = tiny_local_transformer_checkpoints["reranker"]
+    documents = [
+        "AXIOM uses a local model for semantic document retrieval.",
+        "Sourdough bread uses flour, water and a starter culture.",
+    ]
+    try:
+        report = rerank_local_documents(
+            str(checkpoint),
+            "How does local model retrieval work?",
+            documents,
+            batch_size=2,
+            max_length=32,
+            device="cpu",
+        )
+        assert report["engine"] == "axiom-local-cross-encoder"
+        assert report["model"]["name"] == checkpoint.name
+        assert report["model"]["score_mode"] == "positive_class_softmax"
+        assert report["device"] == "cpu"
+        assert report["request"]["document_count"] == 2
+        assert [item["document_index"] for item in report["results"]] in ([1, 2], [2, 1])
+        assert [item["rank"] for item in report["results"]] == [1, 2]
+        assert all(0.0 <= item["score"] <= 1.0 for item in report["results"])
+        assert report["privacy"]["query_returned"] is False
+        assert report["privacy"]["documents_returned"] is False
+        assert report["privacy"]["network_used"] is False
+    finally:
+        unload_local_reranker()
