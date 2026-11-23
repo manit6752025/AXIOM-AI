@@ -199,7 +199,10 @@ test("Engine Fabric compares local engines and routes chat to the chosen service
   await expect(engineFabricPanel.getByText("VERIFIED THIS SESSION", { exact: true })).toBeVisible();
   await engineFabricPanel.getByRole("button", { name: "Disconnect", exact: true }).click();
   await expect(engineFabricPanel.getByText("NOT CONNECTED", { exact: true })).toBeVisible();
+  await expect(engineFabricPanel.getByLabel("Prompt")).toHaveValue("");
+  await expect(engineFabricPanel.getByLabel("Model ID")).toHaveValue("");
   await expect(page.locator("body")).toContainText("external runtime remains running");
+  await expect(page.locator("body")).toContainText("saved profile is retained for a later reconnect");
   await engineFabricPanel.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(savedProfileSelect).toHaveValue("");
   expect(workspaceProfile).toBeNull();

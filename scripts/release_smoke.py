@@ -401,11 +401,11 @@ def inspect(root: Path) -> dict[str, Any]:
     required = [
         "pyproject.toml", "axiom/version.py", "ROADMAP.md", "src/App.tsx",
         "src/api/client.ts", "src/components/ApiPlayground.tsx", "src/components/RuntimeConnectorPanel.tsx", "src/components/AgentProfiles.tsx", "src/components/LocalInferencePanel.tsx", "src/components/RuntimeTracePanel.tsx", "src/components/EngineTelemetryMonitor.tsx", "src/styles.css",
-        "axiom/api/server.py", "axiom/api/workspace.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/runtime_traces.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "scripts/release_smoke.py",
+        "axiom/api/server.py", "axiom/api/workspace.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/runtime_traces.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/core/engine_fabric_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "scripts/release_smoke.py",
         "tests/test_release_smoke.py", "tests/test_ollama_service.py", "tests/test_ollama_service_api.py", "tests/test_ollama_model_operations.py", "tests/test_cli_inference.py", "tests/test_axiom_engine.py", "tests/test_axiom_engine_api.py", "tests/test_axiom_engine_cli.py", "tests/test_native_engine.py", "e2e/axiom-engine.spec.ts", "e2e/helpers/auth.ts", "e2e/modules.spec.ts", "e2e/workflows.spec.ts", "e2e/evaluation.spec.ts",
         "e2e/model-registry-filters.spec.ts", "e2e/ollama-service.spec.ts", "e2e/inference-benchmark.spec.ts", "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/axiom-engine.spec.ts", "tests/test_workspace_model_registry_filters.py", "tests/test_workflow_store_pagination.py", "tests/test_workflow_api_pagination.py", "tests/test_workflow_cli.py",
-        "tests/test_model_compatibility.py", "tests/test_inference_benchmark.py", "tests/test_inference_benchmark_api.py", "tests/test_runtime_traces.py", "tests/test_runtime_traces_api.py", "tests/test_runtime_discovery.py", "tests/test_runtime_discovery_api.py", "tests/test_agent_profiles.py", "tests/test_agent_profiles_api.py", "tests/test_agent_profiles_cli.py", "e2e/api-playground.spec.ts", "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts",
-        "docs/Runtime-Discovery.md", "docs/Agent-Profiles.md", "docs/Api-Playground.md", "docs/Inference-Benchmarking.md", "docs/Local-Engine.md", ".github/workflows/quality-gates.yml", ".github/workflows/nightly-build.yml",
+        "tests/test_model_compatibility.py", "tests/test_inference_benchmark.py", "tests/test_inference_benchmark_api.py", "tests/test_runtime_traces.py", "tests/test_runtime_traces_api.py", "tests/test_runtime_discovery.py", "tests/test_runtime_discovery_api.py", "tests/test_agent_profiles.py", "tests/test_agent_profiles_api.py", "tests/test_agent_profiles_cli.py", "tests/test_engine_fabric_profiles.py", "tests/test_engine_fabric_profiles_api.py", "tests/test_engine_fabric_profiles_cli.py", "e2e/api-playground.spec.ts", "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts", "e2e/engine-fabric.spec.ts",
+        "docs/Runtime-Discovery.md", "docs/Agent-Profiles.md", "docs/Api-Playground.md", "docs/Inference-Benchmarking.md", "docs/Local-Engine.md", "docs/Engine-Fabric.md", ".github/workflows/quality-gates.yml", ".github/workflows/nightly-build.yml",
     ]
     for relative in required:
         if not (root / relative).is_file():
@@ -618,6 +618,28 @@ def inspect(root: Path) -> dict[str, Any]:
     if "runtime_discovery_router" not in server_source:
         failures.append("Runtime connector discovery router is not included in the API application.")
 
+    fabric_profiles_core = (root / "axiom/core/engine_fabric_profiles.py").read_text(encoding="utf-8")
+    fabric_profiles_api = (root / "axiom/api/engine.py").read_text(encoding="utf-8")
+    fabric_profiles_cli = (root / "axiom/cli/engine.py").read_text(encoding="utf-8")
+    fabric_profiles_ui = (root / "src/components/LocalEngineFabricPanel.tsx").read_text(encoding="utf-8")
+    fabric_profiles_client = (root / "src/api/client.ts").read_text(encoding="utf-8")
+    fabric_profiles_e2e = (root / "e2e/engine-fabric.spec.ts").read_text(encoding="utf-8")
+    fabric_profiles_docs = (root / "docs/Engine-Fabric.md").read_text(encoding="utf-8")
+    if not all(token in fabric_profiles_core for token in ("MAX_PROFILES = 25", "custom_endpoints_persisted", "credentials_persisted")):
+        failures.append("Engine Fabric workspace profile storage is missing its bounds or secret-exclusion contract.")
+    if not all(token in fabric_profiles_api for token in ('@router.get("/backends/profiles")', '@router.post("/backends/profiles", status_code=201)', '@router.delete("/backends/profiles/{profile_id}")', '@router.post("/backends/profiles/{profile_id}/connect")')):
+        failures.append("Engine Fabric profile CRUD and one-shot verification routes are incomplete.")
+    if not all(token in fabric_profiles_cli for token in ('@engine_profile_app.command("save")', '@engine_profile_app.command("list")', '@engine_profile_app.command("connect")', '@engine_profile_app.command("delete")')):
+        failures.append("Engine Fabric CLI profile commands are incomplete.")
+    if not all(token in fabric_profiles_client for token in ("engineBackendProfiles", "saveEngineBackendProfile", "deleteEngineBackendProfile", "connectEngineBackendProfile")):
+        failures.append("Engine Fabric profile API methods are incomplete in the typed client.")
+    if not all(token in fabric_profiles_ui for token in ("Saved local connector profiles", "Connect", "Disconnect", "API keys", "endpoint URLs")):
+        failures.append("Engine Fabric GUI profile lifecycle controls are incomplete.")
+    if not all(token in fabric_profiles_e2e for token in ("Saved Engine Fabric profile", "VERIFIED THIS SESSION", "NOT CONNECTED", "external runtime remains running")):
+        failures.append("Engine Fabric connector profile lifecycle is missing browser acceptance coverage.")
+    if "one-shot" not in fabric_profiles_docs or "does not stop" not in fabric_profiles_docs:
+        failures.append("Engine Fabric profile documentation must describe stateless connection and disconnect semantics.")
+
     try:
         package = json.loads((root / "package.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -631,7 +653,7 @@ def inspect(root: Path) -> dict[str, Any]:
     for relative in (
         "e2e/helpers/auth.ts", "e2e/modules.spec.ts", "e2e/workflows.spec.ts",
         "e2e/evaluation.spec.ts", "e2e/api-playground.spec.ts",
-        "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts",
+        "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts", "e2e/engine-fabric.spec.ts",
         "e2e/model-registry-filters.spec.ts", "e2e/inference-benchmark.spec.ts",
         "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/ollama-service.spec.ts", "e2e/settings-retention.spec.ts",
     ):

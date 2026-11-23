@@ -36,5 +36,5 @@ test("Runtime page displays passive connector discovery without claiming connect
   await expect(connectorsPanel.getByText("DISCOVERED", { exact: true })).toBeVisible();
   await expect(connectorsPanel.getByText("vLLM CLI", { exact: true })).toBeVisible();
   await expect(page.locator("body")).toContainText("does not start processes");
-  await expect(page.locator("body")).not.toContainText("CONNECTED");
+  await expect(connectorsPanel).not.toContainText("CONNECTED");
 });

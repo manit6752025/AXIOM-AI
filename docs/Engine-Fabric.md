@@ -35,11 +35,17 @@ The selected backend must respond on its fixed loopback endpoint before it can b
 ~~~bash
 axiom --no-banner engine backends --json
 axiom --no-banner engine backends --profile low-memory
+axiom --no-banner engine profile save "Office local" --backend llama-cpp --model local-model
+axiom --no-banner engine profile list
+axiom --no-banner engine profile connect PROFILE_ID
+axiom --no-banner engine profile delete PROFILE_ID --yes
 axiom --no-banner engine route-chat --backend llama-cpp --model local-model --prompt "Summarize this paragraph."
 ~~~
 
 - GET /api/engine/backends?profile=balanced returns the engine matrix and a recommendation.
 - POST /api/engine/backends/chat dispatches a bounded chat request to Ollama, llama.cpp, LM Studio, vLLM, or llama-cpp-python.
+- GET /api/engine/backends/profiles, POST /api/engine/backends/profiles, and DELETE /api/engine/backends/profiles/{id} manage up to 25 workspace-local connector profiles.
+- POST /api/engine/backends/profiles/{id}/connect performs a fresh loopback health and exact-model-inventory check; it does not retain a socket, send credentials, or launch a process.
 - AXIOM Native Engine continues to use GET /api/engine/status, GET /api/engine/models, POST /api/engine/generate, and POST /api/engine/generate/stream.
 
 Advanced sampling accepts top-p, top-k, repetition penalty, seed, and stop sequences. Min-p is also exposed as `--min-p` in route-chat, auto-chat and route-benchmark. It is supported by AXIOM Native Engine and Ollama; nonzero values are rejected for other adapters instead of being silently ignored. Auto-routing filters by sampler compatibility before its bounded candidate limit so a supported match remains eligible.
@@ -47,6 +53,12 @@ Advanced sampling accepts top-p, top-k, repetition penalty, seed, and stop seque
 ## Security boundaries
 
 External backends are selected by a stable ID, not by a user-supplied URL. Each adapter uses its documented local default endpoint on IPv4 loopback, bypasses environment proxies, limits request and response sizes, validates message roles and prompt/token bounds, and sends no provider credentials. AXIOM does not launch processes, pull models, contact cloud endpoints, or persist prompt/response content as part of engine discovery. Authentication-required endpoints are reported as such rather than receiving guessed credentials. If your local service uses another port or requires a key, configure it outside this feature and do not expose an unauthenticated local model API to an untrusted network.
+
+### Saved connector profiles and lifecycle
+
+The Control Center can save, apply, verify, disconnect and delete workspace-local Engine Fabric profiles. A profile contains only its display name, fixed backend ID and exact model ID. The store is capped at 25 profiles and 64 KiB, rejects unknown fields, and uses private workspace metadata permissions. It does not accept API keys, custom endpoint URLs, prompts, model files or conversation history. The same profiles are available through `axiom engine profile save/list/connect/delete` and the API routes listed above.
+
+**Connect** is a one-shot loopback health and exact model-inventory check. Engine Fabric HTTP adapters are stateless request clients, so AXIOM deliberately retains no socket or credential between calls. **Disconnect** clears the current prompt, model selection, generated result, benchmark samples and session verification while retaining the saved profile metadata for a later reconnect. It does not stop or unload the external service. Use the separate Ollama service controls when you explicitly want AXIOM to start or stop its own managed Ollama process.
 
 Benchmark claims must be backed by measured runs on the target hardware. Hardware fit estimates, service presence, or model catalogue metadata are not substitutes for measured quality, memory and throughput.
 
