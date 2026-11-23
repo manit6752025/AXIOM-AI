@@ -1871,7 +1871,7 @@ def inspect(root: Path) -> dict[str, Any]:
         prediction_resume_core_tests, prediction_resume_e2e, prediction_resume_docs,
         prediction_resume_sdk_python_client, prediction_resume_sdk_python_types,
         prediction_resume_sdk_python_exports, prediction_resume_sdk_typescript_client,
-        prediction_resume_sdk_types, prediction_resume_sdk_typescript_exports,
+        prediction_resume_sdk_typescript_types, prediction_resume_sdk_typescript_exports,
     ))
     for path in (
         "/api/health", "/api/meta", "/api/workspace/runtime",
