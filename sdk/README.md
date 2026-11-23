@@ -23,7 +23,8 @@ the AXIOM API contract v1.
   workspace and does not overwrite the active workspace.
 - Typed methods for metadata, health, workspace inventory, models, datasets,
   local runtime, engine status/telemetry, persistent telemetry history,
-  workspace knowledge bases and plugin-manifest inventory.
+  workspace knowledge bases, plugin-manifest inventory, and local prediction
+  job start/list/status/resume/cancel.
 
 The Python SDK uses the standard library. It provides both a bytes-returning
 backup convenience method and a chunked method that writes to a
@@ -76,3 +77,11 @@ The workflow does not run until a maintainer explicitly dispatches it, and
 registry credentials are never committed to the repository. The packages
 remain unpublished until the external PyPI/npm publisher configuration and
 release action are completed successfully.
+
+## Local prediction jobs
+
+Both SDKs expose typed prediction-job lifecycle methods. Explicit start and
+resume calls consume local compute; list/status calls return bounded metadata
+only. Resume revalidates the dataset fingerprint, model/adapter, generation
+settings, and checkpoint identity and digest on the server. A stale or damaged
+checkpoint is rejected instead of being published or silently restarted.
