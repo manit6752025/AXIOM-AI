@@ -118,6 +118,30 @@ def test_integration_list_json_returns_empty_or_registered_records(tmp_path: Pat
     assert payload["integrations"] == []
 
 
+def test_integration_trust_json_records_explicit_trust_and_unverified_owner_label(tmp_path: Path, monkeypatch) -> None:
+    from axiom.core.integrations import AgentIntegration, IntegrationRegistry, IntegrationType
+
+    monkeypatch.chdir(tmp_path)
+    IntegrationRegistry().add(
+        AgentIntegration("Local MCP", IntegrationType.MCP, command="python -m local.server")
+    )
+
+    result = runner.invoke(
+        app,
+        ["integration", "trust", "Local MCP", "trusted", "--owner-type", "workspace", "--owner-label", "Research Team", "--json"],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["trust_status"] == "trusted"
+    assert payload["owner_type"] == "workspace"
+    assert payload["owner_label"] == "Research Team"
+    assert payload["ownership_verified"] is False
+    saved = IntegrationRegistry().list()[0]
+    assert saved.trust_status == "trusted"
+    assert saved.owner_label == "Research Team"
+
+
 def test_integration_mcp_list_json_is_passive_and_redacts_command_arguments(tmp_path: Path, monkeypatch) -> None:
     from axiom.core.integrations import AgentIntegration, IntegrationRegistry, IntegrationType
 

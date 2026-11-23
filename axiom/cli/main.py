@@ -997,6 +997,46 @@ def supercompress_compress(
     )
 
 
+@integration_app.command("trust")
+def integration_trust(
+    name: str = typer.Argument(..., help="Registered MCP server name."),
+    trust_status: str = typer.Argument(..., help="Trust state: unverified, trusted, or blocked."),
+    owner_type: str = typer.Option("unknown", "--owner-type", help="Ownership category: unknown, workspace, or external."),
+    owner_label: str | None = typer.Option(None, "--owner-label", help="User-declared owner label; not identity verified."),
+    json_output: bool = typer.Option(False, "--json", help="Emit the saved trust record as JSON."),
+) -> None:
+    """Set explicit MCP server trust and user-declared ownership metadata."""
+    from axiom.core.integrations import IntegrationRegistry
+
+    try:
+        updated = IntegrationRegistry(create=False).update_mcp_trust(
+            name,
+            trust_status=trust_status,
+            owner_type=owner_type,
+            owner_label=owner_label,
+        )
+    except LookupError:
+        _cli_error(f"MCP server not found: {name}", code="mcp_server_not_found")
+    except (OSError, ValueError, TypeError) as exc:
+        _cli_error(str(exc), code="mcp_trust_update_failed")
+
+    result = {
+        "name": updated.name,
+        "trust_status": updated.trust_status,
+        "owner_type": updated.owner_type,
+        "owner_label": updated.owner_label,
+        "ownership_verified": False,
+    }
+    if json_output:
+        typer.echo(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    else:
+        console.print(
+            f"[green]Saved[/green] {updated.name}: trust={updated.trust_status}, "
+            f"owner={updated.owner_label or updated.owner_type} "
+            "(ownership is user-declared, not verified)."
+        )
+
+
 @integration_app.command("mcp-list")
 def integration_mcp_list(
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable MCP server inventory."),

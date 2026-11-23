@@ -16,6 +16,7 @@ def _add_server(command: str = 'python -u -m example.server --config "private pa
             type=IntegrationType.MCP,
             command=command,
             description="Test MCP process",
+            trust_status="trusted",
         )
     )
 
@@ -31,6 +32,7 @@ def test_mcp_inventory_api_routes_are_registered_with_expected_methods():
     assert routes["/api/mcp/servers"] == {"GET"}
     assert routes["/api/mcp/servers/{name}/handshake"] == {"POST"}
     assert routes["/api/mcp/servers/{name}/schemas"] == {"POST"}
+    assert routes["/api/mcp/servers/{name}/trust"] == {"PATCH"}
 
 
 def test_mcp_inventory_api_maps_missing_server_to_not_found(monkeypatch):
@@ -61,6 +63,139 @@ def test_mcp_schema_api_maps_unknown_server_to_not_found(monkeypatch):
     assert response.value.status_code == 404
 
 
+def test_legacy_integrations_default_to_unverified_and_trust_state_persists(tmp_path):
+    path = tmp_path / "integrations.json"
+    path.write_text(
+        '[{"name":"Old MCP","type":"mcp","command":"python -m legacy.server","url":null,"description":"legacy"}]\n',
+        encoding="utf-8",
+    )
+    registry = IntegrationRegistry(tmp_path, create=False)
+
+    legacy = registry.list()[0]
+    assert legacy.trust_status == "unverified"
+    assert legacy.owner_type == "unknown"
+    assert legacy.owner_label is None
+    assert legacy.connection_status == "not_inspected"
+    assert legacy.last_inspected_at is None
+
+    trusted = registry.update_mcp_trust(
+        "old mcp",
+        trust_status="trusted",
+        owner_type="workspace",
+        owner_label="Data Platform",
+    )
+    assert trusted.trust_status == "trusted"
+    assert trusted.owner_type == "workspace"
+    assert trusted.owner_label == "Data Platform"
+
+    connected = registry.record_mcp_connection(
+        "Old MCP",
+        connection_status="connected",
+    )
+    assert connected.connection_status == "connected"
+    assert connected.last_inspected_at
+
+    reloaded = IntegrationRegistry(tmp_path, create=False).list()[0]
+    assert reloaded.trust_status == "trusted"
+    assert reloaded.owner_label == "Data Platform"
+    assert reloaded.connection_status == "connected"
+    assert reloaded.last_inspected_at == connected.last_inspected_at
+
+
+def test_mcp_trust_metadata_rejects_invalid_state_and_owner_label(tmp_path):
+    registry = IntegrationRegistry(tmp_path)
+    registry.add(AgentIntegration("Local MCP", IntegrationType.MCP, command="python -m test"))
+
+    with pytest.raises(ValueError, match="Trust status"):
+        registry.update_mcp_trust("Local MCP", trust_status="auto-trust")
+    with pytest.raises(ValueError, match="Owner label"):
+        registry.update_mcp_trust("Local MCP", trust_status="trusted", owner_label="invalid\nowner")
+
+
+def test_unverified_and_blocked_servers_cannot_be_started_for_inspection(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    registry = IntegrationRegistry()
+    registry.add(AgentIntegration("Unverified MCP", IntegrationType.MCP, command="python -m untrusted"))
+    calls = {"client": 0}
+
+    def should_not_start(*_args, **_kwargs):
+        calls["client"] += 1
+        raise AssertionError("Untrusted process must never start")
+
+    monkeypatch.setattr(mcp_inventory, "Client", should_not_start)
+    monkeypatch.setattr(mcp_inventory, "stdio_client", should_not_start)
+
+    with pytest.raises(mcp_inventory.McpInventoryError) as unverified:
+        asyncio.run(mcp_inventory.inspect_mcp_server("Unverified MCP"))
+    assert unverified.value.code == "server_unverified"
+
+    registry.update_mcp_trust("Unverified MCP", trust_status="blocked")
+    with pytest.raises(mcp_inventory.McpInventoryError) as blocked:
+        asyncio.run(mcp_inventory.inspect_mcp_schemas("Unverified MCP"))
+    assert blocked.value.code == "server_blocked"
+    assert calls["client"] == 0
+
+
+def test_successful_handshake_persists_connection_state(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _add_server()
+
+    class FakeClient:
+        protocol_version = "2025-11-25"
+        server_info = SimpleNamespace(name="Connected MCP", version="1.0")
+        server_capabilities = SimpleNamespace(tools=None, resources=None)
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(mcp_inventory, "Client", FakeClient)
+    monkeypatch.setattr(mcp_inventory, "stdio_client", lambda *_args, **_kwargs: object())
+
+    result = asyncio.run(mcp_inventory.inspect_mcp_server("Local MCP"))
+    inventory = mcp_inventory.list_mcp_servers()["servers"][0]
+
+    assert result["status"] == "ok"
+    assert result["connection_state_persisted"] is True
+    assert inventory["connection_state"] == "connected"
+    assert inventory["last_inspected_at"]
+    assert inventory["last_connection_error"] is None
+
+
+def test_api_can_update_server_trust_and_owner_metadata(tmp_path, monkeypatch):
+    from axiom.api import mcp_inventory as api_module
+
+    monkeypatch.chdir(tmp_path)
+    IntegrationRegistry().add(AgentIntegration("Local MCP", IntegrationType.MCP, command="python -m local"))
+
+    result = api_module.update_mcp_server_trust(
+        "Local MCP",
+        api_module.McpServerTrustUpdate(
+            trust_status="trusted",
+            owner_type="external",
+            owner_label="Vendor Support",
+        ),
+    )
+
+    assert result == {
+        "name": "Local MCP",
+        "trust_status": "trusted",
+        "owner_type": "external",
+        "owner_label": "Vendor Support",
+        "ownership_verified": False,
+    }
+    record = mcp_inventory.list_mcp_servers()["servers"][0]
+    assert record["trust_status"] == "trusted"
+    assert record["owner_type"] == "external"
+    assert record["owner_label"] == "Vendor Support"
+    assert record["ownership_verified"] is False
+
+
 def test_inventory_is_passive_bounded_and_only_lists_mcp_servers(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     registry = IntegrationRegistry()
@@ -77,7 +212,13 @@ def test_inventory_is_passive_bounded_and_only_lists_mcp_servers(tmp_path, monke
         "configured": True,
         "executable": "python",
         "argument_count": 2,
+        "trust_status": "unverified",
+        "owner_type": "unknown",
+        "owner_label": None,
+        "ownership_verified": False,
         "connection_state": "not_inspected",
+        "last_inspected_at": None,
+        "last_connection_error": None,
     }]
     assert "starts the registered process" in result["inspection_note"]
     assert registry.path.exists()
@@ -254,6 +395,7 @@ def test_handshake_negotiates_with_real_mcp_stdio_server(tmp_path, monkeypatch):
             "Process Probe",
             IntegrationType.MCP,
             command=shlex.join([sys.executable, str(server_script)]),
+            trust_status="trusted",
         )
     )
 
@@ -514,6 +656,7 @@ def test_schema_browse_negotiates_real_stdio_tool_resource_and_template_metadata
             "Schema Probe",
             IntegrationType.MCP,
             command=shlex.join([sys.executable, str(server_script)]),
+            trust_status="trusted",
         )
     )
 

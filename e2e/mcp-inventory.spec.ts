@@ -19,7 +19,13 @@ test("MCP inventory stays passive until an explicit protocol handshake", async (
       configured: true,
       executable: "python",
       argument_count: 2,
+      trust_status: "trusted",
+      owner_type: "unknown",
+      owner_label: null,
+      ownership_verified: false,
       connection_state: "not_inspected",
+      last_inspected_at: null,
+      last_connection_error: null,
     }],
     inspection_note: "Inventory is passive.",
   } }));
