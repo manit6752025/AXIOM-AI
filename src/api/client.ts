@@ -1303,6 +1303,7 @@ export type McpSchemaInspection = {
   tools?: McpToolSchemaRecord[];
   resources?: McpResourceSchemaRecord[];
   resource_templates?: McpResourceTemplateSchemaRecord[];
+  resource_templates_supported?: boolean;
   truncated?: { tools: boolean; resources: boolean; resource_templates: boolean };
   duration_ms: number;
   tool_execution_performed: false;

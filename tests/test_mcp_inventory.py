@@ -47,6 +47,20 @@ def test_mcp_inventory_api_maps_missing_server_to_not_found(monkeypatch):
     assert response.value.status_code == 404
 
 
+def test_mcp_schema_api_maps_unknown_server_to_not_found(monkeypatch):
+    from fastapi import HTTPException
+    from axiom.api import mcp_inventory as api_module
+
+    async def missing(_name: str):
+        raise mcp_inventory.McpInventoryError("not found", code="not_found")
+
+    monkeypatch.setattr(mcp_inventory, "inspect_mcp_schemas", missing)
+    with pytest.raises(HTTPException) as response:
+        asyncio.run(api_module.inspect_mcp_server_schemas("missing"))
+
+    assert response.value.status_code == 404
+
+
 def test_inventory_is_passive_bounded_and_only_lists_mcp_servers(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     registry = IntegrationRegistry()
@@ -383,7 +397,6 @@ def test_schema_browse_respects_capability_flags_and_marks_pagination_truncation
 
     monkeypatch.setattr(mcp_inventory, "Client", FakeClient)
     monkeypatch.setattr(mcp_inventory, "stdio_client", lambda *_args, **_kwargs: object())
-    old_pages = mcp_inventory.MAX_SCHEMA_PAGES
     monkeypatch.setattr(mcp_inventory, "MAX_SCHEMA_PAGES", 2)
 
     result = asyncio.run(mcp_inventory.inspect_mcp_schemas("Local MCP"))
@@ -394,6 +407,49 @@ def test_schema_browse_respects_capability_flags_and_marks_pagination_truncation
     assert result["resources"] == []
     assert result["truncated"]["tools"] is True
     assert result["truncated"]["resources"] is False
+
+
+def test_schema_browse_tolerates_optional_resource_templates_method_failure(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _add_server()
+
+    class FakeClient:
+        protocol_version = "2025-11-25"
+        server_info = None
+        server_capabilities = SimpleNamespace(tools=object(), resources=object())
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def list_tools(self, *, cursor=None):
+            return SimpleNamespace(tools=[SimpleNamespace(
+                name="lookup", input_schema={"type": "object"},
+            )], next_cursor=None)
+
+        async def list_resources(self, *, cursor=None):
+            return SimpleNamespace(resources=[SimpleNamespace(
+                name="Catalog", uri="catalog://items",
+            )], next_cursor=None)
+
+        async def list_resource_templates(self, *, cursor=None):
+            raise RuntimeError("Method not found")
+
+    monkeypatch.setattr(mcp_inventory, "Client", FakeClient)
+    monkeypatch.setattr(mcp_inventory, "stdio_client", lambda *_args, **_kwargs: object())
+
+    result = asyncio.run(mcp_inventory.inspect_mcp_schemas("Local MCP"))
+
+    assert result["status"] == "ok"
+    assert [tool["name"] for tool in result["tools"]] == ["lookup"]
+    assert [resource["name"] for resource in result["resources"]] == ["Catalog"]
+    assert result["resource_templates"] == []
+    assert result["resource_templates_supported"] is False
 
 
 def test_schema_inspection_timeout_returns_no_child_output(tmp_path, monkeypatch):
@@ -407,6 +463,9 @@ def test_schema_inspection_timeout_returns_no_child_output(tmp_path, monkeypatch
         async def __aenter__(self):
             await asyncio.sleep(2)
 
+        async def __aexit__(self, *_args):
+            return None
+
     monkeypatch.setattr(mcp_inventory, "Client", SlowClient)
     monkeypatch.setattr(mcp_inventory, "stdio_client", lambda *_args, **_kwargs: object())
 
@@ -416,6 +475,62 @@ def test_schema_inspection_timeout_returns_no_child_output(tmp_path, monkeypatch
     assert result["tool_execution_performed"] is False
     assert result["resource_read_performed"] is False
     assert "private path.json" not in str(result)
+
+
+
+def test_schema_browse_negotiates_real_stdio_tool_resource_and_template_metadata(tmp_path, monkeypatch):
+    import shlex
+    import sys
+
+    monkeypatch.chdir(tmp_path)
+    server_script = tmp_path / "schema_probe.py"
+    marker = tmp_path / "capability-executed.txt"
+    server_script.write_text(
+        "from pathlib import Path\n"
+        "from mcp.server import MCPServer\n"
+        "server = MCPServer('AXIOM Schema Probe')\n"
+        f"marker = Path({str(marker)!r})\n"
+        "@server.tool()\n"
+        "def search_catalog(query: str) -> dict:\n"
+        "    'Search the catalog by name.'\n"
+        "    marker.write_text('tool executed', encoding='utf-8')\n"
+        "    return {'matches': []}\n"
+        "@server.resource('catalog://items')\n"
+        "def catalog_items() -> str:\n"
+        "    'The catalog item index.'\n"
+        "    marker.write_text('resource read', encoding='utf-8')\n"
+        "    return 'item index'\n"
+        "@server.resource('catalog://items/{item_id}')\n"
+        "def catalog_item(item_id: str) -> str:\n"
+        "    'A catalog item.'\n"
+        "    marker.write_text('resource template read', encoding='utf-8')\n"
+        "    return item_id\n"
+        "if __name__ == '__main__':\n"
+        "    server.run()\n",
+        encoding="utf-8",
+    )
+    IntegrationRegistry().add(
+        AgentIntegration(
+            "Schema Probe",
+            IntegrationType.MCP,
+            command=shlex.join([sys.executable, str(server_script)]),
+        )
+    )
+
+    result = asyncio.run(
+        mcp_inventory.inspect_mcp_schemas("Schema Probe", timeout_seconds=12)
+    )
+
+    assert result["status"] == "ok", result
+    assert result["server_name"] == "AXIOM Schema Probe"
+    assert [tool["name"] for tool in result["tools"]] == ["search_catalog"]
+    assert result["tools"][0]["input_schema"]["properties"]["query"]["type"] == "string"
+    assert [resource["name"] for resource in result["resources"]] == ["catalog_items"]
+    assert [template["name"] for template in result["resource_templates"]] == ["catalog_item"]
+    assert result["tool_execution_performed"] is False
+    assert result["resource_read_performed"] is False
+    assert result["prompt_execution_performed"] is False
+    assert not marker.exists(), "Schema browsing must not execute tool or resource handlers"
 
 
 def test_handshake_rejects_unknown_server_and_invalid_timeout(tmp_path, monkeypatch):

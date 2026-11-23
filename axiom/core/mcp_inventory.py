@@ -10,8 +10,8 @@ import asyncio
 import os
 import shlex
 import time
-from pathlib import Path
 from itertools import islice
+from pathlib import Path
 from typing import Any
 
 from mcp import Client, StdioServerParameters
@@ -330,7 +330,7 @@ def _safe_resource_uri(value: object) -> str | None:
             return "[REDACTED URI]"
         port = f":{parsed_port}" if parsed_port is not None else ""
         return f"{scheme}://{host}{port}/…"
-    return f"{scheme}:…" 
+    return f"{scheme}:…"
 
 
 async def _collect_schema_pages(client: Any, method_name: str, collection_name: str) -> tuple[list[Any], bool]:
@@ -414,6 +414,7 @@ async def _perform_schema_browse(parts: list[str]) -> dict[str, Any]:
             tool_records: list[dict[str, Any]] = []
             resource_records: list[dict[str, Any]] = []
             template_records: list[dict[str, Any]] = []
+            resource_templates_supported = False
             truncation = {"tools": False, "resources": False, "resource_templates": False}
 
             if supports_tools:
@@ -428,9 +429,16 @@ async def _perform_schema_browse(parts: list[str]) -> dict[str, Any]:
                 resource_records = [_resource_schema_record(resource) for resource in resources]
                 list_templates = getattr(client, "list_resource_templates", None)
                 if callable(list_templates):
-                    templates, truncation["resource_templates"] = await _collect_schema_pages(
-                        client, "list_resource_templates", "resourceTemplates"
-                    )
+                    try:
+                        templates, truncation["resource_templates"] = await _collect_schema_pages(
+                            client, "list_resource_templates", "resourceTemplates"
+                        )
+                    except Exception:
+                        # Resource templates are an optional MCP listing. A server
+                        # may expose resources while omitting this method.
+                        templates = []
+                    else:
+                        resource_templates_supported = True
                     template_records = [_resource_template_record(item) for item in templates]
 
             server_info = getattr(client, "server_info", None)
@@ -441,6 +449,7 @@ async def _perform_schema_browse(parts: list[str]) -> dict[str, Any]:
                 "server_version": _safe_text(getattr(server_info, "version", None)),
                 "tools_supported": supports_tools,
                 "resources_supported": supports_resources,
+                "resource_templates_supported": resource_templates_supported,
                 "tools": tool_records,
                 "resources": resource_records,
                 "resource_templates": template_records,
