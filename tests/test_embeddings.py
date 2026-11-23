@@ -38,3 +38,32 @@ def test_embedding_input_validation_enforces_bounds():
         validate_embedding_inputs(["x"], device=[])
     with pytest.raises(ValueError, match="normalization"):
         validate_embedding_inputs(["x"], normalize="yes")
+
+
+def test_embeddings_execute_a_real_local_safetensors_checkpoint_on_cpu(tiny_local_transformer_checkpoints):
+    from axiom.core.embeddings import embed_local_texts, unload_local_embeddings
+
+    checkpoint = tiny_local_transformer_checkpoints["embedding"]
+    try:
+        report = embed_local_texts(
+            str(checkpoint),
+            ["AXIOM local runtime embeddings preserve semantic document vectors."],
+            batch_size=1,
+            max_length=32,
+            device="cpu",
+            normalize=True,
+        )
+        assert report["engine"] == "axiom-local-embeddings"
+        assert report["model"]["name"] == checkpoint.name
+        assert report["model"]["dimension"] == 16
+        assert report["device"] == "cpu"
+        assert report["request"]["input_count"] == 1
+        assert len(report["embeddings"]) == 1
+        vector = report["embeddings"][0]
+        assert len(vector) == 16
+        assert all(isinstance(value, float) and math.isfinite(value) for value in vector)
+        assert sum(value * value for value in vector) == pytest.approx(1.0, abs=1e-5)
+        assert report["privacy"]["source_text_persisted"] is False
+        assert report["privacy"]["network_used"] is False
+    finally:
+        unload_local_embeddings()
