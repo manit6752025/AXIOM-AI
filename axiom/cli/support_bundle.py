@@ -37,9 +37,12 @@ def register(app: typer.Typer) -> None:
             emit_error("Output path must be a regular file.", code="support_bundle_not_file", exit_code=EXIT_CODE_USAGE)
         if destination.exists() and not force:
             emit_error("Output file already exists; pass --force to replace it.", code="support_bundle_exists", exit_code=EXIT_CODE_USAGE)
-        parent = destination.parent
-        if parent.is_symlink() or not parent.is_dir():
-            emit_error("Output parent must be an existing, non-symlink directory.", code="support_bundle_invalid_parent", exit_code=EXIT_CODE_USAGE)
+        parent = destination.parent.absolute()
+        if any(candidate.is_symlink() for candidate in (parent, *parent.parents)):
+            emit_error("Output path must not traverse a symbolic-link parent.", code="support_bundle_invalid_parent", exit_code=EXIT_CODE_USAGE)
+        if not parent.is_dir():
+            emit_error("Output parent must be an existing directory.", code="support_bundle_invalid_parent", exit_code=EXIT_CODE_USAGE)
+        destination = parent / destination.name
         try:
             archive = create_support_bundle(workspace)
             flags = os.O_WRONLY | os.O_CREAT

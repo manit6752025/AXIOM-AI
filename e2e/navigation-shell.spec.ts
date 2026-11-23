@@ -45,3 +45,39 @@ test("Control Center remains compact and usable from 320px phones through tablet
   await expect(navigation).not.toHaveClass(/is-open/);
   await expect(page.locator(".topbar-context")).toContainText("Models");
 });
+
+
+test("an open Control Center tab reloads the rebuilt UI without clearing browser state", async ({ page }) => {
+  let fingerprint = "build-before";
+  await page.route("**/api/ui/build", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    headers: { "Cache-Control": "no-store" },
+    body: JSON.stringify({ fingerprint }),
+  }));
+  await ensureAuthenticated(page);
+  await page.evaluate(() => {
+    localStorage.setItem("axiom-refresh-test-local", "keep-local");
+    sessionStorage.setItem("axiom-refresh-test-session", "keep-session");
+  });
+
+  const originalOrigin = await page.evaluate(() => location.origin);
+  const reload = page.waitForEvent("framenavigated", {
+    predicate: (frame) => frame === page.mainFrame(),
+    timeout: 10_000,
+  });
+  fingerprint = "build-after";
+  await reload;
+  await page.waitForLoadState("domcontentloaded");
+
+  await expect.poll(() => page.evaluate(() => ({
+    origin: location.origin,
+    local: localStorage.getItem("axiom-refresh-test-local"),
+    session: sessionStorage.getItem("axiom-refresh-test-session"),
+  }))).toEqual({
+    origin: originalOrigin,
+    local: "keep-local",
+    session: "keep-session",
+  });
+  await expect(page.getByLabel("Primary navigation")).toBeVisible();
+});

@@ -154,3 +154,15 @@ def test_website_uses_the_saturn_mark_for_favicon_and_brand_logo():
     assert "<ellipse" in mark
     assert "<path" in mark
     assert 'fill="#171310"' in mark
+
+
+def test_control_center_bundle_is_staged_and_atomically_swapped():
+    copier = (ROOT / "scripts/copy_webui.mjs").read_text(encoding="utf-8")
+    assert "const staging =" in copier
+    assert "const backup =" in copier
+    assert "await cp(join(source, entry), join(staging, entry)" in copier
+    assert 'await access(join(staging, "index.html"))' in copier
+    assert "await rename(staging, target)" in copier
+    assert "await rename(backup, target)" in copier
+    assert "activated = true" in copier
+

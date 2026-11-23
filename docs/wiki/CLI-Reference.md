@@ -71,9 +71,20 @@ control. The API remains bounded by its route schemas and permission policy.
 
 ## Update and GUI refresh
 
-`axiom update --check` inspects the beta channel without installing. Use `--channel stable` to exclude prereleases, or `axiom update --auto` to fetch and install the exact newer release. The updater verifies the PyPI wheel digest and AXIOM package/version metadata before invoking pip in the active Python environment. It does not operate on model directories, workspaces, account databases, configuration or browser storage. Restart AXIOM after installation.
+`axiom update --check` inspects the beta channel without installing. Use
+`--channel stable` to exclude prereleases, or `axiom update --auto` to fetch
+and install the exact newer release. The updater verifies the PyPI wheel digest
+and AXIOM package/version metadata before invoking pip in the active Python
+environment. It does not operate on model directories, workspaces, account
+databases, configuration or browser storage. Restart AXIOM after installation.
 
-`axiom gui --refresh` is a source-checkout workflow: it runs frontend lint and production build, then opens a cache-busted Control Center URL on the same origin. It may reuse an already-running local GUI server and never clears localStorage/sessionStorage. Install the source checkout once with `python -m pip install -e .` to expose the `axiom` console command in the active environment.
+`axiom gui --refresh` is a source-checkout workflow: it runs frontend lint and
+production build. Existing tabs detect the new bundle through a no-cache
+fingerprint endpoint and reload in place on the same origin. The app shell is
+revalidated while hashed assets remain cacheable; localStorage and
+sessionStorage (including the current tab session) remain intact. A running API
+is reused without a duplicate process or tab. Install the source checkout once
+with `python -m pip install -e .` to expose the `axiom` console command.
 
 ## Security commands
 

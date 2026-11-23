@@ -106,7 +106,7 @@ feature exists or a delivery-date promise.
 - [R075 · Implemented; tests passing] Persist exact plan snapshots across API, GUI, and CLI; reject stale GUI snapshots.
 - [R076 · Implemented; tests passing] Add experiment search, exact-tag filters, pagination, and deletion controls.
 - [R077 · Implemented; tests passing] Add evaluation dataset selection and split provenance.
-- [R078 · In progress] Add versioned benchmark-adapter contracts declaring runtime readiness evidence, exact model-inventory requirements, supported formats, request/sampling capabilities and bounded workload limits; enforce a generation-free API/CLI/Runtime UI preflight before every benchmark.
+- [R078 · Implemented; tests passing] Add versioned benchmark-adapter contracts declaring runtime readiness evidence, exact model-inventory requirements, supported formats, request/sampling capabilities and bounded workload limits; enforce a generation-free API/CLI/Runtime UI preflight before every benchmark. Verified with 950 Python tests, 61 Playwright browser tests, ESLint, TypeScript/production build, and Ubuntu/Windows/macOS release-contract checks (quality-gates run #44705243533).
 - [R079 · Implemented; tests passing] Add documented exact-match and micro token-overlap metrics for precomputed text outputs.
 - [R080 · Implemented; tests passing] Add immutable baseline creation, selection, and comparison.
 - [R081 · Implemented; tests passing] Add configurable score-drop thresholds and regression gates.
@@ -153,7 +153,7 @@ feature exists or a delivery-date promise.
 - [R113 · Planned] Add benchmark-linked resource trend charts with missing-data labels.
 - [R114 · Planned] Add telemetry export, clear-history, and privacy controls.
 - [R115 · In progress; validation pending] Add diagnostic checks for config parsing and permissions, safe paths, dependency importability and minimum versions, and storage free space.
-- [R116 · In progress; validation pending] Deliver allowlisted redacted support bundles through the API, Diagnostics GUI, and CLI; exclude secrets, environment values, data/model contents, and absolute workspace paths, and write CLI archives with private POSIX permissions.
+- [R116 · Implemented; tests passing; code-scan review pending] Deliver allowlisted redacted support bundles through the API, Diagnostics GUI, and CLI; exclude secrets, environment values, data/model contents, and absolute workspace paths; reject symlinked output/parent paths and write CLI archives with private POSIX permissions. Verified with 954 Python tests, 62 browser E2E tests, ESLint, TypeScript/production build, and Ubuntu/Windows/macOS release-contract checks (quality-gates run #44706792876). GitHub-managed default CodeQL alerts still require repository-owner review.
 - [R117 · Implemented; tests passing] Add release smoke checks for CLI, API, production UI build, and browser acceptance coverage together.
 - [R118 · Planned] Add cross-platform packaging verification for supported targets.
 - [R119 · Planned] Add migration/rollback notes for every persisted-data schema change.

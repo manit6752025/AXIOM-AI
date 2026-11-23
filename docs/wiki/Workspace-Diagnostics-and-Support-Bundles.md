@@ -12,7 +12,7 @@ AXIOM's CLI and Control Center share read-only workspace checks intended to iden
     axiom support-bundle --output ./axiom-support-bundle.zip
     axiom support-bundle --output ./axiom-support-bundle.zip --force --json
 
-Use `--force` only when intentionally replacing an existing output file. Without it, the CLI refuses to overwrite; output symlinks are rejected.
+Use `--force` only when intentionally replacing an existing output file. Without it, the CLI refuses to overwrite; output symlinks and symlinked parent directories are rejected.
 
 ## Checks
 
@@ -31,3 +31,14 @@ The documented ZIP contains `diagnostics.json`, `environment.json`, and a static
 **Inspect the archive before sharing it.** Data minimization is not a guarantee of anonymity. Do not include secrets, private rows, proprietary weights, or unredacted logs in an issue.
 
 Related: [Troubleshooting](Troubleshooting), [Local API and Security](Local-API-and-Security).
+
+
+## Automated code scanning
+
+GitHub reports that this repository already has CodeQL **default setup** enabled.
+Use the GitHub-managed default scan and review its Code scanning alerts in the
+repository Security tab. Do not add an advanced CodeQL workflow alongside that
+setup: GitHub rejects SARIF uploads from advanced workflows while default setup
+is enabled. This is source-code analysis, not a CVE database or runtime malware
+scan; inspect and triage the GitHub alerts separately from local package-integrity
+checks.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import logging
+import hashlib
 import re
 import uuid
 import hmac
@@ -35,6 +36,7 @@ _API_SCOPE_TOKEN = re.compile(r"^[A-Za-z0-9._~-]{32,256}$")
 _API_SCOPE_PUBLIC_PATHS = frozenset({
     "/api/health",
     "/api/meta",
+    "/api/ui/build",
     "/api/openapi.json",
     "/api/docs",
     "/api/redoc",
@@ -216,6 +218,9 @@ def create_app() -> Any:
             response = await call_next(request)
             response.headers["X-Request-ID"] = request_id
             response.headers["X-AXIOM-Workspace-ID"] = selected_workspace.id
+            if path in {"/ui", "/ui/"}:
+                # Revalidate the app shell while hashed JS/CSS assets remain cacheable.
+                response.headers["Cache-Control"] = "no-cache, max-age=0"
             return response
         finally:
             if workspace_token is not None:
@@ -307,6 +312,19 @@ def create_app() -> Any:
             "openapi_url": "/api/openapi.json",
             "compatibility_policy": "Additive changes stay in v1; breaking changes require a parallel /api/v2 contract.",
         }
+
+    @app.get("/api/ui/build")
+    def ui_build_metadata() -> Any:
+        """Expose a cache-free fingerprint so open Control Center tabs can self-refresh."""
+        index_path = Path(__file__).resolve().parent.parent / "webui" / "index.html"
+        try:
+            fingerprint = hashlib.sha256(index_path.read_bytes()).hexdigest()
+        except OSError:
+            raise HTTPException(status_code=503, detail="The bundled Control Center is not available.") from None
+        return JSONResponse(
+            {"fingerprint": fingerprint},
+            headers={"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache"},
+        )
 
     @app.post("/api/models/optimize")
     def optimize(req: OptimizeRequest) -> dict[str, Any]:

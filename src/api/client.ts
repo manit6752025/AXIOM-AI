@@ -1603,6 +1603,7 @@ async function streamAxiomEngineRequest(
 
 export const axiomApi = {
   health: () => requestJson<{ status: string; version: string }>("/api/health"),
+  uiBuildFingerprint: () => requestJson<{ fingerprint: string }>("/api/ui/build", { cache: "no-store" }),
 
   models: async () => {
     const result = await axiomApi.modelsPage();
