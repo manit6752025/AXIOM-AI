@@ -432,6 +432,44 @@ export type AxiomEngineSystemTelemetry = {
   privacy_scope: { prompt_content_included: false; generated_content_included: false; model_paths_included: false; environment_values_included: false; credentials_included: false; network_access_performed: false };
   scope_note: string;
 };
+
+export type AxiomEngineResourceTelemetryMetrics = {
+  sampled_at: string;
+  sample_type: "point_in_time";
+  cpu: AxiomEngineSystemTelemetry["cpu"];
+  memory: AxiomEngineSystemTelemetry["memory"];
+  process: Omit<AxiomEngineSystemTelemetry["process"], "pid">;
+  devices: Array<Pick<AxiomEngineSystemTelemetry["devices"][number], "available" | "memory_free_gib" | "memory_total_gib">>;
+  loaded_runtime: {
+    loaded: boolean;
+    device: string | null;
+    memory_mode: AxiomEngineSystemTelemetry["loaded_runtime"]["memory_mode"];
+    precision: string | null;
+    device_allocator: AxiomEngineDeviceMemory | null;
+  };
+};
+export type AxiomEngineResourceTelemetryRecord = {
+  id: string;
+  sampled_at: string;
+  fingerprint: string;
+  metrics: AxiomEngineResourceTelemetryMetrics;
+};
+export type AxiomEngineResourceTelemetryHistory = {
+  schema_version: 1;
+  settings: { enabled: boolean; max_samples: number; max_age_days: number };
+  total: number;
+  samples: AxiomEngineResourceTelemetryRecord[];
+  privacy: {
+    process_ids_included: false;
+    model_names_or_paths_included: false;
+    prompt_or_generated_content_included: false;
+    environment_values_included: false;
+    credentials_included: false;
+    network_identifiers_included: false;
+    automatic_sampling: false;
+  };
+};
+
 export type AxiomEngineStatus = {
   engine: string; ready: boolean; packages: Record<string, boolean>; versions: Record<string, string | null>;
   minimum_versions?: Record<string, string>; problems?: string[];
@@ -2462,6 +2500,18 @@ export const axiomApi = {
   engineBackendBenchmark: (input: { backend_id: EngineFabricChatResult["backend_id"]; model: string; prompt: string; max_new_tokens: number; warmup_runs: number; iterations: number; temperature: number; top_p: number; top_k: number; min_p: number; repetition_penalty: number; seed: number | null; stop_sequences: string[] }) =>
     requestJson<EngineFabricBenchmarkResult>("/api/engine/backends/benchmark", { method: "POST", body: JSON.stringify(input) }, 300_000),
   axiomEngineTelemetry: () => requestJson<AxiomEngineSystemTelemetry>("/api/engine/telemetry"),
+  axiomEngineTelemetryHistory: (limit = 500) =>
+    requestJson<AxiomEngineResourceTelemetryHistory>(`/api/engine/telemetry-history?limit=${limit}`),
+  configureAxiomEngineTelemetryHistory: (input: { enabled: boolean; max_samples: number; max_age_days: number }) =>
+    requestJson<AxiomEngineResourceTelemetryHistory>("/api/engine/telemetry-history/settings", {
+      method: "PUT", body: JSON.stringify(input),
+    }),
+  recordAxiomEngineTelemetryHistory: () =>
+    requestJson<{ sample: AxiomEngineResourceTelemetryRecord; history: AxiomEngineResourceTelemetryHistory }>(
+      "/api/engine/telemetry-history", { method: "POST" },
+    ),
+  clearAxiomEngineTelemetryHistory: () =>
+    requestJson<AxiomEngineResourceTelemetryHistory>("/api/engine/telemetry-history", { method: "DELETE" }),
   axiomEngineModels: () => requestJson<AxiomEngineAssets>("/api/engine/models"),
   checkAxiomEngineAdapterCompatibility: (input: { model_path: string; adapter_path: string }) =>
     requestJson<AxiomEngineAdapterCompatibility>("/api/engine/adapters/compatibility", {

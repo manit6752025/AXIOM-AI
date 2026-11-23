@@ -3,12 +3,63 @@ import { ensureAuthenticated } from "./helpers/auth";
 
 test("Runtime resource monitoring is opt-in, bounded, exportable, and clearable", async ({ page }) => {
   let telemetryCalls = 0;
+  let historySettings = { enabled: false, max_samples: 120, max_age_days: 30 };
+  const persistedHistoryRecords: Array<Record<string, unknown>> = [];
+  let historySequence = 0;
+  const historyReport = () => ({
+    schema_version: 1,
+    settings: historySettings,
+    total: persistedHistoryRecords.length,
+    samples: [...persistedHistoryRecords],
+    privacy: {
+      process_ids_included: false,
+      model_names_or_paths_included: false,
+      prompt_or_generated_content_included: false,
+      environment_values_included: false,
+      credentials_included: false,
+      network_identifiers_included: false,
+      automatic_sampling: false,
+    },
+  });
 
   await page.route((url) => url.pathname.startsWith("/api/"), async (route) => {
     const request = route.request();
     const url = new URL(request.url());
 
-    if (url.pathname === "/api/workspace/runtime") {
+    if (url.pathname === "/api/engine/telemetry-history" && request.method() === "GET") {
+      await route.fulfill({ json: historyReport() });
+    } else if (url.pathname === "/api/engine/telemetry-history/settings" && request.method() === "PUT") {
+      const settings = request.postDataJSON() as typeof historySettings;
+      historySettings = { ...settings };
+      await route.fulfill({ json: historyReport() });
+    } else if (url.pathname === "/api/engine/telemetry-history" && request.method() === "POST") {
+      if (!historySettings.enabled) {
+        await route.fulfill({ status: 409, json: { detail: "Persistent resource history is disabled." } });
+      } else {
+        historySequence += 1;
+        const sampled_at = `2026-11-21T00:00:${String(historySequence).padStart(2, "0")}+00:00`;
+        const metrics = {
+          sampled_at,
+          sample_type: "point_in_time",
+          cpu: { logical_cores: 8, system_percent: 17.5, process_percent: 2.5 },
+          memory: { total_bytes: 16 * 1024 ** 3, available_bytes: 8 * 1024 ** 3, used_bytes: 8 * 1024 ** 3, percent: 50 },
+          process: { rss_bytes: 128 * 1024 ** 2, peak_rss_bytes: 256 * 1024 ** 2, threads: 4 },
+          devices: [],
+          loaded_runtime: { loaded: false, device: null, memory_mode: null, precision: null, device_allocator: null },
+        };
+        const sample = {
+          id: String(historySequence).padStart(32, "0"),
+          sampled_at,
+          fingerprint: "a".repeat(64),
+          metrics,
+        };
+        persistedHistoryRecords.push(sample);
+        await route.fulfill({ status: 201, json: { sample, history: historyReport() } });
+      }
+    } else if (url.pathname === "/api/engine/telemetry-history" && request.method() === "DELETE") {
+      persistedHistoryRecords.splice(0, persistedHistoryRecords.length);
+      await route.fulfill({ json: historyReport() });
+    } else if (url.pathname === "/api/workspace/runtime") {
       await route.fulfill({ json: { status: "ready", hardware: {
         os_name: "Linux", architecture: "x86_64", cpu_cores: 8, ram_gb: 16,
         gpu_name: null, vram_gb: null, cuda_available: false,
@@ -121,4 +172,32 @@ test("Runtime resource monitoring is opt-in, bounded, exportable, and clearable"
   await expect(monitor.getByText("No resource samples collected")).toBeVisible();
   await expect(monitor.getByRole("button", { name: "Export JSON" })).toBeDisabled();
   expect(telemetryCalls).toBeGreaterThanOrEqual(2);
+
+  await monitor.getByLabel("Persist resource history in workspace").check();
+  await monitor.getByLabel("Persistent history sample limit").selectOption("250");
+  await monitor.getByLabel("Persistent history retention days").selectOption("90");
+  await monitor.getByRole("button", { name: "Save persistent history settings" }).click();
+  await expect(page.getByText("Persistent resource history is enabled for this workspace.")).toBeVisible();
+  expect(historySettings).toEqual({ enabled: true, max_samples: 250, max_age_days: 90 });
+
+  await monitor.getByRole("button", { name: "Start monitoring" }).click();
+  await expect.poll(() => persistedHistoryRecords.length, { timeout: 10_000 }).toBeGreaterThan(0);
+  await monitor.getByRole("button", { name: "Stop monitoring" }).click();
+
+  const persistentDownloadPromise = page.waitForEvent("download");
+  await monitor.getByRole("button", { name: "Export JSON" }).click();
+  const persistentDownload = await persistentDownloadPromise;
+  const persistentPath = await persistentDownload.path();
+  expect(persistentPath).not.toBeNull();
+  const persistentPayload = JSON.parse(await (await import("node:fs/promises")).readFile(persistentPath as string, "utf8"));
+  expect(persistentPayload.retention.mode).toBe("workspace-persistent");
+  expect(persistentPayload.retention.max_age_days).toBe(90);
+  expect(persistentPayload.samples[0].id).toBeTruthy();
+  expect(persistentPayload.privacy.process_ids_included).toBe(false);
+  expect(JSON.stringify(persistentPayload)).not.toContain('"pid"');
+
+  await monitor.getByRole("button", { name: "Clear history" }).click();
+  await expect(monitor.getByText("No resource samples collected")).toBeVisible();
+  expect(persistedHistoryRecords).toHaveLength(0);
+  expect(historySettings.enabled).toBe(true);
 });

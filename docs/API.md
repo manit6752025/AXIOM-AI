@@ -229,7 +229,7 @@ The store rejects symlinks, future/malformed schemas, unknown fields and oversiz
 
 `GET /api/engine/telemetry` returns the current local system/process resource snapshot, available accelerator memory/allocator counters, loaded-engine state and free/total capacity for trusted model-storage roots. Root labels are returned; absolute paths are not. The response contains no prompt text, generated output, model paths, environment values or credentials.
 
-The Runtime panel exposes this snapshot and the resource monitor. Monitoring is off until the user starts it, keeps at most 120 samples in browser memory, and ends when stopped or when the page is left. JSON export and clear operate on this browser-local history only; no server-side time-series store is created by this endpoint.
+The Runtime panel exposes this snapshot and the resource monitor. Sampling is off until the user explicitly starts it and ends when stopped or when the page is left. With persistent workspace history disabled (the default), the browser keeps at most 120 samples in tab memory. An operator may opt in to workspace persistence; allowlisted history is then retained in `.axiom/resource-telemetry.json`, bounded by a configurable sample count (1–500) and age (1–3,650 days). The store excludes process IDs, device/model names, model paths, generation details, prompts, outputs, environment values, credentials and network identifiers. JSON/CSV export and clear remain explicit user actions.
 
 The CLI `axiom engine telemetry --json` returns a point-in-time JSON sample. `--watch` explicitly opts into a bounded sample run (`--interval-seconds 0.5..60`, `--samples 1..300`) and may write JSONL to a new `--output` path; existing files are never overwritten. Output files must only be created in operator-controlled locations.
 
@@ -243,3 +243,17 @@ A missing value remains null and is displayed as `Not reported`; the UI does not
 ## Telemetry export, clear and privacy controls (R114)
 
 The Resource Monitoring panel offers browser-memory-only JSON and CSV exports, an explicit clear-history action, and export privacy switches for CPU, system RAM, process RSS/thread and device/allocator fields. The selected categories are projected into the export rather than mutating the live API response. Process IDs are never exported; disabled categories are omitted (JSON uses null for the category and CSV omits its columns). Prompt/response content, model paths, environment values and credentials are always excluded. Exports are created locally by the browser and are not uploaded to AXIOM or a cloud provider.
+
+
+## Persistent resource telemetry history (R139)
+
+Persistent resource sampling is **disabled by default**. The Runtime page offers a separate opt-in for the current workspace, with an explicit sample-count limit (1–500; default 120) and age limit (1–3,650 days; default 30). Sampling still begins only after the operator selects Start and stops when monitoring is stopped or the page is left.
+
+- `GET /api/engine/telemetry-history` reads retained history and settings without probing hardware or creating the store.
+- `PUT /api/engine/telemetry-history/settings` enables/disables persistence and applies count/age retention.
+- `POST /api/engine/telemetry-history` captures one current resource sample only when persistence is enabled.
+- `DELETE /api/engine/telemetry-history` clears sample records but preserves the explicit opt-in and retention settings.
+
+The workspace store is `.axiom/resource-telemetry.json` with a versioned schema, a 4 MiB file limit, atomic replacement and a lock. Unknown/future schemas, malformed records, unsupported fields, invalid fingerprints and symlinked paths fail closed; POSIX files use owner-only permissions. The store persists only CPU, RAM, process RSS/thread counts, device memory availability, and limited loaded-runtime/device allocator state. It deliberately excludes process IDs, model/device identity strings, model paths, disk roots, architecture labels, generation metadata, prompts, generated content, environment values, credentials and network identifiers.
+
+Disabling persistence stops new writes but does not silently delete previous samples. Use Clear history to remove retained records; this preserves the configured opt-in state. Exports are explicitly created by the browser and are not uploaded by AXIOM. This is local resource history, not a remote monitoring or alerting service.
