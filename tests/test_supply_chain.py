@@ -283,14 +283,14 @@ def test_pip_audit_parser_sanitizes_findings_and_deduplicates_records():
 
 def test_pip_audit_parser_accepts_a_successful_scan_with_no_findings():
     result = supply_chain._parse_pip_audit_output(
-        [],
+        [{"name": "example-package", "version": "1.2.3", "vulns": []}],
         generated_at="2026-11-23T00:00:00Z",
         scanner_version="2.10.1",
         exit_code=0,
     )
     assert result["status"] == "complete"
     assert result["network_accessed"] is True
-    assert result["dependency_count"] == 0
+    assert result["dependency_count"] == 1
     assert result["vulnerable_dependency_count"] == 0
     assert result["vulnerability_count"] == 0
     assert result["findings"] == []
