@@ -121,7 +121,7 @@ jobs:
 
     steps:
       - name: Download distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: axiom-python-dist-${{ env.TAG }}
           path: dist

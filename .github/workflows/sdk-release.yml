@@ -68,7 +68,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: axiom-sdk-release-artifacts
           path: dist
@@ -92,7 +92,7 @@ jobs:
         with:
           node-version: "22"
           registry-url: https://registry.npmjs.org
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: axiom-sdk-release-artifacts
           path: dist
