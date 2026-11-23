@@ -535,6 +535,8 @@ def validate_config(
             existing = list(output_dir.iterdir())
         except OSError:
             raise ValueError("Resume output directory could not be inspected safely.") from None
+        if not existing:
+            raise ValueError("Resume policy requires at least one complete checkpoint.")
         if len(existing) != 1 or existing[0].name != CHECKPOINT_DIRECTORY or existing[0].is_symlink() or not existing[0].is_dir():
             raise ValueError("Resume policy only accepts an output directory containing AXIOM checkpoints and no final adapter files.")
         try:
@@ -1342,6 +1344,11 @@ def _run_transformers(
             "Local LoRA dependencies could not be imported. Upgrade the optional training tools with: python -m pip install -e '.[training]'"
         ) from None
 
+    if config["output_policy"] != "resume":
+        torch.manual_seed(AXIOM_TRAINING_SEED)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(AXIOM_TRAINING_SEED)
+
     texts, training_dataset_sha256 = _load_training_texts(
         config,
         workspace_guard,
@@ -1409,11 +1416,7 @@ def _run_transformers(
         "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj",
         "c_attn", "c_proj", "query_key_value", "Wqkv", "query", "value",
     )
-    if resume_state is None:
-        torch.manual_seed(AXIOM_TRAINING_SEED)
-        if device.type == "cuda":
-            torch.cuda.manual_seed_all(AXIOM_TRAINING_SEED)
-    elif resume_state.get("training", {}).get("device") != str(device):
+    if resume_state is not None and resume_state.get("training", {}).get("device") != str(device):
         raise FineTuningError(
             "Resume requires the same compute device as the saved checkpoint; "
             "select the original device or start a new training run."
@@ -1526,6 +1529,11 @@ def _run_transformers(
                 ):
                     raise ValueError("CUDA device count differs from the saved checkpoint")
                 torch.cuda.set_rng_state_all(saved_cuda_states)
+            if device.type == "mps":
+                mps_rng_state = resume_payload.get("torch_mps_rng_state")
+                if mps_rng_state is None:
+                    raise ValueError("MPS random-number state is missing")
+                torch.mps.set_rng_state(mps_rng_state)
             order = saved_order
             position = saved_position
             start_step = int(resume_state["completed_steps"])
@@ -1602,6 +1610,7 @@ def _run_transformers(
                 "python_rng_state": rng.getstate(),
                 "torch_cpu_rng_state": torch.get_rng_state(),
                 "torch_cuda_rng_states": torch.cuda.get_rng_state_all() if device.type == "cuda" else [],
+                "torch_mps_rng_state": torch.mps.get_rng_state() if device.type == "mps" else None,
                 "order": order,
                 "position": position,
             }
