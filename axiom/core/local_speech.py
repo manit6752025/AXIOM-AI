@@ -209,6 +209,14 @@ def _workspace_audio(image_path: str, workspace_root: Path) -> tuple[Path, bytes
     except OSError:
         stream.close()
         raise ValueError("Audio file could not be read safely.") from None
+    if suffix == ".wav" and not (len(data) >= 12 and data[:4] in {b"RIFF", b"RF64"} and data[8:12] == b"WAVE"):
+        raise ValueError("WAV extension and RIFF/WAVE file signature do not match.")
+    if suffix == ".flac" and not data.startswith(b"fLaC"):
+        raise ValueError("FLAC extension and file signature do not match.")
+    if suffix == ".ogg" and not data.startswith(b"OggS"):
+        raise ValueError("OGG extension and file signature do not match.")
+    if suffix == ".mp3" and not (data.startswith(b"ID3") or (len(data) >= 2 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0)):
+        raise ValueError("MP3 extension and file signature do not match.")
     return path, data
 
 
@@ -382,6 +390,7 @@ def write_speech_output_create_only(output_path: str, workspace_root: Path, audi
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     descriptor: int | None = None
     created = False
+    succeeded = False
     try:
         if parent_fd is not None:
             descriptor = os.open(name, flags, 0o600, dir_fd=parent_fd)
@@ -395,6 +404,7 @@ def write_speech_output_create_only(output_path: str, workspace_root: Path, audi
                 raise OSError("Short write while saving speech audio.")
             view = view[written:]
         os.fsync(descriptor)
+        succeeded = True
     except FileExistsError:
         raise FileExistsError("Speech output already exists; choose a new data/NAME.wav path.") from None
     except OSError:
@@ -402,8 +412,16 @@ def write_speech_output_create_only(output_path: str, workspace_root: Path, audi
     finally:
         if descriptor is not None:
             os.close(descriptor)
+        if created and not succeeded:
+            try:
+                if parent_fd is not None:
+                    os.unlink(name, dir_fd=parent_fd)
+                else:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                pass
         if parent_fd is not None:
-            if created and descriptor is not None:
+            if succeeded:
                 try:
                     os.fsync(parent_fd)
                 except OSError:
