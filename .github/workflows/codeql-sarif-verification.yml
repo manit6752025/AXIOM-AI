@@ -7,6 +7,10 @@ on:
       - "axiom/**"
       - "src/**"
       - "tests/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
+      - "docs/**"
       - ".github/codeql/**"
       - ".github/workflows/codeql-sarif-verification.yml"
   workflow_dispatch:
