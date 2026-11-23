@@ -4,6 +4,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from axiom.cli.main import app
+from axiom.core.security_events import SecurityEventStore
 
 runner = CliRunner()
 
@@ -297,3 +298,39 @@ def test_security_artifact_inspect_fails_traversal_archive(tmp_path: Path):
     payload = json.loads(result.stdout)
     assert payload["status"] == "fail"
     assert any(item["id"] == "artifact.archive.path" for item in payload["checks"])
+
+
+def test_mcp_profile_cli_records_reviewable_security_event_and_exports(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    create = runner.invoke(app, ["--no-banner", "mcp", "profile", "create", "audit-test"])
+    assert create.exit_code == 0, create.stdout
+
+    store = SecurityEventStore(tmp_path)
+    event = store.list_page()["events"][0]
+    assert event["event_type"] == "mcp.profile.created"
+    assert event["reviewed"] is False
+
+    listed = runner.invoke(app, ["--no-banner", "security", "events", "list", "--json"])
+    assert listed.exit_code == 0, listed.stdout
+    assert json.loads(listed.stdout)["events"][0]["event_id"] == event["event_id"]
+
+    reviewed = runner.invoke(
+        app,
+        ["--no-banner", "security", "events", "review", event["event_id"], "CLI Admin"],
+    )
+    assert reviewed.exit_code == 0, reviewed.stdout
+    assert "self-attested" in reviewed.stdout
+
+    exported = runner.invoke(app, ["--no-banner", "security", "events", "export"])
+    assert exported.exit_code == 0, exported.stdout
+    assert json.loads(exported.stdout)["integrity"]["event_count"] == 2
+
+
+def test_security_events_cli_verifies_journal(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    SecurityEventStore(tmp_path).record("mcp.profile.created")
+
+    result = runner.invoke(app, ["--no-banner", "security", "events", "verify", "--json"])
+
+    assert result.exit_code == 0, result.stdout
+    assert json.loads(result.stdout)["valid"] is True

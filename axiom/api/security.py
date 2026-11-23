@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from axiom.core.tool_permissions import ToolPermissionStore
 from axiom.core.security_audit import audit_security_posture
 from axiom.core.workspace_context import active_workspace_root
+from axiom.core.security_events import SecurityEventError, SecurityEventStore, record_security_event
 
 router = APIRouter(prefix="/api/security", tags=["security"])
 
@@ -24,6 +25,26 @@ class ActiveProfileInput(BaseModel):
     name: str = Field(min_length=1, max_length=48)
 
 
+class ReviewSecurityEventInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    reviewer_label: str = Field(
+        min_length=2,
+        max_length=48,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9 ._-]{1,47}$",
+    )
+
+
+def _record_action_event(event_type: str) -> None:
+    try:
+        record_security_event(event_type)
+    except SecurityEventError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="The security journal could not record this change; inspect the journal before making further permission changes.",
+        ) from exc
+
+
 @router.post("/tool-profiles/{profile_name}", status_code=201)
 def create_tool_profile(profile_name: str) -> dict[str, Any]:
     try:
@@ -35,6 +56,7 @@ def create_tool_profile(profile_name: str) -> dict[str, Any]:
     from axiom.api.workspace import record_workspace_event
 
     record_workspace_event("mcp.profile.created", "Created a default-deny MCP profile")
+    _record_action_event("mcp.profile.created")
     return {"profile": profile}
 
 
@@ -57,6 +79,7 @@ def save_tool_profile(profile_name: str, request: ToolProfileInput) -> dict[str,
     from axiom.api.workspace import record_workspace_event
 
     record_workspace_event("mcp.permissions.saved", "Updated an MCP tool profile")
+    _record_action_event("mcp.permissions.saved")
     return {"profile": profile}
 
 
@@ -71,6 +94,7 @@ def set_active_profile(request: ActiveProfileInput) -> dict[str, str]:
     from axiom.api.workspace import record_workspace_event
 
     record_workspace_event("mcp.profile.activated", "Changed the active MCP profile")
+    _record_action_event("mcp.profile.activated")
     return {"active_profile": request.name}
 
 
@@ -83,4 +107,54 @@ def security_audit() -> dict[str, Any]:
         raise HTTPException(
             status_code=400,
             detail="Security posture could not be audited safely.",
+        ) from exc
+
+
+@router.get("/events")
+def list_security_events(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, lt=2000),
+) -> dict[str, Any]:
+    """List bounded security events with chain integrity and review status."""
+    try:
+        return SecurityEventStore(active_workspace_root()).list_page(limit, offset)
+    except SecurityEventError as exc:
+        raise HTTPException(status_code=409, detail="Security event journal could not be verified safely.") from exc
+
+
+@router.get("/events/verify")
+def verify_security_events() -> dict[str, Any]:
+    """Verify the complete retained security-event hash chain."""
+    try:
+        return SecurityEventStore(active_workspace_root()).verify()
+    except SecurityEventError as exc:
+        raise HTTPException(status_code=409, detail="Security event journal integrity verification failed.") from exc
+
+
+@router.get("/events/export")
+def export_security_events() -> dict[str, Any]:
+    """Export the retained redacted journal as JSON; no credentials are included."""
+    try:
+        return SecurityEventStore(active_workspace_root()).export()
+    except SecurityEventError as exc:
+        raise HTTPException(status_code=409, detail="Security event journal could not be exported safely.") from exc
+
+
+@router.post("/events/{event_id}/review")
+def review_security_event(
+    event_id: str,
+    request: ReviewSecurityEventInput,
+) -> dict[str, Any]:
+    """Append a review acknowledgement; reviewer labels are self-attested."""
+    try:
+        result = SecurityEventStore(active_workspace_root()).review(
+            event_id,
+            request.reviewer_label,
+        )
+        return {**result, "reviewer_identity_verified": False}
+    except SecurityEventError as exc:
+        status_code = 404 if "not found" in str(exc).lower() else 422
+        raise HTTPException(
+            status_code=status_code,
+            detail="Security event review could not be recorded.",
         ) from exc

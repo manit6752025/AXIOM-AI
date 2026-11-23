@@ -14,7 +14,9 @@ import re
 import stat
 import uuid
 from datetime import UTC, datetime
+from contextlib import contextmanager
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 
 from axiom.core.storage import atomic_write_text, file_lock
@@ -77,6 +79,18 @@ class SecurityEventStore:
         self.directory = self.root / ".axiom"
         self.path = self.directory / "security-events.json"
         self.lock_path = self.directory / "security-events.lock"
+
+    @contextmanager
+    def _locked(self) -> Iterator[None]:
+        self._check_paths(create=True)
+        try:
+            with file_lock(self.lock_path):
+                self._check_paths()
+                if os.name == "posix":
+                    os.chmod(self.lock_path, stat.S_IRUSR | stat.S_IWUSR)
+                yield
+        except (OSError, TimeoutError) as exc:
+            raise SecurityEventError("Security journal lock could not be acquired safely.") from exc
 
     def _check_paths(self, *, create: bool = False) -> None:
         if self.directory.is_symlink():
@@ -221,7 +235,7 @@ class SecurityEventStore:
             raise SecurityEventError("Reviewer label must be 2–48 safe characters.")
         self._check_paths(create=True)
         try:
-            with file_lock(self.lock_path):
+            with self._locked():
                 self._check_paths()
                 events = self._read_locked()
                 target = next((item for item in events if item["event_id"] == event_id), None)
@@ -251,7 +265,7 @@ class SecurityEventStore:
                 "schema_version": SCHEMA_VERSION, "valid": True, "event_count": 0,
                 "max_events": MAX_EVENTS, "head_hash": _GENESIS_HASH, "capacity_reached": False,
             }
-        with file_lock(self.lock_path):
+        with self._locked():
             events = self._read_locked()
         return {
             "schema_version": SCHEMA_VERSION,
@@ -267,7 +281,7 @@ class SecurityEventStore:
             raise SecurityEventError(f"Limit must be between 1 and {MAX_PAGE_SIZE}.")
         if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset < MAX_EVENTS:
             raise SecurityEventError(f"Offset must be between 0 and {MAX_EVENTS - 1}.")
-        with file_lock(self.lock_path):
+        with self._locked():
             self._check_paths()
             events = self._read_locked()
         reviews = {
@@ -276,9 +290,9 @@ class SecurityEventStore:
         }
         primary = [event for event in events if event["event_type"] != _REVIEW_EVENT]
         total = len(primary)
-        page = primary[offset:offset + limit]
+        page = list(reversed(primary))[offset:offset + limit]
         projected = []
-        for event in reversed(page):
+        for event in page:
             review = reviews.get(event["event_id"])
             projected.append({
                 **event,
@@ -305,7 +319,7 @@ class SecurityEventStore:
         }
 
     def export(self) -> dict[str, Any]:
-        with file_lock(self.lock_path):
+        with self._locked():
             self._check_paths()
             events = self._read_locked()
         return {

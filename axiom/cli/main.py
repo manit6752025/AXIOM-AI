@@ -50,6 +50,7 @@ from axiom.core.integrations import (
 )
 from axiom.core.project import create_project
 from axiom.core.tool_permissions import TOOL_DESCRIPTIONS, ToolPermissionStore
+from axiom.core.security_events import SecurityEventError, record_security_event
 from axiom.daemon import LOCAL_ACTIONS, run_daemon
 from axiom.datasets.cleaner import clean_jsonl
 from axiom.datasets.progress import DatasetScanCancelled
@@ -343,6 +344,18 @@ def version():
     console.print(f"[bold cyan]AXIOM[/bold cyan] v{__version__}")
 
 
+def _record_mcp_security_event(event_type: str) -> None:
+    """Record an allowlisted local MCP security action after it succeeds."""
+    try:
+        record_security_event(event_type)
+    except SecurityEventError:
+        emit_error(
+            "The MCP permission change may have taken effect, but its security event could not be recorded. Inspect the active policy and journal before retrying.",
+            code="security_event_record_failed",
+            exit_code=2,
+        )
+
+
 @mcp_app.command("permissions")
 def mcp_permissions() -> None:
     """Show active MCP profile and per-tool access decisions."""
@@ -377,6 +390,7 @@ def mcp_allow(
         policy.save_profile(profile, allowed)
     except (OSError, ValueError) as exc:
         _cli_error(str(exc))
+    _record_mcp_security_event("mcp.permissions.saved")
     console.print(f"[green]Allowed[/green] {tool_name} in profile {profile}.")
 
 
@@ -395,6 +409,7 @@ def mcp_revoke(
         policy.save_profile(profile, allowed)
     except (OSError, ValueError) as exc:
         _cli_error(str(exc))
+    _record_mcp_security_event("mcp.permissions.saved")
     console.print(f"[yellow]Revoked[/yellow] {tool_name} from profile {profile}.")
 
 
@@ -405,6 +420,7 @@ def mcp_profile_create(profile: str) -> None:
         ToolPermissionStore().create_profile(profile)
     except (OSError, ValueError) as exc:
         _cli_error(str(exc))
+    _record_mcp_security_event("mcp.profile.created")
     console.print(f"Created default-deny MCP profile [cyan]{profile}[/cyan].")
 
 
@@ -415,6 +431,7 @@ def mcp_profile_use(profile: str) -> None:
         ToolPermissionStore().set_active(profile)
     except (OSError, ValueError) as exc:
         _cli_error(str(exc))
+    _record_mcp_security_event("mcp.profile.activated")
     console.print(f"Active MCP profile is now [cyan]{profile}[/cyan].")
 
 

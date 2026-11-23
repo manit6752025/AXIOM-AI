@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from axiom.api.security import router as security_router
 from axiom.core.security_audit import audit_security_posture, _package_integrity_check
 from axiom.core.tool_permissions import ToolPermissionStore
+from axiom.core.security_events import SecurityEventStore
 
 READ_TOKEN = "read_" + "r" * 40
 WRITE_TOKEN = "write_" + "w" * 40
@@ -230,3 +231,69 @@ def test_security_audit_includes_required_installed_package_integrity_checks(tmp
         "security.package.mcp",
     }
     assert all(item["status"] in {"pass", "warn", "fail"} for item in package_checks)
+
+
+def test_security_event_api_lists_verifies_exports_and_reviews(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    app = FastAPI()
+    app.include_router(security_router)
+    client = TestClient(app)
+    event = SecurityEventStore(tmp_path).record("mcp.permissions.saved")
+
+    listed = client.get("/api/security/events")
+    assert listed.status_code == 200
+    assert listed.json()["integrity"]["valid"] is True
+    assert listed.json()["events"][0]["event_id"] == event["event_id"]
+    assert listed.json()["events"][0]["reviewed"] is False
+
+    reviewed = client.post(
+        f"/api/security/events/{event['event_id']}/review",
+        json={"reviewer_label": "Security Admin"},
+    )
+    assert reviewed.status_code == 200
+    assert reviewed.json()["already_reviewed"] is False
+    assert reviewed.json()["reviewer_identity_verified"] is False
+
+    listed_after_review = client.get("/api/security/events")
+    assert listed_after_review.json()["events"][0]["reviewed"] is True
+    assert listed_after_review.json()["events"][0]["reviewer_label"] == "Security Admin"
+    assert listed_after_review.json()["events"][0]["reviewer_identity_verified"] is False
+
+    verified = client.get("/api/security/events/verify")
+    exported = client.get("/api/security/events/export")
+    assert verified.status_code == 200
+    assert verified.json()["valid"] is True
+    assert exported.status_code == 200
+    assert exported.json()["integrity"]["event_count"] == 2
+    assert exported.json()["privacy"]["reviewer_identity_authenticated"] is False
+
+
+def test_security_event_api_rejects_arbitrary_reviewer_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    app = FastAPI()
+    app.include_router(security_router)
+    client = TestClient(app)
+    event = SecurityEventStore(tmp_path).record("mcp.profile.created")
+
+    response = client.post(
+        f"/api/security/events/{event['event_id']}/review",
+        json={"reviewer_label": "Admin\\nInjected"},
+    )
+
+    assert response.status_code == 422
+    assert SecurityEventStore(tmp_path).verify()["event_count"] == 1
+
+
+def test_security_api_records_mcp_permission_changes_in_journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    app = FastAPI()
+    app.include_router(security_router)
+    response = TestClient(app).post("/api/security/tool-profiles/review-profile")
+
+    assert response.status_code in {200, 201}
+    events = SecurityEventStore(tmp_path).list_page()["events"]
+    assert events[0]["event_type"] == "mcp.profile.created"
+    assert events[0]["summary"] == "Created a default-deny MCP profile"
