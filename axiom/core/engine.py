@@ -859,10 +859,14 @@ def _resolve_model_directory(value: str, label: str) -> Path:
     entries = _trusted_directory_index(root_strings, freshness_bucket)
     for discovered, is_model, is_adapter, is_symlink in entries:
         key = os.path.normcase(os.path.normpath(discovered))
-        if key not in candidate_keys:
+        matched = key in candidate_keys
+        if is_symlink and not matched:
+            separator = os.sep
+            matched = any(candidate.startswith(key.rstrip("/\\\\") + separator) for candidate in candidate_keys)
+        if not matched:
             continue
         if is_symlink:
-            raise ValueError(f"{label} cannot be a symlink; trusted-root escapes are not allowed.")
+            raise ValueError(f"{label} cannot use a symlinked path component; trusted-root escapes are not allowed.")
         lowered = label.casefold()
         if lowered == "base model" and not is_model:
             continue
