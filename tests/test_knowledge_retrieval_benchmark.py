@@ -54,10 +54,8 @@ _QUERIES = (
 def test_documentation_corpus_meets_retrieval_quality_regression_thresholds(tmp_path: Path):
     """Pin practical lexical retrieval quality against six real product documents."""
     repository = Path(__file__).resolve().parents[1]
-    documents_root = tmp_path / "operator-docs"
-    documents_root.mkdir()
     for relative_path in _CORPUS:
-        destination = documents_root / relative_path
+        destination = tmp_path / relative_path
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(repository / relative_path, destination)
 
