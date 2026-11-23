@@ -63,12 +63,16 @@ def _canonical(value: Any) -> bytes:
 
 
 def _trusted_model_directory(model_path: str | Path) -> Path | None:
-    """Resolve a model only through the filesystem-derived trusted model inventory."""
+    """Resolve model identifiers through AXIOM's filesystem-derived trusted inventory.
+
+    The supplied value is passed only to AXIOM's validating inventory matcher;
+    it is not used to construct or probe a filesystem path before validation.
+    """
     try:
         from axiom.core.engine import _allowed_model_roots, resolve_local_model_directory
 
-        supplied = os.fspath(model_path)
-        resolved = Path(resolve_local_model_directory(supplied, "Base model"))
+        resolved_text = resolve_local_model_directory(os.fspath(model_path), "Base model")
+        resolved = Path(resolved_text)
         trusted_roots = tuple(Path(root).resolve(strict=True) for root in _allowed_model_roots())
         if not resolved.is_absolute() or not any(resolved.is_relative_to(root) for root in trusted_roots):
             return None
