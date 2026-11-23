@@ -33,7 +33,13 @@ def test_cli_lists_shows_and_validates_workflows(tmp_path, monkeypatch):
 
     validated = runner.invoke(app, ["workflow", "validate", "workflow-1"])
     assert validated.exit_code == 0, validated.stdout
-    assert json.loads(validated.stdout)["valid"] is True
+    validation = json.loads(validated.stdout)
+    assert validation["valid"] is True
+    assert validation["missing_inputs"] == [{
+        "node_id": "plan",
+        "port_id": "model",
+        "reason": "Required input is not connected.",
+    }]
 
 
 def test_cli_validation_rejects_a_cyclic_saved_workflow(tmp_path, monkeypatch):
@@ -93,3 +99,26 @@ def test_cli_workflow_page_json_and_cursor_search_are_available(tmp_path, monkey
     assert filtered.exit_code == 0, filtered.output
     assert filtered.stdout
     assert json.loads(filtered.stdout)["total"] == 2
+
+
+
+def test_cli_validation_reports_missing_workflow_ports(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    WorkflowStore().save({
+        "id": "missing-model",
+        "name": "Incomplete plan",
+        "created_at": "2026-11-20T00:00:00Z",
+        "updated_at": "2026-11-20T00:00:00Z",
+        "nodes": [
+            {"id": "dataset", "type": "dataset.profile"},
+            {"id": "plan", "type": "training.plan"},
+        ],
+        "edges": [{"source": "dataset", "target": "plan"}],
+    })
+
+    result = CliRunner().invoke(app, ["workflow", "validate", "missing-model"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["valid"] is True
+    assert payload["missing_inputs"][0]["node_id"] == "plan"
+    assert payload["missing_inputs"][0]["port_id"] == "model"

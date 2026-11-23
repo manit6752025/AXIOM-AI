@@ -2,6 +2,13 @@ import { recordFrontendError } from "../diagnostics/frontendErrors";
 
 const API_BASE = import.meta.env.VITE_AXIOM_API_URL || "";
 
+let inFlightApiRequestCount = 0;
+
+/** Snapshot active requests so late-mounted UI observers do not miss starts. */
+export function getPendingApiRequestCount(): number {
+  return inFlightApiRequestCount;
+}
+
 
 export const playgroundEndpoints = [
   { path: "/api/health", label: "Health", description: "Process liveness and API version." },
@@ -1242,6 +1249,7 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
   }
 
   let succeeded = false;
+  inFlightApiRequestCount += 1;
   window.dispatchEvent(new CustomEvent("axiom:api-request-start", { detail: { path } }));
 
   try {
@@ -1289,6 +1297,7 @@ async function requestJson<T>(path: string, init: RequestInit = {}, timeoutMs = 
     throw error;
   } finally {
     window.clearTimeout(timeout);
+    inFlightApiRequestCount = Math.max(0, inFlightApiRequestCount - 1);
     window.dispatchEvent(new CustomEvent("axiom:api-request-end", {
       detail: { path, ok: succeeded, at: Date.now() },
     }));

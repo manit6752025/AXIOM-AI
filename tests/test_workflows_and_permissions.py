@@ -1,7 +1,7 @@
 import json
 
 from axiom.core.tool_permissions import TOOL_SCOPES, ToolPermissionStore
-from axiom.core.workflows import validate_workflow_graph
+from axiom.core.workflows import WorkflowStore, normalize_workflow_graph, validate_workflow_graph
 
 
 def test_tool_permissions_deny_by_default_and_follow_active_profile(tmp_path):
@@ -129,8 +129,17 @@ def test_workflow_and_mcp_profiles_are_available_through_workspace_api(tmp_path,
         assert created_workflow.status_code == 201
         workflow = created_workflow.json()["workflow"]
         assert workflow["execution_status"] == "not_executable"
-        assert workflow["schema_version"] == 1
+        assert workflow["schema_version"] == 2
         assert workflow["revision"] == 1
+        assert workflow["edges"][0] == {
+            "source": "dataset",
+            "target": "plan",
+            "source_port": "dataset",
+            "target_port": "dataset",
+        }
+        assert workflow["nodes"][1]["ports"]["inputs"][0] == {
+            "id": "dataset", "data_type": "dataset", "required": True,
+        }
         assert client.get("/api/workflows").json()["workflows"] == [workflow]
 
         dry_run = client.post(
@@ -158,11 +167,26 @@ def test_workflow_and_mcp_profiles_are_available_through_workspace_api(tmp_path,
             "supervised-finetuning",
         }
 
+        validation = client.post("/api/workflows/validate", json=workflow_payload)
+        assert validation.status_code == 200
+        assert validation.json()["valid"] is True
+        assert validation.json()["missing_inputs"] == [{
+            "node_id": "plan",
+            "port_id": "model",
+            "reason": "Required input is not connected.",
+        }]
+
         invalid_graph = {**workflow_payload, "edges": [
             {"source": "dataset", "target": "plan"},
             {"source": "plan", "target": "dataset"},
         ]}
         assert client.post("/api/workflows/validate", json=invalid_graph).status_code == 422
+
+        wrong_port = {**workflow_payload, "edges": [{
+            "source": "dataset", "target": "plan",
+            "source_port": "dataset", "target_port": "model",
+        }]}
+        assert client.post("/api/workflows/validate", json=wrong_port).status_code == 422
 
         update_payload = {**workflow_payload, "name": "Dataset to plan v2"}
         updated = client.put(f"/api/workflows/{workflow['id']}", json=update_payload)
@@ -231,3 +255,111 @@ def test_workspace_dataset_profile_accepts_bounded_scan_budgets(tmp_path, monkey
             "/api/workspace/dataset-profile",
             params={"path": "train.jsonl", "max_rows": 500_001},
         ).status_code == 422
+
+
+
+def test_workflow_typed_ports_accept_matching_dataset_and_model_inputs():
+    nodes = [
+        {"id": "dataset", "type": "dataset.profile"},
+        {"id": "model", "type": "model.inspect"},
+        {"id": "plan", "type": "training.plan"},
+    ]
+    edges = [
+        {
+            "source": "dataset", "target": "plan",
+            "source_port": "dataset", "target_port": "dataset",
+        },
+        {
+            "source": "model", "target": "plan",
+            "source_port": "model", "target_port": "model",
+        },
+    ]
+    assert validate_workflow_graph("Complete training plan", nodes, edges) == []
+
+
+def test_workflow_graph_reports_missing_required_and_required_any_inputs():
+    nodes = [
+        {"id": "dataset", "type": "dataset.profile"},
+        {"id": "plan", "type": "training.plan"},
+        {"id": "report", "type": "report.export"},
+    ]
+    edges = [{
+        "source": "dataset", "target": "plan",
+        "source_port": "dataset", "target_port": "dataset",
+    }]
+    missing = validate_workflow_graph("Incomplete workflow", nodes, edges)
+    assert missing == [
+        {"node_id": "plan", "port_id": "model", "reason": "Required input is not connected."},
+        {
+            "node_id": "report",
+            "port_id": "one_of:dataset|plan|evaluation",
+            "reason": "Connect at least one input to this node.",
+        },
+    ]
+
+
+def test_workflow_graph_rejects_unknown_mismatched_and_occupied_ports():
+    nodes = [
+        {"id": "dataset-a", "type": "dataset.profile"},
+        {"id": "dataset-b", "type": "dataset.profile"},
+        {"id": "plan", "type": "training.plan"},
+    ]
+    invalid_graphs = [
+        [{"source": "dataset-a", "target": "plan", "source_port": "missing", "target_port": "dataset"}],
+        [{"source": "dataset-a", "target": "plan", "source_port": "dataset", "target_port": "model"}],
+        [
+            {"source": "dataset-a", "target": "plan", "source_port": "dataset", "target_port": "dataset"},
+            {"source": "dataset-b", "target": "plan", "source_port": "dataset", "target_port": "dataset"},
+        ],
+    ]
+    for edges in invalid_graphs:
+        try:
+            validate_workflow_graph("Invalid ports", nodes, edges)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"invalid workflow ports should be rejected: {edges}")
+
+
+def test_workflow_schema_v1_legacy_edges_migrate_to_schema_v2(tmp_path):
+    registry = tmp_path / "workflows.json"
+    registry.write_text(json.dumps([{
+        "id": "legacy-workflow",
+        "name": "Legacy workflow",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "schema_version": 1,
+        "revision": 1,
+        "versions": [],
+        "nodes": [
+            {"id": "dataset", "type": "dataset.profile"},
+            {"id": "model", "type": "model.inspect"},
+        ],
+        "edges": [{"source": "dataset", "target": "model"}],
+        "execution_status": "not_executable",
+    }]), encoding="utf-8")
+
+    store = WorkflowStore(tmp_path)
+    migrated = store.get("legacy-workflow")
+    assert migrated is not None
+    assert migrated["schema_version"] == 2
+    assert migrated["nodes"][0]["ports"]["outputs"][0]["id"] == "dataset"
+    assert migrated["nodes"][1]["ports"]["inputs"][0]["id"] == "artifact"
+    assert migrated["edges"] == [{
+        "source": "dataset",
+        "target": "model",
+        "source_port": "artifact",
+        "target_port": "artifact",
+    }]
+
+    updated = store.update(
+        "legacy-workflow",
+        name="Migrated workflow",
+        nodes=migrated["nodes"],
+        edges=migrated["edges"],
+    )
+    assert updated is not None
+    persisted = json.loads(registry.read_text(encoding="utf-8"))
+    assert persisted[0]["schema_version"] == 2
+    assert persisted[0]["edges"][0]["source_port"] == "artifact"
+    assert persisted[0]["versions"][0]["edges"][0]["target_port"] == "artifact"

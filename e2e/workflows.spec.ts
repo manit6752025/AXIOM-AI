@@ -7,14 +7,45 @@ const workflow = {
   name: "Dataset to plan",
   created_at: "2026-10-19T00:00:00Z",
   updated_at: "2026-10-19T00:00:00Z",
-  schema_version: 1,
+  schema_version: 2,
   revision: 1,
   versions: [],
   nodes: [
-    { id: "dataset", type: "dataset.profile" as const },
-    { id: "plan", type: "training.plan" as const },
+    {
+      id: "dataset",
+      type: "dataset.profile" as const,
+      ports: {
+        inputs: [{ id: "artifact", data_type: "artifact", required: false }],
+        outputs: [
+          { id: "dataset", data_type: "dataset", required: false },
+          { id: "artifact", data_type: "artifact", required: false },
+        ],
+        required_any_inputs: [],
+      },
+    },
+    {
+      id: "plan",
+      type: "training.plan" as const,
+      ports: {
+        inputs: [
+          { id: "dataset", data_type: "dataset", required: true },
+          { id: "model", data_type: "model", required: true },
+          { id: "artifact", data_type: "artifact", required: false },
+        ],
+        outputs: [
+          { id: "plan", data_type: "plan", required: false },
+          { id: "artifact", data_type: "artifact", required: false },
+        ],
+        required_any_inputs: [],
+      },
+    },
   ],
-  edges: [{ source: "dataset", target: "plan" }],
+  edges: [{
+    source: "dataset",
+    target: "plan",
+    source_port: "dataset",
+    target_port: "dataset",
+  }],
   execution_status: "not_executable" as const,
 };
 

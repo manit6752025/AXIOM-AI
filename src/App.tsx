@@ -29,6 +29,7 @@ import {
 } from "./components/ui/AccessiblePatterns";
 import {
   axiomApi,
+  getPendingApiRequestCount,
   type DatasetCleaningPreview,
   type DatasetManifest,
   type DatasetProfile,
@@ -790,6 +791,9 @@ function App() {
     };
     window.addEventListener("axiom:api-request-start", onRequestStart);
     window.addEventListener("axiom:api-request-end", onRequestEnd);
+    // Child page effects can dispatch requests before this parent effect subscribes.
+    // Reconcile the snapshot after subscribing so those starts are not lost.
+    setPendingApiRequests(getPendingApiRequestCount());
     return () => {
       window.removeEventListener("axiom:api-request-start", onRequestStart);
       window.removeEventListener("axiom:api-request-end", onRequestEnd);

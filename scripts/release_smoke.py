@@ -569,7 +569,8 @@ def inspect(root: Path) -> dict[str, Any]:
         "test_model_update_validation_failure_does_not_mutate_registry",
         '["model", "export", "--path", str(export_path), "--json"]',
         '["model", "import", str(export_path), "--json"]',
-        '["model", "remove", first_model["id"], "--json"]',
+        '["model", "remove", first_model["id"], "--yes", "--json"]',
+        "test_model_remove_requires_confirmation_and_never_deletes_weight_files",
         '["model", "favorite", first_model["id"], "--unfavorite", "--json"]',
     ):
         if token not in cli_json_tests:

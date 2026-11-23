@@ -284,9 +284,10 @@ def test_model_registry_export_import_and_remove_json_roundtrip(tmp_path: Path, 
     assert favorite.exit_code == 0, favorite.stdout
     assert json.loads(favorite.stdout)["model"]["favorite"] is False
 
-    removed = runner.invoke(app, ["model", "remove", first_model["id"], "--json"])
+    removed = runner.invoke(app, ["model", "remove", first_model["id"], "--yes", "--json"])
     assert removed.exit_code == 0, removed.stdout
     assert json.loads(removed.stdout)["removed"] is True
+    assert json.loads(removed.stdout)["weights_deleted"] is False
     listed = runner.invoke(app, ["model", "list", "--json"])
     assert len(json.loads(listed.stdout)["models"]) == 1
 
@@ -440,3 +441,36 @@ def test_model_add_and_update_json_include_source_attribution_and_license_review
     assert record["license_review"] == "restricted"
     assert record["license_review_notes"] == "Distribution needs additional review."
     assert record["source_revision"] == "fedcba9876543210"
+
+
+
+def test_model_remove_requires_confirmation_and_never_deletes_weight_files(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    weights = tmp_path / "models" / "tiny-model.gguf"
+    weights.parent.mkdir()
+    weights.write_bytes(b"model-weight-fixture")
+    registry = ModelRegistry()
+    model = Model(name="Tiny model", source=str(weights), format="gguf")
+    registry.add(model)
+
+    refused = runner.invoke(app, ["model", "remove", model.id, "--json"])
+    assert refused.exit_code == 1
+    refused_payload = json.loads(refused.stdout)
+    assert refused_payload["error"]["code"] == "model_remove_confirmation_required"
+    assert registry.get(model.id) is not None
+    assert weights.read_bytes() == b"model-weight-fixture"
+
+    cancelled = runner.invoke(app, ["model", "remove", model.id])
+    assert cancelled.exit_code == 0
+    assert "Cancelled" in cancelled.stdout
+    assert registry.get(model.id) is not None
+    assert weights.exists()
+
+    removed = runner.invoke(app, ["model", "remove", model.id, "--yes", "--json"])
+    assert removed.exit_code == 0, removed.stdout
+    payload = json.loads(removed.stdout)
+    assert payload["removed"] is True
+    assert payload["weights_deleted"] is False
+    assert payload["model"]["id"] == model.id
+    assert registry.get(model.id) is None
+    assert weights.read_bytes() == b"model-weight-fixture"

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from axiom.core.hardware import HardwareInfo, detect_hardware
-from axiom.core.workflows import WORKFLOW_SCHEMA_VERSION, validate_workflow_graph
+from axiom.core.workflows import WORKFLOW_SCHEMA_VERSION, normalize_workflow_graph, validate_workflow_graph
 from axiom.training.planner import TrainingPlan, create_training_plan
 
 _WORKFLOW_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -26,7 +26,7 @@ class WorkflowPlanningPreview:
     workflow_id: str
     workflow_revision: int
     schema_version: int
-    nodes: list[dict[str, str]]
+    nodes: list[dict[str, Any]]
     edges: list[dict[str, str]]
     hardware: HardwareInfo
     training_plan: TrainingPlan | None
@@ -69,29 +69,8 @@ def build_workflow_planning_preview(
     ):
         raise ValueError("Saved workflow record is malformed.")
 
-    nodes: list[dict[str, str]] = []
-    for node in raw_nodes:
-        if (
-            not isinstance(node, dict)
-            or set(node) != {"id", "type"}
-            or not isinstance(node.get("id"), str)
-            or not isinstance(node.get("type"), str)
-        ):
-            raise ValueError("Saved workflow node is malformed.")
-        nodes.append({"id": node["id"], "type": node["type"]})
-
-    edges: list[dict[str, str]] = []
-    for edge in raw_edges:
-        if (
-            not isinstance(edge, dict)
-            or set(edge) != {"source", "target"}
-            or not isinstance(edge.get("source"), str)
-            or not isinstance(edge.get("target"), str)
-        ):
-            raise ValueError("Saved workflow connection is malformed.")
-        edges.append({"source": edge["source"], "target": edge["target"]})
-
     try:
+        nodes, edges = normalize_workflow_graph(raw_nodes, raw_edges)
         validate_workflow_graph(name, nodes, edges)
     except (AttributeError, TypeError, ValueError) as exc:
         raise ValueError("Saved workflow graph is invalid.") from exc
