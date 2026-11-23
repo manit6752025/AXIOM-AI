@@ -34,7 +34,7 @@ _LICENSE_NAMES = frozenset({
     "copying.txt", "notice", "notice.md", "notice.txt",
 })
 _LICENSE_NAME_PATTERN = re.compile(
-    r"^(?:license|licence|notice|copying)(?:[-_.][a-z0-9][a-z0-9._-]{0,63})?(?:\\.(?:txt|md|rst))?$"
+    r"^(?:license|licence|notice|copying)(?:[-_.][a-z0-9][a-z0-9._-]{0,63})?(?:\.(?:txt|md|rst))?$"
 )
 
 

@@ -618,6 +618,10 @@ def import_workspace_metadata(
         raise ValueError("replace must be a boolean.")
     root = _workspace_root(workspace)
     incoming = _read_archive(data)
+    # Fail with the explicit path-safety diagnostic before attempting to open
+    # lock files under a pre-existing .axiom symlink. The locked helper repeats
+    # no-follow checks to protect against replacements after this preflight.
+    _metadata_directory(root)
     with _locked_metadata_directory(root, create=True) as directory_fd:
         directory = _metadata_directory(root)
         before: dict[str, bytes | None] = {}

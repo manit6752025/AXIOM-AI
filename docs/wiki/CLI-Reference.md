@@ -144,6 +144,8 @@ npm launcher: `@netcore-technologies/axiom-cli`
 
 ## Declarative plugin manifests
 
+The root command is `axiom plugin`; it groups the manifest inventory and permission operations below.
+
 - `axiom plugin list` displays registered manifest versions, fingerprints, and permission status.
 - `axiom plugin manifest validate ./plugin-manifest.json` validates metadata without registering or granting access.
 - `axiom plugin manifest register ./plugin-manifest.json` registers a version; permissions remain denied.

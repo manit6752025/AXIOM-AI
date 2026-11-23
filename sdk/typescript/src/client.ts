@@ -28,6 +28,26 @@ interface PendingResponse {
   externallyAborted: () => boolean;
 }
 
+function hasControlCharacters(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function parseErrorEnvelope(text: string): AxiomErrorEnvelope {
+  if (!text) return {};
+  try {
+    const value: unknown = JSON.parse(text);
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      ? value as AxiomErrorEnvelope
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 function requestId(): string {
   const cryptoApi = globalThis.crypto;
   if (cryptoApi && typeof cryptoApi.randomUUID === "function") {
@@ -62,7 +82,7 @@ function validateHeaders(headers: Record<string, string> | undefined): Record<st
       throw new AxiomConfigurationError(`The ${name} header was supplied more than once.`);
     }
     seenNames.add(lower);
-    if (/[\u0000-\u001f\u007f]/.test(name + value)) {
+    if (hasControlCharacters(name + value)) {
       throw new AxiomConfigurationError("Additional headers must not contain control characters.");
     }
     result[name] = value;
@@ -105,7 +125,7 @@ export class AxiomClient {
     }
     if (
       options.token !== undefined
-      && (!options.token.trim() || /[\u0000-\u001f\u007f]/.test(options.token))
+      && (!options.token.trim() || hasControlCharacters(options.token))
     ) {
       throw new AxiomConfigurationError("Bearer token must be a non-empty printable single-line string.");
     }
@@ -114,7 +134,7 @@ export class AxiomClient {
       && (
         !options.workspaceId.trim()
         || options.workspaceId.length > 128
-        || /[\u0000-\u001f\u007f]/.test(options.workspaceId)
+        || hasControlCharacters(options.workspaceId)
       )
     ) {
       throw new AxiomConfigurationError("Workspace ID must contain 1 to 128 printable characters.");
@@ -165,7 +185,7 @@ export class AxiomClient {
       if (["authorization", "x-request-id", "x-axiom-workspace-id", "host", "content-length"].includes(lower)) {
         throw new AxiomConfigurationError(`The ${name} header is managed by AxiomClient.`);
       }
-      if (!name.trim() || /[\u0000-\u001f\u007f]/.test(name + value)) {
+      if (!name.trim() || hasControlCharacters(name + value)) {
         throw new AxiomConfigurationError("Per-request headers must use printable names and values.");
       }
       if (requestHeaderNames.has(lower)) {
@@ -266,12 +286,7 @@ export class AxiomClient {
         throw this.responseReadError(pending, cause);
       }
       pending.cleanup();
-      let payload: AxiomErrorEnvelope = {};
-      try {
-        payload = text ? JSON.parse(text) as AxiomErrorEnvelope : {};
-      } catch {
-        payload = {};
-      }
+      const payload = parseErrorEnvelope(text);
       const error = payload.error ?? {};
       const message = error.message ?? payload.detail ?? `AXIOM API request failed with HTTP ${response.status}.`;
       throw new AxiomAPIError(
@@ -355,17 +370,17 @@ export class AxiomClient {
   }
 
   createWorkspace(name: string): Promise<{ workspace: AxiomWorkspaceSummary }> {
-    if (!name.trim() || name.length > 64 || /[\u0000-\u001f\u007f]/.test(name)) {
+    if (!name.trim() || name.length > 64 || hasControlCharacters(name)) {
       throw new AxiomConfigurationError("Workspace name must contain 1 to 64 printable characters.");
     }
     return this.request("POST", "/api/workspaces", { jsonBody: { name } });
   }
 
   renameWorkspace(workspaceId: string, name: string): Promise<{ workspace: AxiomWorkspaceSummary }> {
-    if (!workspaceId.trim() || workspaceId.length > 128 || /[\u0000-\u001f\u007f]/.test(workspaceId)) {
+    if (!workspaceId.trim() || workspaceId.length > 128 || hasControlCharacters(workspaceId)) {
       throw new AxiomConfigurationError("Workspace ID must contain 1 to 128 printable characters.");
     }
-    if (!name.trim() || name.length > 64 || /[\u0000-\u001f\u007f]/.test(name)) {
+    if (!name.trim() || name.length > 64 || hasControlCharacters(name)) {
       throw new AxiomConfigurationError("Workspace name must contain 1 to 64 printable characters.");
     }
     return this.request("PATCH", `/api/workspaces/${encodeURIComponent(workspaceId)}`, {
@@ -431,7 +446,7 @@ export class AxiomClient {
     if (!(archive instanceof Blob) || archive.size === 0) {
       throw new AxiomConfigurationError("Backup archive must be a non-empty Blob.");
     }
-    if (!name.trim() || name.length > 64 || /[\u0000-\u001f\u007f]/.test(name)) {
+    if (!name.trim() || name.length > 64 || hasControlCharacters(name)) {
       throw new AxiomConfigurationError("Restored workspace name must contain 1 to 64 printable characters.");
     }
     return this.request("POST", "/api/workspaces/backup/restore", {

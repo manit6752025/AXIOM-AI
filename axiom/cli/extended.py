@@ -235,7 +235,11 @@ def register(app, model_app, dataset_app) -> None:
             content = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
             if output is not None:
                 destination = write_report_new(output, content)
-                typer.echo(f"SPDX 2.3 SBOM written to {destination} ({report['axiom']['package_count']} packages).")
+                summary = report.get("axiom", {})
+                package_count = summary.get("package_count")
+                if not isinstance(package_count, int) or isinstance(package_count, bool):
+                    package_count = len(report.get("packages", [])) if isinstance(report.get("packages"), list) else 0
+                typer.echo(f"SPDX 2.3 SBOM written to {destination} ({package_count} packages).")
             else:
                 typer.echo(content, nl=False)
         except SupplyChainError:

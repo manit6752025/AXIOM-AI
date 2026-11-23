@@ -122,11 +122,23 @@ def test_spdx_sbom_rejects_unbounded_or_invalid_installed_metadata():
 
 
 def test_audit_parser_bounds_total_finding_inventory():
-    vulnerabilities = [
-        {"id": f"PYSEC-2026-{index}", "aliases": [], "fix_versions": []}
-        for index in range(supply_chain.MAX_AUDIT_FINDINGS + 1)
+    # pip-audit caps one dependency's vulnerability list separately. Exercise
+    # the aggregate bound with many individually valid dependency records.
+    payload = [
+        {
+            "name": f"example-{package_index}",
+            "version": "1.0",
+            "vulns": [
+                {
+                    "id": f"PYSEC-2026-{package_index}-{finding_index}",
+                    "aliases": [],
+                    "fix_versions": [],
+                }
+                for finding_index in range(1000)
+            ],
+        }
+        for package_index in range((supply_chain.MAX_AUDIT_FINDINGS // 1000) + 1)
     ]
-    payload = [{"name": "example", "version": "1.0", "vulns": vulnerabilities}]
     with pytest.raises(SupplyChainError, match="finding inventory"):
         supply_chain._parse_pip_audit_output(
             payload,
