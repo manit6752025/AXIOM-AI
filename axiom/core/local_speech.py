@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import threading
 import wave
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ MAX_SYNTHESIS_WAV_BYTES = 12 * 1024 * 1024
 MAX_SPEECH_TIMEOUT_SECONDS = 600
 _LANGUAGE = re.compile(r"^(?:auto|[a-z]{2,3})$")
 _SPEAKER_ID_MAX = 255
+_SPEECH_PROCESS_LOCK = threading.Lock()
 
 
 class LocalSpeechError(RuntimeError):
@@ -156,26 +158,31 @@ def _run_local_process(
     input_text: str | None = None,
 ) -> None:
     """Run a local binary without a shell, inherited secrets, or unbounded logs."""
-    with tempfile.TemporaryFile(mode="w+b") as stderr_file:
-        try:
-            result = subprocess.run(
-                [executable, *arguments],
-                cwd=temporary_root,
-                env=_safe_environment(executable, temporary_root),
-                stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
-                input=input_text.encode("utf-8") if input_text is not None else None,
-                stdout=subprocess.DEVNULL,
-                stderr=stderr_file,
-                timeout=timeout_seconds,
-                check=False,
-                shell=False,
-            )
-        except subprocess.TimeoutExpired:
-            raise LocalSpeechError("The local speech process exceeded its configured time limit.") from None
-        except OSError:
-            raise LocalSpeechError("The local speech executable could not be started.") from None
-        stderr_file.seek(0)
-        detail = stderr_file.read(4097).decode("utf-8", errors="replace").replace("\x00", "")[:1000]
+    if not _SPEECH_PROCESS_LOCK.acquire(blocking=False):
+        raise LocalSpeechError("Another local speech task is active; retry after it finishes.")
+    try:
+        with tempfile.TemporaryFile(mode="w+b") as stderr_file:
+            try:
+                result = subprocess.run(
+                    [executable, *arguments],
+                    cwd=temporary_root,
+                    env=_safe_environment(executable, temporary_root),
+                    stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+                    input=input_text.encode("utf-8") if input_text is not None else None,
+                    stdout=subprocess.DEVNULL,
+                    stderr=stderr_file,
+                    timeout=timeout_seconds,
+                    check=False,
+                    shell=False,
+                )
+            except subprocess.TimeoutExpired:
+                raise LocalSpeechError("The local speech process exceeded its configured time limit.") from None
+            except OSError:
+                raise LocalSpeechError("The local speech executable could not be started.") from None
+            stderr_file.seek(0)
+            detail = stderr_file.read(4097).decode("utf-8", errors="replace").replace("\x00", "")[:1000]
+    finally:
+        _SPEECH_PROCESS_LOCK.release()
     if result.returncode != 0:
         safe_detail = " ".join(detail.split())[:400]
         raise LocalSpeechError(
