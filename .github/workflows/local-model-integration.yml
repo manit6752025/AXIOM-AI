@@ -75,7 +75,7 @@ jobs:
       - name: Install AXIOM and its security-audit extra
         run: |
           python -m pip install --upgrade pip "setuptools>=84.1.0"
-          python -m pip install -e ".[test,security-audit]"
+          python -m pip install ".[test,security-audit]"
       - name: Run AXIOM's bounded, explicitly authorized advisory scanner
         env:
           AXIOM_RUN_REAL_SECURITY_SCAN: "1"
