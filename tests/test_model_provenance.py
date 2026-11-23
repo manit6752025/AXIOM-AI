@@ -465,3 +465,23 @@ def test_model_provenance_hashes_at_exact_configured_weight_byte_limit(tmp_path,
     assert above_limit["hash_evidence"]["status"] == "skipped_size_or_file_count_limit"
     assert above_limit["hash_evidence"]["checkpoint_sha256"] is None
     assert above_limit["hash_evidence"]["files"] == []
+
+
+def test_model_provenance_hashes_the_full_16_gib_production_limit(tmp_path):
+    """Read and SHA-256 the full production byte budget using a sparse local checkpoint."""
+    model = tmp_path / "full-production-weight-budget"
+    model.mkdir()
+    sparse_weight = model / "full-limit.gguf"
+    with sparse_weight.open("wb") as stream:
+        stream.truncate(provenance.MAX_PROVENANCE_HASH_BYTES)
+
+    assert sparse_weight.stat().st_size == provenance.MAX_PROVENANCE_HASH_BYTES
+    report = inspect_model_provenance(model)
+    evidence = report["hash_evidence"]
+    assert report["format_evidence"]["weight_file_count"] == 1
+    assert report["format_evidence"]["weight_size_bytes"] == provenance.MAX_PROVENANCE_HASH_BYTES
+    assert evidence["status"] == "complete"
+    assert evidence["hashed_file_count"] == 1
+    assert evidence["files"][0]["size_bytes"] == provenance.MAX_PROVENANCE_HASH_BYTES
+    assert len(evidence["files"][0]["sha256"]) == 64
+    assert evidence["checkpoint_sha256"] == evidence["files"][0]["sha256"]
