@@ -93,7 +93,7 @@ required.
 
 Virtual environments, dependency caches, symlinked files/directories, sockets,
 devices, FIFOs, and other special filesystem entries are not backed up.
-Symlinks are skipped, not dereferenced. Filenames that cannot be represented
+All-zero blocks in restored large files are content-hashed and verified but restored as sparse filesystem holes where supported, reducing physical allocation without changing file bytes or declared sizes. The restore still consumes and verifies the full uncompressed stream. Symlinks are skipped, not dereferenced. Filenames that cannot be represented
 safely across supported filesystems and case-insensitive path collisions are
 rejected. File modes are restored with restrictive permissions; setuid,
 setgid, sticky and group/other write permissions are never restored.

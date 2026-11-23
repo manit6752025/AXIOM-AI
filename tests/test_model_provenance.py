@@ -465,3 +465,82 @@ def test_model_provenance_hashes_at_exact_configured_weight_byte_limit(tmp_path,
     assert above_limit["hash_evidence"]["status"] == "skipped_size_or_file_count_limit"
     assert above_limit["hash_evidence"]["checkpoint_sha256"] is None
     assert above_limit["hash_evidence"]["files"] == []
+
+
+def test_model_provenance_hashes_a_valid_safetensors_artifact_at_the_full_16_gib_limit(tmp_path):
+    """Hash a valid sparse safetensors container through the production 16 GiB limit."""
+    import json
+    import struct
+
+    model = tmp_path / "full-production-weight-budget"
+    model.mkdir()
+    sparse_weight = model / "full-limit.safetensors"
+    total_size = provenance.MAX_PROVENANCE_HASH_BYTES
+    payload_size = total_size
+
+    # Build a valid safetensors header, accounting for its own padded size
+    # before creating a sparse tensor payload of exactly the remaining bytes.
+    for _ in range(4):
+        header = json.dumps(
+            {
+                "weight": {
+                    "dtype": "U8",
+                    "shape": [payload_size],
+                    "data_offsets": [0, payload_size],
+                }
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        padded = header + b" " * (-len(header) % 8)
+        next_payload_size = total_size - 8 - len(padded)
+        if next_payload_size == payload_size:
+            break
+        payload_size = next_payload_size
+
+    header = json.dumps(
+        {
+            "weight": {
+                "dtype": "U8",
+                "shape": [payload_size],
+                "data_offsets": [0, payload_size],
+            }
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    padded = header + b" " * (-len(header) % 8)
+    assert 8 + len(padded) + payload_size == total_size
+
+    with sparse_weight.open("wb") as stream:
+        stream.write(struct.pack("<Q", len(padded)))
+        stream.write(padded)
+        stream.truncate(total_size)
+
+    with sparse_weight.open("rb") as stream:
+        header_length = struct.unpack("<Q", stream.read(8))[0]
+        parsed = json.loads(stream.read(header_length))
+    assert parsed["weight"]["dtype"] == "U8"
+    assert parsed["weight"]["shape"] == [payload_size]
+    assert parsed["weight"]["data_offsets"] == [0, payload_size]
+
+    # When the optional parser is installed, confirm its standards-based
+    # header reader accepts the sparse checkpoint without materializing it.
+    try:
+        from safetensors import safe_open
+    except ImportError:
+        safe_open = None
+    if safe_open is not None:
+        with safe_open(str(sparse_weight), framework="pt") as checkpoint:
+            assert checkpoint.keys() == ["weight"]
+            assert checkpoint.get_slice("weight").get_shape() == [payload_size]
+
+    assert sparse_weight.stat().st_size == total_size
+    report = inspect_model_provenance(model)
+    evidence = report["hash_evidence"]
+    assert report["format_evidence"]["detected_formats"] == ["safetensors"]
+    assert report["format_evidence"]["weight_file_count"] == 1
+    assert report["format_evidence"]["weight_size_bytes"] == total_size
+    assert evidence["status"] == "complete"
+    assert evidence["hashed_file_count"] == 1
+    assert evidence["files"][0]["size_bytes"] == total_size
+    assert len(evidence["files"][0]["sha256"]) == 64
+    assert evidence["checkpoint_sha256"] == evidence["files"][0]["sha256"]

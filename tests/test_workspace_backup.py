@@ -406,3 +406,31 @@ def test_workspace_backup_rejects_aggregate_byte_overflow_independently_of_per_f
 
     with pytest.raises(WorkspaceBackupError, match="100 GiB"):
         create_workspace_backup(workspace, io.BytesIO())
+
+
+def test_workspace_backup_streams_and_restores_a_one_gib_sparse_file(tmp_path: Path):
+    """Exercise real 1 GiB scan/write/verify/restore without allocating 1 GiB of zero blocks."""
+    workspace = tmp_path / "one-gib-sparse-workspace"
+    workspace.mkdir()
+    size_bytes = 1024**3
+    source = workspace / "sparse-model.gguf"
+    with source.open("wb") as stream:
+        stream.seek(size_bytes - 1)
+        stream.write(bytes([0]))
+
+    assert source.stat().st_size == size_bytes
+    archive, report = _archive(workspace)
+    assert report["file_count"] == 1
+    assert report["total_bytes"] == size_bytes
+
+    staging = _staging(tmp_path)
+    restored = restore_workspace_backup(archive, staging)
+    destination = staging / "sparse-model.gguf"
+    assert restored["integrity"] == "verified"
+    assert restored["file_count"] == 1
+    assert restored["total_bytes"] == size_bytes
+    assert destination.stat().st_size == size_bytes
+    if hasattr(destination.stat(), "st_blocks"):
+        # Filesystem holes should remain holes on filesystems that report
+        # allocated 512-byte blocks.
+        assert destination.stat().st_blocks * 512 < size_bytes // 64
