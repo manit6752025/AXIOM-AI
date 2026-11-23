@@ -222,3 +222,46 @@ the image in memory and may maintain their own runtime caches; the privacy
 statement applies to AXIOM's handling, not to independently configured
 third-party runtime behaviour. Never treat model output as authoritative
 evidence, and review sensitive images before submitting them.
+
+## Local speech-to-text and text-to-speech
+
+Speech support is optional and uses separately installed local command-line runtimes. AXIOM never installs a runtime or downloads a speech model/voice as part of transcription or synthesis.
+
+### Speech to text with whisper.cpp
+
+Install `whisper-cli` separately and place a GGML `.bin` model under a trusted speech-model root. Keep the audio file under the active workspace `data/` directory.
+
+~~~bash
+axiom engine speech transcribe \
+  --model-path "$HOME/models/ggml-base.bin" \
+  --audio-path data/audio/meeting.wav \
+  --language auto \
+  --threads 4 \
+  --timeout 300 \
+  --json
+~~~
+
+Input formats are WAV, MP3, FLAC and OGG, with a 64 MiB file limit. Transcription text is capped at 65,536 characters, CPU threads at 16, and runtime at 600 seconds. AXIOM copies the validated workspace audio into a private temporary directory for the external process and deletes that temporary copy when the process finishes. CPU is the default; `--accelerator` explicitly allows whisper.cpp to select a supported accelerator.
+
+### Text to speech with Piper
+
+Install the `piper` executable separately and place a local ONNX voice file and its adjacent `.onnx.json` configuration under a trusted speech-model root.
+
+~~~bash
+axiom engine speech synthesize \
+  --model-path "$HOME/models/en_US-local.onnx" \
+  --text "Hello from AXIOM." \
+  --output data/speech/hello.wav \
+  --speaker 0 \
+  --json
+~~~
+
+Text is limited to 4,096 characters, speaker IDs to 0–255, execution time to 300 seconds, and output to 12 MiB / 10 minutes. The CLI writes to a new workspace WAV file using create-only semantics; it never overwrites an existing output. The Runtime panel returns bounded audio bytes in the response and exposes a playback control without saving the audio.
+
+### Trusted model roots, resource controls and privacy
+
+Set `AXIOM_SPEECH_MODEL_ROOTS` to one or more existing trusted directories separated by the platform path separator. When unset, AXIOM uses `AXIOM_MODEL_ROOTS`, then the local `models/` directory and `~/models`. Model files must be found by AXIOM's bounded walk of those roots; symlinked model files/roots are rejected. The runtime executable is resolved from `PATH`, invoked as an argument array without a shell, with a reduced environment that does not inherit application API keys or proxy variables. Only one speech subprocess is admitted at a time.
+
+Transcription and synthesis are explicit user actions. AXIOM does not persist source audio, transcription text, synthesis text, or generated audio except for the CLI's explicitly requested WAV output file. No cloud endpoint is used. The external runtime and voice/model files are separate software and data with their own licenses and behaviour; review them before use.
+
+**Commercial distribution warning:** the current Piper engine project identifies its code as GPL-3.0-or-later and does not grant a blanket license to voice models. Each voice's `MODEL_CARD` and full training/fine-tuning chain must be reviewed independently; some widely used voice families have dataset restrictions that exclude commercial use. Do not bundle Piper or redistribute a voice model with AXIOM without a license review. See the [Piper license and voice guidance](https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/LICENSING.md), [commercial-use voice list](https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/COMMERCIAL_USE.md), and [CLI contract](https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/CLI.md). whisper.cpp's supported flags and input formats are documented in its [CLI README](https://github.com/ggml-org/whisper.cpp/blob/master/examples/cli/README.md).
