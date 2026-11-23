@@ -14,6 +14,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.responses import StreamingResponse
 from axiom.core import model_studio
+from axiom.core.inference import InferenceRuntimeError, run_local_vision
+from axiom.core.workspace_context import active_workspace_root
 from axiom.core.engine_fabric import EngineFabricBenchmarkRequirementError, EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
 from axiom.core.engine_fabric_profiles import EngineFabricProfileError, EngineFabricProfileStore
 from axiom.core.benchmark_profiles import BenchmarkProfileError, BenchmarkProfileStore
@@ -892,6 +894,55 @@ def engine_backend_benchmark(request: EngineFabricBenchmarkRequest) -> dict[str,
         raise HTTPException(status_code=409, detail=str(exc)) from None
     except EngineFabricError:
         raise HTTPException(status_code=503, detail="The selected local backend could not complete the benchmark.") from None
+
+
+
+class LocalVisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    model: str = Field(min_length=1, max_length=120)
+    image_path: str = Field(min_length=1, max_length=4096)
+    prompt: str = Field(default="Describe the image accurately. Separate observations from uncertainty.", min_length=1, max_length=8192)
+    max_new_tokens: int = Field(default=256, ge=1, le=1024, strict=True)
+    timeout_seconds: int = Field(default=120, ge=5, le=180, strict=True)
+
+    @field_validator("model")
+    @classmethod
+    def model_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("A local vision model name is required.")
+        return value
+
+    @field_validator("image_path")
+    @classmethod
+    def image_must_be_workspace_relative(cls, value: str) -> str:
+        if not value.startswith("data/") or value.strip() != value:
+            raise ValueError("Image path must be workspace-relative under data/.")
+        return value
+
+    @field_validator("prompt")
+    @classmethod
+    def prompt_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Image prompt must contain non-whitespace characters.")
+        return value
+
+
+@router.post("/vision")
+def engine_local_vision(request: LocalVisionRequest) -> dict[str, Any]:
+    """Analyze one workspace image using a locally installed vision-capable Ollama model."""
+    try:
+        return run_local_vision(
+            request.model,
+            request.image_path,
+            request.prompt,
+            workspace_root=active_workspace_root(),
+            max_new_tokens=request.max_new_tokens,
+            timeout_seconds=request.timeout_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except InferenceRuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
 
 
 class LocalEmbeddingsRequest(BaseModel):

@@ -1,16 +1,19 @@
 """Bounded local inference adapter for an Ollama instance on loopback only."""
 from __future__ import annotations
 
+import base64
 import json
 import math
+import os
 import re
 import shutil
 from datetime import UTC, datetime
 from typing import Any, Callable, Iterator
 from urllib.error import HTTPError, URLError
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from axiom.core.json_schema import JsonSchemaError, validate_json_schema
+from axiom.core.mcp_paths import open_mcp_workspace_file
 
 OLLAMA_ENDPOINT = "http://127.0.0.1:11434"
 _STATUS_TIMEOUT_SECONDS = 2.5
@@ -18,6 +21,10 @@ _GENERATION_TIMEOUT_SECONDS = 300
 _MAX_PROMPT_CHARS = 12_000
 _MAX_MODEL_NAME_CHARS = 120
 _MAX_GENERATED_TOKENS = 2_048
+_MAX_VISION_IMAGE_BYTES = 8 * 1024 * 1024
+_MAX_VISION_PIXELS = 40_000_000
+_MAX_VISION_PROMPT_CHARS = 8_192
+_MAX_VISION_OUTPUT_CHARS = 65_536
 _MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$")
 
 
@@ -97,10 +104,17 @@ def validate_sampling_options(
     return options
 
 
+class _RejectRedirects(HTTPRedirectHandler):
+    """Never forward a local inference request or image to a redirect target."""
+
+    def redirect_request(self, request: Request, fp: Any, code: int, message: str, headers: Any, newurl: str) -> None:
+        return None
+
+
 def _open_loopback(request: Request, timeout: float):
-    # Explicitly disable environment-configured proxies. The request destination
-    # is a constant IPv4 loopback URL; callers cannot provide a hostname or URL.
-    return build_opener(ProxyHandler({})).open(request, timeout=timeout)
+    # Disable proxies and redirects. The request destination is a constant
+    # IPv4 loopback URL; callers cannot provide a hostname or URL.
+    return build_opener(ProxyHandler({}), _RejectRedirects()).open(request, timeout=timeout)
 
 
 def _request_json(path: str, *, payload: dict[str, Any] | None = None, timeout: float) -> dict[str, Any]:
@@ -139,6 +153,163 @@ def _request_json(path: str, *, payload: dict[str, Any] | None = None, timeout: 
     if not isinstance(result, dict):
         raise InferenceRuntimeError("The local inference runtime returned an unexpected response shape.")
     return result
+
+
+
+def _vision_image_dimensions(data: bytes, suffix: str) -> tuple[str, int, int]:
+    """Identify a bounded PNG/JPEG image and read dimensions without decoding pixels."""
+    if suffix == ".png":
+        if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+            raise ValueError("Image extension and PNG file signature do not match.")
+        width = int.from_bytes(data[16:20], "big")
+        height = int.from_bytes(data[20:24], "big")
+        image_format = "png"
+    elif suffix in {".jpg", ".jpeg"}:
+        if len(data) < 4 or data[:2] != b"\xff\xd8":
+            raise ValueError("Image extension and JPEG file signature do not match.")
+        width = height = 0
+        offset = 2
+        frame_markers = {
+            0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+            0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+        }
+        while offset + 4 <= len(data):
+            if data[offset] != 0xFF:
+                offset += 1
+                continue
+            while offset < len(data) and data[offset] == 0xFF:
+                offset += 1
+            if offset >= len(data):
+                break
+            marker = data[offset]
+            offset += 1
+            if marker in {0xD8, 0xD9, 0x01} or 0xD0 <= marker <= 0xD7:
+                continue
+            if offset + 2 > len(data):
+                break
+            segment_length = int.from_bytes(data[offset:offset + 2], "big")
+            if segment_length < 2 or offset + segment_length > len(data):
+                break
+            if marker in frame_markers:
+                if segment_length < 7:
+                    break
+                height = int.from_bytes(data[offset + 3:offset + 5], "big")
+                width = int.from_bytes(data[offset + 5:offset + 7], "big")
+                break
+            offset += segment_length
+        if not width or not height:
+            raise ValueError("JPEG dimensions could not be verified from its bounded header.")
+        image_format = "jpeg"
+    else:
+        raise ValueError("Only workspace PNG and JPEG images are supported.")
+    if (
+        isinstance(width, bool) or isinstance(height, bool)
+        or not 1 <= width <= 10_000 or not 1 <= height <= 10_000
+        or width * height > _MAX_VISION_PIXELS
+    ):
+        raise ValueError("Image dimensions exceed the 10,000-pixel side or 40-megapixel safety limit.")
+    return image_format, width, height
+
+
+def run_local_vision(
+    model: str,
+    image_path: str,
+    prompt: str,
+    *,
+    workspace_root: Any,
+    max_new_tokens: int = 256,
+    timeout_seconds: int = 120,
+) -> dict[str, Any]:
+    """Send one bounded workspace image to an explicitly vision-capable loopback model."""
+    model = validate_model_name(model)
+    if not isinstance(image_path, str) or not image_path.startswith("data/"):
+        raise ValueError("Image path must be workspace-relative under data/.")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("Image prompt must contain non-whitespace characters.")
+    if len(prompt) > _MAX_VISION_PROMPT_CHARS:
+        raise ValueError(f"Image prompt exceeds the {_MAX_VISION_PROMPT_CHARS:,}-character limit.")
+    if (
+        isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int)
+        or not 1 <= max_new_tokens <= 1_024
+    ):
+        raise ValueError("Maximum image-response tokens must be an integer from 1 through 1,024.")
+    if (
+        isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int)
+        or not 5 <= timeout_seconds <= 180
+    ):
+        raise ValueError("Image-analysis timeout must be an integer from 5 through 180 seconds.")
+
+    path, image_stream = open_mcp_workspace_file(image_path, workspace_root)
+    suffix = path.suffix.lower()
+    try:
+        with image_stream:
+            before = os.fstat(image_stream.fileno())
+            if before.st_size <= 0 or before.st_size > _MAX_VISION_IMAGE_BYTES:
+                raise ValueError("Image must be between 1 byte and 8 MiB.")
+            image_data = image_stream.read(_MAX_VISION_IMAGE_BYTES + 1)
+            after = os.fstat(image_stream.fileno())
+        identity_before = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+        identity_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+        if identity_before != identity_after or len(image_data) != after.st_size:
+            raise ValueError("Image changed while AXIOM was reading it; retry with a stable file.")
+    except OSError:
+        raise ValueError("The workspace image could not be read safely.") from None
+
+    image_format, width, height = _vision_image_dimensions(image_data, suffix)
+    show = _request_json("/api/show", payload={"model": model, "verbose": False}, timeout=min(timeout_seconds, 15))
+    capabilities = show.get("capabilities")
+    if not isinstance(capabilities, list) or "vision" not in capabilities:
+        raise InferenceRuntimeError(
+            "The selected local Ollama model did not explicitly report the vision capability; choose a local vision model."
+        )
+
+    generated = _request_json(
+        "/api/generate",
+        payload={
+            "model": model,
+            "prompt": prompt,
+            "images": [base64.b64encode(image_data).decode("ascii")],
+            "stream": False,
+            "options": {"num_predict": max_new_tokens},
+        },
+        timeout=timeout_seconds,
+    )
+    response = generated.get("response")
+    if generated.get("done") is not True or not isinstance(response, str) or not response.strip():
+        raise InferenceRuntimeError("The local vision runtime did not return a completed text response.")
+    if len(response) > _MAX_VISION_OUTPUT_CHARS:
+        raise InferenceRuntimeError("The local vision response exceeded the 64 KiB output limit.")
+    return {
+        "schema_version": 1,
+        "model": model,
+        "response": response,
+        "image": {
+            "format": image_format,
+            "width": width,
+            "height": height,
+            "size_bytes": len(image_data),
+        },
+        "generation": {
+            "max_new_tokens": max_new_tokens,
+            "eval_count": generated.get("eval_count") if isinstance(generated.get("eval_count"), int) else None,
+            "total_duration_ms": round(generated["total_duration"] / 1_000_000, 3)
+                if isinstance(generated.get("total_duration"), (int, float)) and generated["total_duration"] >= 0
+                else None,
+        },
+        "privacy": {
+            "local_loopback_only": True,
+            "network_used": False,
+            "image_returned": False,
+            "image_persisted_by_axiom": False,
+            "prompt_persisted_by_axiom": False,
+            "model_downloaded": False,
+            "model_weights_loaded_by_axiom": False,
+        },
+        "scope_note": (
+            "The image and prompt were sent only to the Ollama API at 127.0.0.1:11434 after an explicit user action. "
+            "AXIOM did not download a model or persist the image, prompt, or response."
+        ),
+    }
 
 
 def runtime_status() -> dict[str, Any]:
