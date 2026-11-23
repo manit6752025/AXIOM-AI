@@ -434,3 +434,43 @@ def test_workspace_backup_streams_and_restores_a_one_gib_sparse_file(tmp_path: P
         # Filesystem holes should remain holes on filesystems that report
         # allocated 512-byte blocks.
         assert destination.stat().st_blocks * 512 < size_bytes // 64
+
+
+def test_workspace_backup_restore_rejects_105_gib_archive_before_zip_parser(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import os
+
+    class VirtualOversizedArchive:
+        """Seekable archive stand-in that reports a size without allocating bytes."""
+
+        def __init__(self) -> None:
+            self.position = 0
+
+        def tell(self) -> int:
+            return self.position
+
+        def seek(self, offset: int, whence: int = os.SEEK_SET) -> int:
+            if whence == os.SEEK_END:
+                self.position = workspace_backup.MAX_BACKUP_ARCHIVE_BYTES + 1
+            elif whence == os.SEEK_SET:
+                self.position = offset
+            elif whence == os.SEEK_CUR:
+                self.position += offset
+            else:
+                raise ValueError("Unsupported seek mode")
+            return self.position
+
+    archive = VirtualOversizedArchive()
+    staging = _staging(tmp_path)
+    monkeypatch.setattr(
+        workspace_backup.zipfile,
+        "ZipFile",
+        lambda *_args, **_kwargs: pytest.fail("oversized archives must be rejected before ZIP parsing"),
+    )
+
+    assert workspace_backup.MAX_BACKUP_ARCHIVE_BYTES == 105 * 1024**3
+    with pytest.raises(WorkspaceBackupError, match="105 GiB upload limit"):
+        restore_workspace_backup(archive, staging)
+    assert not any(staging.iterdir())
