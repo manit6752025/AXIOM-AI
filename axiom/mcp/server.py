@@ -52,6 +52,7 @@ from axiom.core.prediction_jobs import (
     preflight_prediction_job,
     read_prediction_job,
     record_prediction_job_evaluation,
+    resume_prediction_job,
     start_prediction_job,
     wait_prediction_job,
 )
@@ -4230,6 +4231,36 @@ def axiom_prediction_job_wait(job_id: str, timeout_seconds: float = 30.0) -> dic
     ToolPermissionStore().require("axiom_prediction_job_status", arguments=locals())
     root = _mcp_workspace_root()
     return wait_prediction_job(job_id, root, timeout_seconds=timeout_seconds)
+
+
+@mcp.tool()
+def axiom_prediction_job_resume(job_id: str) -> dict:
+    """Resume an interrupted prediction job after revalidating its saved inputs and checkpoint."""
+    ToolPermissionStore().require("axiom_prediction_job_resume", arguments=locals())
+    root = _mcp_workspace_root()
+    try:
+        job = resume_prediction_job(job_id, root)
+    except (OSError, RuntimeError, ValueError):
+        return {
+            "job": None,
+            "resumed": False,
+            "error": "Prediction job could not be resumed safely; inspect its status and verify its original inputs.",
+        }
+    if job is None:
+        return {"job": None, "not_found": True, "resumed": False}
+    return {
+        "job": job,
+        "resumed": True,
+        "scope": {
+            "dataset_fingerprint_verified": True,
+            "model_and_adapter_fingerprints_verified": True,
+            "checkpoint_identity_and_digest_verified": True,
+            "partial_output_published": False,
+            "prompts_returned": False,
+            "predictions_returned": False,
+            "generation_resumed_after_restart": True,
+        },
+    }
 
 
 @mcp.tool()
