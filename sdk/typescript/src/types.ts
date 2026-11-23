@@ -2,6 +2,64 @@
 export type JSONPrimitive = string | number | boolean | null;
 export type JSONValue = JSONPrimitive | JSONValue[] | { [key: string]: JSONValue };
 
+export interface AxiomPredictionJobSummary {
+  id: string;
+  status: string;
+  created_at?: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  dataset_path?: string;
+  output_path?: string;
+  artifact_ready?: boolean;
+  rows_total?: number;
+  rows_completed?: number;
+  resumable?: boolean;
+  resumption_count?: number;
+  error_code?: string | null;
+  [key: string]: unknown;
+}
+
+export interface AxiomPredictionJobStartRequest {
+  model_path: string;
+  dataset_path: string;
+  output_path: string;
+  adapter_path?: string | null;
+  prompt_field?: string;
+  reference_field?: string;
+  prediction_field?: string;
+  max_new_tokens?: number;
+  temperature?: number;
+  seed?: number | null;
+  device?: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu";
+  precision?: "auto" | "fp32" | "fp16" | "bf16";
+}
+
+export interface AxiomPredictionJobPage {
+  schema_version: 1;
+  jobs: AxiomPredictionJobSummary[];
+  limit: number;
+  scope?: Record<string, unknown>;
+}
+
+export interface AxiomPredictionJobStatusResult {
+  schema_version: 1;
+  job: AxiomPredictionJobSummary;
+}
+
+export interface AxiomPredictionJobStartResult {
+  schema_version: 1;
+  job: AxiomPredictionJobSummary;
+  limits?: Record<string, number>;
+  scope?: Record<string, unknown>;
+}
+
+export interface AxiomPredictionJobCancelResult {
+  schema_version: 1;
+  job: AxiomPredictionJobSummary;
+  cancellation_accepted: boolean;
+  note?: string;
+}
+
 export interface AxiomClientOptions {
   /** API origin. Defaults to the local AXIOM daemon. */
   baseUrl?: string;
