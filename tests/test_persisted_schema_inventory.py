@@ -24,6 +24,7 @@ def _sources() -> dict[str, str]:
         "fine_tuning": "axiom/core/fine_tuning.py",
         "model_studio": "axiom/core/model_studio.py",
         "runtime_traces": "axiom/core/runtime_traces.py",
+        "resource_telemetry": "axiom/core/resource_telemetry.py",
     }
     return {name: (ROOT / path).read_text(encoding="utf-8") for name, path in paths.items()}
 
@@ -41,6 +42,9 @@ def test_storage_schema_inventory_matches_all_persisted_store_contracts() -> Non
     assert "SCHEMA_VERSION = 2" in source["security_events"]
     assert ".axiom/security-events.json" in docs
     assert "SCHEMA_VERSION = 1" in source["hardware_snapshots"]
+    assert "SCHEMA_VERSION = 1" in source["resource_telemetry"]
+    assert "MAX_SAMPLES = 500" in source["resource_telemetry"]
+    assert ".axiom/resource-telemetry.json" in docs
     assert ".axiom/hardware-snapshots.json" in docs
     assert "_SCHEMA_VERSION = 1" in source["workspaces"]
     assert "~/.axiom/workspaces.json" in docs

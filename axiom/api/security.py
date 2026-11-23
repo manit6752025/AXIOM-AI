@@ -9,8 +9,16 @@ from axiom.core.tool_permissions import ToolPermissionStore
 from axiom.core.security_audit import audit_security_posture
 from axiom.core.workspace_context import active_workspace_root
 from axiom.core.security_events import SecurityEventError, SecurityEventStore, record_security_event
+from axiom.core.supply_chain import SupplyChainError, audit_dependency_vulnerabilities, generate_spdx_sbom
 
 router = APIRouter(prefix="/api/security", tags=["security"])
+
+
+class DependencyAuditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    allow_network: bool
+    timeout_seconds: int = Field(default=90, ge=1, le=300, strict=True)
 
 
 class ToolProfileInput(BaseModel):
@@ -158,3 +166,25 @@ def review_security_event(
             status_code=status_code,
             detail="Security event review could not be recorded.",
         ) from exc
+
+
+
+@router.get("/sbom")
+def security_software_bill_of_materials() -> dict[str, Any]:
+    """Return a bounded SPDX 2.3 inventory of installed Python distributions."""
+    try:
+        return generate_spdx_sbom()
+    except SupplyChainError:
+        raise HTTPException(status_code=409, detail="Software bill of materials could not be generated safely.") from None
+
+
+@router.post("/dependency-audit")
+def security_dependency_audit(request: DependencyAuditRequest) -> dict[str, Any]:
+    """Run an advisory-backed dependency scan only after explicit network authorization."""
+    try:
+        return audit_dependency_vulnerabilities(
+            allow_network=request.allow_network,
+            timeout_seconds=request.timeout_seconds,
+        )
+    except SupplyChainError:
+        raise HTTPException(status_code=422, detail="Dependency audit requires explicit authorization and valid bounded settings.") from None

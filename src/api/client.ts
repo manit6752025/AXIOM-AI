@@ -1510,6 +1510,67 @@ export type WorkspaceDiagnostics = {
   checks: WorkspaceDiagnosticCheck[];
 };
 
+export type SoftwareBillOfMaterials = {
+  spdxVersion: "SPDX-2.3";
+  dataLicense: "CC0-1.0";
+  SPDXID: "SPDXRef-DOCUMENT";
+  name: string;
+  documentNamespace: string;
+  creationInfo: { creators: string[]; created: string; comment: string };
+  documentDescribes: string[];
+  packages: Array<{
+    name: string;
+    SPDXID: string;
+    versionInfo: string;
+    downloadLocation: "NOASSERTION";
+    filesAnalyzed: false;
+    licenseConcluded: "NOASSERTION";
+    licenseDeclared: "NOASSERTION";
+    copyrightText: "NOASSERTION";
+    primaryPackagePurpose: "LIBRARY";
+    externalRefs: Array<{ referenceCategory: "PACKAGE-MANAGER"; referenceType: "purl"; referenceLocator: string }>;
+  }>;
+  relationships: Array<{ spdxElementId: string; relationshipType: "DESCRIBES" | "DEPENDS_ON"; relatedSpdxElement: string }>;
+  annotations: Array<{ annotationDate: string; annotationType: "OTHER"; annotator: string; comment: string }>;
+  axiom: {
+    schema_version: 1;
+    package_count: number;
+    relationship_count: number;
+    content_sha256: string;
+    scope: string;
+    file_contents_collected: false;
+    host_paths_collected: false;
+    network_access_performed: false;
+  };
+};
+
+export type DependencyVulnerabilityReport = {
+  schema_version: 1;
+  generated_at: string;
+  scanner: { name: "pip-audit"; version: string | null };
+  status: "complete" | "unavailable" | "error";
+  network_accessed: boolean;
+  dependency_count: number;
+  vulnerable_dependency_count: number;
+  vulnerability_count: number;
+  findings: Array<{
+    id: string;
+    package: string;
+    installed_version: string;
+    aliases: string[];
+    fix_versions: string[];
+  }>;
+  message?: string;
+  exit_code?: number;
+  privacy?: {
+    credentials_included: false;
+    environment_values_included: false;
+    package_file_contents_included?: false;
+    network_identifiers_included?: false;
+  };
+  limitations?: string[];
+};
+
 export type SecurityAudit = {
   schema_version: number;
   generated_at: string;
@@ -2045,6 +2106,14 @@ export const axiomApi = {
   workspaceDiagnostics: () => requestJson<WorkspaceDiagnostics>("/api/diagnostics/workspace"),
 
   securityAudit: () => requestJson<SecurityAudit>("/api/security/audit"),
+
+  securitySoftwareBillOfMaterials: () => requestJson<SoftwareBillOfMaterials>("/api/security/sbom"),
+
+  scanDependencyVulnerabilities: (allowNetwork: boolean, timeoutSeconds = 90) =>
+    requestJson<DependencyVulnerabilityReport>("/api/security/dependency-audit", {
+      method: "POST",
+      body: JSON.stringify({ allow_network: allowNetwork, timeout_seconds: timeoutSeconds }),
+    }),
 
   securityEvents: (limit = 50, offset = 0) => {
     const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });

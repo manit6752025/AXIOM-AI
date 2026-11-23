@@ -52,6 +52,7 @@ import {
   type WorkspaceEvent,
   type WorkspaceDiagnostics,
   type SecurityAudit,
+  type DependencyVulnerabilityReport,
   type SecurityEventPage,
   type SecurityEventListItem,
   type RoadmapAudit,
@@ -4513,6 +4514,7 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
   const [bundleBusy, setBundleBusy] = useState(false);
   const [frontendErrors, setFrontendErrors] = useState(() => getFrontendErrorReport().events);
   const [frontendReportBusy, setFrontendReportBusy] = useState(false);
+  const [supplyChainBusy, setSupplyChainBusy] = useState(false);
 
   useEffect(() => {
     const refreshFrontendErrors = () => setFrontendErrors(getFrontendErrorReport().events);
@@ -4531,6 +4533,47 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
       onNotify("Frontend error report could not be exported.", "warning");
     } finally {
       setFrontendReportBusy(false);
+    }
+  };
+
+
+  const exportSoftwareBillOfMaterials = async () => {
+    setSupplyChainBusy(true);
+    try {
+      const report = await axiomApi.securitySoftwareBillOfMaterials();
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/spdx+json" });
+      downloadBlob(blob, "axiom-installed-environment.spdx.json");
+      onNotify("SPDX 2.3 SBOM exported · " + report.axiom.package_count + " package(s). No package code was executed.", "success");
+    } catch (cause) {
+      onNotify(cause instanceof Error ? cause.message : "Software bill of materials could not be exported.", "warning");
+    } finally {
+      setSupplyChainBusy(false);
+    }
+  };
+
+  const scanDependencyVulnerabilities = async () => {
+    const authorized = window.confirm(
+      "Run pip-audit against the active Python environment? This explicit scan may contact external package vulnerability advisory services. AXIOM will not send arbitrary environment variables or API tokens to the scanner."
+    );
+    if (!authorized) return;
+    setSupplyChainBusy(true);
+    try {
+      const report: DependencyVulnerabilityReport = await axiomApi.scanDependencyVulnerabilities(true, 90);
+      downloadBlob(
+        new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }),
+        "axiom-dependency-vulnerability-report.json",
+      );
+      if (report.status !== "complete") {
+        onNotify(report.message || "Dependency scanner did not produce a complete vulnerability result.", "warning");
+      } else if (report.vulnerability_count > 0) {
+        onNotify("Dependency scan found " + report.vulnerability_count + " advisory finding(s) across " + report.vulnerable_dependency_count + " package(s). Review the downloaded report.", "warning");
+      } else {
+        onNotify("Dependency scan completed: no known findings in " + report.dependency_count + " audited package(s). This is not a guarantee of safety.", "success");
+      }
+    } catch (cause) {
+      onNotify(cause instanceof Error ? cause.message : "Dependency vulnerability scan could not be completed.", "warning");
+    } finally {
+      setSupplyChainBusy(false);
     }
   };
 
@@ -4642,6 +4685,8 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
 
   return <FeaturePage page="diagnostics" actions={<>
     <button type="button" className="button secondary-button" onClick={() => void downloadBundle()} disabled={bundleBusy}><ArrowDownToLine size={16} /> {bundleBusy ? "Preparing bundle…" : "Download support bundle"}</button>
+    <button type="button" className="button secondary-button" onClick={() => void exportSoftwareBillOfMaterials()} disabled={supplyChainBusy}><ArrowDownToLine size={16} /> Export SPDX SBOM</button>
+    <button type="button" className="button secondary-button" onClick={() => void scanDependencyVulnerabilities()} disabled={supplyChainBusy}>{supplyChainBusy ? "Checking dependencies…" : "Scan dependencies (network)"}</button>
     <button type="button" className="button primary-button" onClick={() => void runScan()} disabled={scanState === "scanning"}><Wrench size={16} /> {scanState === "scanning" ? "Scanning…" : "Run diagnostics"}</button>
   </>}>
     <div className="diagnostic-hero"><div><p className="eyebrow">WORKSPACE READINESS</p><strong>{headline}</strong><p>{systemDescription}{health?.version ? ` · AXIOM ${health.version}` : ""}</p></div><div className={`diagnostic-ring ${scanState === "failed" ? "blocked" : scanState}`}><span>{scanState === "scanning" ? "…" : connected ? "OK" : "N/A"}</span></div></div>
@@ -4755,6 +4800,14 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
         return <DiagnosticRow key={check.id} icon={Icon} title={check.title} detail={`${check.detail}${check.remediation ? ` Next: ${check.remediation}` : ""}`} state={check.status.toUpperCase()} tone={tone} />;
       })}</div>
     </Surface>}
+    <Surface title="Software supply chain" eyebrow="LOCAL SBOM / EXPLICIT ONLINE AUDIT">
+      <p className="quiet-note">Export an SPDX 2.3 software bill of materials for installed Python distributions. This reads package metadata only, does not execute packages, and does not contact a network service.</p>
+      <p className="quiet-note">The optional dependency vulnerability scan uses pip-audit and online advisory sources only after you select Scan dependencies and confirm the network request. If pip-audit is unavailable or the scan times out, AXIOM reports that no complete vulnerability conclusion was produced; an unavailable scanner is never described as a clean scan.</p>
+      <div className="integration-form-actions">
+        <button type="button" className="button secondary-button" onClick={() => void exportSoftwareBillOfMaterials()} disabled={supplyChainBusy}><ArrowDownToLine size={15} /> Export SPDX 2.3 SBOM</button>
+        <button type="button" className="button secondary-button" onClick={() => void scanDependencyVulnerabilities()} disabled={supplyChainBusy}>{supplyChainBusy ? "Checking dependencies…" : "Scan dependencies (network)"}</button>
+      </div>
+    </Surface>
     {!connected && scanState !== "scanning" && <Callout tone="warning" title="Start the local API">Open the AXIOM UI launcher or start the FastAPI service, then scan again.</Callout>}
   </FeaturePage>;
 }

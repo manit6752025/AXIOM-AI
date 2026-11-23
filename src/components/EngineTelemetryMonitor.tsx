@@ -212,26 +212,26 @@ export default function EngineTelemetryMonitor() {
 
   const exportCsv = () => {
     if (samples.length === 0) return;
-    const columns: Array<{ name: string; value: (sample: AxiomEngineSystemTelemetry) => string | number | null }> = [
+    const columns: Array<{ name: string; value: (sample: ResourceMonitorSample) => string | number | null }> = [
       { name: "sampled_at", value: (sample) => sample.sampled_at },
       ...(includeCpu ? [
-        { name: "system_cpu_percent", value: (sample: AxiomEngineSystemTelemetry) => sample.cpu.system_percent },
-        { name: "process_cpu_percent", value: (sample: AxiomEngineSystemTelemetry) => sample.cpu.process_percent },
+        { name: "system_cpu_percent", value: (sample: ResourceMonitorSample) => sample.cpu.system_percent },
+        { name: "process_cpu_percent", value: (sample: ResourceMonitorSample) => sample.cpu.process_percent },
       ] : []),
       ...(includeMemory ? [
-        { name: "system_ram_total_bytes", value: (sample: AxiomEngineSystemTelemetry) => sample.memory.total_bytes },
-        { name: "system_ram_available_bytes", value: (sample: AxiomEngineSystemTelemetry) => sample.memory.available_bytes },
-        { name: "system_ram_used_bytes", value: (sample: AxiomEngineSystemTelemetry) => sample.memory.used_bytes },
-        { name: "system_ram_used_percent", value: (sample: AxiomEngineSystemTelemetry) => sample.memory.percent },
+        { name: "system_ram_total_bytes", value: (sample: ResourceMonitorSample) => sample.memory.total_bytes },
+        { name: "system_ram_available_bytes", value: (sample: ResourceMonitorSample) => sample.memory.available_bytes },
+        { name: "system_ram_used_bytes", value: (sample: ResourceMonitorSample) => sample.memory.used_bytes },
+        { name: "system_ram_used_percent", value: (sample: ResourceMonitorSample) => sample.memory.percent },
       ] : []),
       ...(includeProcess ? [
-        { name: "process_rss_bytes", value: (sample: AxiomEngineSystemTelemetry) => sample.process.rss_bytes },
-        { name: "process_peak_rss_bytes", value: (sample: AxiomEngineSystemTelemetry) => sample.process.peak_rss_bytes },
-        { name: "process_threads", value: (sample: AxiomEngineSystemTelemetry) => sample.process.threads },
+        { name: "process_rss_bytes", value: (sample: ResourceMonitorSample) => sample.process.rss_bytes },
+        { name: "process_peak_rss_bytes", value: (sample: ResourceMonitorSample) => sample.process.peak_rss_bytes },
+        { name: "process_threads", value: (sample: ResourceMonitorSample) => sample.process.threads },
       ] : []),
       ...(includeDevice ? [
-        { name: "device_allocator_current_bytes", value: (sample: AxiomEngineSystemTelemetry) => sample.loaded_runtime.device_allocator?.current_allocated_bytes ?? null },
-        { name: "device_allocator_reserved_bytes", value: (sample: AxiomEngineSystemTelemetry) => sample.loaded_runtime.device_allocator?.current_reserved_bytes ?? null },
+        { name: "device_allocator_current_bytes", value: (sample: ResourceMonitorSample) => sample.loaded_runtime.device_allocator?.current_allocated_bytes ?? null },
+        { name: "device_allocator_reserved_bytes", value: (sample: ResourceMonitorSample) => sample.loaded_runtime.device_allocator?.current_reserved_bytes ?? null },
       ] : []),
     ];
     const quote = (value: string | number | null) => `"${String(value ?? "").replace(/"/g, '""')}"`;

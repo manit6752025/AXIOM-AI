@@ -23,6 +23,7 @@ from axiom.core.diagnostics import diagnose_workspace
 from axiom.core.security_audit import audit_security_posture
 from axiom.core.artifact_security import inspect_release_artifact
 from axiom.core.security_events import SecurityEventError, SecurityEventStore
+from axiom.core.supply_chain import SupplyChainError, audit_dependency_vulnerabilities, generate_spdx_sbom, write_report_new
 from axiom.cli.support_bundle import register as register_support_bundle_cli
 from axiom.cli.roadmap import roadmap_app as roadmap_cli_app
 from axiom.datasets.inspector import inspect_dataset
@@ -223,6 +224,56 @@ def register(app, model_app, dataset_app) -> None:
             typer.echo(f"Security audit complete: {summary['passed']} passed, {summary['warnings']} warning(s), {summary['failed']} failed")
         if report["summary"]["failed"] or (strict and report["summary"]["warnings"]):
             raise typer.Exit(code=1)
+
+    @security_app.command("sbom")
+    def security_sbom(
+        output: Path | None = typer.Option(None, "--output", help="Create a new SPDX JSON file; existing files are never overwritten."),
+    ) -> None:
+        """Export an SPDX 2.3 bill of materials for the active Python environment."""
+        try:
+            report = generate_spdx_sbom()
+            content = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+            if output is not None:
+                destination = write_report_new(output, content)
+                typer.echo(f"SPDX 2.3 SBOM written to {destination} ({report['axiom']['package_count']} packages).")
+            else:
+                typer.echo(content, nl=False)
+        except SupplyChainError:
+            emit_error("Software bill of materials could not be generated or exported safely.", code="sbom_export_failed", exit_code=2)
+
+    @security_app.command("vulnerabilities")
+    def security_vulnerabilities(
+        allow_network: bool = typer.Option(False, "--allow-network", help="Authorize pip-audit to contact package vulnerability advisory services."),
+        timeout_seconds: int = typer.Option(90, "--timeout", min=1, max=300, help="Maximum scanner run time."),
+        output: Path | None = typer.Option(None, "--output", help="Create a new JSON report; existing files are never overwritten."),
+        json_output: bool = typer.Option(False, "--json", help="Emit the complete machine-readable vulnerability report."),
+        strict: bool = typer.Option(False, "--strict", help="Return a failing exit code when vulnerabilities are found."),
+    ) -> None:
+        """Explicitly audit installed Python dependencies against online vulnerability advisories."""
+        try:
+            report = audit_dependency_vulnerabilities(
+                allow_network=allow_network,
+                timeout_seconds=timeout_seconds,
+            )
+            content = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+            if output is not None:
+                destination = write_report_new(output, content)
+                typer.echo(f"Dependency vulnerability report written to {destination}.")
+            elif json_output:
+                typer.echo(content, nl=False)
+            else:
+                typer.echo(f"AXIOM dependency vulnerability audit · {report['status']}")
+                typer.echo(f"Scanner: {report['scanner']['name']} {report['scanner'].get('version') or 'unavailable'}")
+                typer.echo(f"Dependencies inspected: {report['dependency_count']}")
+                typer.echo(f"Vulnerable dependencies: {report['vulnerable_dependency_count']}")
+                typer.echo(f"Vulnerabilities: {report['vulnerability_count']}")
+                typer.echo("Network advisory lookup was explicitly authorized." if report.get("network_accessed") else "No network lookup was performed.")
+                if report.get("message"):
+                    typer.echo(report["message"])
+            if report["status"] != "complete" or (strict and report["vulnerability_count"]):
+                raise typer.Exit(code=1)
+        except SupplyChainError:
+            emit_error("Dependency vulnerability scan requires explicit network authorization and valid bounded settings.", code="dependency_audit_failed", exit_code=2)
 
     @app.command("doctor")
     def doctor(
@@ -558,18 +609,30 @@ def register(app, model_app, dataset_app) -> None:
     app.add_typer(project_app, name="project")
 
     @project_app.command("info")
-    def project_info() -> None:
+    def project_info(
+        json_output: bool = typer.Option(False, "--json", help="Emit a versioned machine-readable project summary."),
+    ) -> None:
         """Show local project markers in the current directory."""
         root = Path.cwd()
+        config_exists = (root / "axiom.yaml").is_file()
+        readme_exists = (root / "README.md").is_file()
+        if json_output:
+            typer.echo(json.dumps({
+                "schema_version": 1,
+                "path": str(root),
+                "config": {"path": "axiom.yaml", "exists": config_exists},
+                "readme": {"path": "README.md", "exists": readme_exists},
+            }, ensure_ascii=False, sort_keys=True))
+            return
 
         console.print(
             Panel.fit(
                 f"[bold cyan]AXIOM PROJECT[/bold cyan]\n\n"
                 f"Path: {root}\n"
                 f"Config: "
-                f"{'found' if (root / 'axiom.yaml').exists() else 'missing'}\n"
+                f"{'found' if config_exists else 'missing'}\n"
                 f"README: "
-                f"{'found' if (root / 'README.md').exists() else 'missing'}",
+                f"{'found' if readme_exists else 'missing'}",
                 title="AXIOM",
             )
         )

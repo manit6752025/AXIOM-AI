@@ -41,10 +41,17 @@ def test_resource_monitoring_contract_requires_opt_in_bounds_export_and_gui_hist
     panel = (ROOT / "src" / "components" / "EngineTelemetryMonitor.tsx").read_text(encoding="utf-8")
     app = (ROOT / "src" / "App.tsx").read_text(encoding="utf-8")
     e2e = (ROOT / "e2e" / "telemetry-monitor.spec.ts").read_text(encoding="utf-8")
+    core = (ROOT / "axiom" / "core" / "resource_telemetry.py").read_text(encoding="utf-8")
+    api = (ROOT / "axiom" / "api" / "engine.py").read_text(encoding="utf-8")
+    client = (ROOT / "src" / "api" / "client.ts").read_text(encoding="utf-8")
+    core_tests = (ROOT / "tests" / "test_resource_telemetry.py").read_text(encoding="utf-8")
+    api_tests = (ROOT / "tests" / "test_resource_telemetry_api.py").read_text(encoding="utf-8")
 
-    assert release_smoke.resource_monitoring_issues(cli, panel, app, e2e) == []
+    arguments = (cli, panel, app, e2e, core, api, client, core_tests, api_tests)
+    assert release_smoke.resource_monitoring_issues(*arguments) == []
     issues = release_smoke.resource_monitoring_issues(
-        cli, panel, app, e2e.replace('name: "Start monitoring"', 'name: "Begin monitoring"')
+        cli, panel, app, e2e.replace('name: "Start monitoring"', 'name: "Begin monitoring"'),
+        core, api, client, core_tests, api_tests,
     )
     assert any("Browser acceptance" in issue and "Start monitoring" in issue for issue in issues)
 
@@ -423,6 +430,7 @@ def test_persisted_schema_inventory_release_contract_matches_current_stores() ->
         "fine_tuning": "axiom/core/fine_tuning.py",
         "model_studio": "axiom/core/model_studio.py",
         "runtime_traces": "axiom/core/runtime_traces.py",
+        "resource_telemetry": "axiom/core/resource_telemetry.py",
     }
     sources = {name: (ROOT / path).read_text(encoding="utf-8") for name, path in paths.items()}
     docs = (ROOT / "docs/Storage-Schemas-and-Migrations.md").read_text(encoding="utf-8")
@@ -444,6 +452,7 @@ def test_persisted_schema_inventory_detects_stale_versions_and_missing_store_not
         "fine_tuning": "axiom/core/fine_tuning.py",
         "model_studio": "axiom/core/model_studio.py",
         "runtime_traces": "axiom/core/runtime_traces.py",
+        "resource_telemetry": "axiom/core/resource_telemetry.py",
     }
     sources = {name: (ROOT / path).read_text(encoding="utf-8") for name, path in paths.items()}
     docs = (ROOT / "docs/Storage-Schemas-and-Migrations.md").read_text(encoding="utf-8")
@@ -451,3 +460,42 @@ def test_persisted_schema_inventory_detects_stale_versions_and_missing_store_not
     failures = release_smoke.persisted_schema_inventory_issues(stale, sources)
     assert any("schema_version: 2" in failure for failure in failures)
     assert any("tool_permissions.json" in failure for failure in failures)
+
+
+def test_supply_chain_contract_requires_spdx_and_explicit_dependency_audit() -> None:
+    core = (
+        'def generate_spdx_sbom(\n"SPDX-2.3"\n"PACKAGE-MANAGER"\n"DEPENDS_ON"\n'
+        'MAX_DISTRIBUTIONS = 4096\nhost_paths_collected\nnetwork_access_performed\n'
+        'def audit_dependency_vulnerabilities(\nallow_network: bool\nexplicit network authorization\n'
+        'MAX_AUDIT_OUTPUT_BYTES\n"--local"\n"--format", "json"\nsubprocess.TimeoutExpired\nPIP_INDEX_URL\n"unavailable"'
+    )
+    api = '@router.get("/sbom")\n@router.post("/dependency-audit")\nallow_network=request.allow_network\ntimeout_seconds=request.timeout_seconds'
+    cli = '@security_app.command("sbom")\n@security_app.command("vulnerabilities")\n"--allow-network"\nwrite_report_new('
+    client = "SoftwareBillOfMaterials\nDependencyVulnerabilityReport\nsecuritySoftwareBillOfMaterials:\nscanDependencyVulnerabilities:"
+    gui = "exportSoftwareBillOfMaterials\nscanDependencyVulnerabilities\nwindow.confirm(\nExport SPDX 2.3 SBOM\nScan dependencies (network)\nunavailable scanner is never described as a clean scan"
+    core_tests = (
+        "test_spdx_sbom_contains_package_urls_versions_and_installed_dependency_relationships\n"
+        "test_spdx_sbom_rejects_unbounded_or_invalid_installed_metadata\n"
+        "test_report_export_rejects_symlinked_parent_and_existing_symlink\n"
+        "test_vulnerability_scan_requires_explicit_network_authorization\n"
+        "test_vulnerability_scan_reports_unavailable_scanner_without_claiming_clean\n"
+        "test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_secret_environment\n"
+        "test_vulnerability_scan_does_not_report_clean_on_timeout"
+    )
+    api_tests = (
+        "test_security_supply_chain_api_returns_spdx_sbom\n"
+        "test_security_supply_chain_api_requires_explicit_network_authorization\n"
+        "test_security_supply_chain_api_runs_only_authorized_bounded_dependency_scan"
+    )
+    e2e = (
+        'Export SPDX 2.3 SBOM\nScan dependencies (network)\npage.waitForEvent("dialog")\n'
+        'axiom-installed-environment.spdx.json\naxiom-dependency-vulnerability-report.json\nallow_network: true'
+    )
+    docs = "SPDX 2.3\npip-audit\nnetwork authorization\nunavailable\ninstalled Python"
+
+    assert release_smoke.supply_chain_issues(core, api, cli, client, gui, core_tests, api_tests, e2e, docs) == []
+    failures = release_smoke.supply_chain_issues(
+        core.replace("explicit network authorization", ""),
+        api, cli, client, gui, core_tests, api_tests, e2e, docs,
+    )
+    assert any("network authorization" in failure for failure in failures)

@@ -673,6 +673,72 @@ def persisted_schema_inventory_issues(docs: str, sources: dict[str, str]) -> lis
     return failures
 
 
+def supply_chain_issues(
+    core: str, api: str, cli: str, client: str, gui: str,
+    tests: str, api_tests: str, e2e: str, docs: str,
+) -> list[str]:
+    """Require SPDX inventory, explicitly authorized online scanning, and regression coverage."""
+    checks = (
+        ("SPDX inventory", core, (
+            "def generate_spdx_sbom(", '"SPDX-2.3"', '"PACKAGE-MANAGER"',
+            '"DEPENDS_ON"', "MAX_DISTRIBUTIONS = 4096",
+            "host_paths_collected", "network_access_performed",
+        )),
+        ("Dependency audit", core, (
+            "def audit_dependency_vulnerabilities(", "allow_network: bool",
+            "explicit network authorization", "MAX_AUDIT_OUTPUT_BYTES",
+            '"--local"', '"--format", "json"', "subprocess.TimeoutExpired",
+            "PIP_INDEX_URL", '"unavailable"',
+        )),
+        ("Security API", api, (
+            '@router.get("/sbom")', '@router.post("/dependency-audit")',
+            "allow_network=request.allow_network", "timeout_seconds=request.timeout_seconds",
+        )),
+        ("Security CLI", cli, (
+            '@security_app.command("sbom")', '@security_app.command("vulnerabilities")',
+            '"--allow-network"', "write_report_new(",
+        )),
+        ("Typed client", client, (
+            "SoftwareBillOfMaterials", "DependencyVulnerabilityReport",
+            "securitySoftwareBillOfMaterials:", "scanDependencyVulnerabilities:",
+        )),
+        ("Diagnostics GUI", gui, (
+            "exportSoftwareBillOfMaterials", "scanDependencyVulnerabilities",
+            "window.confirm(", "Export SPDX 2.3 SBOM", "Scan dependencies (network)",
+            "unavailable scanner is never described as a clean scan",
+        )),
+        ("Core regression tests", tests, (
+            "test_spdx_sbom_contains_package_urls_versions_and_installed_dependency_relationships",
+            "test_spdx_sbom_rejects_unbounded_or_invalid_installed_metadata",
+            "test_report_export_rejects_symlinked_parent_and_existing_symlink",
+            "test_vulnerability_scan_requires_explicit_network_authorization",
+            "test_vulnerability_scan_reports_unavailable_scanner_without_claiming_clean",
+            "test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_secret_environment",
+            "test_vulnerability_scan_does_not_report_clean_on_timeout",
+        )),
+        ("API regression tests", api_tests, (
+            "test_security_supply_chain_api_returns_spdx_sbom",
+            "test_security_supply_chain_api_requires_explicit_network_authorization",
+            "test_security_supply_chain_api_runs_only_authorized_bounded_dependency_scan",
+        )),
+        ("Browser acceptance", e2e, (
+            "Export SPDX 2.3 SBOM", "Scan dependencies (network)",
+            'page.waitForEvent("dialog")', "axiom-installed-environment.spdx.json",
+            "axiom-dependency-vulnerability-report.json", "allow_network: true",
+        )),
+        ("Security documentation", docs, (
+            "SPDX 2.3", "pip-audit", "network authorization",
+            "unavailable", "installed Python",
+        )),
+    )
+    failures: list[str] = []
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                failures.append(f"Software supply-chain {label} is missing: {token}")
+    return failures
+
+
 def package_verification_issues(
     verifier: str, workflow: str, tests: str, docs: str,
 ) -> list[str]:
@@ -688,7 +754,7 @@ def package_verification_issues(
             "matrix.os", "node-version: \"22\"", "npm ci", "npm run build",
             "python -m build --sdist --wheel --outdir dist",
             "python scripts/verify_package_artifacts.py --dist dist --install-wheel --json",
-            "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py",
+            "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py", "axiom/core/supply_chain.py", "tests/test_supply_chain.py", "tests/test_security_supply_chain_api.py", "axiom/api/security.py",
         )),
         ("archive regression tests", tests, (
             "test_verifies_wheel_and_sdist_bundle_cli_and_control_center",
@@ -724,7 +790,7 @@ def inspect(root: Path) -> dict[str, Any]:
         "e2e/model-registry-filters.spec.ts", "e2e/ollama-service.spec.ts", "e2e/inference-benchmark.spec.ts", "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/axiom-engine.spec.ts", "tests/test_workspace_model_registry_filters.py", "tests/test_workflow_store_pagination.py", "tests/test_workflow_api_pagination.py", "tests/test_workflow_cli.py",
         "tests/test_model_compatibility.py", "tests/test_inference_benchmark.py", "tests/test_inference_benchmark_api.py", "tests/test_runtime_traces.py", "tests/test_runtime_traces_api.py", "tests/test_resource_telemetry.py", "tests/test_resource_telemetry_api.py", "tests/test_runtime_discovery.py", "tests/test_runtime_discovery_api.py", "tests/test_agent_profiles.py", "tests/test_agent_profiles_api.py", "tests/test_agent_profiles_cli.py", "tests/test_engine_fabric_profiles.py", "tests/test_engine_fabric_profiles_api.py", "tests/test_engine_fabric_profiles_cli.py", "e2e/api-playground.spec.ts", "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts", "e2e/engine-fabric.spec.ts",
         "docs/Runtime-Discovery.md", "docs/Agent-Profiles.md", "docs/Api-Playground.md", "docs/Inference-Benchmarking.md", "docs/Local-Engine.md", "docs/Engine-Fabric.md",
-        "docs/Packaging.md", "docs/Storage-Schemas-and-Migrations.md", "docs/DATA-RETENTION.md", ".github/workflows/quality-gates.yml", ".github/workflows/nightly-build.yml",
+        "docs/wiki/Security-and-Privacy.md", "docs/Packaging.md", "docs/Storage-Schemas-and-Migrations.md", "docs/DATA-RETENTION.md", ".github/workflows/quality-gates.yml", ".github/workflows/nightly-build.yml",
     ]
     for relative in required:
         if not (root / relative).is_file():
@@ -747,6 +813,19 @@ def inspect(root: Path) -> dict[str, Any]:
 
     roadmap = (root / "ROADMAP.md").read_text(encoding="utf-8")
     failures.extend(roadmap_issues(roadmap))
+
+    supply_chain_core = (root / "axiom/core/supply_chain.py").read_text(encoding="utf-8")
+    supply_chain_api = (root / "axiom/api/security.py").read_text(encoding="utf-8")
+    supply_chain_cli = (root / "axiom/cli/extended.py").read_text(encoding="utf-8")
+    supply_chain_e2e = (root / "e2e/security-supply-chain.spec.ts").read_text(encoding="utf-8")
+    supply_chain_tests = (root / "tests/test_supply_chain.py").read_text(encoding="utf-8")
+    supply_chain_api_tests = (root / "tests/test_security_supply_chain_api.py").read_text(encoding="utf-8")
+    supply_chain_docs = (root / "docs/wiki/Security-and-Privacy.md").read_text(encoding="utf-8")
+    failures.extend(supply_chain_issues(
+        supply_chain_core, supply_chain_api, supply_chain_cli, client,
+        app_source, supply_chain_tests, supply_chain_api_tests,
+        supply_chain_e2e, supply_chain_docs,
+    ))
 
     app_source = (root / "src/App.tsx").read_text(encoding="utf-8")
     failures.extend(page_registration_issues(app_source, "api-playground"))
@@ -1255,7 +1334,7 @@ def inspect(root: Path) -> dict[str, Any]:
         "e2e/evaluation.spec.ts", "e2e/api-playground.spec.ts",
         "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts", "e2e/engine-fabric.spec.ts",
         "e2e/model-registry-filters.spec.ts", "e2e/inference-benchmark.spec.ts",
-        "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/hardware-snapshots.spec.ts", "e2e/ollama-service.spec.ts", "e2e/settings-retention.spec.ts", "e2e/datasets.spec.ts",
+        "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/hardware-snapshots.spec.ts", "e2e/ollama-service.spec.ts", "e2e/settings-retention.spec.ts", "e2e/datasets.spec.ts", "e2e/security-supply-chain.spec.ts",
     ):
         target = root / relative
         if not target.is_file():
