@@ -1316,6 +1316,11 @@ export type SecurityEventRecord = {
   hash: string;
   reviewer_label?: string;
   target_event_id?: string;
+  tool_name?: string;
+  decision?: "allowed" | "denied";
+  profile_name?: string;
+  reason?: "explicit_grant" | "not_granted" | "unknown_tool" | "invalid_policy";
+  arguments?: Record<string, "[REDACTED]">;
 };
 
 export type SecurityEventListItem = Omit<SecurityEventRecord, "reviewer_label"> & {
@@ -1344,6 +1349,8 @@ export type SecurityEventPage = {
   integrity: SecurityEventIntegrity;
   privacy: {
     event_summaries_allowlisted: true;
+    tool_decisions_audited: true;
+    argument_values_stored: false;
     credential_values_stored: false;
     arbitrary_user_text_stored: false;
     reviewer_identity_authenticated: false;
@@ -1360,6 +1367,8 @@ export type SecurityEventExport = {
     credential_values_stored: false;
     arbitrary_user_text_stored: false;
     reviewer_identity_authenticated: false;
+    tool_decisions_audited: true;
+    argument_values_stored: false;
   };
 };
 

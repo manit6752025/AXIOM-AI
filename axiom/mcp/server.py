@@ -372,7 +372,7 @@ def _score_evaluation_artifact(
 @mcp.tool()
 def axiom_info() -> dict:
     """Return AXIOM release information."""
-    ToolPermissionStore().require("axiom_info")
+    ToolPermissionStore().require("axiom_info", arguments=locals())
     return {
         "name": "AXIOM",
         "version": __version__,
@@ -406,7 +406,7 @@ def axiom_evaluation_preflight(
     max_line_bytes: int = DEFAULT_EVALUATION_MAX_LINE_BYTES,
 ) -> dict:
     """Preview bounded offline metrics and data quality without saving a report."""
-    ToolPermissionStore().require("axiom_evaluation_preflight")
+    ToolPermissionStore().require("axiom_evaluation_preflight", arguments=locals())
     _validate_evaluation_limits(max_bytes, max_rows, max_line_bytes)
 
     if (
@@ -648,7 +648,7 @@ def axiom_evaluation_run(
     max_line_bytes: int = DEFAULT_EVALUATION_MAX_LINE_BYTES,
 ) -> dict:
     """Score precomputed JSONL predictions offline and save aggregate metrics."""
-    ToolPermissionStore().require("axiom_evaluation_run")
+    ToolPermissionStore().require("axiom_evaluation_run", arguments=locals())
     _validate_evaluation_limits(max_bytes, max_rows, max_line_bytes)
 
     if (
@@ -741,7 +741,7 @@ def axiom_prediction_job_evaluate(
     regression_tolerance: float = 0.05,
 ) -> dict:
     """Evaluate a completed job and persist bounded provenance with aggregate metrics."""
-    ToolPermissionStore().require("axiom_evaluation_run")
+    ToolPermissionStore().require("axiom_evaluation_run", arguments=locals())
     if type(approve_truncated_prompts) is not bool:
         raise ValueError("approve_truncated_prompts must be a boolean.")
     if name is not None:
@@ -893,7 +893,7 @@ def axiom_prediction_job_examples(
     include_prompt: bool = False,
 ) -> dict:
     """Read the first hash-verified raw exact mismatches in file order; text is off by default."""
-    ToolPermissionStore().require("axiom_prediction_job_examples")
+    ToolPermissionStore().require("axiom_prediction_job_examples", arguments=locals())
     root = _mcp_workspace_root()
     job = read_prediction_job(job_id, root)
     if job is None:
@@ -928,7 +928,7 @@ def axiom_prediction_job_compare(
     limit_per_category: int = 3,
 ) -> dict:
     """Compare verified transitions and evaluator-compatible lexical metrics between two jobs."""
-    ToolPermissionStore().require("axiom_prediction_job_compare")
+    ToolPermissionStore().require("axiom_prediction_job_compare", arguments=locals())
     root = _mcp_workspace_root()
     if baseline_job_id == candidate_job_id:
         return {"error": "Baseline and candidate must be different prediction jobs."}
@@ -978,7 +978,7 @@ def axiom_prediction_job_compare_examples(
     include_prompt: bool = False,
 ) -> dict:
     """Inspect bounded paired examples from one verified prediction transition."""
-    ToolPermissionStore().require("axiom_prediction_job_compare_examples")
+    ToolPermissionStore().require("axiom_prediction_job_compare_examples", arguments=locals())
     root = _mcp_workspace_root()
     baseline = read_prediction_job(baseline_job_id, root)
     candidate = read_prediction_job(candidate_job_id, root)
@@ -1208,7 +1208,7 @@ def axiom_evaluation_history(
     baselines_only: bool = False,
 ) -> dict:
     """Read safe aggregate history; optionally list only marked baselines and continue after a saved run ID."""
-    ToolPermissionStore().require("axiom_evaluation_history")
+    ToolPermissionStore().require("axiom_evaluation_history", arguments=locals())
     if type(limit) is not int or not 1 <= limit <= 100:
         raise ValueError("Evaluation history limit must be between 1 and 100.")
     if type(baselines_only) is not bool:
@@ -1259,7 +1259,7 @@ def axiom_evaluation_compare(
     regression_tolerance: float = 0.0,
 ) -> dict:
     """Compare two saved complete reports by aggregate metric without reopening sources."""
-    ToolPermissionStore().require("axiom_evaluation_history")
+    ToolPermissionStore().require("axiom_evaluation_history", arguments=locals())
     if (
         not isinstance(baseline_run_id, str)
         or not re.fullmatch(r"[0-9a-f]{32}", baseline_run_id)
@@ -1369,7 +1369,7 @@ def axiom_evaluation_examples(
     include_text: bool = False,
 ) -> dict:
     """Inspect bounded raw exact mismatches from one complete saved evaluation."""
-    ToolPermissionStore().require("axiom_evaluation_examples")
+    ToolPermissionStore().require("axiom_evaluation_examples", arguments=locals())
     if not isinstance(run_id, str) or not re.fullmatch(r"[0-9a-f]{32}", run_id):
         raise ValueError("Evaluation example lookup requires a valid run ID.")
     if type(limit) is not int or not 1 <= limit <= 3:
@@ -1562,7 +1562,7 @@ def axiom_evaluation_compare_examples(
     their deltas do not add up to corpus-level micro-F1. The selected metric
     scores cover all compared rows. Text is off unless include_text is enabled.
     """
-    ToolPermissionStore().require("axiom_evaluation_compare_examples")
+    ToolPermissionStore().require("axiom_evaluation_compare_examples", arguments=locals())
     if (
         not isinstance(baseline_run_id, str)
         or not re.fullmatch(r"[0-9a-f]{32}", baseline_run_id)
@@ -1851,7 +1851,7 @@ def axiom_workspace_context() -> dict:
 @mcp.tool()
 def axiom_workspace_assets() -> dict:
     """List bounded workspace-relative model and JSONL paths without reading file contents."""
-    ToolPermissionStore().require("axiom_workspace_assets")
+    ToolPermissionStore().require("axiom_workspace_assets", arguments=locals())
     model_listing = list_workspace_files("models")
     dataset_listing = list_workspace_files("datasets")
     models = model_listing["items"]
@@ -1893,7 +1893,7 @@ def axiom_workflow_save(
     edges: list[dict[str, str]],
 ) -> dict:
     """Validate and save a design-only workflow after user approval."""
-    ToolPermissionStore().require("axiom_workflow_save")
+    ToolPermissionStore().require("axiom_workflow_save", arguments=locals())
 
     def rejected(reason_code: str, message: str | None = None) -> dict:
         result = {
@@ -2010,7 +2010,7 @@ def axiom_workflow_read(
     after_workflow_id: str | None = None,
 ) -> dict:
     """List saved workflow summaries or retrieve one validated design graph."""
-    ToolPermissionStore().require("axiom_workflow_read")
+    ToolPermissionStore().require("axiom_workflow_read", arguments=locals())
     if type(limit) is not int or not 1 <= limit <= 50:
         raise ValueError("Workflow history limit must be between 1 and 50.")
     if workflow_id is not None and after_workflow_id is not None:
@@ -2291,7 +2291,7 @@ def axiom_workflow_dry_run(
 @mcp.tool()
 def axiom_workflow_compare(workflow_id: str, against_revision: int) -> dict:
     """Compare a retained workflow revision with the current design structure."""
-    ToolPermissionStore().require("axiom_workflow_read")
+    ToolPermissionStore().require("axiom_workflow_read", arguments=locals())
 
     def result_scope() -> dict[str, bool]:
         return {
@@ -2358,7 +2358,7 @@ def axiom_training_preflight(
     text_field: str = "text",
 ) -> dict:
     """Check local LoRA prerequisites without loading weights or starting a job."""
-    ToolPermissionStore().require("axiom_training_preflight")
+    ToolPermissionStore().require("axiom_training_preflight", arguments=locals())
     return run_training_preflight(model_path, dataset_path, text_field)
 
 
@@ -2373,7 +2373,7 @@ def axiom_training_eval_overlap_preflight(
     sample_limit: int = 5,
 ) -> dict:
     """Check for bounded normalized exact overlap between training and evaluation text."""
-    ToolPermissionStore().require("axiom_training_eval_overlap_preflight")
+    ToolPermissionStore().require("axiom_training_eval_overlap_preflight", arguments=locals())
     return run_training_evaluation_overlap_preflight(
         training_dataset_path,
         evaluation_dataset_path,
@@ -2726,7 +2726,7 @@ def axiom_engine_preflight(
     vram_budget_gib: float | None = None,
 ) -> dict:
     """Check native model/adapter metadata and advisory memory estimates without inference."""
-    ToolPermissionStore().require("axiom_engine_preflight")
+    ToolPermissionStore().require("axiom_engine_preflight", arguments=locals())
     if (
         isinstance(max_prompt_tokens, bool)
         or not isinstance(max_prompt_tokens, int)
@@ -3142,7 +3142,7 @@ def axiom_prediction_job_preflight(
     max_new_tokens: int = 64,
 ) -> dict:
     """Predict bounded dataset prompt clipping without loading model weights or running inference."""
-    ToolPermissionStore().require("axiom_prediction_job_preflight")
+    ToolPermissionStore().require("axiom_prediction_job_preflight", arguments=locals())
     root = _mcp_workspace_root()
     try:
         model_target = resolve_workspace_input(model_path, root, "Base model path")
@@ -4121,7 +4121,7 @@ def axiom_prediction_job_start(
     precision: str = "auto",
 ) -> dict:
     """Write a bounded evaluation artifact preserving source rows and adding local predictions."""
-    ToolPermissionStore().require("axiom_prediction_job_start")
+    ToolPermissionStore().require("axiom_prediction_job_start", arguments=locals())
     root = _mcp_workspace_root()
     try:
         job = start_prediction_job(
@@ -4191,7 +4191,7 @@ def axiom_prediction_job_start(
 @mcp.tool()
 def axiom_prediction_job_status(job_id: str | None = None, limit: int = 10) -> dict:
     """Read safe prediction job history or one job by ID for this workspace."""
-    ToolPermissionStore().require("axiom_prediction_job_status")
+    ToolPermissionStore().require("axiom_prediction_job_status", arguments=locals())
     root = _mcp_workspace_root()
     if job_id is None:
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 50:
@@ -4227,7 +4227,7 @@ def axiom_prediction_job_status(job_id: str | None = None, limit: int = 10) -> d
 @mcp.tool()
 def axiom_prediction_job_wait(job_id: str, timeout_seconds: float = 30.0) -> dict:
     """Wait up to 30 seconds for a prediction job to finish or need recovery."""
-    ToolPermissionStore().require("axiom_prediction_job_status")
+    ToolPermissionStore().require("axiom_prediction_job_status", arguments=locals())
     root = _mcp_workspace_root()
     return wait_prediction_job(job_id, root, timeout_seconds=timeout_seconds)
 
@@ -4235,7 +4235,7 @@ def axiom_prediction_job_wait(job_id: str, timeout_seconds: float = 30.0) -> dic
 @mcp.tool()
 def axiom_prediction_job_cancel(job_id: str) -> dict:
     """Request cooperative cancellation of one local prediction job."""
-    ToolPermissionStore().require("axiom_prediction_job_cancel")
+    ToolPermissionStore().require("axiom_prediction_job_cancel", arguments=locals())
     root = _mcp_workspace_root()
     result = cancel_prediction_job(job_id, root)
     if result is None:
@@ -4261,7 +4261,7 @@ def axiom_training_job_start(
     output_policy: str = "empty",
 ) -> dict:
     """Start a bounded local LoRA job or resume its latest verified checkpoint."""
-    ToolPermissionStore().require("axiom_training_job_start")
+    ToolPermissionStore().require("axiom_training_job_start", arguments=locals())
     root = _mcp_workspace_root()
     try:
         model_target = resolve_workspace_input(model_path, root, "Model path")
@@ -4318,7 +4318,7 @@ def axiom_training_job_start(
 @mcp.tool()
 def axiom_training_job_status(job_id: str | None = None, limit: int = 10) -> dict:
     """Read safe local LoRA job summaries for this workspace."""
-    ToolPermissionStore().require("axiom_training_job_status")
+    ToolPermissionStore().require("axiom_training_job_status", arguments=locals())
     root = _mcp_workspace_root()
     if job_id is not None:
         try:
@@ -4354,7 +4354,7 @@ def axiom_training_job_status(job_id: str | None = None, limit: int = 10) -> dic
 @mcp.tool()
 def axiom_training_job_wait(job_id: str, timeout_seconds: float = 30.0) -> dict:
     """Wait up to 30 seconds for a local LoRA job without repeated status calls."""
-    ToolPermissionStore().require("axiom_training_job_status")
+    ToolPermissionStore().require("axiom_training_job_status", arguments=locals())
     root = _mcp_workspace_root()
     try:
         existing = get_job(job_id)
@@ -4422,7 +4422,7 @@ def axiom_training_job_wait(job_id: str, timeout_seconds: float = 30.0) -> dict:
 @mcp.tool()
 def axiom_training_job_cancel(job_id: str) -> dict:
     """Request safe-boundary cancellation for a local LoRA job in this workspace."""
-    ToolPermissionStore().require("axiom_training_job_cancel")
+    ToolPermissionStore().require("axiom_training_job_cancel", arguments=locals())
     root = _mcp_workspace_root()
     try:
         existing = get_job(job_id)
@@ -4469,7 +4469,7 @@ def axiom_engine_generate(
     precision: str = "auto",
 ) -> dict:
     """Generate one bounded response; this synchronous call cannot be cancelled through MCP."""
-    ToolPermissionStore().require("axiom_engine_generate")
+    ToolPermissionStore().require("axiom_engine_generate", arguments=locals())
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > _MCP_ENGINE_MAX_PROMPT_CHARS:
         return {"error": f"Prompt must contain 1 to {_MCP_ENGINE_MAX_PROMPT_CHARS:,} characters."}
     if (
@@ -4566,7 +4566,7 @@ def axiom_engine_generate(
 @mcp.tool()
 def axiom_model_list() -> list[dict]:
     """List models registered with AXIOM."""
-    ToolPermissionStore().require("axiom_model_list")
+    ToolPermissionStore().require("axiom_model_list", arguments=locals())
     registry = ModelRegistry(create=False)
 
     return [model.to_dict() for model in registry.list()]
@@ -4575,7 +4575,7 @@ def axiom_model_list() -> list[dict]:
 @mcp.tool()
 def axiom_model_info(path: str) -> dict:
     """Inspect a local AI model directory."""
-    ToolPermissionStore().require("axiom_model_info")
+    ToolPermissionStore().require("axiom_model_info", arguments=locals())
     if not isinstance(path, str) or not path.strip():
         raise ValueError("Model path cannot be empty.")
 
@@ -4611,7 +4611,7 @@ def axiom_dataset_inspect(
     scan_pii: bool = False,
 ) -> dict:
     """Profile bounded workspace JSONL; content PII scanning is opt-in."""
-    ToolPermissionStore().require("axiom_dataset_inspect")
+    ToolPermissionStore().require("axiom_dataset_inspect", arguments=locals())
     if not isinstance(path, str) or not path:
         raise ValueError("Dataset path must be workspace-relative.")
     if type(scan_pii) is not bool:
@@ -4771,7 +4771,7 @@ def axiom_dataset_clean_preview(
     max_line_bytes: int = DEFAULT_MAX_LINE_BYTES,
 ) -> dict:
     """Preview bounded JSONL cleaning counts without returning row values or writing files."""
-    ToolPermissionStore().require("axiom_dataset_clean_preview")
+    ToolPermissionStore().require("axiom_dataset_clean_preview", arguments=locals())
     if output is not None and (not isinstance(output, str) or not output.strip()):
         raise ValueError("Output path cannot be empty.")
     root = Path.cwd().resolve(strict=True)
@@ -4854,7 +4854,7 @@ def axiom_dataset_clean(
     max_line_bytes: int = DEFAULT_MAX_LINE_BYTES,
 ) -> dict:
     """Write a cleaned JSONL copy to a new workspace-relative path."""
-    ToolPermissionStore().require("axiom_dataset_clean")
+    ToolPermissionStore().require("axiom_dataset_clean", arguments=locals())
     if not isinstance(path, str) or not path.strip():
         raise ValueError("Dataset path cannot be empty.")
     if output is not None and (not isinstance(output, str) or not output.strip()):
@@ -4952,7 +4952,7 @@ def axiom_dataset_clean(
 @mcp.tool()
 def axiom_system_info() -> dict:
     """Return detected system hardware."""
-    ToolPermissionStore().require("axiom_system_info")
+    ToolPermissionStore().require("axiom_system_info", arguments=locals())
     hardware = detect_hardware()
 
     return {
@@ -4972,7 +4972,7 @@ def axiom_training_plan(
     method: str = "auto",
 ) -> dict:
     """Generate a hardware-aware training plan."""
-    ToolPermissionStore().require("axiom_training_plan")
+    ToolPermissionStore().require("axiom_training_plan", arguments=locals())
     if not isinstance(method, str) or not method.strip():
         raise ValueError("Training method cannot be empty.")
 
@@ -5001,7 +5001,7 @@ def axiom_training_plan(
 @mcp.tool()
 def axiom_supercompress_status() -> dict:
     """Check whether SuperCompress is configured."""
-    ToolPermissionStore().require("axiom_supercompress_status")
+    ToolPermissionStore().require("axiom_supercompress_status", arguments=locals())
 
     return {
         "configured": bool(os.getenv("SUPERCOMPRESS_API_KEY")),
@@ -5017,7 +5017,7 @@ def axiom_supercompress(
     ccr: bool = False,
 ) -> dict:
     """Compress context through SuperCompress before inference."""
-    ToolPermissionStore().require("axiom_supercompress")
+    ToolPermissionStore().require("axiom_supercompress", arguments=locals())
     result = compress_context(
         context,
         query,

@@ -148,6 +148,85 @@ def test_security_event_export_contains_no_credentials_or_arbitrary_text(tmp_pat
     assert store.list_page()["privacy"]["reviewer_identity_authenticated"] is False
 
 
+def test_tool_decisions_store_only_redacted_argument_names_and_verify_chain(tmp_path: Path):
+    store = SecurityEventStore(tmp_path)
+
+    denied = store.record_tool_decision(
+        "axiom_engine_generate",
+        "default",
+        False,
+        ["prompt", "model_path", "api_token"],
+        "not_granted",
+    )
+    allowed = store.record_tool_decision(
+        "axiom_info",
+        "read_only",
+        True,
+        [],
+        "explicit_grant",
+    )
+
+    serialized = json.dumps(store.export(), sort_keys=True).lower()
+    assert denied["event_type"] == "mcp.tool.decision"
+    assert denied["decision"] == "denied"
+    assert denied["reason"] == "not_granted"
+    assert denied["arguments"] == {
+        "prompt": "[REDACTED]",
+        "model_path": "[REDACTED]",
+        "api_token": "[REDACTED]",
+    }
+    assert allowed["decision"] == "allowed"
+    assert allowed["profile_name"] == "read_only"
+    assert "[redacted]" in serialized
+    assert "prompt text" not in serialized
+    assert "api_token_value" not in serialized
+    assert store.verify()["valid"] is True
+    page = store.list_page()
+    assert page["privacy"]["tool_decisions_audited"] is True
+    assert page["privacy"]["argument_values_stored"] is False
+
+
+def test_legacy_security_journal_upgrades_to_v2_on_first_tool_decision(tmp_path: Path):
+    store = SecurityEventStore(tmp_path)
+    legacy = store.record("mcp.permissions.saved")
+    path = tmp_path / ".axiom" / "security-events.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["schema_version"] = 1
+    path.write_text(json.dumps(document), encoding="utf-8")
+    if os.name == "posix":
+        path.chmod(0o600)
+
+    decision = store.record_tool_decision(
+        "axiom_info", "default", False, [], "not_granted"
+    )
+    upgraded = json.loads(path.read_text(encoding="utf-8"))
+
+    assert decision["seq"] == 2
+    assert upgraded["schema_version"] == 2
+    assert upgraded["events"][0]["event_id"] == legacy["event_id"]
+    assert store.verify()["schema_version"] == 2
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "profile_name", "allowed", "argument_names", "reason"),
+    [
+        ("bad tool", "default", False, [], "not_granted"),
+        ("axiom_info", "../default", False, [], "not_granted"),
+        ("axiom_info", "default", 1, [], "not_granted"),
+        ("axiom_info", "default", False, ["api-token"], "not_granted"),
+        ("axiom_info", "default", False, ["prompt", "prompt"], "not_granted"),
+        ("axiom_info", "default", False, [], "custom reason"),
+    ],
+)
+def test_tool_decision_rejects_untrusted_metadata(
+    tmp_path: Path, tool_name, profile_name, allowed, argument_names, reason
+):
+    with pytest.raises(SecurityEventError):
+        SecurityEventStore(tmp_path).record_tool_decision(
+            tool_name, profile_name, allowed, argument_names, reason
+        )
+
+
 def test_security_event_read_operations_do_not_create_workspace_metadata(tmp_path: Path):
     store = SecurityEventStore(tmp_path)
 

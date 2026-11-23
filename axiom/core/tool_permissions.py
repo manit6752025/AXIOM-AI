@@ -112,7 +112,12 @@ class ToolPermissionStore:
     """Persist named tool allowlists; an absent entry never grants access."""
 
     def __init__(self, root: Path | None = None) -> None:
-        self.root = Path(root) if root is not None else workspace_metadata_dir()
+        if root is None:
+            self.root = workspace_metadata_dir()
+            self.workspace_root = self.root.parent
+        else:
+            self.root = Path(root)
+            self.workspace_root = self.root.parent if self.root.name == ".axiom" else self.root
         self.policy_file = self.root / "tool_permissions.json"
         self.lock_file = self.root / ".tool_permissions.lock"
 
@@ -173,10 +178,49 @@ class ToolPermissionStore:
         active = config["profiles"][config["active_profile"]]
         return tool_name in active["allowed_tools"]
 
-    def require(self, tool_name: str) -> None:
-        if not self.allows(tool_name):
+    def require(
+        self,
+        tool_name: str,
+        *,
+        arguments: dict[str, Any] | None = None,
+    ) -> None:
+        """Audit an authorization decision before execution; argument values never leave this call."""
+        argument_names = list(arguments.keys()) if isinstance(arguments, dict) else []
+        safe_tool_name = tool_name if isinstance(tool_name, str) else "unknown_tool"
+        try:
+            config = self._read()
+            profile_name = config["active_profile"]
+            known_tool = safe_tool_name in TOOL_DESCRIPTIONS
+            allowed = known_tool and safe_tool_name in config["profiles"][profile_name]["allowed_tools"]
+            reason = (
+                "explicit_grant" if allowed
+                else "unknown_tool" if not known_tool
+                else "not_granted"
+            )
+        except (OSError, ValueError, TypeError, KeyError):
+            profile_name = "unavailable"
+            allowed = False
+            reason = "invalid_policy"
+
+        # The journal receives parameter names only. Values in the mapping are
+        # intentionally never iterated, serialized, hashed, or copied.
+        try:
+            from axiom.core.security_events import SecurityEventStore
+            SecurityEventStore(self.workspace_root).record_tool_decision(
+                safe_tool_name,
+                profile_name,
+                allowed,
+                argument_names,
+                reason,
+            )
+        except Exception:
             raise PermissionError(
-                f"MCP tool '{tool_name}' is denied by the active AXIOM profile. "
+                "MCP tool permission decision could not be audited safely; access is blocked."
+            ) from None
+
+        if not allowed:
+            raise PermissionError(
+                f"MCP tool '{safe_tool_name}' is denied by the active AXIOM profile. "
                 "Grant it in the Control Center or with the AXIOM CLI."
             )
 
