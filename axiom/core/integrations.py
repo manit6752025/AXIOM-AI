@@ -116,6 +116,18 @@ class AgentIntegration:
             last_inspected_at is not None or last_connection_error is not None
         ):
             raise ValueError("Uninspected integration cannot have connection result metadata.")
+        if connection_status != "not_inspected" and last_inspected_at is None:
+            raise ValueError("Inspected integration must include its last inspection timestamp.")
+        if connection_status == "connected" and last_connection_error is not None:
+            raise ValueError("Connected integration cannot include a connection error.")
+        if connection_status == "timeout" and (
+            last_connection_error is None or not last_connection_error.endswith("_timeout")
+        ):
+            raise ValueError("Timed-out integration must include a timeout error code.")
+        if connection_status == "failed" and (
+            last_connection_error is None or not last_connection_error.endswith("_failed")
+        ):
+            raise ValueError("Failed integration must include a failure error code.")
 
         return cls(
             name=name,
@@ -153,6 +165,15 @@ class IntegrationRegistry:
             if not self.path.exists():
                 atomic_write_text(self.path, "[]\n")
 
+    def _ensure_safe_registry_path(self) -> None:
+        """Reject symlinked or non-regular registry paths before metadata writes."""
+        if self.root.is_symlink() or self.path.is_symlink() or self.lock_file.is_symlink():
+            raise ValueError("Integration registry path must not be a symbolic link.")
+        if not self.root.exists() or not self.root.is_dir():
+            raise LookupError("Integration registry does not exist.")
+        if not self.path.exists() or not self.path.is_file():
+            raise LookupError("Integration registry file does not exist.")
+
     def _read(self) -> list[AgentIntegration]:
         if not self.path.exists():
             return []
@@ -188,6 +209,7 @@ class IntegrationRegistry:
     def add(self, integration: AgentIntegration) -> None:
         if not isinstance(integration, AgentIntegration):
             raise TypeError("integration must be an AgentIntegration instance.")
+        integration = AgentIntegration.from_dict(integration.to_dict())
 
         self.root.mkdir(parents=True, exist_ok=True)
         with file_lock(self.lock_file):
@@ -233,8 +255,7 @@ class IntegrationRegistry:
             "owner_type": owner_type,
             "owner_label": owner_label,
         }
-        if not self.path.exists():
-            raise LookupError(f"MCP server not found: {name}")
+        self._ensure_safe_registry_path()
         with file_lock(self.lock_file):
             integrations = self._read()
             updated: AgentIntegration | None = None
@@ -271,6 +292,7 @@ class IntegrationRegistry:
             "last_inspected_at": last_inspected_at,
             "last_connection_error": last_connection_error,
         }
+        self._ensure_safe_registry_path()
         with file_lock(self.lock_file):
             integrations = self._read()
             updated: AgentIntegration | None = None

@@ -1280,6 +1280,10 @@ export type McpServerHandshake = {
     completions: boolean;
   };
   duration_ms: number;
+  connection_state_persisted?: boolean;
+  connection_state?: "not_inspected" | "connected" | "failed" | "timeout";
+  last_inspected_at?: string | null;
+  last_connection_error?: string | null;
   tool_execution_performed: false;
   schemas_enumerated: false;
   error_code?: string;

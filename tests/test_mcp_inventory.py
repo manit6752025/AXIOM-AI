@@ -196,6 +196,25 @@ def test_api_can_update_server_trust_and_owner_metadata(tmp_path, monkeypatch):
     assert record["ownership_verified"] is False
 
 
+def test_api_refuses_handshake_and_schema_inspection_for_unverified_or_blocked_servers(tmp_path, monkeypatch):
+    from fastapi import HTTPException
+    from axiom.api import mcp_inventory as api_module
+
+    monkeypatch.chdir(tmp_path)
+    IntegrationRegistry().add(
+        AgentIntegration("Unverified MCP", IntegrationType.MCP, command="python -m untrusted")
+    )
+
+    with pytest.raises(HTTPException) as unverified:
+        asyncio.run(api_module.inspect_mcp_server_handshake("Unverified MCP"))
+    assert unverified.value.status_code == 409
+
+    IntegrationRegistry().update_mcp_trust("Unverified MCP", trust_status="blocked")
+    with pytest.raises(HTTPException) as blocked:
+        asyncio.run(api_module.inspect_mcp_server_schemas("Unverified MCP"))
+    assert blocked.value.status_code == 403
+
+
 def test_inventory_is_passive_bounded_and_only_lists_mcp_servers(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     registry = IntegrationRegistry()
@@ -339,6 +358,10 @@ def test_handshake_timeout_is_safe_and_never_returns_process_output(tmp_path, mo
     assert result["error_code"] == "handshake_timeout"
     assert result["tool_execution_performed"] is False
     assert result["schemas_enumerated"] is False
+    inventory = mcp_inventory.list_mcp_servers()["servers"][0]
+    assert inventory["connection_state"] == "timeout"
+    assert inventory["last_connection_error"] == "handshake_timeout"
+    assert inventory["last_inspected_at"]
     assert "private path.json" not in str(result)
 
 
@@ -673,6 +696,10 @@ def test_schema_browse_negotiates_real_stdio_tool_resource_and_template_metadata
     assert result["tool_execution_performed"] is False
     assert result["resource_read_performed"] is False
     assert result["prompt_execution_performed"] is False
+    assert result["connection_state_persisted"] is True
+    inventory = mcp_inventory.list_mcp_servers()["servers"][0]
+    assert inventory["connection_state"] == "connected"
+    assert inventory["last_inspected_at"]
     assert not marker.exists(), "Schema browsing must not execute tool or resource handlers"
 
 

@@ -115,8 +115,8 @@ def list_mcp_servers() -> dict[str, Any]:
         "total": len(servers),
         "servers": servers,
         "inspection_note": (
-            "Inventory is passive. A handshake starts the registered process only "
-            "after an explicit inspection request."
+            "Inventory is passive. Only servers explicitly marked trusted can be "
+            "started for a time-limited handshake or schema inspection."
         ),
     }
 
@@ -148,22 +148,28 @@ def _find_server(name: str):
     return integration
 
 
-def _record_connection_result(name: str, result: dict[str, Any]) -> bool:
+def _record_connection_result(name: str, result: dict[str, Any]) -> dict[str, Any]:
     status = result.get("status")
+    error_code = result.get("error_code")
     connection_status = (
         "connected" if status == "ok"
-        else "timeout" if result.get("error_code", "").endswith("timeout")
+        else "timeout" if isinstance(error_code, str) and error_code.endswith("timeout")
         else "failed"
     )
     try:
-        _registry().record_mcp_connection(
+        updated = _registry().record_mcp_connection(
             name,
             connection_status=connection_status,
-            last_connection_error=result.get("error_code") if status != "ok" else None,
+            last_connection_error=error_code if status != "ok" else None,
         )
     except Exception:
-        return False
-    return True
+        return {"connection_state_persisted": False}
+    return {
+        "connection_state_persisted": True,
+        "connection_state": updated.connection_status,
+        "last_inspected_at": updated.last_inspected_at,
+        "last_connection_error": updated.last_connection_error,
+    }
 
 
 async def _perform_handshake(parts: list[str], timeout_seconds: float) -> dict[str, Any]:
@@ -252,7 +258,7 @@ async def inspect_mcp_server(
             "schemas_enumerated": False,
         }
 
-    result["connection_state_persisted"] = _record_connection_result(integration.name, result)
+    result.update(_record_connection_result(integration.name, result))
     return {
         "name": _safe_text(integration.name) or "Unnamed MCP server",
         "transport": "stdio",

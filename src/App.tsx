@@ -4197,6 +4197,17 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
     try {
       const result = await axiomApi.inspectMcpServer(name);
       setHandshakeResults((current) => ({ ...current, [name]: result }));
+      if (result.connection_state_persisted && result.connection_state) {
+        setServerInventory((current) => current ? {
+          ...current,
+          servers: current.servers.map((server) => server.name === name ? {
+            ...server,
+            connection_state: result.connection_state!,
+            last_inspected_at: result.last_inspected_at ?? null,
+            last_connection_error: result.last_connection_error ?? null,
+          } : server),
+        } : current);
+      }
       onNotify(
         result.status === "ok"
           ? `MCP handshake completed for ${name}.`
@@ -4255,6 +4266,17 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
     try {
       const result = await axiomApi.inspectMcpServerSchemas(name);
       setSchemaResults((current) => ({ ...current, [name]: result }));
+      if (result.connection_state_persisted && result.connection_state) {
+        setServerInventory((current) => current ? {
+          ...current,
+          servers: current.servers.map((server) => server.name === name ? {
+            ...server,
+            connection_state: result.connection_state!,
+            last_inspected_at: result.last_inspected_at ?? null,
+            last_connection_error: result.last_connection_error ?? null,
+          } : server),
+        } : current);
+      }
       onNotify(
         result.status === "ok"
           ? `Read-only schemas loaded for ${name}.`
@@ -4446,8 +4468,8 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
         })}
       </div> : <EmptyState icon={Network} title="No MCP servers registered" description="Add a stdio MCP server with axiom integration add to see it here. Inventory is passive and does not start processes." /> : <div className="loading-state" role="status">Loading registered MCP servers…</div>}
       <div className="surface-divider" />
-      <Callout tone="warning" title="Inspection starts a process">Both inspection actions explicitly start the selected registered stdio command with a time limit and the MCP SDK's minimal child environment. Handshake negotiates protocol metadata; Browse schemas requests only tools/list, resources/list and resource-template list metadata. Neither action calls tools, reads resources, runs prompts, or forwards AXIOM credentials to the child.</Callout>
-      <p className="quiet-note">{serverInventory?.inspection_note || "Registered server information is read without starting external processes."} Use axiom integration handshake NAME for the same check from the CLI.</p>
+      <Callout tone="warning" title="Trusted servers only">New MCP servers are unverified by default. Save the server as Trusted before either inspection action can start its process; Blocked servers remain disabled. Each inspection uses a time limit and the MCP SDK's minimal child environment. Handshake negotiates protocol metadata; Browse schemas requests only tools/list, resources/list and resource-template list metadata. Neither action calls tools, reads resources, runs prompts, or forwards AXIOM credentials to the child.</Callout>
+      <p className="quiet-note">{serverInventory?.inspection_note || "Registered server information is read without starting external processes."} Use axiom integration trust NAME trusted before axiom integration handshake NAME from the CLI.</p>
     </Surface>
     <div className="two-column-grid mcp-layout">
       <Surface title="Tool permissions" eyebrow="BACKEND-ENFORCED">
