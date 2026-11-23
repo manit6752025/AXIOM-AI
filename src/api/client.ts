@@ -42,6 +42,7 @@ export type EngineFabricBackend = {
   formats: string[]; strengths: string[]; tradeoffs: string[]; best_for: string[];
   status: "ready" | "offline" | "auth_required" | "incompatible" | "setup_required";
   installed: boolean; reachable: boolean; models: string[]; model_count: number; error: string | null; scope: string;
+  benchmark_requirements: EngineFabricBenchmarkAdapterRequirements;
   generation: {
     transport: "in_process" | "ollama_options" | "openai_compatible";
     parameter_mapping: Record<string, string>;
@@ -49,6 +50,19 @@ export type EngineFabricBackend = {
     extension_sampling_controls: string[];
     note: string;
   };
+};
+export type EngineFabricBenchmarkAdapterRequirements = {
+  schema_version: 1; adapter_id: string; backend_id: string;
+  runtime: { kind: "in_process" | "loopback_service"; component: string | null; readiness_evidence: string; endpoint: string | null; inventory_route: string };
+  model: { selection: "exact_model_id"; inventory_source: string; supported_formats: string[]; must_be_discoverable: true; notes: string };
+  request: { route: string; transport: string; model_id_match: "exact"; warmups: { minimum: 0; maximum: 1 }; measured_requests: { minimum: 1; maximum: 5; concurrency: 1 }; output_tokens: { minimum: 1; maximum: 256 }; sampling: { native: string[]; extensions: string[] } };
+  privacy: { prompt_returned: false; responses_returned: false; results_persisted: false; cloud_provider_used: false };
+  scope_note: string;
+};
+export type EngineFabricBenchmarkPreflight = {
+  schema_version: 1; backend_id: string; adapter_id: string; requirements: EngineFabricBenchmarkAdapterRequirements;
+  preflight: { status: "ready" | "runtime_unavailable" | "model_required" | "model_not_found"; runtime_status: string; runtime_ready: boolean; model_id: string | null; model_available: boolean | null; reason: string | null };
+  can_benchmark: boolean;
 };
 export type EngineFabricReport = {
   schema_version: number; checked_at: string; host: { os: string; architecture: string };
@@ -2187,6 +2201,10 @@ export const axiomApi = {
     requestJson<EngineFabricChatResult>("/api/engine/backends/chat", { method: "POST", body: JSON.stringify(input) }, 300_000),
   engineBackendAutoChat: (input: { profile: EngineFabricProfile; model: string; messages: Array<{ role: "system" | "user" | "assistant"; content: string }>; max_new_tokens: number; temperature: number; top_p: number; top_k: number; min_p: number; repetition_penalty: number; seed: number | null; stop_sequences: string[] }) =>
     requestJson<EngineFabricChatResult>("/api/engine/backends/auto-chat", { method: "POST", body: JSON.stringify(input) }, 300_000),
+  engineBackendBenchmarkRequirements: (backendId: string, model: string) => {
+    const query = new URLSearchParams({ backend_id: backendId, model });
+    return requestJson<EngineFabricBenchmarkPreflight>("/api/engine/backends/benchmark-requirements?" + query.toString());
+  },
   engineBackendBenchmark: (input: { backend_id: EngineFabricChatResult["backend_id"]; model: string; prompt: string; max_new_tokens: number; warmup_runs: number; iterations: number; temperature: number; top_p: number; top_k: number; min_p: number; repetition_penalty: number; seed: number | null; stop_sequences: string[] }) =>
     requestJson<EngineFabricBenchmarkResult>("/api/engine/backends/benchmark", { method: "POST", body: JSON.stringify(input) }, 300_000),
   axiomEngineTelemetry: () => requestJson<AxiomEngineSystemTelemetry>("/api/engine/telemetry"),

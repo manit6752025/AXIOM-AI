@@ -568,3 +568,48 @@ def test_engine_batch_cli_help_documents_repeatable_prompt_input() -> None:
     assert "--prompts-file" in result.output
     assert "--prompt" in result.output
     assert "repeat" in result.output.lower()
+
+
+def test_engine_benchmark_requirements_command_returns_preflight_without_generation(monkeypatch):
+    expected = {
+        "schema_version": 1,
+        "backend_id": "ollama",
+        "adapter_id": "axiom-engine-fabric-benchmark-v1:ollama",
+        "requirements": {
+            "adapter_id": "axiom-engine-fabric-benchmark-v1:ollama",
+            "runtime": {"component": "ollama", "endpoint": "http://127.0.0.1:11434"},
+            "model": {"inventory_source": "http://127.0.0.1:11434/api/tags", "selection": "exact_model_id", "supported_formats": ["Ollama library models", "GGUF through Ollama"]},
+            "scope_note": "Requirements are evidence only.",
+        },
+        "preflight": {"status": "ready", "reason": None},
+        "can_benchmark": True,
+    }
+    captured = {}
+    def fake_inspect(backend, model):
+        captured.update(backend=backend, model=model)
+        return expected
+    monkeypatch.setattr(engine_cli, "inspect_engine_backend_benchmark_requirements", fake_inspect)
+    result = runner.invoke(engine_app, ["benchmark-requirements", "--backend", "ollama", "--model", "tiny-local", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == expected
+    assert captured == {"backend": "ollama", "model": "tiny-local"}
+
+
+def test_engine_benchmark_requirements_command_exits_nonzero_on_preflight_failure(monkeypatch):
+    monkeypatch.setattr(engine_cli, "inspect_engine_backend_benchmark_requirements", lambda backend, model: {
+        "requirements": {
+            "adapter_id": "axiom-engine-fabric-benchmark-v1:ollama",
+            "runtime": {"component": "ollama", "endpoint": "http://127.0.0.1:11434"},
+            "model": {
+                "inventory_source": "http://127.0.0.1:11434/api/tags",
+                "selection": "exact_model_id",
+                "supported_formats": ["Ollama library models"],
+            },
+            "scope_note": "Local only.",
+        },
+        "preflight": {"status": "model_not_found", "reason": "Exact model ID was not discovered."},
+        "can_benchmark": False,
+    })
+    result = runner.invoke(engine_app, ["benchmark-requirements", "--backend", "ollama", "--model", "missing"])
+    assert result.exit_code == 2
+    assert "model_not_found" in result.output

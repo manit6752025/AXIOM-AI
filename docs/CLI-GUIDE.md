@@ -297,3 +297,34 @@ axiom --no-banner infer run qwen2.5:0.5b --prompt "Explain AXIOM" \
 ```
 
 The Runtime GUI exposes the same settings under **Advanced sampling options**. Leave seed and context size blank to use the runtime defaults; repeat `--stop` for additional stop strings.
+
+
+## Updating and refreshing the Control Center
+
+```bash
+axiom update --check
+axiom update --channel stable --check
+axiom update --auto
+axiom gui --refresh
+```
+
+The `axiom` console script is installed by the `axiom-all` Python distribution.
+In a source checkout, activate the intended virtual environment and install the
+project once with `python -m pip install -e .`. Then use `axiom gui --help`
+instead of `python -m axiom.cli.main gui --help`.
+
+`axiom update` checks GitHub releases (beta includes published prereleases;
+stable excludes them). `--auto` / `--yes` downloads the matching PyPI
+`axiom-all` wheel, verifies its SHA-256 and wheel metadata, and installs it
+using the active Python interpreter. The updater only replaces the application
+distribution; it does not target model directories, workspaces, configuration,
+experiment history, account databases or browser storage. Restart AXIOM after
+installation. `--check` never installs.
+
+`axiom gui --refresh` is for source checkouts. It runs `npm run lint` then
+`npm run build`, reuses a healthy GUI server already bound to the configured
+port, and opens a cache-busted URL on the same loopback origin. It does not
+clear localStorage or sessionStorage; use the same browser tab to retain
+sessionStorage. Keep the port stable (default 40507) to retain the origin's
+sign-in state. Packaged installs without frontend source should use a release
+update instead.

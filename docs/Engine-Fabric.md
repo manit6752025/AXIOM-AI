@@ -54,3 +54,28 @@ Benchmark claims must be backed by measured runs on the target hardware. Hardwar
 ## Evidence-based local benchmarking
 
 The Engine Fabric includes an optional measured shootout for the selected external local runtime. It permits one warm-up, one to five measured requests, and up to 256 output tokens per request. The API discards each generation response and returns only per-request wall latency, median/P95 latency, end-to-end completion throughput when token counts are reported, run settings, and privacy flags. Results are kept in the current Control Center screen only; refreshing or closing the page clears the comparison. Different models and quantization levels are not apples-to-apples, so this is a tool for repeatable local observation, not a global leaderboard.
+
+
+## Benchmark adapter requirements and preflight
+
+Each discovered Engine Fabric backend publishes a versioned benchmark adapter
+contract with its required runtime component/service, readiness evidence,
+model-inventory endpoint, supported model formats, exact model-ID rule, request
+transport, sampling controls, privacy promises and bounded workload limits.
+AXIOM Native Engine uses its trusted model inventory; external adapters use
+their own fixed loopback inventory endpoint.
+
+Every benchmark performs a fresh preflight before its first warm-up or measured
+generation. The runtime must be ready and the exact model ID must appear in that
+runtime's current inventory. Offline services, invalid inventories and unknown
+model IDs fail before generation. The same check is available through the
+Control Center and the API:
+
+- GET /api/engine/backends includes benchmark_requirements for every adapter.
+- GET /api/engine/backends/benchmark-requirements?backend_id=ollama&model=qwen2.5%3A0.5b returns the declared contract and live preflight.
+- POST /api/engine/backends/benchmark repeats the preflight inside the benchmark core before running.
+
+The CLI command axiom engine benchmark-requirements --backend ollama
+--model qwen2.5:0.5b --json is read-only and does not generate tokens, launch
+services, download models, or send credentials. Benchmarks remain sequential:
+at most one warm-up, five measured requests and 256 output tokens per request.

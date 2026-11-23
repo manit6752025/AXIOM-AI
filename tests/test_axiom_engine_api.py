@@ -1110,3 +1110,39 @@ def test_engine_fabric_auto_chat_does_not_expose_internal_exception_details(
     assert secret_detail not in response.text
     assert "/private/runner" not in response.text
 
+
+
+def test_engine_fabric_benchmark_requirements_endpoint_returns_live_preflight(monkeypatch):
+    expected = {"schema_version": 1, "backend_id": "ollama", "adapter_id": "axiom-engine-fabric-benchmark-v1:ollama", "requirements": {"runtime": {"endpoint": "http://127.0.0.1:11434"}, "model": {"selection": "exact_model_id"}}, "preflight": {"status": "ready", "runtime_status": "ready", "runtime_ready": True, "model_id": "tiny-local", "model_available": True, "reason": None}, "can_benchmark": True}
+    captured = {}
+    def fake_inspect(backend_id, model):
+        captured.update(backend_id=backend_id, model=model)
+        return expected
+    monkeypatch.setattr(engine_api, "inspect_engine_backend_benchmark_requirements", fake_inspect)
+    response = _client().get("/api/engine/backends/benchmark-requirements?backend_id=ollama&model=tiny-local")
+    assert response.status_code == 200, response.text
+    assert response.json() == expected
+    assert captured == {"backend_id": "ollama", "model": "tiny-local"}
+
+
+def test_engine_fabric_benchmark_requirements_rejects_unknown_adapter():
+    response = _client().get("/api/engine/backends/benchmark-requirements?backend_id=remote&model=tiny-local")
+    assert response.status_code == 422
+
+
+def test_engine_fabric_benchmark_endpoint_returns_conflict_when_preflight_fails(monkeypatch):
+    from axiom.core.engine_fabric import EngineFabricBenchmarkRequirementError
+
+    def reject_preflight(*_args, **_kwargs):
+        raise EngineFabricBenchmarkRequirementError("The exact model ID is not advertised by the selected runtime.")
+
+    monkeypatch.setattr(engine_api, "run_engine_backend_benchmark", reject_preflight)
+    response = _client().post("/api/engine/backends/benchmark", json={
+        "backend_id": "ollama",
+        "model": "missing-model",
+        "prompt": "This must never generate.",
+        "warmup_runs": 0,
+        "iterations": 1,
+    })
+    assert response.status_code == 409
+    assert "exact model ID" in response.json()["detail"]

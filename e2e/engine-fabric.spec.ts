@@ -3,6 +3,28 @@ import { ensureAuthenticated } from "./helpers/auth";
 
 const backend = (id: string, name: string, status: "ready" | "setup_required", supportsChat: boolean, models: string[] = []) => ({
   id, name, kind: id === "axiom-native" ? "native" : "openai-compatible",
+  benchmark_requirements: {
+    schema_version: 1,
+    adapter_id: `axiom-engine-fabric-benchmark-v1:${id}`,
+    backend_id: id,
+    runtime: {
+      kind: id === "axiom-native" ? "in_process" : "loopback_service",
+      component: id,
+      readiness_evidence: "Live adapter/model inventory check.",
+      endpoint: id === "axiom-native" ? null : "http://127.0.0.1:11434",
+      inventory_route: id === "ollama" ? "/api/tags" : "/v1/models",
+    },
+    model: { selection: "exact_model_id", inventory_source: "local adapter inventory", supported_formats: ["local model files"], must_be_discoverable: true, notes: "Exact model ID." },
+    request: {
+      route: "/api/chat", transport: "ollama_options", model_id_match: "exact",
+      warmups: { minimum: 0, maximum: 1 },
+      measured_requests: { minimum: 1, maximum: 5, concurrency: 1 },
+      output_tokens: { minimum: 1, maximum: 256 },
+      sampling: { native: ["temperature", "top_p"], extensions: [] },
+    },
+    privacy: { prompt_returned: false, responses_returned: false, results_persisted: false, cloud_provider_used: false },
+    scope_note: "Adapter requirements only.",
+  },
   endpoint: id === "axiom-native" ? null : "http://127.0.0.1:8080",
   supports_chat: supportsChat, formats: ["local model files"],
   strengths: ["Local execution", "No cloud routing", "Bounded API"],
@@ -35,6 +57,17 @@ test("Engine Fabric compares local engines and routes chat to the chosen service
   let chatRequestBody: Record<string, unknown> | undefined;
   let benchmarkRequestBody: Record<string, unknown> | undefined;
   await page.route("**/api/engine/backends**", async (route) => {
+    if (route.request().method() === "GET" && route.request().url().includes("/benchmark-requirements")) {
+      await route.fulfill({ json: {
+        schema_version: 1,
+        backend_id: "ollama",
+        adapter_id: "axiom-engine-fabric-benchmark-v1:ollama",
+        requirements: backend("ollama", "Ollama", "ready", true, ["tiny-local"]).benchmark_requirements,
+        preflight: { status: "ready", runtime_status: "ready", runtime_ready: true, model_id: "tiny-local", model_available: true, reason: null },
+        can_benchmark: true,
+      } });
+      return;
+    }
     if (route.request().method() === "POST" && route.request().url().includes("/benchmark")) {
       benchmarkRequestBody = route.request().postDataJSON() as Record<string, unknown>;
       await route.fulfill({ json: {
@@ -94,6 +127,8 @@ test("Engine Fabric compares local engines and routes chat to the chosen service
   await engineFabricPanel.getByRole("button", { name: "Run on selected engine" }).click();
   await expect(engineFabricPanel.getByRole("region", { name: "Engine Fabric response" })).toContainText("A reply from the selected local backend.");
   expect(chatRequestBody?.min_p).toBe(0.2);
+  await engineFabricPanel.getByRole("button", { name: "Check benchmark requirements" }).click();
+  await expect(engineFabricPanel.getByText("Preflight: READY", { exact: false })).toBeVisible();
   await engineFabricPanel.getByRole("button", { name: "Benchmark selected engine" }).click();
   await expect(engineFabricPanel.getByRole("table", { name: "Measured local engine comparison" })).toContainText("21 ms");
   await expect(engineFabricPanel.getByRole("table", { name: "Measured local engine comparison" })).toContainText("350 tokens/s");

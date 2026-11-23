@@ -16,7 +16,7 @@ from rich.text import Text
 
 from axiom.core.engine import AxiomEngineError, benchmark_local, discover_local_engine_assets, estimate_native_quantization, generate_local, generate_local_batch, generate_local_stream, runtime_status, runtime_telemetry
 from axiom.core import model_studio
-from axiom.core.engine_fabric import EngineFabricError, discover_engine_backends, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
+from axiom.core.engine_fabric import EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
 
 engine_app = typer.Typer(help="Run causal language models directly through AXIOM's local engine.", no_args_is_help=True)
 console = Console()
@@ -761,3 +761,36 @@ def engine_route_benchmark(
     table.add_row("Completion throughput", f"{throughput} tokens/s" if throughput is not None else "not reported by backend")
     console.print(table)
     console.print(result["scope_note"])
+
+
+@engine_app.command("benchmark-requirements")
+def engine_benchmark_requirements_cli(
+    backend: str = typer.Option(..., "--backend", help="Adapter ID: axiom-native, ollama, llama-cpp, lm-studio, vllm, llama-cpp-python."),
+    model: str = typer.Option(..., "--model", help="Exact model ID advertised by the selected local runtime."),
+    json_output: bool = typer.Option(False, "--json", help="Print requirements and preflight as JSON."),
+) -> None:
+    """Check benchmark runtime/model requirements without generating tokens."""
+    try:
+        report = inspect_engine_backend_benchmark_requirements(backend, model)
+    except ValueError as exc:
+        _fail(str(exc))
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        req, preflight = report["requirements"], report["preflight"]
+        table = Table(title=f"Benchmark requirements · {backend}")
+        table.add_column("Requirement", style="cyan")
+        table.add_column("Declared value")
+        table.add_row("Adapter", req["adapter_id"])
+        table.add_row("Runtime", str(req["runtime"]["component"] or "AXIOM Native Engine"))
+        table.add_row("Endpoint", str(req["runtime"]["endpoint"] or "In process"))
+        table.add_row("Model inventory", req["model"]["inventory_source"])
+        table.add_row("Model ID rule", req["model"]["selection"])
+        table.add_row("Supported formats", ", ".join(req["model"]["supported_formats"]))
+        table.add_row("Preflight", preflight["status"])
+        if preflight["reason"]:
+            table.add_row("Reason", preflight["reason"])
+        console.print(table)
+        console.print(req["scope_note"])
+    if not report["can_benchmark"]:
+        raise typer.Exit(code=2)
