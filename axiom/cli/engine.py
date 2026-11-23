@@ -18,6 +18,8 @@ from rich.table import Table
 from rich.text import Text
 
 from axiom.core.engine import AxiomEngineError, benchmark_local, discover_local_engine_assets, estimate_native_quantization, generate_local, generate_local_batch, generate_local_stream, inspect_native_model_context, resolve_local_model_directory, runtime_status, runtime_telemetry
+from axiom.core.prediction_jobs import cancel_prediction_job, get_prediction_job, list_prediction_jobs, start_prediction_job, wait_prediction_job
+from axiom.core.workspace_context import active_workspace_root
 from axiom.core import model_studio
 from axiom.core.engine_fabric import EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
 from axiom.core.engine_fabric_profiles import EngineFabricProfileError, EngineFabricProfileStore
@@ -55,7 +57,6 @@ serving_profile_app = typer.Typer(
     help="Create and validate bounded AXIOM Native Engine serving profiles.",
     no_args_is_help=True,
 )
-engine_app.add_typer(serving_profile_app, name="profile")
 
 
 @serving_profile_app.command("create")
@@ -257,6 +258,8 @@ def serving_profile_delete(
         "model_files_deleted": False,
     }, ensure_ascii=False))
 
+
+engine_app.add_typer(serving_profile_app, name="profile")
 
 @engine_app.command("discover")
 def engine_discover(
@@ -842,8 +845,8 @@ def engine_batch(
 __all__ = ["engine_app"]
 
 
-engine_profile_app = typer.Typer(help="Manage secret-free workspace profiles for fixed local Engine Fabric adapters.", no_args_is_help=True)
-engine_app.add_typer(engine_profile_app, name="profile")
+engine_profile_app = typer.Typer(help="Manage secret-free Engine Fabric connector profiles for fixed local adapters.", no_args_is_help=True)
+engine_app.add_typer(engine_profile_app, name="fabric-profile")
 
 
 @engine_app.command("backends")
@@ -926,7 +929,7 @@ def engine_profile_save(
 
 @engine_profile_app.command("connect")
 def engine_profile_connect(
-    profile_id: str = typer.Argument(..., help="Exact profile ID from axiom engine profile list."),
+    profile_id: str = typer.Argument(..., help="Exact profile ID from axiom engine fabric-profile list."),
     json_output: bool = typer.Option(False, "--json", help="Print the verification result as JSON."),
 ) -> None:
     """Verify the local backend and exact model from a saved profile; no socket is retained."""
@@ -1309,3 +1312,178 @@ def engine_rerank_unload() -> None:
     report = unload_local_reranker()
     console.print("[green]Reranker unloaded.[/green]" if report["unloaded"] else "No reranker was loaded.")
     console.print(report["scope_note"])
+
+
+prediction_jobs_app = typer.Typer(
+    help="Start, inspect, wait for, and cancel bounded local JSONL prediction jobs.",
+    no_args_is_help=True,
+)
+
+
+@prediction_jobs_app.command("start")
+def prediction_job_start(
+    model_path: str = typer.Option(..., "--model-path", help="Workspace or trusted-root native model path."),
+    dataset_path: str = typer.Option(..., "--dataset-path", help="Workspace JSONL input under data/."),
+    output_path: str = typer.Option(..., "--output-path", help="New data/NAME.jsonl destination; existing files are never overwritten."),
+    prompt_field: str = typer.Option("prompt", "--prompt-field"),
+    reference_field: str = typer.Option("reference", "--reference-field"),
+    prediction_field: str = typer.Option("prediction", "--prediction-field"),
+    adapter_path: str | None = typer.Option(None, "--adapter-path"),
+    max_new_tokens: int = typer.Option(64, "--max-new-tokens", min=1, max=64),
+    temperature: float = typer.Option(0.7, "--temperature", min=0, max=2),
+    seed: int | None = typer.Option(None, "--seed", min=0),
+    device: str = typer.Option("auto", "--device"),
+    precision: str = typer.Option("auto", "--precision"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Run a bounded prediction job and wait while its process-owned worker executes."""
+    root = active_workspace_root()
+    try:
+        job = start_prediction_job(
+            root,
+            model_path=model_path,
+            adapter_path=adapter_path,
+            dataset_path=dataset_path,
+            output_path=output_path,
+            prompt_field=prompt_field,
+            reference_field=reference_field,
+            prediction_field=prediction_field,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            seed=seed,
+            device=device,
+            precision=precision,
+        )
+        outcome = None
+        while True:
+            waited = wait_prediction_job(job["id"], root, timeout_seconds=10)
+            job = waited.get("job") or job
+            outcome = waited["wait_outcome"]
+            if outcome != "timed_out":
+                break
+            if not json_output:
+                console.print(
+                    f"Prediction job {job['id'][:12]} · {job['rows_completed']}/{job['rows_total']} rows",
+                    style="dim",
+                )
+    except KeyboardInterrupt:
+        try:
+            cancellation = cancel_prediction_job(job["id"], root)
+            if cancellation is not None and cancellation.get("cancellation_accepted"):
+                wait_prediction_job(job["id"], root, timeout_seconds=30)
+        except (OSError, RuntimeError, ValueError):
+            pass
+        raise typer.Exit(130) from None
+    except (AxiomEngineError, OSError, RuntimeError, ValueError) as exc:
+        _fail(str(exc))
+    if json_output:
+        console.print_json(json.dumps({"job": job, "wait_outcome": outcome}, ensure_ascii=False, allow_nan=False))
+        if job["status"] not in {"completed"}:
+            raise typer.Exit(1)
+        return
+    console.print(f"Prediction job [cyan]{job['id']}[/cyan] · {job['status']}")
+    console.print(f"Progress: {job['rows_completed']}/{job['rows_total']} rows · prompt truncations: {job['prompts_truncated']}")
+    if job["status"] == "completed":
+        console.print(f"Published: {job['output_path']}")
+    elif job.get("error_code"):
+        _fail(f"Prediction job failed safely ({job['error_code']}).")
+
+
+@prediction_jobs_app.command("list")
+def prediction_job_list(
+    limit: int = typer.Option(20, "--limit", min=1, max=50),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """List recent prediction jobs in the active workspace."""
+    try:
+        jobs = list_prediction_jobs(active_workspace_root(), limit=limit)
+    except (OSError, RuntimeError, ValueError) as exc:
+        _fail(f"Prediction job history is unavailable: {exc}")
+    if json_output:
+        console.print_json(json.dumps({"jobs": jobs, "limit": limit}, ensure_ascii=False, allow_nan=False))
+        return
+    if not jobs:
+        console.print("No saved prediction jobs.")
+        return
+    table = Table(title="Local prediction jobs")
+    table.add_column("ID", style="cyan")
+    table.add_column("Status")
+    table.add_column("Progress", justify="right")
+    table.add_column("Truncated", justify="right")
+    table.add_column("Output")
+    for job in jobs:
+        table.add_row(
+            job["id"][:12],
+            str(job["status"]),
+            f"{job['rows_completed']}/{job['rows_total']}",
+            str(job["prompts_truncated"]),
+            str(job["output_path"]),
+        )
+    console.print(table)
+
+
+@prediction_jobs_app.command("show")
+def prediction_job_show(
+    job_id: str,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Show persisted progress and safe metadata for one prediction job."""
+    try:
+        job = get_prediction_job(job_id, active_workspace_root())
+    except (OSError, RuntimeError, ValueError) as exc:
+        _fail(f"Prediction job state is unavailable: {exc}")
+    if job is None:
+        _fail(f"Prediction job was not found: {job_id}")
+    if json_output:
+        console.print_json(json.dumps({"job": job}, ensure_ascii=False, allow_nan=False))
+        return
+    console.print(f"Prediction job [cyan]{job['id']}[/cyan] · {job['status']}")
+    console.print(f"Progress: {job['rows_completed']}/{job['rows_total']} rows")
+    console.print(f"Prompt truncations: {job['prompts_truncated']}")
+    console.print(f"Output: {job['output_path']} · {'published' if job['artifact_ready'] else 'not published'}")
+    if job.get("error_code"):
+        console.print(f"Safe error code: {job['error_code']}")
+
+
+@prediction_jobs_app.command("wait")
+def prediction_job_wait(
+    job_id: str,
+    timeout_seconds: float = typer.Option(10.0, "--timeout", min=0, max=30),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Wait for up to 30 seconds for a prediction job to finish or require recovery."""
+    try:
+        result = wait_prediction_job(job_id, active_workspace_root(), timeout_seconds=timeout_seconds)
+    except (OSError, RuntimeError, ValueError) as exc:
+        _fail(f"Prediction job state is unavailable: {exc}")
+    if result["job"] is None:
+        _fail(f"Prediction job was not found: {job_id}")
+    if json_output:
+        console.print_json(json.dumps(result, ensure_ascii=False, allow_nan=False))
+        return
+    job = result["job"]
+    console.print(f"Prediction job [cyan]{job['id']}[/cyan] · {job['status']}")
+    console.print(f"Progress: {job['rows_completed']}/{job['rows_total']} rows · wait: {result['wait_outcome']}")
+
+
+@prediction_jobs_app.command("cancel")
+def prediction_job_cancel(
+    job_id: str,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Request cooperative cancellation of a running prediction job."""
+    try:
+        result = cancel_prediction_job(job_id, active_workspace_root())
+    except (OSError, RuntimeError, ValueError) as exc:
+        _fail(f"Prediction job cancellation failed: {exc}")
+    if result is None:
+        _fail(f"Prediction job was not found: {job_id}")
+    if json_output:
+        console.print_json(json.dumps(result, ensure_ascii=False, allow_nan=False))
+        return
+    state = "accepted" if result["cancellation_accepted"] else "unavailable"
+    console.print(f"Cancellation {state} · {result['job']['status']}")
+    console.print(result["note"])
+
+
+engine_app.add_typer(prediction_jobs_app, name="prediction")

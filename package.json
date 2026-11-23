@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "prebuild": "node scripts/check_lucide_types.mjs && node scripts/check_typescript_version.mjs",
-    "prelint": "node scripts/check_typescript_version.mjs"
+    "prelint": "node scripts/check_lucide_types.mjs && node scripts/check_typescript_version.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.77.0",

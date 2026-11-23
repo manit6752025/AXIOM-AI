@@ -145,7 +145,7 @@ def test_frontend_dependency_audit_detects_missing_bundled_lucide_types(tmp_path
 
     missing = main_cli._frontend_dependency_mismatches(tmp_path)
     assert missing == [
-        "lucide-react: bundled TypeScript declarations are missing; restore node_modules with npm ci"
+        "lucide-react: bundled TypeScript declarations are missing or outside the package"
     ]
 
     declarations = package_root / "dist" / "lucide-react.d.ts"

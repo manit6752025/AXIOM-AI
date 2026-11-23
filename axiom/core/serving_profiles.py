@@ -393,7 +393,7 @@ def validate_serving_prompt(
     required_context = prompt_tokens + output_tokens
     if required_context > profile["context_length"]:
         raise ServingProfileError(
-            f"Prompt plus requested output needs {required_context} tokens; this profile allows {profile['context_length']}."
+            f"Prompt and requested output exceed the serving profile context limit: {required_context} tokens required; configured limit is {profile['context_length']}."
         )
     return {
         "prompt_characters": len(prompt),

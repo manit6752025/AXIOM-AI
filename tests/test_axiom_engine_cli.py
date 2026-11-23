@@ -804,3 +804,15 @@ def test_engine_rerank_cli_reads_bounded_json_document_file(monkeypatch, tmp_pat
     ])
     assert result.exit_code == 0, result.output
     assert seen == [["first candidate", "second candidate"]]
+
+
+def test_engine_serving_and_fabric_profiles_use_distinct_cli_groups():
+    serving = runner.invoke(engine_app, ["profile", "--help"])
+    assert serving.exit_code == 0, serving.output
+    for command in ("create", "list", "show", "probe", "run", "delete"):
+        assert command in serving.output
+
+    fabric = runner.invoke(engine_app, ["fabric-profile", "--help"])
+    assert fabric.exit_code == 0, fabric.output
+    for command in ("list", "save", "connect"):
+        assert command in fabric.output

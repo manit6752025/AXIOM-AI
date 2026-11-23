@@ -172,6 +172,10 @@ step.
 
 The fingerprint intentionally excludes display names, notes, tags, record IDs, and timestamps. It covers the model/dataset labels, parameter count, requested method, captured hardware, planner provenance, and exact plan estimate. Snapshot printing and diffing are read-only: neither reruns the planner nor creates a job or artifact. A matching fingerprint is not a guarantee of identical runtime behavior or training results.
 
+## Local native serving profiles (R132)
+
+`GET /api/engine/serving-profiles` lists bounded workspace-local model configurations. `POST /api/engine/serving-profiles` creates or updates a profile by name after trusted local model path and checkpoint-context validation. Profiles set device, memory mode, precision, context, maximum prompt/output size, request timeout, one active request, and zero queued requests. `POST /api/engine/serving-profiles/{profile_id}/readiness` checks native dependencies, selected-device availability, checkpoint context and optional adapter compatibility without loading weights. `POST /api/engine/serving-profiles/{profile_id}/generate` performs local inference under that profile's caps and cooperative timeout/disconnect cancellation. A concurrent request receives 429; a profile that fails readiness receives 409. `DELETE /api/engine/serving-profiles/{profile_id}` deletes profile metadata only, never model or adapter files. The readiness route does not start a separate HTTP listener. See [Local Serving Profiles](Local-Serving-Profiles.md) for the full request and lifecycle contract.
+
 ## Repeated offline evaluation by saved experiment (R131)
 
 `POST /api/evaluation/runs` accepts an optional `experiment_id` containing the

@@ -107,22 +107,6 @@ export default function EngineServingProfilesPanel() {
     try {
       const report = await axiomApi.generateAxiomEngineServingProfile(selectedProfile.id, { prompt });
       setOutput(report.result.response);
-      setReadiness((current) => ({
-        ...current,
-        [selectedProfile.id]: {
-          schema_version: 1,
-          profile_id: selectedProfile.id,
-          profile_name: selectedProfile.name,
-          ready: true,
-          checks: { last_request: report.request_budget },
-          problems: [],
-          weights_loaded: true,
-          service_started: false,
-          network_used: false,
-          probed_at: new Date().toISOString(),
-          scope_note: "A profile request loaded and used the local model in this AXIOM process.",
-        },
-      }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Profile generation failed.");
     } finally {
