@@ -10,6 +10,7 @@ from axiom.core.prediction_jobs import (
     cancel_prediction_job,
     get_prediction_job,
     list_prediction_jobs,
+    resume_prediction_job,
     start_prediction_job,
 )
 from axiom.core.workspace_context import active_workspace_root
@@ -140,6 +141,33 @@ def get_prediction_job_status(job_id: str) -> dict[str, Any]:
     if job is None:
         raise HTTPException(status_code=404, detail="Prediction job was not found in this workspace.")
     return {"schema_version": 1, "job": job}
+
+
+@router.post("/{job_id}/resume", status_code=202)
+def resume_interrupted_prediction_job(job_id: str) -> dict[str, Any]:
+    """Resume an interrupted job from its integrity-checked committed output prefix."""
+    try:
+        job = resume_prediction_job(job_id, active_workspace_root())
+    except ValueError as exc:
+        message = str(exc)
+        status = 409 if "another local AXIOM compute job is active" in message else 422
+        raise HTTPException(status_code=status, detail=message) from None
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail="Prediction job could not be resumed safely.") from exc
+    if job is None:
+        raise HTTPException(status_code=404, detail="Prediction job was not found in this workspace.")
+    return {
+        "schema_version": 1,
+        "job": job,
+        "scope": {
+            "dataset_fingerprint_verified": True,
+            "model_and_adapter_fingerprints_verified": True,
+            "checkpoint_identity_and_digest_verified": True,
+            "partial_output_published": False,
+            "prompts_returned": False,
+            "predictions_returned": False,
+        },
+    }
 
 
 @router.post("/{job_id}/cancel")
