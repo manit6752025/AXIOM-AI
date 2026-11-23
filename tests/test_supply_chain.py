@@ -66,6 +66,13 @@ def test_spdx_sbom_is_stable_for_the_same_packages_and_timestamp():
     )
 
 
+
+
+def test_spdx_sbom_percent_encodes_purl_version_epochs():
+    report = generate_spdx_sbom(distributions=[distribution("legacy-package", "1!2.3+local")])
+    package = report["packages"][0]
+    assert package["externalRefs"][0]["referenceLocator"] == "pkg:pypi/legacy-package@1%212.3+local"
+
 def test_spdx_sbom_rejects_unbounded_or_invalid_installed_metadata():
     too_many = [distribution(f"pkg-{index}", "1.0") for index in range(supply_chain.MAX_DISTRIBUTIONS + 1)]
     with pytest.raises(SupplyChainError, match="exceeds"):
@@ -104,6 +111,62 @@ def test_report_export_rejects_symlinked_parent_and_existing_symlink(tmp_path: P
 def test_vulnerability_scan_requires_explicit_network_authorization():
     with pytest.raises(SupplyChainError, match="explicit network authorization"):
         audit_dependency_vulnerabilities(allow_network=False)
+
+
+def test_security_api_exports_spdx_and_requires_strict_network_authorization(monkeypatch: pytest.MonkeyPatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from axiom.api.security import router as security_router
+
+    sbom = {
+        "spdxVersion": "SPDX-2.3",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "axiom": {"package_count": 1},
+    }
+    monkeypatch.setattr("axiom.api.security.generate_spdx_sbom", lambda: sbom)
+    from axiom.core.supply_chain import audit_dependency_vulnerabilities as run_audit
+
+    calls = []
+
+    def fake_audit(*, allow_network: bool, timeout_seconds: int):
+        calls.append((allow_network, timeout_seconds))
+        if not allow_network:
+            return run_audit(allow_network=allow_network, timeout_seconds=timeout_seconds)
+        return {
+            "schema_version": 1,
+            "status": "unavailable",
+            "network_accessed": False,
+            "dependency_count": 0,
+            "vulnerable_dependency_count": 0,
+            "vulnerability_count": 0,
+            "findings": [],
+            "message": "No scanner available; no conclusion.",
+        }
+
+    monkeypatch.setattr("axiom.api.security.audit_dependency_vulnerabilities", fake_audit)
+    application = FastAPI()
+    application.include_router(security_router)
+    client = TestClient(application)
+
+    exported = client.get("/api/security/sbom")
+    assert exported.status_code == 200
+    assert exported.json() == sbom
+
+    denied = client.post("/api/security/dependency-audit", json={"allow_network": False})
+    assert denied.status_code == 422
+    assert "explicit authorization" in denied.json()["detail"]
+    assert calls == [(False, 90)]
+
+    malformed = client.post("/api/security/dependency-audit", json={"allow_network": "true"})
+    assert malformed.status_code == 422
+    allowed = client.post("/api/security/dependency-audit", json={
+        "allow_network": True,
+        "timeout_seconds": 45,
+    })
+    assert allowed.status_code == 200
+    assert allowed.json()["status"] == "unavailable"
+    assert calls == [(False, 90), (True, 45)]
 
 
 def test_vulnerability_scan_reports_unavailable_scanner_without_claiming_clean(monkeypatch: pytest.MonkeyPatch):
@@ -172,6 +235,7 @@ def test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_s
     assert kwargs["cwd"] == supply_chain.sys.prefix
     assert "PIP_INDEX_URL" not in kwargs["env"]
     assert "AXIOM_API_TOKEN" not in kwargs["env"]
+    assert kwargs["env"]["PIP_CONFIG_FILE"] == os.devnull
 
 
 def test_vulnerability_scan_does_not_report_clean_on_timeout(monkeypatch: pytest.MonkeyPatch):
@@ -211,7 +275,7 @@ def test_vulnerability_scan_bounds_captured_streams(monkeypatch: pytest.MonkeyPa
 
     class NoisyProcess:
         def __init__(self, *_args, **_kwargs):
-            self.stdout = io.BytesIO(b"{}" if stream_name == "stdout" else b"")
+            self.stdout = io.BytesIO(b"x" * (limit + 1) if stream_name == "stdout" else b"{}")
             self.stderr = io.BytesIO(b"x" * (limit + 1) if stream_name == "stderr" else b"")
             self.returncode = 0
 

@@ -9,14 +9,15 @@ import os
 import re
 import subprocess
 import sys
-from urllib.parse import quote
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Thread
 from typing import Any, Iterable
+from urllib.parse import quote
 
 MAX_DISTRIBUTIONS = 4096
 MAX_RELATIONSHIPS = 20_000
+MAX_AUDIT_FINDINGS = 20_000
 MAX_AUDIT_OUTPUT_BYTES = 8 * 1024 * 1024
 MAX_AUDIT_STDERR_BYTES = 1 * 1024 * 1024
 MAX_SCAN_SECONDS = 90
@@ -50,13 +51,20 @@ def _distribution_values(distribution: Any) -> tuple[str, str, list[str]]:
         metadata = distribution.metadata
         name = str(metadata.get("Name", "")).strip()
         version = str(distribution.version).strip()
-        requirements = list(distribution.requires or ())
+        raw_requirements = distribution.requires or ()
+        requirements: list[str] = []
+        for item in raw_requirements:
+            if len(requirements) >= 4096:
+                raise SupplyChainError(f"Dependency metadata for {name} exceeds its supported bounds.")
+            if not isinstance(item, str) or len(item) > 2048:
+                raise SupplyChainError(f"Dependency metadata for {name} exceeds its supported bounds.")
+            requirements.append(item)
+    except SupplyChainError:
+        raise
     except Exception as exc:
         raise SupplyChainError("Installed distribution metadata could not be read safely.") from exc
     if not _NAME_PATTERN.fullmatch(name) or not _VERSION_PATTERN.fullmatch(version):
         raise SupplyChainError("An installed distribution has an invalid or unsupported name/version.")
-    if len(requirements) > 4096 or any(not isinstance(item, str) or len(item) > 2048 for item in requirements):
-        raise SupplyChainError(f"Dependency metadata for {name} exceeds its supported bounds.")
     return name, version, requirements
 
 
@@ -67,11 +75,16 @@ def generate_spdx_sbom(
 ) -> dict[str, Any]:
     """Build an SPDX 2.3 JSON SBOM from installed package metadata, without running packages."""
     try:
-        found = list(distributions if distributions is not None else importlib.metadata.distributions())
+        source = distributions if distributions is not None else importlib.metadata.distributions()
+        found: list[Any] = []
+        for distribution in source:
+            if len(found) >= MAX_DISTRIBUTIONS:
+                raise SupplyChainError(f"Installed package inventory exceeds {MAX_DISTRIBUTIONS} distributions.")
+            found.append(distribution)
+    except SupplyChainError:
+        raise
     except Exception as exc:
         raise SupplyChainError("Installed package inventory could not be enumerated safely.") from exc
-    if len(found) > MAX_DISTRIBUTIONS:
-        raise SupplyChainError(f"Installed package inventory exceeds {MAX_DISTRIBUTIONS} distributions.")
 
     packages_by_name: dict[str, dict[str, Any]] = {}
     requirements_by_name: dict[str, list[str]] = {}
@@ -115,24 +128,31 @@ def generate_spdx_sbom(
         })
     for canonical in sorted(requirements_by_name):
         package = packages_by_name[canonical]
-        for requirement in requirements_by_name[canonical]:
+        dependency_ids: set[str] = set()
+        for requirement in sorted(requirements_by_name[canonical], key=str.casefold):
             match = _DEPENDENCY_NAME_PATTERN.match(requirement)
             if not match:
                 continue
             dependency = packages_by_name.get(_canonical_name(match.group(1)))
-            if dependency is None:
-                continue
+            if dependency is not None:
+                dependency_ids.add(dependency["SPDXID"])
+        for dependency_id in sorted(dependency_ids):
             relationships.append({
                 "spdxElementId": package["SPDXID"],
                 "relationshipType": "DEPENDS_ON",
-                "relatedSpdxElement": dependency["SPDXID"],
+                "relatedSpdxElement": dependency_id,
             })
             if len(relationships) > MAX_RELATIONSHIPS:
                 raise SupplyChainError(f"Dependency relationship inventory exceeds {MAX_RELATIONSHIPS} entries.")
 
     created = _utc_timestamp(generated_at)
     content_fingerprint = hashlib.sha256(
-        json.dumps(packages, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        json.dumps(
+            {"packages": packages, "relationships": relationships},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
     ).hexdigest()
     namespace = f"https://spdx.org/spdxdocs/axiom-{content_fingerprint}-{created.replace(':', '-')}"
     return {
@@ -169,7 +189,7 @@ def generate_spdx_sbom(
 
 
 def write_report_new(path: str | Path, content: str) -> Path:
-    """Create a new local report with restrictive permissions; never overwrite or follow symlinks."""
+    """Create a private report atomically without overwriting or following symlinks."""
     if not isinstance(content, str) or len(content.encode("utf-8")) > 32 * 1024 * 1024:
         raise SupplyChainError("Report content exceeds the 32 MiB export limit.")
     target = Path(path).expanduser()
@@ -178,6 +198,10 @@ def write_report_new(path: str | Path, content: str) -> Path:
     target = Path(os.path.abspath(target))
     if target.name in {"", ".", ".."}:
         raise SupplyChainError("Report output must name a file.")
+
+    # Keep a human-readable rejection for pre-existing symlinks, then use
+    # directory descriptors on POSIX so replacing a parent with a symlink
+    # between validation and creation cannot redirect the output.
     current = Path(target.anchor)
     for component in target.parent.parts[1:]:
         current = current / component
@@ -187,27 +211,73 @@ def write_report_new(path: str | Path, content: str) -> Path:
             raise SupplyChainError("Report output parent must be an existing directory.")
     if target.is_symlink() or target.exists():
         raise SupplyChainError("Report output already exists; choose a new path.")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    flags |= getattr(os, "O_NOFOLLOW", 0)
-    flags |= getattr(os, "O_BINARY", 0)
+
+    file_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    file_flags |= getattr(os, "O_NOFOLLOW", 0)
+    file_flags |= getattr(os, "O_BINARY", 0)
+    directory_fd: int | None = None
+    descriptor: int | None = None
+    created = False
+    supports_directory_descriptors = (
+        os.open in getattr(os, "supports_dir_fd", set())
+        and os.unlink in getattr(os, "supports_dir_fd", set())
+        and hasattr(os, "O_DIRECTORY")
+        and hasattr(os, "O_NOFOLLOW")
+    )
     try:
-        descriptor = os.open(str(target), flags, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+        if supports_directory_descriptors:
+            directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+            directory_fd = os.open(target.anchor, directory_flags)
+            for component in target.parent.parts[1:]:
+                next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+                os.close(directory_fd)
+                directory_fd = next_fd
+            descriptor = os.open(target.name, file_flags, 0o600, dir_fd=directory_fd)
+        else:
+            descriptor = os.open(str(target), file_flags, 0o600)
+        created = True
+        stream = os.fdopen(descriptor, "w", encoding="utf-8", newline="")
+        descriptor = None
+        with stream:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        if os.name != "nt":
-            os.chmod(target, 0o600)
+        if directory_fd is not None:
+            os.fsync(directory_fd)
     except FileExistsError:
         raise SupplyChainError("Report output already exists; choose a new path.") from None
+    except SupplyChainError:
+        if created:
+            try:
+                if directory_fd is not None:
+                    os.unlink(target.name, dir_fd=directory_fd)
+                else:
+                    target.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
     except OSError:
-        try:
-            target.unlink(missing_ok=True)
-        except OSError:
-            pass
+        if created:
+            try:
+                if directory_fd is not None:
+                    os.unlink(target.name, dir_fd=directory_fd)
+                else:
+                    target.unlink(missing_ok=True)
+            except OSError:
+                pass
         raise SupplyChainError("Report output could not be written safely.") from None
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if directory_fd is not None:
+            try:
+                os.close(directory_fd)
+            except OSError:
+                pass
     return target
-
 
 def _parse_pip_audit_output(payload: Any, *, generated_at: str, scanner_version: str | None, exit_code: int) -> dict[str, Any]:
     if isinstance(payload, dict):
@@ -254,6 +324,10 @@ def _parse_pip_audit_output(payload: Any, *, generated_at: str, scanner_version:
                 "aliases": safe_aliases,
                 "fix_versions": safe_fixes,
             })
+            if len(findings) > MAX_AUDIT_FINDINGS:
+                raise SupplyChainError(
+                    f"Dependency audit finding inventory exceeds {MAX_AUDIT_FINDINGS} entries."
+                )
 
     findings.sort(key=lambda item: (item["package"].casefold(), item["id"]))
     vulnerable_packages = {(item["package"], item["installed_version"]) for item in findings}
@@ -297,7 +371,7 @@ def _consume_bounded_pipe(stream: Any, maximum_bytes: int, result: dict[str, Any
                 captured.extend(block[:remaining])
             if total > maximum_bytes:
                 result["overflow"] = True
-    except OSError:
+    except (OSError, ValueError):
         result["read_error"] = True
     result["content"] = bytes(captured)
 
