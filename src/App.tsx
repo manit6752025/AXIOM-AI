@@ -77,6 +77,7 @@ import {
   type WorkspaceRuntimeMatrix,
   type LocalEmbeddingsReport,
   type LocalRerankingReport,
+  type LocalVisionReport,
   type KnowledgeBaseSummary,
   type KnowledgeDocumentRecord,
   type KnowledgeSearchReport,
@@ -4643,6 +4644,73 @@ function LocalRerankerPanel() {
 }
 
 
+
+function LocalVisionPanel() {
+  const [model, setModel] = useState("");
+  const [imagePath, setImagePath] = useState("");
+  const [prompt, setPrompt] = useState("Describe the image accurately. Separate observations from uncertainty.");
+  const [maxNewTokens, setMaxNewTokens] = useState("256");
+  const [report, setReport] = useState<LocalVisionReport | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    setReport(null);
+    try {
+      setReport(await axiomApi.analyzeLocalVision({
+        model: model.trim(),
+        image_path: imagePath.trim(),
+        prompt,
+        max_new_tokens: Number(maxNewTokens),
+      }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Local image understanding failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <Surface
+    title="Local image understanding"
+    eyebrow="OPT-IN MULTIMODAL INFERENCE"
+  >
+    <form className="integration-form" onSubmit={(event) => void submit(event)}>
+      <label className="field">
+        <span className="field-label-row"><span>Installed local vision model</span></span>
+        <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="llava:latest" maxLength={120} required />
+      </label>
+      <label className="field">
+        <span className="field-label-row"><span>Workspace image path</span><span>PNG or JPEG · maximum 8 MiB</span></span>
+        <input value={imagePath} onChange={(event) => setImagePath(event.target.value)} placeholder="data/images/sample.png" maxLength={4096} required />
+      </label>
+      <label className="field">
+        <span className="field-label-row"><span>Image question</span><span>{prompt.length.toLocaleString()} / 8,192</span></span>
+        <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} maxLength={8192} required />
+      </label>
+      <label className="field">
+        <span className="field-label-row"><span>Maximum response tokens</span></span>
+        <input type="number" min={1} max={1024} step={1} value={maxNewTokens} onChange={(event) => setMaxNewTokens(event.target.value)} required />
+      </label>
+      <div className="integration-form-actions">
+        <button type="submit" className="button primary-button" disabled={busy || !model.trim() || !imagePath.trim() || !prompt.trim() || !Number.isInteger(Number(maxNewTokens)) || Number(maxNewTokens) < 1 || Number(maxNewTokens) > 1024}>{busy ? "Analyzing locally…" : "Analyze image locally"}</button>
+        <span className="quiet-note">Nothing runs until you submit. The image and question go only to the local Ollama loopback service; the model must already be installed and advertise vision capability.</span>
+      </div>
+    </form>
+    {error && <InlineAlert tone="warning" role="alert">{error}</InlineAlert>}
+    {report && <div className="embedding-result" role="status">
+      <StatusPill tone="success">LOCAL VISION COMPLETE</StatusPill>
+      <h3>{report.model}</h3>
+      <p>{report.image.format.toUpperCase()} · {report.image.width.toLocaleString()} × {report.image.height.toLocaleString()} · {report.image.size_bytes.toLocaleString()} bytes · {report.generation.max_new_tokens} max tokens</p>
+      <p className="quiet-note">{report.response}</p>
+      <p className="quiet-note">{report.scope_note}</p>
+    </div>}
+  </Surface>;
+}
+
+
 function LocalEmbeddingsPanel() {
   const [modelPath, setModelPath] = useState("");
   const [sourceText, setSourceText] = useState("");
@@ -4753,6 +4821,7 @@ function Runtime() {
     <EngineServingProfilesPanel />
     <LocalEngineFabricPanel />
     <LocalInferencePanel />
+    <LocalVisionPanel />
     <LocalEmbeddingsPanel />
     <LocalRerankerPanel />
     <WorkspaceKnowledgePanel />
