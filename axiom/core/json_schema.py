@@ -29,7 +29,7 @@ _ALLOWED_KEYWORDS = frozenset({
     "maxLength", "minimum", "maximum", "minItems", "maxItems",
 })
 _SUPPORTED_DRAFT = "https://json-schema.org/draft/2020-12/schema"
-_PROPERTY_NAME = re.compile(r"^[^\\x00]{1,128}$")
+_PROPERTY_NAME = re.compile(r"^[^\x00]{1,128}$")
 
 
 class JsonSchemaError(ValueError):
@@ -41,7 +41,11 @@ def _is_integer(value: Any) -> bool:
 
 
 def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, float) and math.isfinite(value)
 
 
 def _bounded_integer(node: dict[str, Any], key: str, *, maximum: int) -> None:
@@ -159,6 +163,16 @@ def _validate_schema_node(schema: Any, *, depth: int, counter: list[int]) -> dic
     elif "minimum" in schema or "maximum" in schema:
         raise JsonSchemaError("Numeric-only keywords may only be used with type=integer or type=number.")
 
+    # A schema's own enum/const values must satisfy its type and constraints;
+    # otherwise Python's bool/int equality could accept the wrong JSON type.
+    candidates = ([normalized["const"]] if "const" in normalized else [])
+    candidates.extend(normalized.get("enum", []))
+    for candidate in candidates:
+        candidate_errors: list[str] = []
+        _validate_value(candidate, normalized, "$schema-value", depth=0, counter=[0], errors=candidate_errors)
+        if candidate_errors:
+            raise JsonSchemaError("const and enum values must satisfy their schema type and constraints.")
+
     return normalized
 
 
@@ -223,6 +237,9 @@ def _validate_value(value: Any, schema: dict[str, Any], path: str, *, depth: int
     if kind == "object":
         if len(value) > MAX_OBJECT_PROPERTIES:
             errors.append(f"{path}: object has more than {MAX_OBJECT_PROPERTIES} properties.")
+            return
+        if any(not isinstance(name, str) for name in value):
+            errors.append(f"{path}: object property names must be strings.")
             return
         properties = schema["properties"]
         unknown = set(value) - set(properties)

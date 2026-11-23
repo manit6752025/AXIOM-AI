@@ -8,7 +8,7 @@ from typing import Any, Literal
 from axiom.core.workspace_context import active_workspace_id
 
 MAX_RUNTIME_TRACES = 200
-TraceOperation = Literal["inference.generate", "inference.benchmark"]
+TraceOperation = Literal["inference.generate", "inference.generate.structured", "inference.benchmark"]
 TraceStatus = Literal["success", "error"]
 
 _traces_by_workspace: dict[str, deque[dict[str, Any]]] = {}
@@ -43,7 +43,7 @@ def record_runtime_trace(
     """Record allow-listed runtime metadata; prompt/response bodies are never accepted."""
     if not isinstance(request_id, str) or not request_id or len(request_id) > 64:
         raise ValueError("Runtime trace request ID is invalid.")
-    if operation not in {"inference.generate", "inference.benchmark"}:
+    if operation not in {"inference.generate", "inference.generate.structured", "inference.benchmark"}:
         raise ValueError("Runtime trace operation is unsupported.")
     if status not in {"success", "error"}:
         raise ValueError("Runtime trace status is unsupported.")

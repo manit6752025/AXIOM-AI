@@ -77,6 +77,32 @@ def test_schema_rejects_unsupported_or_unbounded_keywords(schema):
         validate_json_schema(schema)
 
 
+@pytest.mark.parametrize("schema", [
+    {"type": "integer", "const": True},
+    {"type": "integer", "enum": [1, True]},
+    {"type": "integer", "const": 11, "maximum": 10},
+    {"type": "string", "enum": ["ok", 1]},
+])
+def test_schema_rejects_const_and_enum_values_that_violate_declared_constraints(schema):
+    with pytest.raises(JsonSchemaError, match="const and enum values"):
+        validate_json_schema(schema)
+
+
+def test_large_integer_values_are_validated_without_float_overflow():
+    value = 10**400
+    validate_json_instance(value, {"type": "integer"})
+    with pytest.raises(JsonSchemaError, match="outside the configured range"):
+        validate_json_instance(value, {"type": "integer", "maximum": 100})
+
+
+def test_object_validation_rejects_non_string_python_keys_cleanly():
+    with pytest.raises(JsonSchemaError, match="property names must be strings"):
+        validate_json_instance(
+            {"name": "AXIOM", 1: "unexpected"},
+            {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+        )
+
+
 def test_schema_rejects_oversized_input_and_excessive_nesting():
     oversized = {"type": "string", "description": "x" * MAX_SCHEMA_BYTES}
     with pytest.raises(JsonSchemaError, match="byte limit"):
@@ -103,3 +129,29 @@ def test_output_parser_rejects_duplicate_non_finite_invalid_or_wrong_type_values
 def test_output_parser_enforces_size_limit_before_json_parsing():
     with pytest.raises(JsonSchemaError, match="character limit"):
         parse_and_validate_json_output(" " + "x" * MAX_OUTPUT_CHARS, {"type": "string"})
+
+
+
+def test_schema_allows_ordinary_property_names_containing_x_zero_and_backslash():
+    schema = {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string"},
+            "x0": {"type": "string"},
+            "path\\name": {"type": "string"},
+        },
+        "required": ["text", "x0", "path\\name"],
+    }
+    validate_json_instance(
+        {"text": "hello", "x0": "value", "path\\name": "local"},
+        schema,
+    )
+
+
+@pytest.mark.parametrize("property_name", ["", "\\x00".encode().decode("unicode_escape"), "n" * 129])
+def test_schema_rejects_empty_nul_and_oversized_property_names(property_name):
+    with pytest.raises(JsonSchemaError, match="Property names"):
+        validate_json_schema({
+            "type": "object",
+            "properties": {property_name: {"type": "string"}},
+        })

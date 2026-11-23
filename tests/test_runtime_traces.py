@@ -78,6 +78,27 @@ def test_trace_records_only_allowlisted_metadata_not_prompt_or_response() -> Non
 
 
 @pytest.mark.parametrize("limit", [0, -1, MAX_RUNTIME_TRACES + 1, True])
+def test_structured_inference_trace_is_allowlisted_and_metadata_only() -> None:
+    clear_runtime_traces()
+    trace = record_runtime_trace(
+        request_id="structured-trace-1",
+        operation="inference.generate.structured",
+        model="qwen2.5:0.5b",
+        status="success",
+        started_at="2026-11-21T00:00:00+00:00",
+        duration_ms=25.0,
+        prompt_characters=44,
+        requested_output_tokens=128,
+        temperature=0.1,
+        completion_tokens=20,
+    )
+    assert trace["operation"] == "inference.generate.structured"
+    assert trace["completion_tokens"] == 20
+    assert "prompt" not in trace and "response" not in trace and "schema" not in trace
+    assert list_runtime_traces()["traces"][0]["request_id"] == "structured-trace-1"
+    clear_runtime_traces()
+
+
 def test_trace_listing_rejects_invalid_limits(limit: int) -> None:
     with pytest.raises(ValueError, match="limit"):
         list_runtime_traces(limit)
