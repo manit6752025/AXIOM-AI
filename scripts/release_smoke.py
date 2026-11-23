@@ -1055,7 +1055,7 @@ def prediction_job_resume_issues(
         )),
         ("prediction resume CLI tests", cli_tests, (
             "test_engine_prediction_job_cli_resumes_from_verified_checkpoint",
-            "prediction_job_resume",
+            '"prediction", "resume"',
         )),
         ("prediction resume MCP tests", mcp_tests, (
             "test_mcp_prediction_resume_requires_its_own_explicit_permission",
