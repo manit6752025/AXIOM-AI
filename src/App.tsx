@@ -78,6 +78,8 @@ import {
   type LocalEmbeddingsReport,
   type LocalRerankingReport,
   type LocalVisionReport,
+  type LocalSpeechTranscriptionReport,
+  type LocalSpeechSynthesisReport,
   type KnowledgeBaseSummary,
   type KnowledgeDocumentRecord,
   type KnowledgeSearchReport,
@@ -4645,6 +4647,140 @@ function LocalRerankerPanel() {
 
 
 
+
+function LocalSpeechPanel() {
+  const [whisperModel, setWhisperModel] = useState("");
+  const [audioPath, setAudioPath] = useState("");
+  const [language, setLanguage] = useState("auto");
+  const [threads, setThreads] = useState("4");
+  const [useWhisperAccelerator, setUseWhisperAccelerator] = useState(false);
+  const [transcription, setTranscription] = useState<LocalSpeechTranscriptionReport | null>(null);
+  const [transcribing, setTranscribing] = useState(false);
+
+  const [piperModel, setPiperModel] = useState("");
+  const [speechText, setSpeechText] = useState("");
+  const [speakerId, setSpeakerId] = useState("0");
+  const [usePiperAccelerator, setUsePiperAccelerator] = useState(false);
+  const [synthesis, setSynthesis] = useState<LocalSpeechSynthesisReport | null>(null);
+  const [synthesizing, setSynthesizing] = useState(false);
+  const [error, setError] = useState("");
+
+  async function transcribe(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setTranscribing(true);
+    setError("");
+    setTranscription(null);
+    try {
+      setTranscription(await axiomApi.transcribeLocalAudio({
+        model_path: whisperModel.trim(),
+        audio_path: audioPath.trim(),
+        language,
+        threads: Number(threads),
+        use_accelerator: useWhisperAccelerator,
+      }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Local speech transcription failed.");
+    } finally {
+      setTranscribing(false);
+    }
+  }
+
+  async function synthesize(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSynthesizing(true);
+    setError("");
+    setSynthesis(null);
+    try {
+      setSynthesis(await axiomApi.synthesizeLocalSpeech({
+        model_path: piperModel.trim(),
+        text: speechText,
+        speaker_id: Number(speakerId),
+        use_accelerator: usePiperAccelerator,
+      }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Local speech synthesis failed.");
+    } finally {
+      setSynthesizing(false);
+    }
+  }
+
+  return <Surface title="Local speech" eyebrow="OPT-IN SPEECH-TO-TEXT AND TEXT-TO-SPEECH">
+    <div className="info-grid">
+      <div>
+        <h3>Speech to text</h3>
+        <p className="quiet-note">Uses an installed whisper.cpp executable and a local GGML .bin model. Audio must already be in the active workspace.</p>
+        <form className="integration-form" onSubmit={(event) => void transcribe(event)}>
+          <label className="field">
+            <span className="field-label-row"><span>Whisper model file</span></span>
+            <input value={whisperModel} onChange={(event) => setWhisperModel(event.target.value)} placeholder="/home/user/models/ggml-base.bin" maxLength={4096} required />
+          </label>
+          <label className="field">
+            <span className="field-label-row"><span>Workspace audio path</span><span>WAV · MP3 · FLAC · OGG · max 64 MiB</span></span>
+            <input value={audioPath} onChange={(event) => setAudioPath(event.target.value)} placeholder="data/audio/meeting.wav" maxLength={4096} required />
+          </label>
+          <label className="field">
+            <span className="field-label-row"><span>Language</span></span>
+            <input value={language} onChange={(event) => setLanguage(event.target.value.toLowerCase())} placeholder="auto or en" maxLength={3} required />
+          </label>
+          <label className="field">
+            <span className="field-label-row"><span>CPU threads</span></span>
+            <input type="number" min={1} max={16} step={1} value={threads} onChange={(event) => setThreads(event.target.value)} required />
+          </label>
+          <label className="checkbox-row">
+            <input type="checkbox" checked={useWhisperAccelerator} onChange={(event) => setUseWhisperAccelerator(event.target.checked)} />
+            <span>Allow whisper.cpp to select an accelerator (otherwise CPU only)</span>
+          </label>
+          <div className="integration-form-actions">
+            <button type="submit" className="button primary-button" disabled={transcribing || !whisperModel.trim() || !audioPath.trim() || !/^(auto|[a-z]{2,3})$/.test(language) || !Number.isInteger(Number(threads)) || Number(threads) < 1 || Number(threads) > 16}>{transcribing ? "Transcribing locally…" : "Transcribe audio"}</button>
+          </div>
+        </form>
+        {transcription && <div className="embedding-result" role="status">
+          <StatusPill tone="success">TRANSCRIPTION COMPLETE</StatusPill>
+          <h3>{transcription.model}</h3>
+          <p className="quiet-note">{transcription.audio.format.toUpperCase()} · {transcription.audio.size_bytes.toLocaleString()} bytes · {transcription.execution.device} · {transcription.execution.threads} threads</p>
+          <p>{transcription.transcript}</p>
+          <p className="quiet-note">{transcription.scope_note}</p>
+        </div>}
+      </div>
+      <div>
+        <h3>Text to speech</h3>
+        <p className="quiet-note">Uses an installed Piper executable and a local ONNX voice model with its adjacent .onnx.json configuration.</p>
+        <form className="integration-form" onSubmit={(event) => void synthesize(event)}>
+          <label className="field">
+            <span className="field-label-row"><span>Piper voice model file</span></span>
+            <input value={piperModel} onChange={(event) => setPiperModel(event.target.value)} placeholder="/home/user/models/en_US-local.onnx" maxLength={4096} required />
+          </label>
+          <label className="field">
+            <span className="field-label-row"><span>Text to speak</span><span>{speechText.length.toLocaleString()} / 4,096</span></span>
+            <textarea value={speechText} onChange={(event) => setSpeechText(event.target.value)} rows={5} maxLength={4096} placeholder="Enter text for local speech synthesis…" required />
+          </label>
+          <label className="field">
+            <span className="field-label-row"><span>Speaker ID</span></span>
+            <input type="number" min={0} max={255} step={1} value={speakerId} onChange={(event) => setSpeakerId(event.target.value)} required />
+          </label>
+          <label className="checkbox-row">
+            <input type="checkbox" checked={usePiperAccelerator} onChange={(event) => setUsePiperAccelerator(event.target.checked)} />
+            <span>Use Piper CUDA when the installed runtime supports it (otherwise CPU)</span>
+          </label>
+          <div className="integration-form-actions">
+            <button type="submit" className="button primary-button" disabled={synthesizing || !piperModel.trim() || !speechText.trim() || speechText.length > 4096 || !Number.isInteger(Number(speakerId)) || Number(speakerId) < 0 || Number(speakerId) > 255}>{synthesizing ? "Synthesizing locally…" : "Synthesize speech"}</button>
+          </div>
+        </form>
+        {synthesis && <div className="embedding-result" role="status">
+          <StatusPill tone="success">SPEECH GENERATED</StatusPill>
+          <h3>{synthesis.model}</h3>
+          <p className="quiet-note">{synthesis.audio.duration_seconds.toFixed(2)} seconds · {synthesis.audio.sample_rate_hz.toLocaleString()} Hz · {synthesis.audio.size_bytes.toLocaleString()} bytes · {synthesis.execution.device}</p>
+          <audio controls preload="none" aria-label="Locally generated speech" src={"data:audio/wav;base64," + synthesis.audio_base64} />
+          <p className="quiet-note">{synthesis.scope_note}</p>
+        </div>}
+      </div>
+    </div>
+    {error && <InlineAlert tone="warning" role="alert">{error}</InlineAlert>}
+    <p className="quiet-note">Model files must already exist under configured trusted speech model roots. AXIOM does not download models or send audio/text to cloud services. Accelerator execution is explicit and disabled by default.</p>
+  </Surface>;
+}
+
+
 function LocalVisionPanel() {
   const [model, setModel] = useState("");
   const [imagePath, setImagePath] = useState("");
@@ -4821,6 +4957,7 @@ function Runtime() {
     <EngineServingProfilesPanel />
     <LocalEngineFabricPanel />
     <LocalInferencePanel />
+    <LocalSpeechPanel />
     <LocalVisionPanel />
     <LocalEmbeddingsPanel />
     <LocalRerankerPanel />
