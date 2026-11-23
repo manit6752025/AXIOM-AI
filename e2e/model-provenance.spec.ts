@@ -102,7 +102,7 @@ test("Models can inspect bounded local provenance evidence without loading weigh
   await expect(page.getByRole("heading", { name: "Model provenance and security evidence" })).toBeVisible();
   await expect(page.getByText("Checkpoint SHA-256", { exact: true })).toBeVisible();
   await expect(page.getByText("0123456789abcdef…", { exact: true })).toBeVisible();
-  await expect(page.getByText("LICENSE", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Local license\/notice files: LICENSE/)).toBeVisible();
   await expect(page.getByText("not independently verified", { exact: false })).toBeVisible();
   expect(provenancePayload).toEqual({ path: "demo" });
 });
