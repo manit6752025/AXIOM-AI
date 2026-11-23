@@ -4720,7 +4720,7 @@ function LocalSpeechPanel() {
           </label>
           <label className="field">
             <span className="field-label-row"><span>Language</span></span>
-            <input value={language} onChange={(event) => setLanguage(event.target.value.toLowerCase())} placeholder="auto or en" maxLength={3} required />
+            <input value={language} onChange={(event) => setLanguage(event.target.value.toLowerCase())} placeholder="auto or en" maxLength={4} required />
           </label>
           <label className="field">
             <span className="field-label-row"><span>CPU threads</span></span>
