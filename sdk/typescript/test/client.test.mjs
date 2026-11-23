@@ -241,6 +241,7 @@ test("exposes typed prediction-job start, history, status, cancellation and chec
             dataset_fingerprint_verified: true,
             model_and_adapter_fingerprints_verified: true,
             checkpoint_identity_and_digest_verified: true,
+            generation_configuration_fingerprint_verified: true,
             partial_output_published: false,
             prompts_returned: false,
             predictions_returned: false,
@@ -271,6 +272,7 @@ test("exposes typed prediction-job start, history, status, cancellation and chec
   assert.equal(started.job.status, "queued");
   assert.equal(shown.job.id, jobId);
   assert.equal(resumed.job.resumption_count, 1);
+  assert.equal(resumed.scope.generation_configuration_fingerprint_verified, true);
   assert.equal(resumed.scope.generation_resumed_after_restart, true);
   assert.equal(resumed.scope.partial_output_published, false);
   assert.equal(cancelled.cancellation_accepted, true);
