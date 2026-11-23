@@ -39,6 +39,7 @@ from axiom.path_safety import (
 from axiom.training.planner import create_training_plan
 from axiom.core.plan_reproducibility import (
     PLANNER_ALGORITHM_VERSION,
+    capture_software_manifest,
     diff_plan_records,
     reproducible_plan_document,
 )
@@ -167,6 +168,7 @@ class WorkspaceExperimentInput(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     parameter_billions: float = Field(gt=0, le=1000)
     method: Literal["auto", "qlora", "lora", "full"] = "auto"
+    seed: int = Field(default=42, ge=0, le=4_294_967_295, strict=True)
     plan_snapshot: WorkspaceTrainingPlanInput | None = None
     model: str | None = Field(default=None, max_length=256)
     dataset: str | None = Field(default=None, max_length=512)
@@ -621,6 +623,8 @@ def workspace_add_experiment(request: WorkspaceExperimentInput) -> dict[str, Any
         "requested_method": request.method,
         "planner_algorithm_version": PLANNER_ALGORITHM_VERSION,
         "axiom_version": __version__,
+        "seed": request.seed,
+        "software_manifest": capture_software_manifest(__version__),
         "status": "planned",
         "hardware": hardware.__dict__,
         "plan": plan.__dict__,

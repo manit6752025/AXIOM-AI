@@ -3011,6 +3011,7 @@ function Datasets({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
 function Training({ onNotify }: { onNotify: (message: string, tone?: Tone) => void }) {
   const [parameterBillions, setParameterBillions] = useState("7");
   const [method, setMethod] = useState("auto");
+  const [seed, setSeed] = useState("42");
   const [plan, setPlan] = useState<TrainingPlanResult | null>(null);
   const [hardware, setHardware] = useState<RuntimeSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
@@ -3067,6 +3068,11 @@ function Training({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
 
   const saveExperiment = async () => {
     if (!plan) return;
+    const seedValue = Number(seed);
+    if (!Number.isSafeInteger(seedValue) || seedValue < 0 || seedValue > 4_294_967_295) {
+      setError("Enter a whole-number reproducibility seed from 0 to 4294967295.");
+      return;
+    }
     setSavingExperiment(true);
     setError("");
     try {
@@ -3074,6 +3080,7 @@ function Training({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
         name: `${parameterBillions}B ${plan.method} plan`,
         parameter_billions: Number(parameterBillions),
         method,
+        seed: seedValue,
         plan_snapshot: plan,
       });
       setSavedExperimentId(result.experiment.id);
@@ -3130,6 +3137,20 @@ function Training({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
     }
   };
 
+  const downloadSavedSnapshot = () => {
+    if (!snapshot) return;
+    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/vnd.axiom.training-plan+json" });
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `axiom-training-plan-${snapshot.fingerprint.value.slice(0, 12)}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+    onNotify("Reproducibility manifest downloaded as canonical JSON.", "success");
+  };
+
   return <FeaturePage page="training" actions={<button type="button" className="button primary-button" onClick={() => void createPlan()} disabled={busy}><Play size={16} /> {busy ? "Building plan…" : "Build plan"}</button>}>
     <div className="info-grid">
       <InfoCard icon={Zap} label="Method" value={plan?.method.toUpperCase() || method.toUpperCase()} detail={plan ? plan.precision : "Choose a planning method"} tone={plan?.fits_hardware === true ? "success" : "neutral"} />
@@ -3140,7 +3161,8 @@ function Training({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
       <Surface title="Plan inputs" eyebrow="HARDWARE-AWARE ESTIMATE">
         <label className="field"><span className="field-label-row"><span>Model size (billions of parameters)</span></span><input type="number" min="0.1" max="1000" step="0.1" value={parameterBillions} onChange={(event) => { setParameterBillions(event.target.value); setPlan(null); setSavedExperimentId(""); }} /></label>
         <label className="field"><span className="field-label-row"><span>Training method</span></span><select value={method} onChange={(event) => { setMethod(event.target.value); setPlan(null); setSavedExperimentId(""); }}><option value="auto">Automatic</option><option value="qlora">QLoRA</option><option value="lora">LoRA</option><option value="full">Full fine-tuning</option></select></label>
-        <p className="quiet-note">The estimate uses detected GPU memory when available. Actual LoRA execution is available below when the optional Transformers/PEFT runtime is installed.</p>
+        <label className="field"><span className="field-label-row"><span>Reproducibility seed (metadata only)</span></span><input aria-label="Reproducibility seed (metadata only)" type="number" min="0" max="4294967295" step="1" value={seed} onChange={(event) => setSeed(event.target.value)} /></label>
+        <p className="quiet-note">The seed is saved in the provenance manifest only; it does not seed a runtime or start training. The estimate uses detected GPU memory when available. Actual LoRA execution is available below when the optional Transformers/PEFT runtime is installed.</p>
         {error && <InlineAlert tone="warning" role="alert">{error}</InlineAlert>}
         <button type="button" className="button primary-button" onClick={() => void createPlan()} disabled={busy}><Play size={15} /> {busy ? "Building plan…" : "Generate plan"}</button>
       </Surface>
@@ -3166,7 +3188,7 @@ function Training({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
       </Surface>
     </div>
     <Surface title="Saved plan tools" eyebrow="REPRODUCIBLE SNAPSHOTS · FIELD-LEVEL DIFF">
-      <p className="quiet-note">Print a stable JSON document from the exact saved inputs, hardware snapshot, planner version, and estimate. Compare two saved snapshots without recalculating either plan. A fingerprint identifies the recorded content; it is not a training-run or benchmark result.</p>
+      <p className="quiet-note">Print or download a stable JSON document with the saved inputs, hardware, planner and software versions, seed metadata, and estimate. Compare snapshots without recalculating either plan. A fingerprint identifies the recorded content; it is not a training-run or benchmark result.</p>
       <div className="settings-preference-grid">
         <label className="field settings-field">
           <span className="field-label-row"><span>Print saved snapshot</span></span>
@@ -3206,9 +3228,13 @@ function Training({ onNotify }: { onNotify: (message: string, tone?: Tone) => vo
       {snapshot && <div className="surface-divider">
         <div className="setting-row">
           <div><b>Saved plan fingerprint</b><span className="mono-text">{snapshot.fingerprint.value}</span></div>
-          <button type="button" className="button secondary-button" onClick={() => void copySavedSnapshot()}><Copy size={15} /> Copy JSON</button>
+          <div className="module-row-actions">
+            <button type="button" className="button secondary-button" onClick={() => void copySavedSnapshot()}><Copy size={15} /> Copy JSON</button>
+            <button type="button" className="button secondary-button" onClick={downloadSavedSnapshot}><ArrowDownToLine size={15} /> Download manifest</button>
+          </div>
         </div>
         <pre className="plan-reproducible-json"><code>{JSON.stringify(snapshot, null, 2)}</code></pre>
+        <p className="quiet-note">{snapshot.reproducibility.scope_note}</p>
         <p className="quiet-note">{snapshot.execution.scope_note}</p>
       </div>}
       {planDiff && <div className="surface-divider">

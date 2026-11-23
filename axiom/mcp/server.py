@@ -2610,6 +2610,19 @@ def _training_job_summary(job: dict, root: Path) -> dict:
             "trainable_parameters": result.get("trainable_parameters"),
             "adapter_files": [Path(value).name for value in result.get("adapter_files", []) if isinstance(value, str)],
         }
+    raw_checkpoint = job.get("checkpoint")
+    safe_checkpoint = None
+    if isinstance(raw_checkpoint, dict):
+        safe_checkpoint = {
+            key: raw_checkpoint.get(key)
+            for key in ("enabled", "interval", "latest_step", "retained", "last_saved_at", "resume_available")
+        }
+    if isinstance(result, dict) and isinstance(result.get("checkpoint"), dict):
+        safe_result["resumed_from_step"] = result.get("resumed_from_step")
+        safe_result["checkpoint"] = {
+            key: result["checkpoint"].get(key)
+            for key in ("enabled", "interval", "latest_step", "retained", "last_saved_at", "resume_available")
+        }
     status = job.get("status")
     return {
         "schema_version": 1,
@@ -2628,8 +2641,11 @@ def _training_job_summary(job: dict, root: Path) -> dict:
             "sequence_length": config.get("sequence_length"),
             "learning_rate": config.get("learning_rate"),
             "lora_rank": config.get("lora_rank"),
+            "checkpoint_interval": config.get("checkpoint_interval", 0),
+            "output_policy": config.get("output_policy", "empty"),
         },
         "completed_steps": job.get("completed_steps", 0),
+        "checkpoint": safe_checkpoint,
         "loss": job.get("loss"),
         "loss_trace": training_loss_trace_summary(job),
         "result": safe_result,

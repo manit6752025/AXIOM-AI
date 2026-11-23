@@ -88,6 +88,25 @@ Hardware-aware sizing uses detected hardware and assumptions. It is useful for c
 
 `axiom evaluation run` scores predictions already present in the evaluation data and does not call a model. Separately, the permissioned MCP prediction-job tools can generate a bounded local artifact for that offline evaluator.
 
+## Saved-plan reproducibility manifests
+
+Saved Training plans include a bounded reproducibility manifest in the output of
+`axiom experiment print <experiment-id>` and the Training page's canonical JSON
+export. It records the user-selected seed plus the AXIOM, Python, platform, and
+relevant ML package versions captured when the plan is saved. Missing metadata
+from older records remains explicitly unknown; export never fills historical
+versions from the current machine. The manifest includes a SHA-256 fingerprint,
+so a changed seed or package version changes the saved snapshot identity and is
+visible in field-level comparisons.
+
+The saved-plan seed is provenance only (`seed_applied: false`). Saving,
+printing, downloading, or comparing a plan does not set any random-number
+generator, start a training job, or pass the value into the separate local LoRA
+worker. The current LoRA worker retains its own runtime seed and checkpointed
+random-number state. A future workflow executor must explicitly validate and
+consume the saved seed before it can affect execution. Workflow graph nodes and
+dry-runs remain planning-only.
+
 ## Roadmap integrity
 
 `axiom roadmap audit --json` reports consistency problems; it does not mark items complete merely because a file exists. Only update roadmap status after the implementation, tests, documentation, and applicable platform gates have been reviewed.
