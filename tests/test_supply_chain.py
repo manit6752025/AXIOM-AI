@@ -281,6 +281,21 @@ def test_pip_audit_parser_sanitizes_findings_and_deduplicates_records():
     assert result["network_accessed"] is True
 
 
+def test_pip_audit_parser_accepts_a_successful_scan_with_no_findings():
+    result = supply_chain._parse_pip_audit_output(
+        [],
+        generated_at="2026-11-23T00:00:00Z",
+        scanner_version="2.10.1",
+        exit_code=0,
+    )
+    assert result["status"] == "complete"
+    assert result["network_accessed"] is True
+    assert result["dependency_count"] == 0
+    assert result["vulnerable_dependency_count"] == 0
+    assert result["vulnerability_count"] == 0
+    assert result["findings"] == []
+
+
 def test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_secret_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     payload = [{"name": "typer", "version": "0.12.0", "vulns": [
         {"id": "PYSEC-2026-1", "aliases": ["CVE-2026-0001"], "fix_versions": ["0.13.0"]},
