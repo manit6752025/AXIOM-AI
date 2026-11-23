@@ -736,7 +736,7 @@ def test_prediction_job_restart_resume_release_contract_covers_every_surface() -
     assert release_smoke.prediction_job_resume_issues(*args) == []
 
     failures = release_smoke.prediction_job_resume_issues(
-        core.replace("generation_fingerprint", "missing_generation_fingerprint", 1),
+        core.replace("generation_fingerprint", "settings_digest", 1),
         *args[1:],
     )
     assert any("generation_fingerprint" in item for item in failures)
