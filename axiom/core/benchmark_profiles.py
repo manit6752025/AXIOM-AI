@@ -20,7 +20,6 @@ from typing import Any
 from axiom.core.hardware import detect_hardware
 from axiom.core.storage import atomic_write_text, file_lock
 from axiom.core.workspace_context import workspace_metadata_dir
-from axiom.path_safety import SafePathError, open_regular_file
 from axiom.version import __version__
 
 SCHEMA_VERSION = 1
@@ -64,30 +63,16 @@ def _canonical(value: Any) -> bytes:
 
 
 def _trusted_model_directory(model_path: str | Path) -> Path | None:
-    """Resolve a model through the native engine's allowlisted model inventory."""
+    """Resolve model identifiers through AXIOM's filesystem-derived trusted inventory.
+
+    The supplied value is passed only to AXIOM's validating inventory matcher;
+    it is not used to construct or probe a filesystem path before validation.
+    """
     try:
-        supplied = os.path.expanduser(os.fspath(model_path))
-        candidate = Path(os.path.abspath(supplied))
-        current = Path(candidate.anchor)
-        for component in candidate.parts[1:]:
-            current = current / component
-            try:
-                metadata = current.lstat()
-            except OSError:
-                return None
-            reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-            is_junction = getattr(current, "is_junction", None)
-            if (
-                stat.S_ISLNK(metadata.st_mode)
-                or (reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag)
-                or (is_junction is not None and is_junction())
-            ):
-                raise BenchmarkProfileError(
-                    "The selected model directory must not contain symbolic links or junctions."
-                )
         from axiom.core.engine import _allowed_model_roots, resolve_local_model_directory
 
-        resolved = Path(resolve_local_model_directory(str(candidate), "Base model"))
+        resolved_text = resolve_local_model_directory(os.fspath(model_path), "Base model")
+        resolved = Path(resolved_text)
         trusted_roots = tuple(Path(root).resolve(strict=True) for root in _allowed_model_roots())
         if not resolved.is_absolute() or not any(resolved.is_relative_to(root) for root in trusted_roots):
             return None
@@ -99,10 +84,23 @@ def _trusted_model_directory(model_path: str | Path) -> Path | None:
 
 
 def _model_config_fingerprint(model_path: str | Path) -> str | None:
-    """Hash fixed-name configuration metadata from an allowlisted local model."""
+    """Hash fixed-name model configuration metadata without following file links."""
     root = _trusted_model_directory(model_path)
     if root is None:
         return None
+    # The directory itself is returned by AXIOM's bounded trusted-root walk.
+    # Verify that the directory identity does not change while its fixed-name
+    # metadata entries are being opened.
+    try:
+        root_before = root.lstat()
+    except OSError:
+        raise BenchmarkProfileError("The selected model directory could not be inspected safely.") from None
+    if not stat.S_ISDIR(root_before.st_mode):
+        raise BenchmarkProfileError("The selected model directory must be a regular directory.")
+    root_reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    if root_reparse and getattr(root_before, "st_file_attributes", 0) & root_reparse:
+        raise BenchmarkProfileError("The selected model directory must not be a reparse point.")
+
     parts: list[tuple[str, str]] = []
     total = 0
     for name in _MODEL_CONFIG_FILES:
@@ -110,28 +108,53 @@ def _model_config_fingerprint(model_path: str | Path) -> str | None:
             raise BenchmarkProfileError("Model configuration filename is invalid.")
         path = root / name
         try:
-            with open_regular_file(path) as stream:
-                before = os.fstat(stream.fileno())
-                if not stat.S_ISREG(before.st_mode) or before.st_size < 0 or before.st_size > 2 * 1024 * 1024:
-                    raise BenchmarkProfileError("A model configuration file exceeds the benchmark provenance limit.")
-                total += before.st_size
-                if total > 8 * 1024 * 1024:
-                    raise BenchmarkProfileError("Model configuration metadata exceeds the 8 MiB provenance limit.")
-                raw = stream.read(2 * 1024 * 1024 + 1)
-                after = os.fstat(stream.fileno())
-            if len(raw) > 2 * 1024 * 1024 or len(raw) != before.st_size:
-                raise BenchmarkProfileError("A model configuration file changed during provenance inspection.")
-            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
-                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
-            ):
-                raise BenchmarkProfileError("A model configuration file changed during provenance inspection.")
+            entry = path.lstat()
         except FileNotFoundError:
             continue
+        except OSError:
+            raise BenchmarkProfileError("Model configuration metadata could not be inspected safely.") from None
+        if stat.S_ISLNK(entry.st_mode) or (
+            root_reparse and getattr(entry, "st_file_attributes", 0) & root_reparse
+        ):
+            raise BenchmarkProfileError("Model configuration metadata must not use symbolic links or junctions.")
+        if not stat.S_ISREG(entry.st_mode) or entry.st_size < 0 or entry.st_size > 2 * 1024 * 1024:
+            raise BenchmarkProfileError("A model configuration file exceeds the benchmark provenance limit.")
+        total += entry.st_size
+        if total > 8 * 1024 * 1024:
+            raise BenchmarkProfileError("Model configuration metadata exceeds the 8 MiB provenance limit.")
+
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+        if os.name == "posix":
+            flags |= getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(path, flags)
+            with os.fdopen(descriptor, "rb") as stream:
+                descriptor = -1
+                before = os.fstat(stream.fileno())
+                identity = (entry.st_dev, entry.st_ino, entry.st_size, entry.st_mtime_ns)
+                opened_identity = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                if not stat.S_ISREG(before.st_mode) or identity != opened_identity:
+                    raise BenchmarkProfileError("Model configuration metadata changed while opening.")
+                raw = stream.read(2 * 1024 * 1024 + 1)
+                after = os.fstat(stream.fileno())
+                after_identity = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+                if after_identity != opened_identity or len(raw) != entry.st_size:
+                    raise BenchmarkProfileError("Model configuration metadata changed during provenance inspection.")
         except BenchmarkProfileError:
             raise
-        except (OSError, SafePathError):
+        except OSError:
             raise BenchmarkProfileError("Model configuration metadata could not be read safely.") from None
+        finally:
+            if "descriptor" in locals() and descriptor >= 0:
+                os.close(descriptor)
         parts.append((name, hashlib.sha256(raw).hexdigest()))
+
+    try:
+        root_after = root.lstat()
+    except OSError:
+        raise BenchmarkProfileError("The selected model directory changed during provenance inspection.") from None
+    if (root_before.st_dev, root_before.st_ino) != (root_after.st_dev, root_after.st_ino):
+        raise BenchmarkProfileError("The selected model directory changed during provenance inspection.")
     return hashlib.sha256(_canonical(parts)).hexdigest() if parts else None
 
 
