@@ -40,6 +40,7 @@ Run from a maintainer account after registering the matching hardware runner:
 ```bash
 gh workflow run accelerator-integration.yml --ref implement/roadmap -f device=mps
 gh workflow run accelerator-integration.yml --ref implement/roadmap -f device=cuda
+gh workflow run accelerator-integration.yml --ref implement/roadmap -f device=cuda-github-hosted-t4
 gh workflow run accelerator-integration.yml --ref implement/roadmap -f device=rocm
 gh workflow run accelerator-integration.yml --ref implement/roadmap -f device=xpu
 ```

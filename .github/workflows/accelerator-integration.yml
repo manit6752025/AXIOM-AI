@@ -38,7 +38,7 @@ jobs:
         run: python -m pip install --upgrade pip "setuptools>=84.1.0" && python -m pip install -e ".[native-inference,test]"
       - name: Require a real NVIDIA Tesla T4
         run: |
-          nvidia-smi --query-gpu=name,memory.total,compute_cap --format=csv
+          nvidia-smi --query-gpu=name,memory.total --format=csv
           python - <<'PY'
           import torch
 
