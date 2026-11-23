@@ -312,8 +312,15 @@ def _parse_pip_audit_output(payload: Any, *, generated_at: str, scanner_version:
         vulnerabilities = dependency.get("vulns", dependency.get("vulnerabilities", []))
         if not isinstance(name, str) or not _NAME_PATTERN.fullmatch(name):
             raise SupplyChainError("Dependency scanner output contains an invalid package name.")
-        if not isinstance(version, str) or not _VERSION_PATTERN.fullmatch(version):
-            raise SupplyChainError("Dependency scanner output contains an invalid package version.")
+        if not isinstance(version, str):
+            raise SupplyChainError(
+                f"Dependency scanner output contains a non-string version for package {name!r}."
+            )
+        if not _VERSION_PATTERN.fullmatch(version):
+            safe_version = "".join(character for character in version[:80] if 32 <= ord(character) < 127)
+            raise SupplyChainError(
+                f"Dependency scanner output contains an invalid version for package {name!r}: {safe_version!r}."
+            )
         if not isinstance(vulnerabilities, list) or len(vulnerabilities) > 1000:
             raise SupplyChainError("Dependency scanner output contains an invalid vulnerability list.")
         for vulnerability in vulnerabilities:
