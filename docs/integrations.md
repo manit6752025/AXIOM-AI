@@ -213,7 +213,8 @@ axiom mcp allow axiom_engine_generate
 ```
 
 The separately permissioned `axiom_prediction_job_start`,
-`axiom_prediction_job_status`, and `axiom_prediction_job_cancel` tools bridge
+`axiom_prediction_job_status`, `axiom_prediction_job_cancel`, and the separately permissioned
+`axiom_prediction_job_resume` tool bridge
 local inference to the offline evaluator. Start accepts a JSONL input below
 `data/`, workspace-relative model and optional adapter paths, prompt/reference/
 prediction field names, and a new `data/NAME.jsonl` destination. It validates
@@ -237,8 +238,14 @@ paths, settings, row counts, safe status, and completed-artifact identity/hash.
 It does not store dataset rows, prompts, predictions, or logs. Use
 `axiom_prediction_job_status` without an ID to list recent jobs or pass an ID
 to inspect one job after an MCP restart. If the owning process exited before
-completion was recorded, the job is marked `interrupted` and is never resumed;
-its artifact is not eligible for job-ID evaluation. If AXIOM cannot verify
+completion was recorded, the job is marked `interrupted`; its artifact is not
+eligible for job-ID evaluation. `axiom_prediction_job_resume` may resume only
+when the original dataset hash/row count, local model/adapter fingerprints, and
+the checkpoint's regular-file identity, committed byte count, complete row count,
+and SHA-256 all verify. It skips committed rows and generates only the remainder.
+Legacy jobs or assets beyond the bounded fingerprint scan remain non-resumable;
+changed inputs, a replaced checkpoint, or a bad digest fail closed. Partial output
+is never published as an evaluation artifact. If AXIOM cannot verify
 whether the owning process is still alive, status is `recovery_unverified` and
 the job remains untouched until status can be checked again. A `publishing`
 checkpoint can recover to completed if the already-published artifact independently
@@ -263,6 +270,7 @@ default-deny permission:
 axiom mcp allow axiom_prediction_job_start
 axiom mcp allow axiom_prediction_job_status
 axiom mcp allow axiom_prediction_job_cancel
+axiom mcp allow axiom_prediction_job_resume
 ```
 
 `axiom_prediction_job_wait` can wait up to 30 seconds for one job and returns
