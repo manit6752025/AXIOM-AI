@@ -1630,7 +1630,14 @@ def _worker_failure_code(exc: Exception, stage: str) -> str:
     return "prediction_failed"
 
 
-def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: dict[str, Any]) -> None:
+def _worker(
+    job_id: str,
+    config: dict[str, Any],
+    root: Path,
+    source_manifest: dict[str, Any],
+    *,
+    resume_record: dict[str, Any] | None = None,
+) -> None:
     cancel_event: threading.Event = config["cancel_event"]
     source_stream = None
     parent_fd: int | None = None
@@ -1708,19 +1715,38 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
             raise PredictionJobFailure("input_size_limit", "Prediction input exceeds the bounded size limit.")
 
         stage = "output_prepare"
-        output_descriptor, temp_name, temp_path, temp_file_identity = _reserve_output_temp(
-            destination,
-            parent_fd,
-            output_name,
-            job_id,
-        )
-        output_stream = os.fdopen(output_descriptor, "wb")
-        output_descriptor = None
+        if resume_record is None:
+            output_descriptor, temp_name, temp_path, temp_file_identity = _reserve_output_temp(
+                destination,
+                parent_fd,
+                output_name,
+                job_id,
+            )
+            output_stream = os.fdopen(output_descriptor, "w+b")
+            output_descriptor = None
+            output_bytes = 0
+            output_digest = hashlib.sha256()
+            _set_job(
+                job_id,
+                checkpoint_name=temp_name,
+                checkpoint_identity=list(temp_file_identity),
+                checkpoint_bytes=0,
+                checkpoint_sha256=output_digest.hexdigest(),
+            )
+            resume_rows = 0
+        else:
+            (
+                output_stream,
+                temp_name,
+                temp_path,
+                temp_file_identity,
+                output_bytes,
+                output_digest,
+            ) = _open_prediction_checkpoint(root, resume_record, parent_fd=parent_fd)
+            resume_rows = int(resume_record["rows_completed"])
         source_digest = hashlib.sha256()
         source_bytes = 0
         rows_read = 0
-        output_bytes = 0
-        output_digest = hashlib.sha256()
         chunk_rows: list[dict[str, Any]] = []
         chunk_prompts: list[str] = []
         chunk_prompt_chars = 0
@@ -1779,12 +1805,27 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
                     )
                 if output_stream.write(encoded) != len(encoded):
                     raise OSError("Prediction artifact write was incomplete.")
+                output_stream.flush()
+                os.fsync(output_stream.fileno())
                 output_digest.update(encoded)
+                checkpoint_stat = os.fstat(output_stream.fileno())
+                if (
+                    not stat.S_ISREG(checkpoint_stat.st_mode)
+                    or _file_identity(checkpoint_stat) != temp_file_identity
+                    or checkpoint_stat.st_size != output_bytes
+                ):
+                    raise ValueError("Prediction checkpoint identity or size changed during generation.")
                 truncated = (result.get("context_management") or {}).get("token_truncation_applied") is True
                 with _JOBS_LOCK:
                     job = _JOBS.get(job_id)
                     if job is not None:
-                        changes = {"rows_completed": job["rows_completed"] + 1}
+                        changes = {
+                            "rows_completed": job["rows_completed"] + 1,
+                            "checkpoint_name": temp_name,
+                            "checkpoint_identity": list(temp_file_identity),
+                            "checkpoint_bytes": output_bytes,
+                            "checkpoint_sha256": output_digest.hexdigest(),
+                        }
                         if truncated:
                             changes["prompts_truncated"] = job["prompts_truncated"] + 1
                         updated = {**job, **changes, "updated_at": _now()}
@@ -1816,6 +1857,8 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
                 prompt_field=config["prompt_field"],
                 reference_field=config["reference_field"],
             )
+            if rows_read <= resume_rows:
+                continue
             if chunk_rows and (
                 len(chunk_rows) >= _BATCH_SIZE
                 or chunk_prompt_chars + len(prompt) > _MAX_BATCH_PROMPT_CHARS
@@ -1966,10 +2009,23 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
             artifact_sha256=output_digest.hexdigest(),
             pending_artifact_identity=None,
             pending_artifact_sha256=None,
+            checkpoint_name=None,
+            checkpoint_identity=None,
+            checkpoint_bytes=0,
+            checkpoint_sha256=None,
         )
     except PredictionJobCancelled:
         try:
-            _set_job(job_id, status="cancelled", finished_at=_now(), error_code=None)
+            _set_job(
+                job_id,
+                status="cancelled",
+                finished_at=_now(),
+                error_code=None,
+                checkpoint_name=None,
+                checkpoint_identity=None,
+                checkpoint_bytes=0,
+                checkpoint_sha256=None,
+            )
         except Exception:
             _mark_job_interrupted_in_memory(job_id, "job_state_unavailable")
     except Exception as exc:
@@ -1994,6 +2050,10 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
                     error_code=_worker_failure_code(exc, stage),
                     pending_artifact_identity=None,
                     pending_artifact_sha256=None,
+                    checkpoint_name=None,
+                    checkpoint_identity=None,
+                    checkpoint_bytes=0,
+                    checkpoint_sha256=None,
                 )
             except Exception:
                 _mark_job_interrupted_in_memory(job_id, "job_state_unavailable")
@@ -2024,6 +2084,10 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
                         artifact_sha256=pending_digest,
                         pending_artifact_identity=None,
                         pending_artifact_sha256=None,
+                        checkpoint_name=None,
+                        checkpoint_identity=None,
+                        checkpoint_bytes=0,
+                        checkpoint_sha256=None,
                     )
                 else:
                     pending_identity = unfinished.get("pending_artifact_identity")
@@ -2051,6 +2115,10 @@ def _worker(job_id: str, config: dict[str, Any], root: Path, source_manifest: di
                         error_code="prediction_failed",
                         pending_artifact_identity=None,
                         pending_artifact_sha256=None,
+                        checkpoint_name=None,
+                        checkpoint_identity=None,
+                        checkpoint_bytes=0,
+                        checkpoint_sha256=None,
                     )
             except Exception:
                 _mark_job_interrupted_in_memory(job_id, "job_state_unavailable")
