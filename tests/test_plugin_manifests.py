@@ -33,6 +33,24 @@ def manifest(version: str = "1.0.0", *, description: str = "A safe declarative p
     }
 
 
+def test_published_plugin_manifest_schema_validates_example_with_standard_draft_2020_12_validator():
+    from pathlib import Path
+
+    from jsonschema import Draft202012Validator, FormatChecker
+
+    root = Path(__file__).resolve().parents[1]
+    schema = json.loads((root / "docs/schemas/plugin-manifest-v1.schema.json").read_text(encoding="utf-8"))
+    example = json.loads((root / "examples/plugin-manifest.example.json").read_text(encoding="utf-8"))
+
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema, format_checker=FormatChecker())
+    validator.validate(example)
+    validator.validate(manifest())
+
+    invalid = {**example, "entrypoint": "module:run"}
+    assert list(validator.iter_errors(invalid))
+
+
 def test_manifest_is_canonical_strict_and_disallows_executable_fields():
     normalized, digest = validate_plugin_manifest(manifest())
     assert normalized["id"] == "com.example.research"
