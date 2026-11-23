@@ -7,14 +7,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from axiom.core.integrations import IntegrationRegistry
-from axiom.core.mcp_inventory import McpInventoryError, inspect_mcp_server, list_mcp_servers
+from axiom.core.mcp_inventory import McpInventoryError, _registry, inspect_mcp_server, list_mcp_servers
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp-inventory"])
 
 
 class McpServerTrustUpdate(BaseModel):
     trust_status: Literal["unverified", "trusted", "blocked"]
-    owner_type: Literal["unknown", "workspace", "external"] = "unknown"
+    owner_type: Literal["unknown", "workspace", "external"] | None = None
     owner_label: str | None = Field(default=None, max_length=96)
 
 
@@ -22,11 +22,27 @@ class McpServerTrustUpdate(BaseModel):
 def update_mcp_server_trust(name: str, request: McpServerTrustUpdate) -> dict[str, Any]:
     """Persist explicit trust and user-declared ownership for an MCP server."""
     try:
-        updated = IntegrationRegistry(create=False).update_mcp_trust(
+        registry = _registry()
+        existing = next(
+            (
+                item for item in registry.list()
+                if item.type.value == "mcp" and item.name.casefold() == name.casefold()
+            ),
+            None,
+        )
+        if existing is None:
+            raise LookupError(name)
+        owner_type = request.owner_type if request.owner_type is not None else existing.owner_type
+        owner_label = (
+            request.owner_label
+            if "owner_label" in request.model_fields_set
+            else existing.owner_label
+        )
+        updated = registry.update_mcp_trust(
             name,
             trust_status=request.trust_status,
-            owner_type=request.owner_type,
-            owner_label=request.owner_label,
+            owner_type=owner_type,
+            owner_label=owner_label,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="MCP server not found.") from exc

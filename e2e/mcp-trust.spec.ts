@@ -81,7 +81,7 @@ test("MCP trust must be explicit and per-server ownership stays user-declared", 
 
   await page.getByRole("button", { name: "Inspect handshake" }).click();
   await expect(page.getByText("HANDSHAKE OK")).toBeVisible();
-  await expect(page.getByText("connected", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Last check: connected/)).toBeVisible();
   expect(handshakeCalls).toBe(1);
 
   await page.getByLabel("Trust status for Unverified MCP").selectOption("blocked");

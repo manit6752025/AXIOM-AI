@@ -1001,19 +1001,28 @@ def supercompress_compress(
 def integration_trust(
     name: str = typer.Argument(..., help="Registered MCP server name."),
     trust_status: str = typer.Argument(..., help="Trust state: unverified, trusted, or blocked."),
-    owner_type: str = typer.Option("unknown", "--owner-type", help="Ownership category: unknown, workspace, or external."),
+    owner_type: str | None = typer.Option(None, "--owner-type", help="Ownership category: unknown, workspace, or external; defaults to the saved value."),
     owner_label: str | None = typer.Option(None, "--owner-label", help="User-declared owner label; not identity verified."),
+    clear_owner_label: bool = typer.Option(False, "--clear-owner-label", help="Remove the saved owner label."),
     json_output: bool = typer.Option(False, "--json", help="Emit the saved trust record as JSON."),
 ) -> None:
     """Set explicit MCP server trust and user-declared ownership metadata."""
     from axiom.core.integrations import IntegrationRegistry
+    from axiom.core.mcp_inventory import _registry
 
     try:
-        updated = IntegrationRegistry(create=False).update_mcp_trust(
+        registry = _registry()
+        existing = next(
+            (item for item in registry.list() if item.type is IntegrationType.MCP and item.name.casefold() == name.casefold()),
+            None,
+        )
+        if existing is None:
+            _cli_error(f"MCP server not found: {name}", code="mcp_server_not_found")
+        updated = registry.update_mcp_trust(
             name,
             trust_status=trust_status,
-            owner_type=owner_type,
-            owner_label=owner_label,
+            owner_type=owner_type or existing.owner_type,
+            owner_label=None if clear_owner_label else owner_label if owner_label is not None else existing.owner_label,
         )
     except LookupError:
         _cli_error(f"MCP server not found: {name}", code="mcp_server_not_found")

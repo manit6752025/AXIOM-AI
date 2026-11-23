@@ -167,6 +167,20 @@ def test_successful_handshake_persists_connection_state(tmp_path, monkeypatch):
     assert inventory["last_connection_error"] is None
 
 
+def test_api_returns_not_found_for_trust_update_without_registry_entry(tmp_path, monkeypatch):
+    from fastapi import HTTPException
+    from axiom.api import mcp_inventory as api_module
+
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(HTTPException) as response:
+        api_module.update_mcp_server_trust(
+            "missing",
+            api_module.McpServerTrustUpdate(trust_status="trusted"),
+        )
+
+    assert response.value.status_code == 404
+
+
 def test_api_can_update_server_trust_and_owner_metadata(tmp_path, monkeypatch):
     from axiom.api import mcp_inventory as api_module
 
@@ -194,6 +208,20 @@ def test_api_can_update_server_trust_and_owner_metadata(tmp_path, monkeypatch):
     assert record["owner_type"] == "external"
     assert record["owner_label"] == "Vendor Support"
     assert record["ownership_verified"] is False
+
+    preserved = api_module.update_mcp_server_trust(
+        "Local MCP",
+        api_module.McpServerTrustUpdate(trust_status="blocked"),
+    )
+    assert preserved["trust_status"] == "blocked"
+    assert preserved["owner_type"] == "external"
+    assert preserved["owner_label"] == "Vendor Support"
+
+    cleared = api_module.update_mcp_server_trust(
+        "Local MCP",
+        api_module.McpServerTrustUpdate(trust_status="trusted", owner_label=None),
+    )
+    assert cleared["owner_label"] is None
 
 
 def test_api_refuses_handshake_and_schema_inspection_for_unverified_or_blocked_servers(tmp_path, monkeypatch):

@@ -141,6 +141,13 @@ def test_integration_trust_json_records_explicit_trust_and_unverified_owner_labe
     assert saved.trust_status == "trusted"
     assert saved.owner_label == "Research Team"
 
+    trust_only = runner.invoke(app, ["integration", "trust", "Local MCP", "blocked", "--json"])
+    assert trust_only.exit_code == 0, trust_only.stdout
+    preserved = json.loads(trust_only.stdout)
+    assert preserved["trust_status"] == "blocked"
+    assert preserved["owner_type"] == "workspace"
+    assert preserved["owner_label"] == "Research Team"
+
 
 def test_integration_mcp_list_json_is_passive_and_redacts_command_arguments(tmp_path: Path, monkeypatch) -> None:
     from axiom.core.integrations import AgentIntegration, IntegrationRegistry, IntegrationType

@@ -242,8 +242,13 @@ class IntegrationRegistry:
         owner_label: str | None = None,
     ) -> AgentIntegration:
         """Persist explicit trust and user-declared ownership for one MCP server."""
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError("MCP server name cannot be empty.")
+        if (
+            not isinstance(name, str)
+            or not name.strip()
+            or len(name) > 128
+            or any(not character.isprintable() for character in name)
+        ):
+            raise ValueError("MCP server name must be 1–128 printable characters.")
         if trust_status not in MCP_TRUST_STATES:
             raise ValueError("Trust status must be unverified, trusted, or blocked.")
         if owner_type not in MCP_OWNER_TYPES:
