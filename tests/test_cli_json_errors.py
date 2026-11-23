@@ -5,13 +5,14 @@ import json
 import pytest
 from typer.testing import CliRunner
 
+from axiom.cli.errors import EXIT_CODE_FAILURE, EXIT_CODE_USAGE
 from axiom.cli.main import app
 
 
 runner = CliRunner()
 
 
-def _invoke_json_error(*args: str, expected_code: str, expected_exit: int = 1):
+def _invoke_json_error(*args: str, expected_code: str, expected_exit: int = EXIT_CODE_FAILURE):
     result = runner.invoke(app, ["--no-banner", "--json-errors", *args])
     assert result.exit_code == expected_exit, result.output
     payload = json.loads(result.output)
@@ -60,7 +61,7 @@ def test_support_bundle_unsafe_output_preserves_exit_code_and_json_code(tmp_path
     _invoke_json_error(
         "support-bundle", "--output", str(output),
         expected_code="support_bundle_symlink",
-        expected_exit=2,
+        expected_exit=EXIT_CODE_USAGE,
     )
 
 
@@ -70,5 +71,17 @@ def test_human_error_mode_remains_readable_without_json_errors():
     ])
     assert result.exit_code == 1
     assert "Error: Workflow search" in result.output
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(result.output)
+
+
+
+def test_click_usage_errors_keep_exit_code_two_before_command_error_handler():
+    result = runner.invoke(app, [
+        "--no-banner", "--json-errors", "workflow", "list", "--not-a-real-option",
+    ])
+
+    assert result.exit_code == EXIT_CODE_USAGE
+    assert "No such option" in result.output
     with pytest.raises(json.JSONDecodeError):
         json.loads(result.output)

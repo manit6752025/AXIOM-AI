@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — global command palette
+
+- Extended the Ctrl/Command+K palette to search and execute page navigation plus local actions for theme switching, password changes, and sign-out; added keyboard and browser regression tests.
+
+## Unreleased — shared accessible Control Center patterns
+
+- Added reusable form-field, semantic data-table, focus-managed dialog, and politely announced empty-state primitives; migrated password change and saved-plan comparisons to the shared patterns.
+- Added browser checks for dialog labelling/focus wrapping, empty-state announcements, and saved-plan table semantics.
+
+## Unreleased — Control Center shell regression coverage
+
+- Added browser acceptance coverage for the preserved sidebar, responsive mobile navigation, topbar theme toggle and persistence, collapsed sidebar state, and browser-history page restoration.
+
+## Unreleased — CLI/API/Control Center command reference
+
+- Expanded the wiki command reference to index every registered root CLI command and map major feature families to representative typed API endpoints and Control Center pages.
+- Added a contract test that compares the command index, API examples, and GUI navigation labels with the current source surfaces; documents CLI-only host/process operations explicitly.
+
+## Unreleased — CLI exit-code contract
+
+- Documented exit statuses for success, operational/validation errors, usage or unsafe-output rejections, and cooperative cancellation.
+- Centralized AXIOM's numeric exit-code constants and added regressions for JSON failure envelopes, Click usage failures, support-bundle safety rejections, and Ctrl+C cancellation.
+
 ## Unreleased — reproducible training-plan snapshots
 
 - Added canonical saved-plan JSON printing with stable SHA-256 fingerprints and field-level comparisons across planning inputs, captured hardware, planner provenance, and estimates.

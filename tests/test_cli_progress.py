@@ -4,7 +4,8 @@ import signal
 
 import pytest
 
-from axiom.cli.progress import cancellable_byte_progress, cancellable_scan_progress
+from axiom.cli.errors import EXIT_CODE_CANCELLED
+from axiom.cli.progress import cancellable_byte_progress, cancellable_scan_progress, report_cancelled
 from axiom.datasets.progress import DatasetScanCancelled, check_scan_cancelled
 
 
@@ -31,3 +32,15 @@ def test_download_progress_sets_cancel_event_on_ctrl_c():
         with pytest.raises(DatasetScanCancelled):
             check_scan_cancelled(cancel_event)
     assert signal.getsignal(signal.SIGINT) is original
+
+
+
+def test_report_cancelled_uses_documented_exit_code_and_stderr_only(capsys):
+    with pytest.raises(SystemExit) as result:
+        report_cancelled("Operation cancelled.")
+
+    assert result.value.code == EXIT_CODE_CANCELLED
+    assert result.value.code == 130
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Operation cancelled." in captured.err

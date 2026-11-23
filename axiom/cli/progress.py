@@ -9,7 +9,7 @@ import threading
 from rich.console import Console
 from rich.progress import BarColumn, DownloadColumn, Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
 
-from axiom.cli.errors import runtime_options
+from axiom.cli.errors import EXIT_CODE_CANCELLED, runtime_options
 
 ScanProgress = Callable[[int, int, int], None]
 
@@ -133,4 +133,4 @@ def report_cancelled(message: str) -> None:
     options = runtime_options()
     if not bool(options.get("quiet")):
         Console(stderr=True).print(f"[yellow]{message}[/yellow]")
-    raise SystemExit(130)
+    raise SystemExit(EXIT_CODE_CANCELLED)

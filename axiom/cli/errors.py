@@ -9,6 +9,12 @@ import click
 import typer
 
 
+EXIT_CODE_SUCCESS = 0
+EXIT_CODE_FAILURE = 1
+EXIT_CODE_USAGE = 2
+EXIT_CODE_CANCELLED = 130
+
+
 def runtime_options() -> dict[str, object]:
     """Read the root command's output policy from the active Click context."""
     context = click.get_current_context(silent=True)
@@ -28,7 +34,7 @@ def emit_error(
     message: str,
     *,
     code: str = "AXIOM_CLI_ERROR",
-    exit_code: int = 1,
+    exit_code: int = EXIT_CODE_FAILURE,
     options: Mapping[str, object] | None = None,
     stderr: bool = False,
 ) -> NoReturn:

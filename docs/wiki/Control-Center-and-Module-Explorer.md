@@ -6,6 +6,20 @@ Launch the local browser interface with:
 
 Use `axiom gui --no-open` to print the local URL without opening a browser.
 
+## Global command palette
+
+Press **Ctrl+K** (or **⌘K** on macOS) from any authenticated workspace page
+to search the Control Center without leaving the keyboard. Results combine
+workspace pages with actions such as switching the dark/light theme, changing
+the administrator password, and signing out. Use **↑/↓** to move the selected
+result, **Enter** to run it, and **Escape** to close the palette. The action
+list reflects the current theme so it always offers the opposite theme as the
+switch target.
+
+The palette is a local navigation/action surface. It does not search workspace
+records, execute model or workflow jobs, or expose commands that require
+additional destructive confirmation.
+
 ## Module Explorer
 
 The beta.4 Module Explorer is a searchable index of current GUI pages, CLI command families, and API surfaces described by the live OpenAPI reference. GUI destinations navigate to an existing page; CLI-only entries provide copyable command guidance rather than pretending a browser can execute arbitrary shell commands.

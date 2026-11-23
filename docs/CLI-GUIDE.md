@@ -85,6 +85,33 @@ command fails. Exit codes are unchanged, including exit code 2 for unsafe
 support-bundle output paths. Shell/Click argument parsing errors that occur
 before the root command callback are still rendered by Click itself.
 
+## CLI exit codes and automation contract
+
+| Exit code | Meaning | Typical cause |
+|---:|---|---|
+| `0` | Success | The requested command completed. |
+| `1` | Operation or validation failure | A local resource is invalid or missing, or an operation could not complete. |
+| `2` | Usage or safety-policy rejection | Click/Typer argument parsing failed, or a support-bundle output path was unsafe or already existed. |
+| `130` | User cancellation | The user pressed **Ctrl+C** and a cooperative operation stopped at a safe boundary. |
+
+Check the process exit code first. With `--json-errors`, command failures that
+reach AXIOM's command error handler also emit this schema-versioned envelope
+on standard error:
+
+```json
+{"schema_version":1,"error":{"code":"workflow_error","message":"...","exit_code":1}}
+```
+
+Treat `error.code` and `error.exit_code` as the machine-readable contract;
+`error.message` is explanatory text and may become more detailed. Codes are
+stable identifiers, for example `workflow_error`, `model_studio_error`,
+`llm_error`, `tool_not_found`, `support_bundle_symlink`,
+`support_bundle_not_file`, `support_bundle_exists`, and
+`support_bundle_invalid_parent`. Command-specific success `--json` output
+is unchanged. Errors raised by Click/Typer argument parsing before the root
+command callback remain usage errors (exit code `2`) and are not wrapped in
+AXIOM's JSON error envelope.
+
 ## Shell completion
 
 The root Typer command exposes shell completion. Install completion in the
