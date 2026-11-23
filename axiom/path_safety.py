@@ -153,7 +153,32 @@ def open_regular_file(path: Path) -> BinaryIO:
         finally:
             os.close(directory_fd)
     else:
-        descriptor = os.open(path, flags | nofollow)
+        # Windows does not expose openat/O_NOFOLLOW consistently. Inspect every
+        # path component without following reparse points before opening; also
+        # reject junctions and non-directory parents. POSIX keeps the stronger
+        # descriptor-relative path above.
+        absolute = target if target.is_absolute() else Path.cwd() / target
+        current = Path(absolute.anchor)
+        components = absolute.parts[1:]
+        for index, component in enumerate(components):
+            current = current / component
+            try:
+                metadata = current.lstat()
+            except OSError as exc:
+                raise SafePathError("path contains a missing or inaccessible component") from exc
+            reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            is_junction = getattr(current, "is_junction", None)
+            if (
+                stat.S_ISLNK(metadata.st_mode)
+                or (reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag)
+                or (is_junction is not None and is_junction())
+            ):
+                raise SafePathError("path must not contain symbolic links or junctions")
+            if index < len(components) - 1 and not stat.S_ISDIR(metadata.st_mode):
+                raise SafePathError("path parents must be regular directories")
+        if not components:
+            raise SafePathError("path must identify a regular file")
+        descriptor = os.open(absolute, flags | nofollow)
 
     try:
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
