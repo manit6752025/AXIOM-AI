@@ -543,4 +543,11 @@ def test_model_provenance_hashes_a_valid_safetensors_artifact_at_the_full_16_gib
     assert evidence["hashed_file_count"] == 1
     assert evidence["files"][0]["size_bytes"] == total_size
     assert len(evidence["files"][0]["sha256"]) == 64
-    assert evidence["checkpoint_sha256"] == evidence["files"][0]["sha256"]
+    # The checkpoint digest is a deterministic tree digest over path, size,
+    # and the independently computed per-file digest (not the raw file digest).
+    tree_digest = hashlib.sha256()
+    tree_digest.update(b"full-limit.safetensors\\0")
+    tree_digest.update(str(total_size).encode("ascii"))
+    tree_digest.update(b"\\0")
+    tree_digest.update(bytes.fromhex(evidence["files"][0]["sha256"]))
+    assert evidence["checkpoint_sha256"] == tree_digest.hexdigest()
