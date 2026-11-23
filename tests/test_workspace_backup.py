@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import stat
 import zipfile
 from pathlib import Path
@@ -28,6 +27,31 @@ def _staging(tmp_path: Path) -> Path:
     destination = tmp_path / "staging"
     destination.mkdir(mode=0o700)
     return destination
+
+
+def test_published_backup_manifest_schema_and_example_match_runtime_limits():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    schema = json.loads((root / "docs/schemas/workspace-backup-manifest-v1.schema.json").read_text(encoding="utf-8"))
+    example = json.loads((root / "examples/workspace-backup-manifest-v1.example.json").read_text(encoding="utf-8"))
+    assert schema["properties"]["schema_version"]["const"] == workspace_backup.BACKUP_SCHEMA_VERSION
+    assert schema["properties"]["files"]["maxItems"] == workspace_backup.MAX_BACKUP_FILES
+    assert example["limits"] == {
+        "maximum_files": workspace_backup.MAX_BACKUP_FILES,
+        "maximum_file_bytes": workspace_backup.MAX_BACKUP_FILE_BYTES,
+        "maximum_total_bytes": workspace_backup.MAX_BACKUP_TOTAL_BYTES,
+    }
+    assert example["summary"]["total_bytes"] == sum(item["size_bytes"] for item in example["files"])
+
+
+@pytest.mark.parametrize(
+    "unsafe_path",
+    ["../outside", "/absolute/path", "C:/Windows/boot.ini", "folder\\\\escape", "CON.txt", "a/../b"],
+)
+def test_workspace_backup_path_validation_rejects_cross_platform_traversal(unsafe_path: str):
+    with pytest.raises(WorkspaceBackupError):
+        workspace_backup._safe_relative_path(unsafe_path)
 
 
 def test_workspace_backup_round_trips_regular_files_with_manifest_checksums(tmp_path: Path):
@@ -137,7 +161,11 @@ def test_workspace_restore_rejects_path_traversal_and_removes_partial_staging(tm
             "special_files": 0,
             "excluded_directories": 0,
         },
-        "limits": {},
+        "limits": {
+            "maximum_files": workspace_backup.MAX_BACKUP_FILES,
+            "maximum_file_bytes": workspace_backup.MAX_BACKUP_FILE_BYTES,
+            "maximum_total_bytes": workspace_backup.MAX_BACKUP_TOTAL_BYTES,
+        },
         "scope_note": "test",
     }
     archive = io.BytesIO()

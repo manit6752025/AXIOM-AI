@@ -135,6 +135,60 @@ def test_history_rejects_tampered_fingerprints_and_unsupported_fields(tmp_path) 
         store.list()
 
 
+def test_history_serializes_concurrent_sample_writes(tmp_path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = ResourceTelemetryStore(tmp_path / ".axiom")
+    store.configure(enabled=True, max_samples=120, max_age_days=30)
+
+    def write_sample(index: int):
+        return store.record(sample(cpu={
+            "logical_cores": 16,
+            "system_percent": float(index),
+            "process_percent": float(index) / 2,
+        }))["sample"]["id"]
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        identifiers = list(executor.map(write_sample, range(24)))
+
+    history = store.list()
+    assert len(set(identifiers)) == 24
+    assert history["total"] == 24
+    assert {record["id"] for record in history["samples"]} == set(identifiers)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX no-follow directory-descriptor support is required.")
+def test_history_rejects_symlinked_store_and_lock_files(tmp_path) -> None:
+    root = tmp_path / ".axiom"
+    root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"private":"sentinel"}', encoding="utf-8")
+    store = ResourceTelemetryStore(root)
+
+    store.path.symlink_to(outside)
+    with pytest.raises(ResourceTelemetryError):
+        store.list()
+    store.path.unlink()
+
+    lock_target = tmp_path / "lock-target"
+    lock_target.write_text("lock sentinel", encoding="utf-8")
+    store.lock_path.symlink_to(lock_target)
+    with pytest.raises(ResourceTelemetryError):
+        store.configure(enabled=True)
+    assert lock_target.read_text(encoding="utf-8") == "lock sentinel"
+
+
+def test_history_rejects_duplicate_json_object_keys(tmp_path) -> None:
+    store = ResourceTelemetryStore(tmp_path / ".axiom")
+    store.configure(enabled=True)
+    store.path.write_text(
+        '{"schema_version":1,"schema_version":1,"settings":{"enabled":true,"max_samples":120,"max_age_days":30},"samples":[]}',
+        encoding="utf-8",
+    )
+    with pytest.raises(ResourceTelemetryError, match="duplicate"):
+        store.list()
+
+
 @pytest.mark.skipif(os.name == "nt", reason="Directory symlink privileges vary on Windows CI.")
 def test_history_rejects_symlinked_metadata_root(tmp_path) -> None:
     target = tmp_path / "real"

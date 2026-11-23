@@ -6,7 +6,7 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.background import BackgroundTask
+from starlette.background import BackgroundTask
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
