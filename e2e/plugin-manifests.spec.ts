@@ -102,7 +102,7 @@ test("MCP Control Center registers versioned manifests and re-reviews stale scop
   await page.getByLabel("Plugin manifest JSON").fill(JSON.stringify(manifest("1.0.0"), null, 2));
   await page.getByRole("button", { name: "Validate and register" }).click();
   await expect(page.getByText("com.example.research · 1.0.0")).toBeVisible();
-  await expect(page.getByText("DEFAULT DENY")).toBeVisible();
+  await expect(page.getByText("DEFAULT DENY", { exact: true })).toBeVisible();
   await expect(page.getByText(/does not load plugin code/i)).toBeVisible();
 
   const searchTool = page.locator(".permission-row").filter({ hasText: "Search approved local data." });
