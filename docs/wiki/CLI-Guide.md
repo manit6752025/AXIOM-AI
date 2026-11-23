@@ -100,6 +100,10 @@ axiom dataset profile ./data/train.jsonl --json
 axiom ai hf-search qwen --limit 10 --json
 axiom ai policy-audit ./models/my-model --json
 axiom ai plan --model ./models/my-model --json
+axiom project validate --json
+axiom check --json
+axiom tools doctor --json
+axiom tools plan claude-code --json
 ```
 
 These commands emit versioned JSON suitable for scripts. Dataset profiling
