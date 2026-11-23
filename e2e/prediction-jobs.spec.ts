@@ -18,6 +18,7 @@ test("Runtime starts, tracks, and cancels a bounded native prediction job", asyn
   let job: Record<string, unknown> | null = null;
   let startPayload: Record<string, unknown> | null = null;
   let cancelRequests = 0;
+  let resumeRequests = 0;
 
   const jobScope = {
     prompts_returned: false,
@@ -130,6 +131,8 @@ test("Runtime starts, tracks, and cancels a bounded native prediction job", asyn
         prompts_truncated: 0,
         evaluation_run_ids: [],
         error_code: null,
+        resumable: false,
+        resumption_count: 0,
         scope: jobScope,
       };
       await route.fulfill({ status: 202, json: {
@@ -150,6 +153,23 @@ test("Runtime starts, tracks, and cancels a bounded native prediction job", asyn
       return;
     }
     await route.continue();
+  });
+
+  await page.route("**/api/prediction-jobs/*/resume", async (route) => {
+    resumeRequests += 1;
+    if (job) job = { ...job, status: "running", resumable: false, resumption_count: 1 };
+    await route.fulfill({ status: 202, json: {
+      schema_version: 1,
+      job,
+      scope: {
+        dataset_fingerprint_verified: true,
+        model_and_adapter_fingerprints_verified: true,
+        checkpoint_identity_and_digest_verified: true,
+        partial_output_published: false,
+        prompts_returned: false,
+        predictions_returned: false,
+      },
+    } });
   });
 
   await page.route("**/api/prediction-jobs/*/cancel", async (route) => {
@@ -197,4 +217,14 @@ test("Runtime starts, tracks, and cancels a bounded native prediction job", asyn
   await expect(history.getByText("data/predictions.jsonl · cancelling", { exact: true })).toBeVisible();
   await expect(engine.getByRole("status").filter({ hasText: "Cancellation requested." })).toBeVisible();
   await expect(history.getByText("Output not published until completion", { exact: false })).toBeVisible();
+
+  job = { ...(job ?? {}), status: "interrupted", resumable: true, resumption_count: 0 };
+  await engine.getByRole("button", { name: "Refresh jobs" }).click();
+  await expect(history.getByText("data/predictions.jsonl · interrupted", { exact: true })).toBeVisible();
+  const resumeButton = history.getByRole("button", { name: "Resume prediction job " + jobId });
+  await expect(resumeButton).toBeVisible();
+  await resumeButton.click();
+  await expect.poll(() => resumeRequests).toBe(1);
+  await expect(history.getByText("data/predictions.jsonl · running", { exact: true })).toBeVisible();
+  await expect(engine.getByRole("status").filter({ hasText: "Prediction job resumed from its verified checkpoint." })).toBeVisible();
 });
