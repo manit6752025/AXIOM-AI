@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import stat
@@ -133,7 +134,7 @@ def test_pip_audit_parser_sanitizes_findings_and_deduplicates_records():
     assert result["network_accessed"] is True
 
 
-def test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_secret_environment(monkeypatch: pytest.MonkeyPatch):
+def test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_secret_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     payload = [{"name": "typer", "version": "0.12.0", "vulns": [
         {"id": "PYSEC-2026-1", "aliases": ["CVE-2026-0001"], "fix_versions": ["0.13.0"]},
     ]}]
@@ -143,20 +144,32 @@ def test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_s
     monkeypatch.setenv("AXIOM_API_TOKEN", "must-not-leak")
     calls = []
 
-    def fake_run(args, **kwargs):
-        calls.append((args, kwargs))
-        kwargs["stdout"].write(json.dumps(payload).encode("utf-8"))
-        return SimpleNamespace(returncode=1)
+    class FakeProcess:
+        def __init__(self, args, **kwargs):
+            calls.append((args, kwargs))
+            self.stdout = io.BytesIO(json.dumps(payload).encode("utf-8"))
+            self.stderr = io.BytesIO()
+            self.returncode = 1
 
-    monkeypatch.setattr(supply_chain.subprocess, "run", fake_run)
+        def wait(self, timeout=None):
+            assert timeout == 30
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(supply_chain.subprocess, "Popen", FakeProcess)
+    monkeypatch.chdir(tmp_path)
     report = audit_dependency_vulnerabilities(allow_network=True, timeout_seconds=30)
 
     assert report["status"] == "complete"
     assert report["vulnerability_count"] == 1
     args, kwargs = calls[0]
     assert args[-4:] == ["--format", "json", "--progress-spinner", "off"]
-    assert kwargs["timeout"] == 30
     assert kwargs["stdin"] is subprocess.DEVNULL
+    assert kwargs["stdout"] is subprocess.PIPE
+    assert kwargs["stderr"] is subprocess.PIPE
+    assert kwargs["cwd"] == supply_chain.sys.prefix
     assert "PIP_INDEX_URL" not in kwargs["env"]
     assert "AXIOM_API_TOKEN" not in kwargs["env"]
 
@@ -164,13 +177,55 @@ def test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_s
 def test_vulnerability_scan_does_not_report_clean_on_timeout(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(supply_chain.importlib.util, "find_spec", lambda _name: object())
     monkeypatch.setattr(supply_chain.importlib.metadata, "version", lambda _name: "2.9.0")
-    def timeout(*_args, **_kwargs):
-        raise subprocess.TimeoutExpired(cmd="pip-audit", timeout=1)
-    monkeypatch.setattr(supply_chain.subprocess, "run", timeout)
+
+    class TimeoutProcess:
+        def __init__(self, *_args, **_kwargs):
+            self.stdout = io.BytesIO()
+            self.stderr = io.BytesIO()
+            self.killed = False
+
+        def wait(self, timeout=None):
+            if not self.killed:
+                raise subprocess.TimeoutExpired(cmd="pip-audit", timeout=timeout)
+            return -9
+
+        def kill(self):
+            self.killed = True
+
+    monkeypatch.setattr(supply_chain.subprocess, "Popen", TimeoutProcess)
     result = audit_dependency_vulnerabilities(allow_network=True, timeout_seconds=1)
     assert result["status"] == "error"
     assert result["network_accessed"] is True
     assert "no complete vulnerability conclusion" in result["message"]
+
+
+@pytest.mark.parametrize(
+    ("stream_name", "limit_name"),
+    [("stdout", "MAX_AUDIT_OUTPUT_BYTES"), ("stderr", "MAX_AUDIT_STDERR_BYTES")],
+)
+def test_vulnerability_scan_bounds_captured_streams(monkeypatch: pytest.MonkeyPatch, stream_name: str, limit_name: str):
+    limit = 128
+    monkeypatch.setattr(supply_chain, limit_name, limit)
+    monkeypatch.setattr(supply_chain.importlib.util, "find_spec", lambda _name: object())
+    monkeypatch.setattr(supply_chain.importlib.metadata, "version", lambda _name: "2.9.0")
+
+    class NoisyProcess:
+        def __init__(self, *_args, **_kwargs):
+            self.stdout = io.BytesIO(b"{}" if stream_name == "stdout" else b"")
+            self.stderr = io.BytesIO(b"x" * (limit + 1) if stream_name == "stderr" else b"")
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(supply_chain.subprocess, "Popen", NoisyProcess)
+    report = audit_dependency_vulnerabilities(allow_network=True, timeout_seconds=5)
+    assert report["status"] == "error"
+    assert report["network_accessed"] is True
+    assert "exceeded" in report["message"]
 
 
 def test_security_cli_exports_spdx_sbom_to_a_create_only_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

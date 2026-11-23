@@ -9,14 +9,16 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
+from urllib.parse import quote
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Thread
 from typing import Any, Iterable
 
 MAX_DISTRIBUTIONS = 4096
 MAX_RELATIONSHIPS = 20_000
 MAX_AUDIT_OUTPUT_BYTES = 8 * 1024 * 1024
+MAX_AUDIT_STDERR_BYTES = 1 * 1024 * 1024
 MAX_SCAN_SECONDS = 90
 _NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
 _VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.+!_-]{0,199}$")
@@ -95,7 +97,7 @@ def generate_spdx_sbom(
             "externalRefs": [{
                 "referenceCategory": "PACKAGE-MANAGER",
                 "referenceType": "purl",
-                "referenceLocator": f"pkg:pypi/{_canonical_name(name)}@{version}",
+                "referenceLocator": f"pkg:pypi/{_canonical_name(name)}@{quote(version, safe='.-_+')}",
             }],
         }
         requirements_by_name[canonical] = requirements
@@ -280,6 +282,41 @@ def _parse_pip_audit_output(payload: Any, *, generated_at: str, scanner_version:
     }
 
 
+def _consume_bounded_pipe(stream: Any, maximum_bytes: int, result: dict[str, Any]) -> None:
+    """Drain a child pipe without retaining more than its declared byte budget."""
+    captured = bytearray()
+    total = 0
+    try:
+        while True:
+            block = stream.read(64 * 1024)
+            if not block:
+                break
+            total += len(block)
+            remaining = maximum_bytes - len(captured)
+            if remaining > 0:
+                captured.extend(block[:remaining])
+            if total > maximum_bytes:
+                result["overflow"] = True
+    except OSError:
+        result["read_error"] = True
+    result["content"] = bytes(captured)
+
+
+def _scanner_failure(generated_at: str, scanner_version: str | None, message: str, *, network_accessed: bool) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "generated_at": generated_at,
+        "scanner": {"name": "pip-audit", "version": scanner_version},
+        "status": "error",
+        "network_accessed": network_accessed,
+        "dependency_count": 0,
+        "vulnerable_dependency_count": 0,
+        "vulnerability_count": 0,
+        "findings": [],
+        "message": message,
+    }
+
+
 def audit_dependency_vulnerabilities(
     *,
     allow_network: bool,
@@ -326,52 +363,85 @@ def audit_dependency_vulnerabilities(
         "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE",
     )
     environment = {key: os.environ[key] for key in allowed_environment if key in os.environ}
+    # Do not let pip configuration in the invoking workspace or user profile
+    # inject private package-index URLs or credentials into the audit process.
+    environment["PIP_CONFIG_FILE"] = os.devnull
     args = [executable, "-m", "pip_audit", "--local", "--format", "json", "--progress-spinner", "off"]
+    scan_cwd = Path(sys.prefix)
+    if not scan_cwd.is_dir():
+        raise SupplyChainError("The active Python environment directory is unavailable.")
     try:
-        with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
-            completed = subprocess.run(
-                args,
-                stdin=subprocess.DEVNULL,
-                stdout=stdout_file,
-                stderr=stderr_file,
-                check=False,
-                timeout=timeout_seconds,
-                env=environment,
-                cwd=os.getcwd(),
+        completed = subprocess.Popen(
+            args,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=environment,
+            cwd=str(scan_cwd),
+        )
+        if completed.stdout is None or completed.stderr is None:
+            completed.kill()
+            completed.wait()
+            raise SupplyChainError("Dependency scanner output streams could not be bounded.")
+        stdout_capture: dict[str, Any] = {}
+        stderr_capture: dict[str, Any] = {}
+        stdout_reader = Thread(
+            target=_consume_bounded_pipe,
+            args=(completed.stdout, MAX_AUDIT_OUTPUT_BYTES, stdout_capture),
+            daemon=True,
+        )
+        stderr_reader = Thread(
+            target=_consume_bounded_pipe,
+            args=(completed.stderr, MAX_AUDIT_STDERR_BYTES, stderr_capture),
+            daemon=True,
+        )
+        stdout_reader.start()
+        stderr_reader.start()
+        try:
+            return_code = completed.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            completed.kill()
+            completed.wait()
+            stdout_reader.join(timeout=5)
+            stderr_reader.join(timeout=5)
+            return _scanner_failure(
+                generated_at,
+                scanner_version,
+                "Dependency scanner timed out; no complete vulnerability conclusion was produced.",
+                network_accessed=True,
             )
-            stdout_file.seek(0, os.SEEK_END)
-            output_size = stdout_file.tell()
-            if output_size > MAX_AUDIT_OUTPUT_BYTES:
-                raise SupplyChainError("Dependency scanner JSON output exceeds the 8 MiB limit.")
-            stdout_file.seek(0)
-            raw = stdout_file.read(MAX_AUDIT_OUTPUT_BYTES + 1)
-    except subprocess.TimeoutExpired:
-        return {
-            "schema_version": 1,
-            "generated_at": generated_at,
-            "scanner": {"name": "pip-audit", "version": scanner_version},
-            "status": "error",
-            "network_accessed": True,
-            "dependency_count": 0,
-            "vulnerable_dependency_count": 0,
-            "vulnerability_count": 0,
-            "findings": [],
-            "message": "Dependency scanner timed out; no complete vulnerability conclusion was produced.",
-        }
+        stdout_reader.join(timeout=5)
+        stderr_reader.join(timeout=5)
+        if stdout_reader.is_alive() or stderr_reader.is_alive():
+            completed.kill()
+            raise SupplyChainError("Dependency scanner output streams did not close within the allowed time.")
+        if stdout_capture.get("read_error") or stderr_capture.get("read_error"):
+            raise SupplyChainError("Dependency scanner output could not be read safely.")
+        if stdout_capture.get("overflow"):
+            return _scanner_failure(
+                generated_at,
+                scanner_version,
+                "Dependency scanner JSON output exceeded the 8 MiB limit; no vulnerability conclusion was produced.",
+                network_accessed=True,
+            )
+        if stderr_capture.get("overflow"):
+            return _scanner_failure(
+                generated_at,
+                scanner_version,
+                "Dependency scanner diagnostic output exceeded the 1 MiB limit; no vulnerability conclusion was produced.",
+                network_accessed=True,
+            )
+        raw = stdout_capture.get("content", b"")
+    except SupplyChainError:
+        raise
     except OSError:
-        return {
-            "schema_version": 1,
-            "generated_at": generated_at,
-            "scanner": {"name": "pip-audit", "version": scanner_version},
-            "status": "error",
-            "network_accessed": False,
-            "dependency_count": 0,
-            "vulnerable_dependency_count": 0,
-            "vulnerability_count": 0,
-            "findings": [],
-            "message": "Dependency scanner could not be started safely.",
-        }
-    if completed.returncode not in {0, 1}:
+        return _scanner_failure(
+            generated_at,
+            scanner_version,
+            "Dependency scanner could not be started or its output could not be captured safely.",
+            network_accessed=False,
+        )
+    if return_code not in {0, 1}:
         return {
             "schema_version": 1,
             "generated_at": generated_at,
@@ -383,12 +453,12 @@ def audit_dependency_vulnerabilities(
             "vulnerability_count": 0,
             "findings": [],
             "message": "Dependency scanner failed; no complete vulnerability conclusion was produced.",
-            "exit_code": completed.returncode,
+            "exit_code": return_code,
         }
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError):
         raise SupplyChainError("Dependency scanner returned invalid JSON; no vulnerability conclusion was produced.") from None
     return _parse_pip_audit_output(
-        payload, generated_at=generated_at, scanner_version=scanner_version, exit_code=completed.returncode
+        payload, generated_at=generated_at, scanner_version=scanner_version, exit_code=return_code
     )

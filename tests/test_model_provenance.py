@@ -118,3 +118,75 @@ def test_model_provenance_rejects_files_and_symlinked_roots(tmp_path):
         pytest.skip("symlink creation is unavailable")
     with pytest.raises(ModelProvenanceError, match="symbolic link"):
         inspect_model_provenance(linked)
+
+def test_model_provenance_api_enforces_workspace_paths_and_labels_registry_claims(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from axiom.api.server import create_app
+
+    model = tmp_path / "models" / "demo"
+    model.mkdir(parents=True)
+    weights = b"local weights"
+    (model / "model.safetensors").write_bytes(weights)
+    (model / "LICENSE").write_text("Apache-2.0", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    with TestClient(create_app()) as client:
+        registered = client.post("/api/workspace/models", json={
+            "name": "Demo local model",
+            "source": "models/demo",
+            "format": "safetensors",
+            "license": "Apache-2.0",
+            "license_review": "unreviewed",
+            "source_attribution": "Example publisher",
+            "source_url": "https://huggingface.co/example/demo",
+            "source_revision": "deadbeef",
+        })
+        assert registered.status_code == 201, registered.text
+        model_id = registered.json()["model"]["id"]
+
+        response = client.post("/api/workspace/models/provenance", json={
+            "path": "demo",
+            "model_id": model_id,
+        })
+        assert response.status_code == 200, response.text
+        report = response.json()["provenance"]
+        assert report["model_directory"] == "models/demo"
+        assert report["hash_evidence"]["checkpoint_sha256"]
+        assert report["hash_evidence"]["files"][0]["sha256"] == hashlib.sha256(weights).hexdigest()
+        assert report["registry_metadata"]["status"] == "supplied"
+        assert report["source_evidence"]["status"] == "registry_claim_not_verified"
+        assert report["source_evidence"]["network_used"] is False
+        assert report["license_evidence"]["declared_license"] == "Apache-2.0"
+        assert report["license_evidence"]["registry_review_state"] == "unreviewed"
+
+        unsafe = client.post("/api/workspace/models/provenance", json={"path": "../outside"})
+        assert unsafe.status_code == 422
+        missing = client.post("/api/workspace/models/provenance", json={
+            "path": "demo",
+            "model_id": "0" * 32,
+        })
+        assert missing.status_code == 404
+
+
+def test_model_provenance_cli_emits_machine_readable_hash_evidence(tmp_path, monkeypatch):
+    import json
+
+    from typer.testing import CliRunner
+
+    from axiom.cli.main import app
+
+    model = tmp_path / "demo"
+    model.mkdir()
+    (model / "model.gguf").write_bytes(b"gguf test bytes")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(app, [
+        "--no-banner", "model", "provenance", str(model), "--json",
+    ])
+    assert result.exit_code == 0, result.stdout
+    report = json.loads(result.stdout)["provenance"]
+    assert report["format_evidence"]["detected_formats"] == ["gguf"]
+    assert report["hash_evidence"]["status"] == "complete"
+    assert report["hash_evidence"]["checkpoint_sha256"]
+    assert report["security_evidence"]["model_weights_loaded"] is False
