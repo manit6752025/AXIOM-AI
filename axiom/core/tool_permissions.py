@@ -58,6 +58,9 @@ TOOL_DESCRIPTIONS = {
     "axiom_prediction_job_cancel": (
         "Request cooperative cancellation of a local prediction job before artifact finalization begins."
     ),
+    "axiom_prediction_job_resume": (
+        "Resume one interrupted local prediction job only after the saved dataset, model/adapter and durable checkpoint fingerprints verify; consumes local compute and continues writing the original artifact."
+    ),
     "axiom_prediction_job_examples": (
         "Inspect the first up to three identity- and hash-verified raw exact mismatches; text is off by default and bounded excerpts require explicit per-call opt-in."
     ),
@@ -93,8 +96,8 @@ TOOL_DESCRIPTIONS = {
 }
 TOOL_SCOPES: dict[str, tuple[str, ...]] = {
     name: (("network",) if name == "axiom_supercompress" else ())
-    + (("execution",) if name in {"axiom_training_job_start", "axiom_engine_generate", "axiom_prediction_job_start"} else ())
-    + (("write",) if name in {"axiom_workflow_save", "axiom_training_job_start", "axiom_prediction_job_start", "axiom_dataset_clean", "axiom_evaluation_run"} else ())
+    + (("execution",) if name in {"axiom_training_job_start", "axiom_engine_generate", "axiom_prediction_job_start", "axiom_prediction_job_resume"} else ())
+    + (("write",) if name in {"axiom_workflow_save", "axiom_training_job_start", "axiom_prediction_job_start", "axiom_prediction_job_resume", "axiom_dataset_clean", "axiom_evaluation_run"} else ())
     + (("read",) if name not in {"axiom_workflow_save", "axiom_training_job_cancel", "axiom_prediction_job_cancel"} else ())
     for name in TOOL_DESCRIPTIONS
 }
