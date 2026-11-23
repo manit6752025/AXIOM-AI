@@ -36,6 +36,8 @@ import {
   type DatasetQualityResult,
   type HardwareStatus,
   type McpToolPolicy,
+  type McpServerInventory,
+  type McpServerHandshake,
   type RuntimeSnapshot,
   type TrainingPlan as TrainingPlanResult,
   type WorkspaceDataset,
@@ -4146,20 +4148,53 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [serverInventory, setServerInventory] = useState<McpServerInventory | null>(null);
+  const [serverInventoryError, setServerInventoryError] = useState("");
+  const [handshakeResults, setHandshakeResults] = useState<Record<string, McpServerHandshake>>({});
+  const [inspectingServer, setInspectingServer] = useState("");
 
   const refresh = async () => {
     setLoading(true);
     setError("");
-    try {
-      const result = await axiomApi.mcpToolPolicy();
+    setServerInventoryError("");
+    const [policyResult, inventoryResult] = await Promise.allSettled([
+      axiomApi.mcpToolPolicy(),
+      axiomApi.mcpServerInventory(),
+    ]);
+    if (policyResult.status === "fulfilled") {
+      const result = policyResult.value;
       setPolicy(result);
       setSelectedProfile(result.active_profile);
       const active = result.profiles.find((profile) => profile.name === result.active_profile);
       setAllowedTools(active?.allowed_tools || []);
+    } else {
+      setError(policyResult.reason instanceof Error ? policyResult.reason.message : "MCP permissions unavailable.");
+    }
+    if (inventoryResult.status === "fulfilled") {
+      setServerInventory(inventoryResult.value);
+      setHandshakeResults({});
+    } else {
+      setServerInventoryError(inventoryResult.reason instanceof Error ? inventoryResult.reason.message : "MCP server inventory unavailable.");
+    }
+    setLoading(false);
+  };
+
+  const inspectServerHandshake = async (name: string) => {
+    setInspectingServer(name);
+    setServerInventoryError("");
+    try {
+      const result = await axiomApi.inspectMcpServer(name);
+      setHandshakeResults((current) => ({ ...current, [name]: result }));
+      onNotify(
+        result.status === "ok"
+          ? `MCP handshake completed for ${name}.`
+          : `MCP handshake ${result.status}: ${result.message || "protocol negotiation failed"}`,
+        result.status === "ok" ? "success" : "warning",
+      );
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "MCP permissions unavailable.");
+      setServerInventoryError(cause instanceof Error ? cause.message : "MCP handshake could not be inspected.");
     } finally {
-      setLoading(false);
+      setInspectingServer("");
     }
   };
 
@@ -4245,6 +4280,36 @@ function MCP({ onNotify }: { onNotify: (message: string, tone?: Tone) => void })
       <InfoCard icon={ShieldCheck} label="Active profile" value={activeProfile} detail={`${policy?.profiles.find((profile) => profile.name === activeProfile)?.allowed_tools.length || 0} tools allowed`} tone={policy ? "success" : "neutral"} />
       <InfoCard icon={LockKeyhole} label="Default access" value="Deny" detail="No tools granted until explicitly enabled" tone="warning" />
     </div>
+    <Surface title="Registered MCP servers" eyebrow="PASSIVE INVENTORY">
+      {serverInventoryError && <InlineAlert tone="warning" role="alert">{serverInventoryError}</InlineAlert>}
+      {serverInventory ? serverInventory.servers.length ? <div className="permission-list">
+        {serverInventory.servers.map((server) => {
+          const result = handshakeResults[server.name];
+          const busy = inspectingServer === server.name;
+          return <div className="diag-list" key={server.name}>
+            <div className="permission-row">
+              <span>
+                <b>{server.name}</b>
+                <small>{server.transport.toUpperCase()} · {server.executable || "No command configured"} · {server.argument_count} arguments · Not inspected</small>
+              </span>
+              <button type="button" className="button secondary-button" onClick={() => void inspectServerHandshake(server.name)} disabled={!server.configured || Boolean(inspectingServer)}>
+                {busy ? "Negotiating…" : "Inspect handshake"}
+              </button>
+            </div>
+            {result && <div className="quiet-note" role="status">
+              <StatusPill tone={result.status === "ok" ? "success" : "warning"}>{result.status === "ok" ? "HANDSHAKE OK" : result.status.toUpperCase()}</StatusPill>
+              {result.status === "ok"
+                ? ` ${result.server_name || server.name} · protocol ${result.protocol_version || "not reported"} · ${result.server_version || "version not reported"} · ${Object.entries(result.capabilities || {}).filter(([, enabled]) => enabled).map(([key]) => key).join(", ") || "no capabilities reported"} · ${result.duration_ms} ms`
+                : ` ${result.message || "Protocol negotiation did not complete."}`}
+              <span> · no tools executed · no schemas enumerated</span>
+            </div>}
+          </div>;
+        })}
+      </div> : <EmptyState icon={Network} title="No MCP servers registered" description="Add a stdio MCP server with axiom integration add to see it here. Inventory is passive and does not start processes." /> : <div className="loading-state" role="status">Loading registered MCP servers…</div>}
+      <div className="surface-divider" />
+      <Callout tone="warning" title="Handshake starts a process">Inspect handshake explicitly starts the registered stdio command for a time-limited protocol negotiation. AXIOM uses the MCP SDK's minimal child environment, does not enumerate tool/resource schemas, and never invokes tools during this check.</Callout>
+      <p className="quiet-note">{serverInventory?.inspection_note || "Registered server information is read without starting external processes."} Use axiom integration handshake NAME for the same check from the CLI.</p>
+    </Surface>
     <div className="two-column-grid mcp-layout">
       <Surface title="Tool permissions" eyebrow="BACKEND-ENFORCED">
         {error && <InlineAlert tone="warning" role="alert">{error}</InlineAlert>}

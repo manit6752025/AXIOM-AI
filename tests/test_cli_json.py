@@ -118,6 +118,43 @@ def test_integration_list_json_returns_empty_or_registered_records(tmp_path: Pat
     assert payload["integrations"] == []
 
 
+def test_integration_handshake_json_reports_protocol_metadata(tmp_path: Path, monkeypatch) -> None:
+    import asyncio
+
+    from axiom.core.integrations import AgentIntegration, IntegrationRegistry, IntegrationType
+    from axiom.core import mcp_inventory
+
+    monkeypatch.chdir(tmp_path)
+    IntegrationRegistry().add(
+        AgentIntegration("Local MCP", IntegrationType.MCP, command="python -m local.server")
+    )
+
+    async def fake_inspect(name: str):
+        assert name == "Local MCP"
+        return {
+            "name": name,
+            "transport": "stdio",
+            "status": "ok",
+            "protocol_version": "2025-11-25",
+            "server_name": "Local test server",
+            "server_version": "1.0",
+            "capabilities": {"tools": True, "resources": False, "prompts": False, "logging": False, "completions": False},
+            "duration_ms": 12,
+            "tool_execution_performed": False,
+            "schemas_enumerated": False,
+        }
+
+    monkeypatch.setattr(mcp_inventory, "inspect_mcp_server", fake_inspect)
+    result = runner.invoke(app, ["integration", "handshake", "Local MCP", "--json"])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["server_name"] == "Local test server"
+    assert payload["tool_execution_performed"] is False
+    assert payload["schemas_enumerated"] is False
+
+
 def test_model_search_json_skips_symlink_entries(tmp_path: Path) -> None:
     root = tmp_path / "models"
     model_dir = root / "tiny-llama"
