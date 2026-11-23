@@ -36,11 +36,15 @@ def _model(tmp_path: Path, name: str = "tiny-llama", **overrides: object) -> Pat
     model = tmp_path / name
     model.mkdir()
     config = {**BASE_CONFIG, **overrides}
-    if config["model_type"] in {"mistral", "qwen3"}:
-        config["architectures"] = {
-            "mistral": "MistralForCausalLM",
-            "qwen3": "Qwen3ForCausalLM",
-        }[config["model_type"]]
+    architecture_by_model_type = {
+        "mistral": "MistralForCausalLM",
+        "qwen3": "Qwen3ForCausalLM",
+    }
+    if config["model_type"] in architecture_by_model_type:
+        # Hugging Face config.json stores architectures as a JSON array.
+        # Keep fixtures schema-accurate so strict native-engine preflight is
+        # exercised with the same shape as real checkpoints.
+        config["architectures"] = [architecture_by_model_type[config["model_type"]]]
     (model / "config.json").write_text(json.dumps(config), encoding="utf-8")
     return model
 
