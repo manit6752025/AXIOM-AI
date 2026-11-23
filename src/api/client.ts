@@ -1269,6 +1269,50 @@ export type McpServerHandshake = {
   message?: string;
 };
 
+export type McpToolSchemaRecord = {
+  name: string;
+  title: string | null;
+  description: string | null;
+  input_schema: Record<string, unknown>;
+  output_schema: Record<string, unknown> | null;
+  annotations: Record<string, boolean>;
+};
+
+export type McpResourceSchemaRecord = {
+  name: string | null;
+  uri: string | null;
+  description: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+};
+
+export type McpResourceTemplateSchemaRecord = {
+  name: string | null;
+  uri_template: string | null;
+  description: string | null;
+  mime_type: string | null;
+};
+
+export type McpSchemaInspection = {
+  name?: string;
+  transport?: "stdio";
+  status: "ok" | "timeout" | "error";
+  protocol_version?: string | null;
+  server_name?: string | null;
+  server_version?: string | null;
+  tools?: McpToolSchemaRecord[];
+  resources?: McpResourceSchemaRecord[];
+  resource_templates?: McpResourceTemplateSchemaRecord[];
+  truncated?: { tools: boolean; resources: boolean; resource_templates: boolean };
+  duration_ms: number;
+  tool_execution_performed: false;
+  resource_read_performed: false;
+  prompt_execution_performed: false;
+  schema_browse_scope?: string;
+  error_code?: string;
+  message?: string;
+};
+
 export type OptimizerProfile = {
   number: number;
   key: string;
@@ -2200,6 +2244,12 @@ export const axiomApi = {
   inspectMcpServer: (name: string) =>
     requestJson<McpServerHandshake>(
       `/api/mcp/servers/${encodeURIComponent(name)}/handshake`,
+      { method: "POST" },
+      20_000,
+    ),
+  inspectMcpServerSchemas: (name: string) =>
+    requestJson<McpSchemaInspection>(
+      `/api/mcp/servers/${encodeURIComponent(name)}/schemas`,
       { method: "POST" },
       20_000,
     ),

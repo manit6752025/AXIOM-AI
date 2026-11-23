@@ -1185,6 +1185,61 @@ def integration_doctor():
     console.print(table)
 
 
+@integration_app.command("schemas")
+def integration_schemas(
+    name: str = typer.Argument(..., help="Registered MCP server name."),
+    json_output: bool = typer.Option(False, "--json", help="Emit bounded tool/resource schemas as JSON."),
+) -> None:
+    """Explicitly browse a registered MCP server's tool/resource schemas without running tools."""
+    import asyncio
+
+    from axiom.core.mcp_inventory import McpInventoryError, inspect_mcp_schemas
+
+    try:
+        result = asyncio.run(inspect_mcp_schemas(name))
+    except McpInventoryError as exc:
+        _cli_error(str(exc), code="mcp_schema_inspection_error")
+
+    if json_output:
+        typer.echo(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        if result["status"] != "ok":
+            raise typer.Exit(code=1)
+        return
+    if result["status"] != "ok":
+        console.print(f"[red]Schema inspection {result['status']}:[/red] {result['message']}")
+        raise typer.Exit(code=1)
+
+    console.print(Panel(
+        f"Server: {result['server_name'] or name}\n"
+        f"Protocol: {result['protocol_version'] or 'Not reported'}\n"
+        f"Tools: {len(result['tools'])} · Resources: {len(result['resources'])} · Resource templates: {len(result['resource_templates'])}\n"
+        "Tool execution: no · Resource reads: no",
+        title="MCP schema inventory",
+    ))
+    table = Table(title="Tool schemas")
+    table.add_column("Tool")
+    table.add_column("Description")
+    table.add_column("Input schema")
+    for item in result["tools"]:
+        table.add_row(
+            item["name"],
+            item["description"] or item["title"] or "—",
+            json.dumps(item["input_schema"], ensure_ascii=False),
+        )
+    console.print(table)
+
+    resources = Table(title="Resources and templates")
+    resources.add_column("Kind")
+    resources.add_column("Name")
+    resources.add_column("URI")
+    resources.add_column("MIME type")
+    for item in result["resources"]:
+        resources.add_row("Resource", item["name"] or "—", item["uri"] or "—", item["mime_type"] or "—")
+    for item in result["resource_templates"]:
+        resources.add_row("Template", item["name"] or "—", item["uri_template"] or "—", item["mime_type"] or "—")
+    console.print(resources)
+
+
 @integration_app.command("handshake")
 def integration_handshake(
     name: str = typer.Argument(..., help="Registered MCP server name."),

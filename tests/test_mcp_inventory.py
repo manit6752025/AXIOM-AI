@@ -68,6 +68,20 @@ def test_inventory_is_passive_bounded_and_only_lists_mcp_servers(tmp_path, monke
     assert registry.path.exists()
 
 
+def test_windows_command_parser_preserves_quoted_paths_and_backslashes():
+    command = '"C:\\Program Files\\AXIOM\\python.exe" -m sample.server --config "D:\\model data\\config.json"'
+
+    parts = mcp_inventory._command_parts(command, windows=True)
+
+    assert parts == [
+        "C:\\Program Files\\AXIOM\\python.exe",
+        "-m",
+        "sample.server",
+        "--config",
+        "D:\\model data\\config.json",
+    ]
+
+
 def test_inventory_does_not_create_metadata_when_registry_is_missing(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
@@ -238,6 +252,169 @@ def test_handshake_negotiates_with_real_mcp_stdio_server(tmp_path, monkeypatch):
     assert result["protocol_version"]
     assert result["tool_execution_performed"] is False
     assert result["schemas_enumerated"] is False
+
+
+
+
+def test_schema_browse_lists_bounded_tool_and_resource_metadata_only(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _add_server()
+    calls = {"tools": [], "resources": [], "templates": [], "execute": 0, "read": 0}
+
+    class FakeClient:
+        protocol_version = "2025-11-25"
+        server_info = SimpleNamespace(name="Schema Probe", version="3.2")
+        server_capabilities = SimpleNamespace(tools=object(), resources=object())
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def list_tools(self, *, cursor=None):
+            calls["tools"].append(cursor)
+            if cursor is None:
+                tools = [SimpleNamespace(
+                    name="lookup",
+                    title="Lookup",
+                    description="Search local metadata",
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "Search query", "default": "secret-default"},
+                            "token": {"type": "string", "examples": ["secret-example"]},
+                        },
+                        "required": ["query"],
+                        "default": {"token": "secret-value"},
+                    },
+                    output_schema={"type": "object", "properties": {"count": {"type": "integer"}}},
+                    annotations=SimpleNamespace(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+                )]
+                return SimpleNamespace(tools=tools, next_cursor="page-2")
+            return SimpleNamespace(tools=[SimpleNamespace(
+                name="status", title=None, description=None,
+                input_schema={"type": "object"}, output_schema=None, annotations=None,
+            )], next_cursor=None)
+
+        async def list_resources(self, *, cursor=None):
+            calls["resources"].append(cursor)
+            return SimpleNamespace(resources=[SimpleNamespace(
+                name="Private file",
+                uri="file:///home/alice/private/secrets.json",
+                description="Metadata only",
+                mimeType="application/json",
+                size=128,
+            )], next_cursor=None)
+
+        async def list_resource_templates(self, *, cursor=None):
+            calls["templates"].append(cursor)
+            return SimpleNamespace(resource_templates=[SimpleNamespace(
+                name="Account",
+                uri_template="https://example.test/accounts/{id}?token=private",
+                description="Account resource",
+                mimeType="application/json",
+            )], next_cursor=None)
+
+        async def call_tool(self, *_args, **_kwargs):
+            calls["execute"] += 1
+            raise AssertionError("Schema browsing must not invoke tools")
+
+        async def read_resource(self, *_args, **_kwargs):
+            calls["read"] += 1
+            raise AssertionError("Schema browsing must not read resources")
+
+    monkeypatch.setattr(mcp_inventory, "Client", FakeClient)
+    monkeypatch.setattr(mcp_inventory, "stdio_client", lambda *_args, **_kwargs: object())
+
+    result = asyncio.run(mcp_inventory.inspect_mcp_schemas("Local MCP"))
+
+    assert result["status"] == "ok"
+    assert result["protocol_version"] == "2025-11-25"
+    assert [item["name"] for item in result["tools"]] == ["lookup", "status"]
+    assert result["tools"][0]["annotations"]["readOnlyHint"] is True
+    assert result["tools"][0]["input_schema"]["properties"]["query"]["type"] == "string"
+    assert "default" not in result["tools"][0]["input_schema"]
+    assert "default" not in result["tools"][0]["input_schema"]["properties"]["query"]
+    assert "examples" not in result["tools"][0]["input_schema"]["properties"]["token"]
+    assert result["resources"][0]["uri"] == "file://…/secrets.json"
+    assert result["resource_templates"][0]["uri_template"] == "https://example.test/…"
+    assert result["tool_execution_performed"] is False
+    assert result["resource_read_performed"] is False
+    assert result["prompt_execution_performed"] is False
+    assert calls == {"tools": [None, "page-2"], "resources": [None], "templates": [None], "execute": 0, "read": 0}
+    assert "secret-value" not in str(result)
+    assert "secret-default" not in str(result)
+    assert "secret-example" not in str(result)
+    assert "/home/alice/private" not in str(result)
+    assert "token=private" not in str(result)
+
+
+def test_schema_browse_respects_capability_flags_and_marks_pagination_truncation(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _add_server()
+
+    class FakeClient:
+        protocol_version = "2025-11-25"
+        server_info = None
+        server_capabilities = SimpleNamespace(tools=object(), resources=None)
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def list_tools(self, *, cursor=None):
+            return SimpleNamespace(
+                tools=[SimpleNamespace(name=f"tool-{cursor or 'first'}", input_schema={"type": "object"})],
+                next_cursor=f"next-{cursor or 'first'}",
+            )
+
+        async def list_resources(self, **_kwargs):
+            raise AssertionError("Resources are not advertised")
+
+    monkeypatch.setattr(mcp_inventory, "Client", FakeClient)
+    monkeypatch.setattr(mcp_inventory, "stdio_client", lambda *_args, **_kwargs: object())
+    old_pages = mcp_inventory.MAX_SCHEMA_PAGES
+    monkeypatch.setattr(mcp_inventory, "MAX_SCHEMA_PAGES", 2)
+
+    result = asyncio.run(mcp_inventory.inspect_mcp_schemas("Local MCP"))
+
+    assert result["tools_supported"] is True
+    assert result["resources_supported"] is False
+    assert len(result["tools"]) == 2
+    assert result["resources"] == []
+    assert result["truncated"]["tools"] is True
+    assert result["truncated"]["resources"] is False
+
+
+def test_schema_inspection_timeout_returns_no_child_output(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _add_server()
+
+    class SlowClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            await asyncio.sleep(2)
+
+    monkeypatch.setattr(mcp_inventory, "Client", SlowClient)
+    monkeypatch.setattr(mcp_inventory, "stdio_client", lambda *_args, **_kwargs: object())
+
+    result = asyncio.run(mcp_inventory.inspect_mcp_schemas("Local MCP", timeout_seconds=1))
+
+    assert result["status"] == "timeout"
+    assert result["tool_execution_performed"] is False
+    assert result["resource_read_performed"] is False
+    assert "private path.json" not in str(result)
 
 
 def test_handshake_rejects_unknown_server_and_invalid_timeout(tmp_path, monkeypatch):
