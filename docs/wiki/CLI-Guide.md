@@ -41,6 +41,32 @@ Remote metadata and downloads require network access. Model inspection does not 
 
 Dataset support focuses on JSONL. Structural validity does not prove semantic quality or compliance. PII checks, where supported, are opt-in heuristics. `preview-clean` does not write a file; `clean` is a separate explicit write operation.
 
+## Workspace metadata transfer
+
+    axiom workspace metadata export --output ./axiom-workspace-metadata.zip
+    axiom workspace metadata export --workspace ./my-project --output ./backup.zip --json
+    axiom workspace metadata import ./axiom-workspace-metadata.zip
+    axiom workspace metadata import ./backup.zip --workspace ./my-project --replace --json
+
+The versioned ZIP contains only the model registry, workflow designs, experiment
+plans, evaluation reports, and agent task profiles. Import validates the entire
+archive and its SHA-256 checksums before writing. It merges by default, preserves
+existing records, and rejects ID/name/source conflicts without a partial import.
+Use `--replace` only when intentionally replacing collections present in the
+archive; collections omitted from the archive are left untouched. Export refuses
+to overwrite an existing destination unless `--force` is supplied.
+
+The same transfer is available in **Settings → Workspace metadata transfer**
+and through `GET /api/workspace/metadata/export` /
+`POST /api/workspace/metadata/import`.
+
+Archives exclude `axiom.yaml`, credentials, environment variables, API keys,
+MCP grants, external integration commands and URLs, prediction-job history,
+runtime traces, datasets, model weights, checkpoints, generated artifacts,
+locks, and caches. Registry and evaluation records can still contain local
+paths; inspect an archive before sharing it. The ZIP has a 24 MiB compressed
+limit, 20 MiB total uncompressed limit, and a 4 MiB per-collection limit.
+
 ## Hardware and planning
 
     axiom system info

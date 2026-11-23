@@ -40,6 +40,22 @@ remain at the output path chosen for the job. Dataset files and model weights
 remain at their existing filesystem paths unless the user explicitly deletes
 them outside AXIOM.
 
+### Workspace metadata archives
+
+Settings or the CLI can create an explicit ZIP export of the model registry,
+workflow designs, experiment plans, evaluation reports, and agent task profiles.
+The archive is a separate user-created file and is not stored automatically in
+`.axiom/`. It excludes project configuration, credentials, MCP permission
+grants, external integration commands and URLs, prediction-job history,
+datasets, model weights, checkpoints, and generated artifacts. Some included
+metadata (for example registry sources and report provenance) can contain local
+paths; review the archive before sharing it.
+
+Import merges by default and rejects conflicting record IDs/names/sources before
+writing. The explicit replace mode changes only collections present in the
+archive. Import does not restore datasets or checkpoints; their files remain at
+their existing paths and must be backed up separately.
+
 ## Runtime traces and events
 
 The runtime request-trace buffer is held in process memory and is limited to 200

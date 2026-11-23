@@ -1514,6 +1514,83 @@ export const axiomApi = {
 
   roadmapAudit: () => requestJson<RoadmapAudit>("/api/diagnostics/roadmap"),
 
+  exportWorkspaceMetadata: async (): Promise<Blob> => {
+    const requestId = globalThis.crypto?.randomUUID?.()
+      ?? `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 30_000);
+    try {
+      const response = await fetch(`${API_BASE}/api/workspace/metadata/export`, {
+        headers: { Accept: "application/vnd.axiom.workspace-metadata+zip", "X-Request-ID": requestId },
+        signal: controller.signal,
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        const raw = await response.text();
+        let payload: unknown = raw;
+        try { payload = raw ? JSON.parse(raw) as unknown : null; } catch { /* retain the safe text fallback */ }
+        const responseRequestId = response.headers.get("X-Request-ID") || requestId;
+        throw new Error(`${messageFromPayload(payload, `Workspace metadata export failed (${response.status})`)} (request ID ${responseRequestId})`);
+      }
+      return await response.blob();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw new Error(`Workspace metadata export timed out (request ID ${requestId}).`, { cause: error });
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  },
+
+  importWorkspaceMetadata: async (file: File, replace = false): Promise<{
+    schema_version: number;
+    mode: "merge" | "replace";
+    imported: Record<string, number>;
+    excluded: string[];
+  }> => {
+    const requestId = globalThis.crypto?.randomUUID?.()
+      ?? `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 30_000);
+    try {
+      const query = replace ? "?replace=true" : "";
+      const response = await fetch(`${API_BASE}/api/workspace/metadata/import${query}`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/vnd.axiom.workspace-metadata+zip",
+          "X-Request-ID": requestId,
+        },
+        body: file,
+        signal: controller.signal,
+        cache: "no-store",
+      });
+      const raw = await response.text();
+      let payload: unknown = null;
+      if (raw) {
+        try { payload = JSON.parse(raw) as unknown; } catch { payload = raw; }
+      }
+      if (!response.ok) {
+        const responseRequestId = response.headers.get("X-Request-ID") || requestId;
+        throw new Error(`${messageFromPayload(payload, `Workspace metadata import failed (${response.status})`)} (request ID ${responseRequestId})`);
+      }
+      return payload as {
+        schema_version: number;
+        mode: "merge" | "replace";
+        imported: Record<string, number>;
+        excluded: string[];
+      };
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw new Error(`Workspace metadata import timed out (request ID ${requestId}).`, { cause: error });
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  },
+
   downloadSupportBundle: async (): Promise<Blob> => {
     const requestId = globalThis.crypto?.randomUUID?.()
       ?? `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;

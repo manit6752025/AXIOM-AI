@@ -3702,6 +3702,10 @@ function SettingsPage({
   const [draft, setDraft] = useState<AppPreferences>(() => ({ ...preferences }));
   const [saveError, setSaveError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [metadataBusy, setMetadataBusy] = useState(false);
+  const [metadataReplace, setMetadataReplace] = useState(false);
+  const [metadataMessage, setMetadataMessage] = useState("");
+  const [metadataError, setMetadataError] = useState("");
   const conflict = draft.lowPowerMode && draft.dashboardRefreshSeconds > 0;
 
   const update = <K extends keyof AppPreferences>(key: K, value: AppPreferences[K]) => {
@@ -3717,6 +3721,49 @@ function SettingsPage({
     if (result) { setSaveError(result); return; }
     setSaveError("");
     setSaved(true);
+  };
+
+  const exportWorkspaceMetadata = async () => {
+    setMetadataBusy(true);
+    setMetadataError("");
+    setMetadataMessage("");
+    try {
+      const blob = await axiomApi.exportWorkspaceMetadata();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "axiom-workspace-metadata.zip";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      setMetadataMessage("Workspace metadata archive exported.");
+    } catch (error) {
+      setMetadataError(error instanceof Error ? error.message : "Workspace metadata export failed.");
+    } finally {
+      setMetadataBusy(false);
+    }
+  };
+
+  const importWorkspaceMetadata = async (file: File | null) => {
+    if (!file) return;
+    if (!window.confirm(
+      metadataReplace
+        ? "Replace the matching metadata collections in this workspace? Other files will not be changed."
+        : "Merge the metadata from this archive into this workspace? Existing records are preserved and conflicts are rejected.",
+    )) return;
+    setMetadataBusy(true);
+    setMetadataError("");
+    setMetadataMessage("");
+    try {
+      const result = await axiomApi.importWorkspaceMetadata(file, metadataReplace);
+      const counts = Object.entries(result.imported).map(([name, count]) => `${name.replaceAll("_", " ")}: ${count}`).join(" · ");
+      setMetadataMessage(`Metadata ${result.mode} completed. ${counts}`);
+    } catch (error) {
+      setMetadataError(error instanceof Error ? error.message : "Workspace metadata import failed.");
+    } finally {
+      setMetadataBusy(false);
+    }
   };
 
   return <FeaturePage page="settings">
@@ -3785,6 +3832,35 @@ function SettingsPage({
         <div className="surface-divider" />
         <p className="quiet-note">Deleting a registry entry or saved plan does not delete a checkpoint, dataset, or run output. Files at chosen output paths remain until you remove them yourself.</p>
         <a href="https://github.com/manit6752025/AXIOM-AI/blob/latest/development/docs/DATA-RETENTION.md" target="_blank" rel="noreferrer">Read the data retention and deletion guide</a>
+      </Surface>
+      <Surface title="Workspace metadata transfer" eyebrow="PORTABLE PROJECT METADATA">
+        <p className="quiet-note">Export or import the local model registry, workflow designs, experiment plans, evaluation reports, and agent task profiles. Imports are validated and merged by default; conflicts stop the entire import before any records are written.</p>
+        <p className="quiet-note">Archives exclude axiom.yaml, credentials, MCP permission grants, external integration commands and URLs, prediction-job history, datasets, model weights, checkpoints, and generated files. Review an archive before sharing it: registry and report metadata can still contain workspace-relative or local paths.</p>
+        <div className="settings-save-row">
+          <button type="button" className="button primary-button" onClick={() => void exportWorkspaceMetadata()} disabled={metadataBusy}><ArrowDownToLine size={15} /> {metadataBusy ? "Working…" : "Export workspace metadata"}</button>
+          <label className="button secondary-button" style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: metadataBusy ? "not-allowed" : "pointer" }}>
+            <Upload size={15} /> Import archive
+            <input
+              aria-label="Import workspace metadata archive"
+              type="file"
+              accept=".zip,application/zip"
+              disabled={metadataBusy}
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0] ?? null;
+                void importWorkspaceMetadata(file);
+                event.currentTarget.value = "";
+              }}
+              style={{ display: "none" }}
+            />
+          </label>
+        </div>
+        <label className="setting-toggle">
+          <span><b>Replace included collections</b><small>When enabled, replace matching archive collections instead of merging. Omitted collections and unrelated workspace files remain untouched.</small></span>
+          <input aria-label="Replace included metadata collections" type="checkbox" checked={metadataReplace} onChange={(event) => setMetadataReplace(event.target.checked)} disabled={metadataBusy} />
+        </label>
+        {metadataError && <InlineAlert tone="danger" role="alert">{metadataError}</InlineAlert>}
+        {metadataMessage && <InlineAlert tone="success" role="status">{metadataMessage}</InlineAlert>}
+        <p className="quiet-note">CLI: <code>axiom workspace metadata export</code> · <code>axiom workspace metadata import archive.zip</code></p>
       </Surface>
       <Surface title="CLI feature map" eyebrow="COMMANDS → GUI">
         <p className="quiet-note">Open the matching AXIOM Control Center page for each command family. Use Copy to keep the corresponding CLI command handy; terminal-only actions such as shell completion remain accessible through the CLI.</p>

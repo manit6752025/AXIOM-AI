@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from axiom.core.hardware import detect_hardware
@@ -35,6 +35,12 @@ from axiom.path_safety import (
     open_regular_file,
 )
 from axiom.training.planner import create_training_plan
+from axiom.core.workspace_metadata import (
+    ARCHIVE_FORMAT,
+    MAX_ARCHIVE_BYTES,
+    export_workspace_metadata,
+    import_workspace_metadata,
+)
 
 router = APIRouter(prefix="/api/workspace", tags=["workspace"])
 _events: deque[dict[str, Any]] = deque(maxlen=100)
@@ -919,3 +925,43 @@ def _profile_workspace_dataset(
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=422, detail="Dataset could not be profiled.") from exc
     return {"path": candidate.relative_to(root).as_posix(), "profile": report}
+
+
+@router.get("/metadata/export")
+def workspace_export_metadata() -> Response:
+    """Download a versioned ZIP of allowlisted workspace metadata."""
+    try:
+        archive = export_workspace_metadata(Path.cwd())
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Workspace metadata could not be exported safely.") from exc
+    return Response(
+        content=archive,
+        media_type=ARCHIVE_FORMAT,
+        headers={
+            "Content-Disposition": 'attachment; filename="axiom-workspace-metadata.zip"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.post("/metadata/import")
+async def workspace_import_metadata(
+    request: Request,
+    replace: bool = Query(False, description="Replace the collections included in the archive instead of merging."),
+) -> dict[str, Any]:
+    """Validate and import a metadata ZIP; omitted collections remain unchanged."""
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > MAX_ARCHIVE_BYTES:
+        raise HTTPException(status_code=413, detail="Workspace metadata archive exceeds the 24 MiB limit.")
+    media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if media_type not in {ARCHIVE_FORMAT, "application/zip", "application/octet-stream"}:
+        raise HTTPException(status_code=415, detail="Upload a supported AXIOM workspace metadata ZIP archive.")
+    data = await request.body()
+    if len(data) > MAX_ARCHIVE_BYTES:
+        raise HTTPException(status_code=413, detail="Workspace metadata archive exceeds the 24 MiB limit.")
+    try:
+        result = import_workspace_metadata(data, Path.cwd(), replace=replace)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Workspace metadata archive was rejected; no partial import was applied.") from exc
+    return {"schema_version": 1, **result}
