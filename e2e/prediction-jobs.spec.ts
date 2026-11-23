@@ -232,5 +232,6 @@ test("Runtime starts, tracks, and cancels a bounded native prediction job", asyn
   await resumeButton.click();
   await expect.poll(() => resumeRequests).toBe(1);
   await expect(history.getByText("data/predictions.jsonl · running", { exact: true })).toBeVisible();
+  await expect(history.getByText("Resumed after restart · 1 time(s)", { exact: true })).toBeVisible();
   await expect(engine.getByRole("status").filter({ hasText: "Prediction job resumed from its verified checkpoint." })).toBeVisible();
 });
