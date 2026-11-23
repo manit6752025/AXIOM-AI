@@ -119,15 +119,6 @@ def test_knowledge_search_fuses_local_embedding_scores_when_model_is_supplied(tm
     assert result["results"][0]["vector_score"] is not None
 
 
-@pytest.mark.parametrize("kwargs", [
-    {"limit": 0},
-    {"max_documents": 65},
-    {"chunk_size_chars": 64},
-    {"chunk_overlap_chars": 1200},
-    {"vector_weight": 1.5},
-    {"device": "remote"},
-    {"device": []},
-])
 def test_knowledge_search_hybrid_ranking_recovers_semantic_only_matches(tmp_path, monkeypatch):
     store, base = _seed_store(tmp_path)
     (tmp_path / "docs" / "mobility.md").write_text(
@@ -168,6 +159,15 @@ def test_knowledge_search_hybrid_ranking_recovers_semantic_only_matches(tmp_path
     assert best["citation"]["content_sha256"]
 
 
+@pytest.mark.parametrize("kwargs", [
+    {"limit": 0},
+    {"max_documents": 65},
+    {"chunk_size_chars": 64},
+    {"chunk_overlap_chars": 1200},
+    {"vector_weight": 1.5},
+    {"device": "remote"},
+    {"device": []},
+])
 def test_knowledge_search_rejects_unbounded_parameters(tmp_path, kwargs):
     store, base = _seed_store(tmp_path)
     with pytest.raises(KnowledgeSearchError):
