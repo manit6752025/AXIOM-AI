@@ -337,7 +337,10 @@ def _exclude_local_axiom_distribution(payload: Any) -> tuple[Any, int]:
     return {**payload, "dependencies": filtered}, excluded
 
 
-def _parse_pip_audit_output(\n    payload: Any, *, generated_at: str, scanner_version: str | None, exit_code: int,\n    excluded_local_project_count: int = 0,\n) -> dict[str, Any]:
+def _parse_pip_audit_output(
+    payload: Any, *, generated_at: str, scanner_version: str | None, exit_code: int,
+    excluded_local_project_count: int = 0,
+) -> dict[str, Any]:
     if isinstance(payload, dict):
         dependencies = payload.get("dependencies")
     else:
