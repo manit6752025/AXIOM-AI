@@ -101,6 +101,23 @@ test("Diagnostics downloads and restores a full workspace into a new isolated wo
     }
   });
 
+  // The backup is an anchor navigation/download rather than a fetch() call.
+  // Install a dedicated route after the API fixture to verify the exact selected workspace.
+  await page.route("**/api/workspaces/*/backup", async (route) => {
+    const url = new URL(route.request().url());
+    const match = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/backup$/);
+    downloadedWorkspaceId = match?.[1] ?? null;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/zip",
+      headers: {
+        "Content-Disposition": 'attachment; filename="axiom-workspace-backup.zip"',
+        "Cache-Control": "no-store",
+      },
+      body: Buffer.from("AXIOM test ZIP fixture"),
+    });
+  });
+
   await ensureAuthenticated(page);
   await page.evaluate((workspaceId) => localStorage.setItem("axiom-active-workspace", workspaceId), defaultWorkspace.id);
   await page.goto("/?page=diagnostics");
