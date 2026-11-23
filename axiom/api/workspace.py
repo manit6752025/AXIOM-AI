@@ -35,6 +35,12 @@ from axiom.path_safety import (
     open_regular_file,
 )
 from axiom.training.planner import create_training_plan
+from axiom.core.plan_reproducibility import (
+    PLANNER_ALGORITHM_VERSION,
+    diff_plan_records,
+    reproducible_plan_document,
+)
+from axiom.version import __version__
 from axiom.core.workspace_metadata import (
     ARCHIVE_FORMAT,
     MAX_ARCHIVE_BYTES,
@@ -582,6 +588,8 @@ def workspace_add_experiment(request: WorkspaceExperimentInput) -> dict[str, Any
         "tags": request.tags,
         "parameter_billions": request.parameter_billions,
         "requested_method": request.method,
+        "planner_algorithm_version": PLANNER_ALGORITHM_VERSION,
+        "axiom_version": __version__,
         "status": "planned",
         "hardware": hardware.__dict__,
         "plan": plan.__dict__,
@@ -970,3 +978,35 @@ async def workspace_import_metadata(
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=422, detail="Workspace metadata archive was rejected; no partial import was applied.") from exc
     return {"schema_version": 1, **result}
+
+
+@router.get("/experiments/{experiment_id}/reproducible")
+def workspace_experiment_reproducible(experiment_id: str) -> dict[str, Any]:
+    """Return the exact saved plan as deterministic canonical JSON metadata."""
+    try:
+        record = ExperimentStore().get(experiment_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Experiment not found.")
+        snapshot = reproducible_plan_document(record)
+    except HTTPException:
+        raise
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Saved experiment does not contain a reproducible plan snapshot.") from exc
+    return {"snapshot": snapshot}
+
+
+@router.get("/experiments/{left_id}/diff/{right_id}")
+def workspace_experiment_diff(left_id: str, right_id: str) -> dict[str, Any]:
+    """Compare two immutable saved plan snapshots without regenerating either plan."""
+    try:
+        store = ExperimentStore()
+        left = store.get(left_id)
+        right = store.get(right_id)
+        if left is None or right is None:
+            raise HTTPException(status_code=404, detail="One or both saved experiments were not found.")
+        diff = diff_plan_records(left, right)
+    except HTTPException:
+        raise
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="One or both saved experiments do not contain comparable plan snapshots.") from exc
+    return {"diff": diff}

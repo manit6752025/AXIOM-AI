@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — workspace metadata transfer
+
+- Added a versioned allowlisted workspace metadata ZIP for models, workflows, experiments, evaluations, and agent task profiles, with validated merge/replace import, checksums, size limits, conflict detection, and atomic rollback.
+- Added `axiom workspace metadata export/import`, workspace API endpoints, and Settings-page archive upload/download. Credentials, MCP grants, integrations, job history, datasets, and model weights remain outside the archive.
+
 ## 0.3.0-beta.6 — Beta candidate
 
 ### Added and improved
