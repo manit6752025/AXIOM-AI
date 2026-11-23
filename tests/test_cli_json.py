@@ -736,3 +736,53 @@ def test_check_json_distinguishes_non_project_and_ready_project(tmp_path: Path, 
     assert ready["status"] == "ready"
     assert ready["project_detected"] is True
     assert ready["missing_paths"] == []
+
+
+
+def test_config_show_json_redacts_nested_credentials_but_preserves_ordinary_values(tmp_path: Path) -> None:
+    config = tmp_path / "axiom.yaml"
+    config.write_text(
+        "name: test\n"
+        "max_tokens: 128\n"
+        "api_key: private-api-key-value\n"
+        "provider:\n"
+        "  client_secret: private-client-secret\n"
+        "  auth:\n"
+        "    bearer_token: private-bearer-token\n"
+        "  temperature: 0.2\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["config", "show", "--path", str(config), "--json"])
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["redacted_value_count"] == 3
+    assert payload["config"]["max_tokens"] == 128
+    assert payload["config"]["api_key"] == "[REDACTED]"
+    assert payload["config"]["provider"]["client_secret"] == "[REDACTED]"
+    assert payload["config"]["provider"]["auth"]["bearer_token"] == "[REDACTED]"
+    assert payload["config"]["provider"]["temperature"] == 0.2
+    for secret in ("private-api-key-value", "private-client-secret", "private-bearer-token"):
+        assert secret not in result.stdout
+
+
+def test_config_show_json_rejects_symlinked_config_file(tmp_path: Path) -> None:
+    target = tmp_path / "real.yaml"
+    target.write_text("name: safe\n", encoding="utf-8")
+    link = tmp_path / "linked.yaml"
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        import pytest
+        pytest.skip(f"File symlinks unavailable: {exc}")
+    result = runner.invoke(app, ["config", "show", "--path", str(link), "--json"])
+    assert result.exit_code != 0
+    assert "could not be read safely" in result.output
+
+
+def test_config_show_json_rejects_oversized_input_before_parsing(tmp_path: Path) -> None:
+    config = tmp_path / "large.yaml"
+    config.write_text("value: " + ("x" * (256 * 1024)), encoding="utf-8")
+    result = runner.invoke(app, ["config", "show", "--path", str(config), "--json"])
+    assert result.exit_code != 0
+    assert "256 KiB" in result.output
