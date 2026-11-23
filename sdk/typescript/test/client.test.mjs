@@ -274,16 +274,34 @@ test("exposes typed prediction-job start, history, status, cancellation and chec
     max_new_tokens: 16,
     device: "cpu",
   });
-  assert.equal(requests[3].init.body, undefined);
-  assert.equal(requests[4].init.body, undefined);
+  assert.equal(requests[3].init.body, null);
+  assert.equal(requests[4].init.body, null);
   client.close();
 });
 
-test("validates prediction job identifiers and required local start paths", async () => {
+test("validates prediction job identifiers and required local start paths", () => {
   const client = new AxiomClient();
-  await assert.rejects(() => client.resumePredictionJob("../unsafe"), AxiomConfigurationError);
+  assert.throws(() => client.resumePredictionJob("../unsafe"), AxiomConfigurationError);
   assert.throws(
     () => client.startPredictionJob({ model_path: "", dataset_path: "data/eval.jsonl", output_path: "data/out.jsonl" }),
+    AxiomConfigurationError,
+  );
+  assert.throws(
+    () => client.startPredictionJob({
+      model_path: "models/tiny",
+      dataset_path: "data/eval.jsonl",
+      output_path: "data/out.jsonl",
+      unexpected: true,
+    }),
+    AxiomConfigurationError,
+  );
+  assert.throws(
+    () => client.startPredictionJob({
+      model_path: "models/tiny",
+      dataset_path: "data/eval.jsonl",
+      output_path: "data/out.jsonl",
+      device: "cloud",
+    }),
     AxiomConfigurationError,
   );
   client.close();

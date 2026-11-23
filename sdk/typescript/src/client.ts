@@ -523,8 +523,25 @@ export class AxiomClient {
   }
 
   startPredictionJob(request: AxiomPredictionJobStartRequest): Promise<AxiomPredictionJobStartResult> {
-    if (!request.model_path?.trim() || !request.dataset_path?.trim() || !request.output_path?.trim()) {
-      throw new AxiomConfigurationError("Prediction job start requires model_path, dataset_path and output_path.");
+    if (!request || typeof request !== "object") {
+      throw new AxiomConfigurationError("Prediction job start request must be an object.");
+    }
+    const allowedFields = new Set([
+      "model_path", "adapter_path", "dataset_path", "output_path",
+      "prompt_field", "reference_field", "prediction_field",
+      "max_new_tokens", "temperature", "seed", "device", "precision",
+    ]);
+    if (Object.keys(request).some((key) => !allowedFields.has(key))) {
+      throw new AxiomConfigurationError("Prediction job start request contains unsupported fields.");
+    }
+    for (const [field, value, maximum] of [
+      ["model_path", request.model_path, 4096],
+      ["dataset_path", request.dataset_path, 512],
+      ["output_path", request.output_path, 512],
+    ] as const) {
+      if (typeof value !== "string" || !value.trim() || value.length > maximum) {
+        throw new AxiomConfigurationError(`${field} must contain 1 to ${maximum} characters.`);
+      }
     }
     if (request.max_new_tokens !== undefined && (!Number.isSafeInteger(request.max_new_tokens) || request.max_new_tokens < 1 || request.max_new_tokens > 64)) {
       throw new AxiomConfigurationError("max_new_tokens must be an integer between 1 and 64.");
@@ -535,17 +552,27 @@ export class AxiomClient {
     if (request.seed !== undefined && request.seed !== null && (!Number.isSafeInteger(request.seed) || request.seed < 0)) {
       throw new AxiomConfigurationError("seed must be a non-negative safe integer.");
     }
-    if (request.adapter_path !== undefined && request.adapter_path !== null && !request.adapter_path.trim()) {
-      throw new AxiomConfigurationError("adapter_path must be omitted or contain non-whitespace text.");
+    if (request.adapter_path !== undefined && request.adapter_path !== null && (
+      typeof request.adapter_path !== "string" || !request.adapter_path.trim() || request.adapter_path.length > 4096
+    )) {
+      throw new AxiomConfigurationError("adapter_path must contain 1 to 4096 characters when supplied.");
     }
     for (const [field, value] of Object.entries({
       prompt_field: request.prompt_field,
       reference_field: request.reference_field,
       prediction_field: request.prediction_field,
     })) {
-      if (value !== undefined && (!value.trim() || value.length > 160)) {
+      if (value !== undefined && (typeof value !== "string" || !value.trim() || value.length > 160)) {
         throw new AxiomConfigurationError(`${field} must contain 1 to 160 characters.`);
       }
+    }
+    const devices = new Set(["auto", "cpu", "cuda", "rocm", "mps", "xpu"]);
+    const precisions = new Set(["auto", "fp32", "fp16", "bf16"]);
+    if (request.device !== undefined && (typeof request.device !== "string" || !devices.has(request.device))) {
+      throw new AxiomConfigurationError("device is not a supported local prediction device.");
+    }
+    if (request.precision !== undefined && (typeof request.precision !== "string" || !precisions.has(request.precision))) {
+      throw new AxiomConfigurationError("precision is not a supported local prediction precision.");
     }
     return this.request("POST", "/api/prediction-jobs", { jsonBody: request });
   }

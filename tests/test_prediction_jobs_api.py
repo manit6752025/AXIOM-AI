@@ -126,6 +126,7 @@ def test_prediction_job_api_resumes_only_when_core_verification_succeeds(tmp_pat
             "partial_output_published": False,
             "prompts_returned": False,
             "predictions_returned": False,
+            "generation_resumed_after_restart": True,
         }
         assert resumed == {"job_id": "a" * 32, "root": tmp_path}
 

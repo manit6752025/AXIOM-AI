@@ -56,6 +56,7 @@ Both clients expose:
   clear operations.
 - Knowledge-base list/create/search and plugin-manifest inventory.
 - Full workspace backup download and restore as a new workspace.
+- Local prediction-job start, list, status, cooperative cancellation and verified restart-resume.
 
 They do not start telemetry sampling, run model generation, install models,
 call cloud providers, or alter workspace state unless the caller invokes the
@@ -131,7 +132,7 @@ Publisher configured for this repository/workflow and the `pypi` environment;
 npm requires an `NPM_TOKEN` secret in the `npm` environment and publishes
 with provenance. Pushes and pull requests do not publish packages.
 
-The 20-operation registry in
+The 25-operation registry in
 [`sdk/openapi/axiom-v1-operations.json`](../sdk/openapi/axiom-v1-operations.json)
 is validated against the application's live FastAPI OpenAPI document and both
 SDK method declarations by `scripts/verify_sdk_contract.py`.
