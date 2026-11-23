@@ -611,7 +611,11 @@ def _validate_workspace_guard(config: dict[str, Any], guard: dict[str, Any] | No
     if not isinstance(output_relative, str):
         raise FineTuningError("The MCP workspace training output is invalid.")
     try:
-        current_output = resolve_workspace_output(output_relative, root)
+        current_output = resolve_workspace_output(
+            output_relative,
+            root,
+            allow_checkpoints=config.get("output_policy") == "resume",
+        )
     except (OSError, RuntimeError, ValueError):
         raise FineTuningError("Adapter output changed or is no longer safe inside outputs/.") from None
     if current_output != Path(config["output_dir"]):
@@ -1416,12 +1420,6 @@ def _run_transformers(
         "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj",
         "c_attn", "c_proj", "query_key_value", "Wqkv", "query", "value",
     )
-    if resume_state is not None and resume_state.get("training", {}).get("device") != str(device):
-        raise FineTuningError(
-            "Resume requires the same compute device as the saved checkpoint; "
-            "select the original device or start a new training run."
-        )
-
     if resume_state is not None:
         training = resume_state.get("training", {})
         targets = training.get("target_modules")
@@ -1473,6 +1471,12 @@ def _run_transformers(
         device = torch.device("mps")
     else:
         device = torch.device("cpu")
+
+    if resume_state is not None and resume_state.get("training", {}).get("device") != str(device):
+        raise FineTuningError(
+            "Resume requires the same compute device as the saved checkpoint; "
+            "select the original device or start a new training run."
+        )
 
     try:
         if cancel_check:

@@ -183,7 +183,7 @@ def checkpoint_count(output_dir: Path) -> int:
 def _fsync_checkpoint_file(path: Path) -> None:
     if os.name != "posix":
         return
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+    descriptor = os.open(path, os.O_WRONLY | getattr(os, "O_CLOEXEC", 0))
     try:
         os.fsync(descriptor)
     finally:

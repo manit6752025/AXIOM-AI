@@ -271,3 +271,42 @@ def test_local_training_resumes_verified_adapter_optimizer_and_sampling_state(tm
     assert (output / "adapter_config.json").is_file()
     assert (output / "adapter_model.safetensors").is_file()
     assert (output / "tokenizer.json").is_file()
+
+
+def test_workspace_output_guard_accepts_only_checkpoint_folder_for_resume(tmp_path):
+    from axiom.core.training_preflight import resolve_workspace_output
+
+    workspace = tmp_path.resolve()
+    outputs = workspace / "outputs"
+    outputs.mkdir()
+    output = outputs / "adapter"
+    output.mkdir()
+    (output / ".axiom-checkpoints").mkdir()
+
+    with pytest.raises(ValueError, match="new or empty"):
+        resolve_workspace_output("outputs/adapter", workspace)
+
+    assert resolve_workspace_output(
+        "outputs/adapter",
+        workspace,
+        allow_checkpoints=True,
+    ) == output
+
+
+def test_workspace_output_guard_rejects_resume_folder_with_user_files(tmp_path):
+    from axiom.core.training_preflight import resolve_workspace_output
+
+    workspace = tmp_path.resolve()
+    outputs = workspace / "outputs"
+    outputs.mkdir()
+    output = outputs / "adapter"
+    output.mkdir()
+    (output / ".axiom-checkpoints").mkdir()
+    (output / "do-not-overwrite.txt").write_text("keep", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="checkpoint directory"):
+        resolve_workspace_output(
+            "outputs/adapter",
+            workspace,
+            allow_checkpoints=True,
+        )
