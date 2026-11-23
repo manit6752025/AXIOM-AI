@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Activity, Play, Plus, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
 import {
   axiomApi,
@@ -24,8 +24,16 @@ export default function EngineServingProfilesPanel() {
   const [selectedId, setSelectedId] = useState("");
   const [readiness, setReadiness] = useState<Record<string, AxiomEngineServingReadiness>>({});
   const [output, setOutput] = useState("");
+  const [admission, setAdmission] = useState<{
+    queue_position: number;
+    queued: boolean;
+    waited_ms: number;
+    concurrency_limit: 1;
+    queue_limit: number;
+  } | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const generationAbort = useRef<AbortController | null>(null);
 
   const refresh = async () => {
     setBusy("refresh");
@@ -49,6 +57,11 @@ export default function EngineServingProfilesPanel() {
 
   useEffect(() => {
     void refresh();
+  }, []);
+
+  useEffect(() => () => {
+    generationAbort.current?.abort();
+    generationAbort.current = null;
   }, []);
 
   const selectedProfile = profiles.find((profile) => profile.id === selectedId) ?? null;
@@ -102,15 +115,28 @@ export default function EngineServingProfilesPanel() {
 
   const generate = async () => {
     if (!selectedProfile || !prompt.trim()) return;
+    const controller = new AbortController();
+    generationAbort.current = controller;
     setBusy("generate");
     setError("");
     setOutput("");
+    setAdmission(null);
     try {
-      const report = await axiomApi.generateAxiomEngineServingProfile(selectedProfile.id, { prompt });
+      const report = await axiomApi.generateAxiomEngineServingProfile(
+        selectedProfile.id,
+        { prompt },
+        controller.signal,
+      );
       setOutput(report.result.response);
+      setAdmission(report.admission);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Profile generation failed.");
+      if (controller.signal.aborted) {
+        setError("Generation cancellation was sent. Queued requests are removed and active native generation is asked to stop cooperatively.");
+      } else {
+        setError(cause instanceof Error ? cause.message : "Profile generation failed.");
+      }
     } finally {
+      if (generationAbort.current === controller) generationAbort.current = null;
       setBusy("");
     }
   };
@@ -213,6 +239,7 @@ export default function EngineServingProfilesPanel() {
             <span className="module-copy">
               <b>{profile.name}</b>
               <small>{profile.model_path} · {profile.device_preference} · context {profile.context_length.toLocaleString()} · max output {profile.max_new_tokens}</small>
+              <small>{profile.max_concurrent_requests} active worker · {profile.max_queued_requests} queued per profile · {profile.request_timeout_seconds}s total request deadline</small>
               {report && <small>{report.ready ? "Ready for a local generation attempt" : report.problems.join(" · ")} · weights loaded: {report.weights_loaded ? "yes" : "no"}</small>}
             </span>
             <span className={"status-pill " + (report ? (report.ready ? "success" : "warning") : "neutral")}><i />{report ? (report.ready ? "READY" : "NOT READY") : "UNPROBED"}</span>
@@ -237,6 +264,17 @@ export default function EngineServingProfilesPanel() {
       <button type="button" className="button primary-button" onClick={() => void generate()} disabled={busy !== "" || !selectedProfile || !prompt.trim()}>
         <Play size={15} /> {busy === "generate" ? "Generating locally…" : "Generate through profile"}
       </button>
+      {busy === "generate" && <button type="button" className="button secondary-button" onClick={() => generationAbort.current?.abort()}>
+        Cancel generation
+      </button>}
+      {admission && <p className="quiet-note" role="status">
+        {admission.queued
+          ? `Admitted from FIFO queue position ${admission.queue_position}`
+          : "Admitted immediately"}
+        · waited {(admission.waited_ms / 1000).toFixed(2)} s
+        · one active worker
+        · per-profile queue cap {admission.queue_limit}
+      </p>}
       {output && <pre className="local-inference-output" aria-label="Serving profile generated response">{output}</pre>}
       <p className="quiet-note">Profiles persist only configuration. They do not save credentials, custom endpoints, prompts or responses. Readiness is a preflight, not a guarantee of runtime fit or a separate HTTP listener.</p>
     </section>

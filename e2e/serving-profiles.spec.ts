@@ -17,6 +17,8 @@ test("Runtime creates, probes, uses, and deletes a bounded native serving profil
   let profiles: Array<Record<string, unknown>> = [];
   let createPayload: Record<string, unknown> | null = null;
   let generatePayload: Record<string, unknown> | null = null;
+  let generateRequests = 0;
+  let delayNextGeneration = false;
 
   await page.route("**/api/engine/models", (route) =>
     route.fulfill({ json: {
@@ -60,17 +62,35 @@ test("Runtime creates, probes, uses, and deletes a bounded native serving profil
     } });
   });
   await page.route("**/api/engine/serving-profiles/*/generate", async (route) => {
+    generateRequests += 1;
     generatePayload = route.request().postDataJSON() as Record<string, unknown>;
-    await route.fulfill({ json: {
+    const response = {
       schema_version: 1,
       profile: { id: "a".repeat(32), name: "Runtime smoke" },
       request_budget: {
         prompt_characters: 12, prompt_tokens: 8, max_new_tokens: 64,
         requested_context_tokens: 72, context_limit_tokens: 4096,
       },
+      admission: {
+        queue_position: 2,
+        queued: true,
+        waited_ms: 1250,
+        concurrency_limit: 1,
+        queue_limit: 3,
+      },
       result: { response: "Serving profile response stays local." },
       scope: { local_only: true, network_used: false, profile_persisted: false },
-    } });
+    };
+    if (delayNextGeneration) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      try {
+        await route.fulfill({ json: response });
+      } catch {
+        // The caller cancelled the in-flight Fetch request.
+      }
+      return;
+    }
+    await route.fulfill({ json: response });
   });
   await page.route("**/api/engine/serving-profiles/*", async (route) => {
     if (route.request().method() === "DELETE") {
@@ -112,6 +132,14 @@ test("Runtime creates, probes, uses, and deletes a bounded native serving profil
   await expect.poll(() => generatePayload).not.toBeNull();
   expect(generatePayload).toMatchObject({ prompt: "Hello local model" });
   await expect(page.getByLabel("Serving profile generated response")).toContainText("Serving profile response stays local.");
+  await expect(page.getByRole("status").filter({ hasText: "Admitted from FIFO queue position 2" })).toContainText("waited 1.25 s");
+
+  delayNextGeneration = true;
+  await page.getByLabel("Serving profile prompt").fill("Cancel this generation");
+  await page.getByRole("button", { name: "Generate through profile" }).click();
+  await expect.poll(() => generateRequests).toBe(2);
+  await page.getByRole("button", { name: "Cancel generation" }).click();
+  await expect(page.getByRole("alert")).toContainText("Generation cancellation was sent");
 
   await page.getByRole("button", { name: "Delete serving profile Runtime smoke" }).click();
   await expect(page.getByText("0 profile(s)", { exact: true })).toBeVisible();

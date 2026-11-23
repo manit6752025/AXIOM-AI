@@ -3209,10 +3209,14 @@ export const axiomApi = {
   ),
   probeAxiomEngineServingProfile: (id: string) =>
     requestJson<AxiomEngineServingReadiness>("/api/engine/serving-profiles/" + encodeURIComponent(id) + "/readiness", { method: "POST" }),
-  generateAxiomEngineServingProfile: (id: string, input: { prompt: string; max_new_tokens?: number }) =>
+  generateAxiomEngineServingProfile: (
+    id: string,
+    input: { prompt: string; max_new_tokens?: number },
+    signal?: AbortSignal,
+  ) =>
     requestJson<AxiomEngineServingGeneration>(
       "/api/engine/serving-profiles/" + encodeURIComponent(id) + "/generate",
-      { method: "POST", body: JSON.stringify(input) }, 900_000,
+      { method: "POST", body: JSON.stringify(input), signal }, 900_000,
     ),
   deleteAxiomEngineServingProfile: (id: string) =>
     requestJson<{ deleted: AxiomEngineServingProfile; model_files_deleted: false }>(

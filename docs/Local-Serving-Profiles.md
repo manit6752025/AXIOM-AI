@@ -8,7 +8,8 @@ Serving profiles save a bounded configuration for AXIOM's existing native local 
 axiom engine profile create workstation \
   --model-path ~/models/qwen2.5-7b \
   --device auto --memory-mode layer_streaming --precision bf16 \
-  --context-length 8192 --max-new-tokens 512 --json
+  --context-length 8192 --max-new-tokens 512 \\
+  --max-queued-requests 4 --json
 axiom engine profile list --json
 axiom engine profile probe <profile-id> --json
 axiom engine profile run <profile-id> --prompt "Explain the local inference boundary." --json
@@ -23,7 +24,7 @@ Each profile binds to a model and optional LoRA adapter already discovered benea
 
 Profiles bound the configured context window (1–131,072 tokens, further capped by the checkpoint), maximum output (1–2,048 tokens), prompt text (1–12,000 characters), and request time (5–900 seconds). Device, memory mode, and precision are restricted to the options supported by AXIOM Native Engine. Before generation, the native tokenizer inspects the exact prompt and AXIOM rejects requests whose prompt tokens plus requested output exceed the profile context budget or require silent prompt truncation.
 
-The current native runtime has a single global model/request lock. Profiles therefore require exactly one active request and zero queued requests. A concurrent request receives HTTP 429 with `Retry-After: 1`; the profile layer does not accumulate waiting requests. A request timeout or client disconnect signals the engine's cooperative cancellation event.
+The native runtime remains single-worker (one active generation at a time). Each serving profile can opt into a FIFO queue of 0–32 waiting requests; the default is zero and rejects immediately. The admission manager enforces both the selected profile's queue limit and a global ceiling of 32 waiters across profiles in the AXIOM API process. All profiles share the same FIFO order for the single native worker. Requests that exceed either bound receive HTTP 429 with `Retry-After: 1`. Queue wait time counts toward the profile request deadline; expired requests receive HTTP 504 and are removed. A client disconnect while queued removes its ticket; disconnect during generation signals cooperative engine cancellation. Admission metadata in a successful response includes `queue_position`, `queued`, `waited_ms`, `concurrency_limit`, and `queue_limit`. The Runtime panel shows the returned queue position and wait time. The CLI profile runner applies the same per-profile and global queue bounds within that CLI process.
 
 ## Readiness and lifecycle
 
@@ -44,4 +45,4 @@ The workspace-local store is capped at 25 profiles and 128 KiB. The metadata fil
 | `POST` | `/api/engine/serving-profiles/{id}/generate` | Generate under the saved request limits |
 | `DELETE` | `/api/engine/serving-profiles/{id}` | Delete profile metadata only |
 
-Profile generation returns 422 for invalid prompt/context budgets, 409 when the profile is not ready, 429 when the native engine is busy, and 504 when the configured request deadline expires. The route stays local to the AXIOM API; it does not bind a public listener or expose an OpenAI-compatible serving endpoint.
+Profile generation returns 422 for invalid prompt/context budgets, 409 when the profile is not ready, 429 when either admission queue limit is full, 499 when a queued/running client disconnects, and 504 when the configured request deadline expires. The route stays local to the AXIOM API; it does not bind a public listener or expose an OpenAI-compatible serving endpoint.
