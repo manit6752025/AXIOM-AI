@@ -246,7 +246,10 @@ def structured_inference_issues(
         )),
         ("runtime", inference_core, (
             "response_format: dict[str, Any] | None = None",
-            'payload["format"] = validate_json_schema(response_format)',
+            "normalized_schema = validate_json_schema(response_format)",
+            'normalized_schema.pop("$schema", None)',
+            'payload["format"] = normalized_schema',
+            "Return only one JSON value",
         )),
         ("API", inference_api, (
             'class StructuredGenerateRequest(GenerateRequest):',
@@ -260,7 +263,7 @@ def structured_inference_issues(
             '"/api/inference/generate/structured"',
         )),
         ("CLI", cli_source, (
-            '"--schema-file"', "def _load_json_schema_file(", "os.O_NOFOLLOW",
+            '"--schema-file"', "def _load_json_schema_file(", "O_NOFOLLOW",
             "parse_and_validate_json_output(", "structured_output_validated",
         )),
         ("Runtime GUI", panel_source, (
@@ -287,7 +290,7 @@ def structured_inference_issues(
             "test_infer_run_rejects_symlinked_schema_files",
         )),
         ("browser acceptance", e2e_source, (
-            "schema-constrained local inference", '"/api/inference/generate/structured"',
+            "schema-constrained local inference", '"**/api/inference/generate/structured"',
             "SCHEMA VALIDATED", "JSON Schema for structured output",
         )),
         ("documentation", docs_source, (
@@ -1093,7 +1096,7 @@ def inspect(root: Path) -> dict[str, Any]:
         schema_core, inference_core, inference_api, client, ollama_cli,
         inference_panel, schema_tests, inference_core_tests, structured_api_tests,
         (root / "tests/test_cli_inference.py").read_text(encoding="utf-8"),
-        inference_stream_e2e, structured_docs,
+        (root / "e2e/inference.spec.ts").read_text(encoding="utf-8"), structured_docs,
     ))
     inference_stream_e2e = (root / "e2e/inference.spec.ts").read_text(encoding="utf-8")
     for token in ("test_streaming_api_passes_advanced_sampling_options", "test_generate_api_rejects_oversized_context_and_stop_sequence_lists", "test_streaming_inference_emits_ndjson_token_deltas", "test_streaming_inference_sanitizes_runtime_failures"):

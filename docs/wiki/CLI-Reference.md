@@ -20,6 +20,7 @@ installation extras or platform; use the installed `--help` output as the
 final authority for those details.
 
 Prompt template usage, variable types, safety limits, and API examples are in the [Prompt Studio guide](Prompt-Studio.md).
+Structured local JSON output, schema limits, and API examples are in the [Structured Output guide](Structured-Output.md).
 
 ### Complete top-level command index
 
@@ -48,6 +49,7 @@ axiom update --check
 axiom update --auto
 axiom gui --refresh
 axiom infer service status --json
+axiom infer run qwen2.5:0.5b --prompt "Return an answer and confidence." --schema-file ./response.schema.json --num-predict 256 --json
 axiom workspace metadata export --output ./axiom-workspace-metadata.zip
 axiom config validate --path ./axiom.yaml --json
 ```
@@ -67,10 +69,11 @@ control. The API remains bounded by its route schemas and permission policy.
 | Datasets and data quality | `dataset` | `/api/workspace/datasets`, `/api/workspace/dataset-cleaning-preview`, `/api/workspace/dataset-quality` | Datasets |
 | Training plans and saved workflows | `train`, `workflow`, `experiment` | `/api/fine-tuning/jobs`, `/api/workflows`, `/api/workspace/experiments` | Training, Evaluation |
 | Offline evaluation | `evaluation`, `experiment` | `/api/evaluation/runs`, `/api/workspace/experiments` | Evaluation |
-| Local inference and engine | `infer`, `engine`, `system`, `headroom` | `/api/inference/generate`, `/api/inference/status`, `/api/engine/status`, `/api/engine/telemetry` | Runtime |
+| Local inference and engine | `infer`, `engine`, `system`, `headroom` | `/api/inference/generate`, `/api/inference/generate/structured`, `/api/inference/status`, `/api/engine/status`, `/api/engine/telemetry` | Runtime |
 | LLM providers and optimization | `llm`, `ai`, `optimize`, `supercompress` | `/api/llm/providers`, `/api/llm/models`, `/api/llm/chat`, `/api/optimizer/plan` | Runtime, Model Studio |
 | Agents, permissions, and connectors | `agent-profile`, `mcp`, `security`, `integration`, `tools`, `session`, `mobile-bridge` | `/api/agent-profiles`, `/api/security/audit`, `/api/security/tool-permissions`, `/api/diagnostics/runtime-connectors` | Agent Profiles, Settings, API Playground |
 | Prompt engineering | `prompt` | `/api/prompt-templates` | Prompt Studio |
+| Structured local inference | `infer run --schema-file` | `/api/inference/generate/structured` | Runtime → Local model inference |
 
 ## Update and GUI refresh
 

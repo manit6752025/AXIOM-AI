@@ -518,9 +518,18 @@ def run_local_inference(
     }
     if response_format is not None:
         try:
-            payload["format"] = validate_json_schema(response_format)
+            normalized_schema = validate_json_schema(response_format)
         except JsonSchemaError as exc:
             raise ValueError(str(exc)) from None
+        # Ollama accepts the JSON Schema object directly; AXIOM's draft marker
+        # is validation metadata, not an Ollama format keyword.
+        normalized_schema.pop("$schema", None)
+        payload["format"] = normalized_schema
+        payload["prompt"] = (
+            prompt
+            + "\\n\\nReturn only one JSON value that conforms to the provided schema. "
+            "Do not add Markdown, code fences, or commentary."
+        )
     result = _request_json(
         "/api/generate",
         payload=payload,
