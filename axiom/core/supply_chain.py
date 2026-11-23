@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 MAX_DISTRIBUTIONS = 4096
 MAX_RELATIONSHIPS = 20_000
+MAX_TOTAL_REQUIREMENTS = 50_000
 MAX_AUDIT_FINDINGS = 20_000
 MAX_AUDIT_OUTPUT_BYTES = 8 * 1024 * 1024
 MAX_AUDIT_STDERR_BYTES = 1 * 1024 * 1024
@@ -88,8 +89,14 @@ def generate_spdx_sbom(
 
     packages_by_name: dict[str, dict[str, Any]] = {}
     requirements_by_name: dict[str, list[str]] = {}
+    total_requirements = 0
     for distribution in found:
         name, version, requirements = _distribution_values(distribution)
+        total_requirements += len(requirements)
+        if total_requirements > MAX_TOTAL_REQUIREMENTS:
+            raise SupplyChainError(
+                f"Installed dependency metadata exceeds {MAX_TOTAL_REQUIREMENTS} requirement entries."
+            )
         canonical = _canonical_name(name)
         if canonical in packages_by_name:
             existing = packages_by_name[canonical]
@@ -173,18 +180,14 @@ def generate_spdx_sbom(
             "annotationDate": created,
             "annotationType": "OTHER",
             "annotator": "Tool: AXIOM-AI",
-            "comment": f"Inventory contains {len(packages)} installed distributions. Package file contents and host paths were not collected.",
+            "comment": (
+                f"AXIOM inventory: schema_version=1; package_count={len(packages)}; "
+                f"relationship_count={len(relationships)}; content_sha256={content_fingerprint}; "
+                "scope=active Python environment, installed distribution metadata only; "
+                "file_contents_collected=false; host_paths_collected=false; "
+                "network_access_performed=false; package_code_executed=false."
+            ),
         }],
-        "axiom": {
-            "schema_version": 1,
-            "package_count": len(packages),
-            "relationship_count": len(relationships),
-            "content_sha256": content_fingerprint,
-            "scope": "active Python environment; installed distribution metadata only",
-            "file_contents_collected": False,
-            "host_paths_collected": False,
-            "network_access_performed": False,
-        },
     }
 
 
@@ -331,6 +334,10 @@ def _parse_pip_audit_output(payload: Any, *, generated_at: str, scanner_version:
                     f"Dependency audit finding inventory exceeds {MAX_AUDIT_FINDINGS} entries."
                 )
 
+    if (exit_code == 0 and findings) or (exit_code == 1 and not findings):
+        raise SupplyChainError(
+            "Dependency scanner exit status conflicts with its vulnerability inventory; no complete conclusion was produced."
+        )
     findings.sort(key=lambda item: (item["package"].casefold(), item["id"]))
     vulnerable_packages = {(item["package"], item["installed_version"]) for item in findings}
     return {
