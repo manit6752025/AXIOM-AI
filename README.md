@@ -127,7 +127,7 @@ Downloads and checksums are on [GitHub Releases](https://github.com/manit6752025
 | **Datasets** | Validate JSONL, find duplicates, estimate tokens, write a cleaned copy | `axiom dataset validate ./data/train.jsonl` |
 | **Hardware** | Detect CPU, RAM, GPU, VRAM, and estimate which model sizes fit | `axiom system info` |
 | **Training** | Hardware-aware plans, saved experiments, optional local LoRA fine-tuning | `axiom train plan 7 --method qlora` |
-| **AXIOM Engine** | Direct local inference and bounded local text embeddings; no Ollama needed | `axiom engine status` · `axiom engine embed` |
+| **AXIOM Engine** | Direct local inference, text embeddings, and cross-encoder reranking; no Ollama needed | `axiom engine status` · `axiom engine embed` |
 | **Ollama** | Local service control, model pulls, streaming, structured JSON Schema output and benchmarking | `axiom infer status` · `axiom infer run --schema-file ./response.schema.json` |
 | **Model Studio** | Search and install GGUF models, convert to GGUF | `axiom model studio wizard` |
 | **Prompt Studio** | Build typed, versioned prompt templates and safely preview literal substitutions | `axiom prompt list` |
@@ -215,6 +215,18 @@ axiom engine embed-unload
 ~~~
 
 Embedding generation is local-only, uses trusted safetensors checkpoints, and does not persist input text. See [Local Embeddings](docs/Local-Embeddings.md) for bounds and limitations.
+
+</details>
+
+<details>
+<summary><b>Local reranking</b></summary>
+
+~~~bash
+axiom engine rerank --model-path ./models/my-reranker --query "local AI" --document "First result" --document "Second result" --json
+axiom engine rerank-unload
+~~~
+
+Cross-encoder scores and ranks are computed locally. Scores are ranking signals, not calibrated probabilities; source documents are not returned or saved. See [Local Reranking](docs/Local-Reranking.md).
 
 </details>
 

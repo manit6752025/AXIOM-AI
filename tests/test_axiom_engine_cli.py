@@ -749,3 +749,58 @@ def test_engine_embed_cli_supports_text_file_and_rejects_conflicting_inputs(tmp_
     ])
     assert conflict.exit_code != 0
     assert "but not both" in conflict.output
+
+
+
+def test_engine_rerank_cli_prints_only_scores_and_indices(monkeypatch, tmp_path):
+    model = tmp_path / "reranker"
+    model.mkdir()
+    expected = {
+        "model": {"name": "tiny-reranker", "score_mode": "sigmoid"},
+        "request": {"document_count": 2},
+        "device": "cpu",
+        "results": [
+            {"rank": 1, "document_index": 2, "score": 0.9, "document_characters": 5},
+            {"rank": 2, "document_index": 1, "score": 0.1, "document_characters": 5},
+        ],
+        "scope_note": "Local ranking signal only.",
+    }
+    captured = {}
+
+    def fake_rerank(model_path, query, documents, **kwargs):
+        captured.update(model_path=model_path, query=query, documents=documents, **kwargs)
+        return expected
+
+    monkeypatch.setattr(engine_cli, "rerank_local_documents", fake_rerank)
+    result = runner.invoke(engine_app, [
+        "rerank", "--model-path", str(model), "--query", "secret query",
+        "--document", "secret one", "--document", "secret two", "--json",
+    ])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == expected
+    assert "secret query" not in result.stdout
+    assert "secret one" not in result.stdout
+    assert captured["documents"] == ["secret one", "secret two"]
+
+
+def test_engine_rerank_cli_reads_bounded_json_document_file(monkeypatch, tmp_path):
+    model = tmp_path / "reranker"
+    model.mkdir()
+    source = tmp_path / "candidates.json"
+    source.write_text('["first candidate", "second candidate"]', encoding="utf-8")
+    seen = []
+    monkeypatch.setattr(
+        engine_cli, "rerank_local_documents",
+        lambda model_path, query, documents, **kwargs: (
+            seen.append(documents)
+            or {"model": {"name": "tiny", "score_mode": "sigmoid"},
+                "request": {"document_count": 2}, "results": [
+                    {"rank": 1, "document_index": 1, "score": 0.5, "document_characters": 15}],
+                "device": "cpu", "scope_note": "local"}
+        ),
+    )
+    result = runner.invoke(engine_app, [
+        "rerank", "--model-path", str(model), "--query", "q", "--documents-file", str(source),
+    ])
+    assert result.exit_code == 0, result.output
+    assert seen == [["first candidate", "second candidate"]]
