@@ -32,8 +32,8 @@ test("Diagnostics downloads and restores a full workspace into a new isolated wo
         workspaces: restored ? [defaultWorkspace, restoredWorkspace] : [defaultWorkspace],
         scope_note: "Workspace filesystem paths remain local and are not returned by this API.",
       } });
-    } else if (url.pathname === `/api/workspaces/${defaultWorkspace.id}/backup` && request.method() === "GET") {
-      downloadedWorkspaceId = defaultWorkspace.id;
+    } else if (/^\/api\/workspaces\/[^/]+\/backup$/.test(url.pathname) && request.method() === "GET") {
+      downloadedWorkspaceId = url.pathname.split("/")[3];
       await route.fulfill({
         status: 200,
         contentType: "application/zip",
@@ -102,6 +102,7 @@ test("Diagnostics downloads and restores a full workspace into a new isolated wo
   });
 
   await ensureAuthenticated(page);
+  await page.evaluate((workspaceId) => localStorage.setItem("axiom-active-workspace", workspaceId), defaultWorkspace.id);
   await page.goto("/?page=diagnostics");
   await expect(page.getByRole("heading", { name: "Full workspace backup and restore" })).toBeVisible();
 
