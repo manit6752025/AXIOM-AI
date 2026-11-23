@@ -1,6 +1,7 @@
 """CLI commands for AXIOM's direct local model engine."""
 from __future__ import annotations
 
+import base64
 import json
 import time
 from pathlib import Path
@@ -34,8 +35,15 @@ from axiom.core.embeddings import EmbeddingEngineError, MAX_EMBEDDING_TOTAL_CHAR
 from axiom.core.reranking import MAX_RERANK_TOTAL_CHARS, RerankerError, rerank_local_documents, unload_local_reranker
 from axiom.core.benchmark_profiles import BenchmarkProfileError, BenchmarkProfileStore
 from axiom.core.inference import InferenceRuntimeError, run_local_vision
+from axiom.core.local_speech import (
+    LocalSpeechError,
+    synthesize_local_speech,
+    transcribe_local_audio,
+    write_speech_output_create_only,
+)
 
 engine_app = typer.Typer(help="Run causal language models directly through AXIOM's local engine.", no_args_is_help=True)
+speech_app = typer.Typer(help="Run bounded speech-to-text and text-to-speech with local installed runtimes.", no_args_is_help=True)
 console = Console()
 _CLI_PROFILE_ADMISSION = ENGINE_REQUEST_ADMISSION
 
@@ -1233,6 +1241,73 @@ def engine_benchmark_requirements_cli(
         raise typer.Exit(code=2)
 
 
+
+
+
+@speech_app.command("transcribe")
+def speech_transcribe(
+    model_path: str = typer.Option(..., "--model-path", help="Trusted local whisper.cpp .bin model file."),
+    audio_path: str = typer.Option(..., "--audio-path", help="Workspace WAV/MP3/FLAC/OGG file under data/."),
+    language: str = typer.Option("auto", "--language", help="Whisper language code or auto."),
+    timeout_seconds: int = typer.Option(300, "--timeout", min=10, max=600),
+    threads: int = typer.Option(4, "--threads", min=1, max=16),
+    use_accelerator: bool = typer.Option(False, "--accelerator/--cpu", help="Allow whisper.cpp to select an available accelerator; CPU is the default."),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Transcribe workspace audio with an installed local whisper.cpp runtime."""
+    try:
+        report = transcribe_local_audio(
+            model_path,
+            audio_path,
+            workspace_root=active_workspace_root(),
+            language=language,
+            timeout_seconds=timeout_seconds,
+            threads=threads,
+            use_accelerator=use_accelerator,
+        )
+    except (ValueError, LocalSpeechError) as exc:
+        _fail(str(exc))
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, allow_nan=False))
+    else:
+        console.print(Panel(report["transcript"], title=f"Local transcription · {report['model']}"))
+        console.print(f"Audio: {report['audio']['format'].upper()} · {report['audio']['size_bytes']:,} bytes")
+        console.print(report["scope_note"])
+
+
+@speech_app.command("synthesize")
+def speech_synthesize(
+    model_path: str = typer.Option(..., "--model-path", help="Trusted local Piper .onnx voice model."),
+    text: str = typer.Option(..., "--text", help="Text to synthesize locally (maximum 4,096 characters)."),
+    output_path: str = typer.Option(..., "--output", help="New WAV output path under workspace data/."),
+    speaker_id: int = typer.Option(0, "--speaker", min=0, max=255),
+    timeout_seconds: int = typer.Option(180, "--timeout", min=10, max=300),
+    use_accelerator: bool = typer.Option(False, "--accelerator/--cpu", help="Use Piper CUDA when installed; CPU is the default."),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Synthesize text with an installed local Piper voice; never overwrites files."""
+    try:
+        report = synthesize_local_speech(
+            model_path,
+            text,
+            speaker_id=speaker_id,
+            timeout_seconds=timeout_seconds,
+            use_accelerator=use_accelerator,
+        )
+        audio = base64.b64decode(report["audio_base64"], validate=True)
+        saved = write_speech_output_create_only(output_path, active_workspace_root(), audio)
+    except (ValueError, OSError, LocalSpeechError) as exc:
+        _fail(str(exc))
+    safe_report = {key: value for key, value in report.items() if key != "audio_base64"}
+    safe_report["output"] = saved
+    if json_output:
+        typer.echo(json.dumps(safe_report, ensure_ascii=False, allow_nan=False))
+    else:
+        console.print(f"Speech audio saved to [cyan]{saved['path']}[/cyan] · {saved['size_bytes']:,} bytes")
+        console.print(report["scope_note"])
+
+
+engine_app.add_typer(speech_app, name="speech")
 
 @engine_app.command("vision")
 def engine_vision(
