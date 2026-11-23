@@ -786,3 +786,34 @@ def test_config_show_json_rejects_oversized_input_before_parsing(tmp_path: Path)
     result = runner.invoke(app, ["config", "show", "--path", str(config), "--json"])
     assert result.exit_code != 0
     assert "256 KiB" in result.output
+
+
+
+def test_info_json_reports_local_environment_without_collecting_secrets(tmp_path: Path, monkeypatch) -> None:
+    from axiom.cli import extended as extended_cli
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "axiom.yaml").write_text("name: local-test\n", encoding="utf-8")
+    monkeypatch.setattr(extended_cli, "AXIOM_VERSION", "0.9.0-test")
+    monkeypatch.setattr(extended_cli, "package_version", lambda: "0.9.0")
+    monkeypatch.setattr(extended_cli.platform, "python_version", lambda: "3.12.1")
+    monkeypatch.setattr(extended_cli.platform, "platform", lambda: "TestOS-1")
+    monkeypatch.setattr(extended_cli.sys, "executable", "/usr/bin/python-test")
+    monkeypatch.setattr(extended_cli, "git_output", lambda *args: "implement/roadmap")
+    monkeypatch.setenv("AXIOM_API_TOKEN", "never-return-this-token")
+
+    result = runner.invoke(app, ["info", "--json"])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["version"] == "0.9.0-test"
+    assert payload["package_version"] == "0.9.0"
+    assert payload["python_version"] == "3.12.1"
+    assert payload["platform"] == "TestOS-1"
+    assert payload["executable"] == "/usr/bin/python-test"
+    assert payload["working_directory"] == str(tmp_path)
+    assert payload["project_config_present"] is True
+    assert payload["git_branch"] == "implement/roadmap"
+    assert "never-return-this-token" not in result.stdout
+    assert "AXIOM_API_TOKEN" not in result.stdout

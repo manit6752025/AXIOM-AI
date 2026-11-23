@@ -37,6 +37,7 @@ Structured local JSON output, schema limits, and API examples are in the [Struct
 Useful command examples:
 
 ```bash
+axiom info --json
 axiom model list --json
 axiom dataset inspect ./data/train.jsonl --json
 axiom dataset profile ./data/train.jsonl --json
@@ -48,6 +49,7 @@ axiom check --json
 axiom tools list --json
 axiom tools doctor --json
 axiom tools plan claude-code --json
+axiom headroom status --json
 axiom knowledge base create "Engineering notes"
 axiom knowledge ingest BASE_ID documents/guide.md
 axiom knowledge search BASE_ID --query "local inference" --json

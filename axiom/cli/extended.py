@@ -359,9 +359,27 @@ def register(app, model_app, dataset_app) -> None:
             raise typer.Exit(code=1)
 
     @app.command("info")
-    def info() -> None:
+    def info(
+        json_output: bool = typer.Option(False, "--json", help="Emit a versioned local environment summary."),
+    ) -> None:
         """Show local AXIOM and Python environment information."""
         cwd = Path.cwd()
+        project_config_present = (cwd / "axiom.yaml").exists()
+        git_branch = git_output("branch", "--show-current") or None
+        if json_output:
+            typer.echo(json.dumps({
+                "schema_version": 1,
+                "version": AXIOM_VERSION,
+                "package_version": package_version(),
+                "python_version": platform.python_version(),
+                "platform": platform.platform(),
+                "executable": sys.executable,
+                "working_directory": str(cwd),
+                "project_config_present": project_config_present,
+                "git_branch": git_branch,
+                "scope_note": "Local process and working-directory metadata only; environment variables, credentials, and network state are not collected.",
+            }, ensure_ascii=False, indent=2, sort_keys=True))
+            return
 
         console.print(
             Panel.fit(
@@ -372,9 +390,9 @@ def register(app, model_app, dataset_app) -> None:
                 f"Executable: {sys.executable}\n"
                 f"Working directory: {cwd}\n"
                 f"Project config: "
-                f"{'found' if (cwd / 'axiom.yaml').exists() else 'not found'}\n"
+                f"{'found' if project_config_present else 'not found'}\n"
                 f"Git branch: "
-                f"{git_output('branch', '--show-current') or 'n/a'}",
+                f"{git_branch or 'n/a'}",
                 title="AXIOM INFO",
             )
         )

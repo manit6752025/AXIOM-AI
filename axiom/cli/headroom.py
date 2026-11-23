@@ -32,6 +32,7 @@ def status_payload() -> dict[str, object]:
 
     executable = _executable()
     return {
+        "schema_version": 1,
         "id": "headroom",
         "name": "Headroom",
         "kind": "optional-local-proxy",

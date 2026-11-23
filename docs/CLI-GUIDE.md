@@ -216,6 +216,7 @@ Commands that support `--json` emit a versioned payload on standard output.
 For example:
 
 ```bash
+axiom info --json
 axiom status --json
 axiom summary --json
 axiom model list --json
@@ -227,11 +228,15 @@ axiom ai plan --model ./models/my-model --json
 axiom project validate --json
 axiom check --json
 axiom tools list --json
+axiom config show --path ./axiom.yaml --json
 axiom config validate --path ./axiom.yaml --json
 axiom tools doctor --json
 axiom tools plan claude-code --json
+axiom headroom status --json
 axiom engine discover --json
 ```
+
+`axiom info --json` and `axiom headroom status --json` provide versioned local environment/availability records. They do not collect environment-variable values or verify vendor authentication.
 
 Configuration JSON uses safe YAML parsing, rejects symlinks and files over 256 KiB, and redacts likely credential values by key name. It does not return the original raw YAML document.
 

@@ -39,6 +39,7 @@ def test_headroom_status_json_is_secret_free_and_machine_readable(monkeypatch):
 
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
     assert payload["available"] is True
     assert payload["executable"] == "/usr/local/bin/headroom"
     assert payload["kind"] == "optional-local-proxy"
