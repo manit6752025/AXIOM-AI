@@ -685,3 +685,54 @@ def test_ai_optimization_plan_json_uses_versioned_plan_contract(monkeypatch) -> 
     assert payload["plan"]["model"] == "models/tiny"
     assert payload["plan"]["recommended_quantization"] == "int4"
     assert "must be measured" in payload["scope_note"]
+
+
+
+def test_project_validate_json_reports_missing_paths_and_nonzero_status(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "axiom.yaml").write_text("name: test\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# Test\n", encoding="utf-8")
+    (tmp_path / "data").mkdir()
+    result = runner.invoke(app, ["project", "validate", "--json"])
+    assert result.exit_code == 1, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["valid"] is False
+    assert payload["root"] == str(tmp_path)
+    assert payload["missing_paths"] == ["models", "experiments", "evaluations", "outputs"]
+
+
+def test_project_validate_json_accepts_complete_project(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    for item in ("axiom.yaml", "README.md"):
+        (tmp_path / item).write_text("test\n", encoding="utf-8")
+    for item in ("data", "models", "experiments", "evaluations", "outputs"):
+        (tmp_path / item).mkdir()
+    result = runner.invoke(app, ["project", "validate", "--json"])
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["valid"] is True
+    assert payload["missing_paths"] == []
+
+
+def test_check_json_distinguishes_non_project_and_ready_project(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["check", "--json"])
+    assert result.exit_code == 0, result.stdout
+    empty = json.loads(result.stdout)
+    assert empty["schema_version"] == 1
+    assert empty["status"] == "not_project"
+    assert empty["project_detected"] is False
+    assert "axiom.yaml" in empty["missing_paths"]
+
+    (tmp_path / "axiom.yaml").write_text("name: test\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# Test\n", encoding="utf-8")
+    for item in ("data", "models", "experiments", "evaluations", "outputs"):
+        (tmp_path / item).mkdir()
+    result = runner.invoke(app, ["check", "--json"])
+    assert result.exit_code == 0, result.stdout
+    ready = json.loads(result.stdout)
+    assert ready["status"] == "ready"
+    assert ready["project_detected"] is True
+    assert ready["missing_paths"] == []
