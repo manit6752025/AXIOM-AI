@@ -11,9 +11,14 @@ def test_tools_list_is_local_and_machine_readable(monkeypatch):
     result = runner.invoke(app, ["tools", "list", "--json"])
 
     assert result.exit_code == 0, result.stdout
-    assert '"id": "codex"' in result.stdout
-    assert '"id": "zai-glm"' in result.stdout
-    assert "credential" not in result.stdout.lower()
+    payload = __import__("json").loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["platform"] == "linux"
+    assert payload["total"] == len(payload["tools"])
+    assert {item["id"] for item in payload["tools"]} >= {"codex", "zai-glm"}
+    assert "scope_note" in payload
+    assert "credential" in payload["scope_note"].lower()
+    assert all("executables" in item and "status" in item for item in payload["tools"])
 
 
 def test_tools_plan_shows_vendor_command_without_running_it(monkeypatch):

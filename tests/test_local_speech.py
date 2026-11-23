@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import base64
+import io
 import wave
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -91,17 +91,27 @@ def test_transcribe_uses_only_local_whisper_cli_and_bounded_workspace_audio(tmp_
     monkeypatch.setenv("AXIOM_SECRET_TOKEN", "must-not-be-inherited")
     observed = {}
 
-    def fake_run(command, **kwargs):
-        observed["command"] = command
-        observed["kwargs"] = kwargs
-        input_path = Path(command[command.index("-f") + 1])
-        observed["audio"] = input_path.read_bytes()
-        prefix = command[command.index("-of") + 1]
-        Path(prefix + ".txt").write_text("  Hello from local speech.\\n", encoding="utf-8")
-        assert kwargs["env"].get("AXIOM_SECRET_TOKEN") is None
-        return SimpleNamespace(returncode=0)
+    class FakeProcess:
+        def __init__(self, command, **kwargs):
+            observed["command"] = command
+            observed["kwargs"] = kwargs
+            input_path = Path(command[command.index("-f") + 1])
+            observed["audio"] = input_path.read_bytes()
+            prefix = command[command.index("-of") + 1]
+            Path(prefix + ".txt").write_text("  Hello from local speech.\\n", encoding="utf-8")
+            assert kwargs["env"].get("AXIOM_SECRET_TOKEN") is None
+            self.stderr = io.BytesIO(b"")
+            self.stdin = None
+            self.returncode = 0
 
-    monkeypatch.setattr(local_speech.subprocess, "run", fake_run)
+        def wait(self, timeout=None):
+            observed["timeout"] = timeout
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(local_speech.subprocess, "Popen", FakeProcess)
     report = local_speech.transcribe_local_audio(
         str(model), "data/question.wav", workspace_root=root,
         language="en", timeout_seconds=90, threads=2,
@@ -116,8 +126,9 @@ def test_transcribe_uses_only_local_whisper_cli_and_bounded_workspace_audio(tmp_
     assert observed["command"][0] == str(executable)
     assert "-ng" in observed["command"]
     assert observed["kwargs"]["shell"] is False
-    assert observed["kwargs"]["timeout"] == 90
+    assert observed["timeout"] == 90
     assert observed["kwargs"]["stdout"] == local_speech.subprocess.DEVNULL
+    assert observed["kwargs"]["stderr"] == local_speech.subprocess.PIPE
     assert not Path(observed["command"][observed["command"].index("-f") + 1]).exists()
 
 
@@ -174,16 +185,41 @@ def test_synthesize_uses_local_piper_and_returns_bounded_wav(tmp_path, monkeypat
     wav_data = _wav_bytes()
     observed = {}
 
-    def fake_run(command, **kwargs):
-        observed["command"] = command
-        observed["kwargs"] = kwargs
-        output = Path(command[command.index("--output_file") + 1])
-        output.write_bytes(wav_data)
-        assert kwargs["input"] == "Hello AXIOM.".encode()
-        assert kwargs["env"]["HOME"] != str(Path.home())
-        return SimpleNamespace(returncode=0)
+    class FakeInput:
+        def __init__(self):
+            self.value = bytearray()
+            self.closed = False
 
-    monkeypatch.setattr(local_speech.subprocess, "run", fake_run)
+        def write(self, payload):
+            self.value.extend(payload)
+            return len(payload)
+
+        def flush(self):
+            return None
+
+        def close(self):
+            self.closed = True
+
+    class FakeProcess:
+        def __init__(self, command, **kwargs):
+            observed["command"] = command
+            observed["kwargs"] = kwargs
+            output = Path(command[command.index("--output_file") + 1])
+            output.write_bytes(wav_data)
+            assert kwargs["env"]["HOME"] != str(Path.home())
+            self.stdin = FakeInput()
+            observed["process_input"] = self.stdin
+            self.stderr = io.BytesIO()
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            observed["timeout"] = timeout
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(local_speech.subprocess, "Popen", FakeProcess)
     report = local_speech.synthesize_local_speech(str(model), "Hello AXIOM.", speaker_id=1)
     assert report["engine"] == "piper"
     assert base64.b64decode(report["audio_base64"]) == wav_data
@@ -194,7 +230,9 @@ def test_synthesize_uses_local_piper_and_returns_bounded_wav(tmp_path, monkeypat
     assert report["privacy"]["text_persisted_by_axiom"] is False
     assert "--cuda" not in observed["command"]
     assert observed["kwargs"]["shell"] is False
-    assert observed["kwargs"]["timeout"] == 180
+    assert observed["timeout"] == 180
+    assert observed["kwargs"]["stderr"] == local_speech.subprocess.PIPE
+    assert bytes(observed["process_input"].value) == b"Hello AXIOM."
 
 
 def test_synthesize_rejects_invalid_text_options_and_missing_runtime(tmp_path, monkeypatch):
@@ -224,3 +262,66 @@ def test_speech_output_is_create_only_and_workspace_scoped(tmp_path, monkeypatch
         local_speech.write_speech_output_create_only("data/speech.wav", root, audio)
     with pytest.raises(ValueError):
         local_speech.write_speech_output_create_only("../outside.wav", root, audio)
+
+
+
+def test_local_speech_stderr_is_drained_but_only_a_fixed_prefix_is_retained(tmp_path, monkeypatch):
+    executable = tmp_path / "whisper-cli"
+    executable.write_text("stub", encoding="utf-8")
+    emitted = b"runtime diagnostic " + (b"x" * 256_000)
+    class InspectableBytesIO(io.BytesIO):
+        def close(self):
+            # Keep the consumed-byte cursor observable after the parent closes the pipe.
+            return None
+
+    stream = InspectableBytesIO(emitted)
+
+    class FakeProcess:
+        stdin = None
+        stderr = stream
+        returncode = 2
+
+        def wait(self, timeout=None):
+            assert timeout == 10
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(local_speech.subprocess, "Popen", lambda *_args, **_kwargs: FakeProcess())
+    with pytest.raises(local_speech.LocalSpeechError, match="runtime diagnostic") as raised:
+        local_speech._run_local_process(
+            str(executable), [], temporary_root=tmp_path, timeout_seconds=10,
+        )
+    assert stream.tell() == len(emitted)
+    assert len(str(raised.value)) <= 450
+
+
+def test_local_speech_timeout_kills_child_and_releases_single_flight_lock(tmp_path, monkeypatch):
+    executable = tmp_path / "whisper-cli"
+    executable.write_text("stub", encoding="utf-8")
+
+    class FakeProcess:
+        stdin = None
+        stderr = io.BytesIO()
+        returncode = None
+        killed = False
+
+        def wait(self, timeout=None):
+            if timeout is not None:
+                raise local_speech.subprocess.TimeoutExpired("whisper-cli", timeout)
+            return self.returncode
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+
+    process = FakeProcess()
+    monkeypatch.setattr(local_speech.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    with pytest.raises(local_speech.LocalSpeechError, match="exceeded its configured time limit"):
+        local_speech._run_local_process(
+            str(executable), [], temporary_root=tmp_path, timeout_seconds=10,
+        )
+    assert process.killed is True
+    assert local_speech._SPEECH_PROCESS_LOCK.acquire(blocking=False)
+    local_speech._SPEECH_PROCESS_LOCK.release()

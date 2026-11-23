@@ -203,10 +203,17 @@ class BatchGenerateRequest(BaseModel):
 
 class QuantizationEstimateRequest(BaseModel):
     model_path: str = Field(min_length=1, max_length=4096)
-    context_length: int = Field(default=4096, ge=1, le=131072)
-    batch_size: int = Field(default=1, ge=1, le=16)
+    context_length: int = Field(default=4096, ge=1, le=131072, strict=True)
+    batch_size: int = Field(default=1, ge=1, le=16, strict=True)
     ram_budget_gib: float | None = Field(default=None, ge=0.1, le=2048)
     vram_budget_gib: float | None = Field(default=None, ge=0.1, le=2048)
+
+    @field_validator("ram_budget_gib", "vram_budget_gib", mode="before")
+    @classmethod
+    def memory_budgets_must_not_be_boolean(cls, value: Any) -> Any:
+        if isinstance(value, bool):
+            raise ValueError("Memory budgets must be numeric GiB values, not booleans.")
+        return value
 
     @field_validator("model_path", mode="before")
     @classmethod

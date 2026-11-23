@@ -24,6 +24,7 @@ MAX_TRANSCRIPT_CHARS = 65_536
 MAX_SYNTHESIS_TEXT_CHARS = 4_096
 MAX_SYNTHESIS_WAV_BYTES = 12 * 1024 * 1024
 MAX_SPEECH_TIMEOUT_SECONDS = 600
+MAX_SPEECH_STDERR_CAPTURE_BYTES = 4096
 _LANGUAGE = re.compile(r"^(?:auto|[a-z]{2,3})$")
 _SPEAKER_ID_MAX = 255
 _SPEECH_PROCESS_LOCK = threading.Lock()
@@ -149,6 +150,41 @@ def _safe_environment(executable: str, temporary_root: Path) -> dict[str, str]:
     return environment
 
 
+def _drain_capped_stderr(stream: Any, captured: bytearray) -> None:
+    """Drain the entire child pipe while retaining only a small diagnostic prefix."""
+    try:
+        while True:
+            chunk = stream.read(4096)
+            if not chunk:
+                break
+            remaining = MAX_SPEECH_STDERR_CAPTURE_BYTES - len(captured)
+            if remaining > 0:
+                captured.extend(chunk[:remaining])
+    except (OSError, ValueError):
+        return
+
+
+def _write_child_stdin(stream: Any, payload: bytes) -> None:
+    """Send the small, bounded TTS input without blocking process supervision."""
+    try:
+        view = memoryview(payload)
+        while view:
+            written = stream.write(view)
+            if written is None or written <= 0:
+                break
+            view = view[written:]
+        stream.flush()
+    except (BrokenPipeError, OSError, ValueError):
+        # A runtime may exit before consuming all text; its exit status is handled
+        # by the supervising thread below.
+        pass
+    finally:
+        try:
+            stream.close()
+        except (OSError, ValueError):
+            pass
+
+
 def _run_local_process(
     executable: str,
     arguments: list[str],
@@ -161,33 +197,97 @@ def _run_local_process(
     if not _SPEECH_PROCESS_LOCK.acquire(blocking=False):
         raise LocalSpeechError("Another local speech task is active; retry after it finishes.")
     try:
-        with tempfile.TemporaryFile(mode="w+b") as stderr_file:
+        try:
+            process = subprocess.Popen(
+                [executable, *arguments],
+                cwd=temporary_root,
+                env=_safe_environment(executable, temporary_root),
+                stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                shell=False,
+            )
+        except OSError:
+            raise LocalSpeechError("The local speech executable could not be started.") from None
+
+        if process.stderr is None:
+            if process.stdin is not None:
+                process.stdin.close()
+            process.kill()
+            process.wait()
+            raise LocalSpeechError("The local speech process did not expose a diagnostic pipe.")
+
+        captured_stderr = bytearray()
+        reader = threading.Thread(
+            target=_drain_capped_stderr,
+            args=(process.stderr, captured_stderr),
+            name="axiom-speech-stderr",
+            daemon=True,
+        )
+        reader.start()
+
+        writer: threading.Thread | None = None
+        if input_text is not None and process.stdin is not None:
+            writer = threading.Thread(
+                target=_write_child_stdin,
+                args=(process.stdin, input_text.encode("utf-8")),
+                name="axiom-speech-stdin",
+                daemon=True,
+            )
+            writer.start()
+        elif process.stdin is not None:
+            process.stdin.close()
+
+        try:
+            return_code = process.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            process.kill()
             try:
-                result = subprocess.run(
-                    [executable, *arguments],
-                    cwd=temporary_root,
-                    env=_safe_environment(executable, temporary_root),
-                    stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
-                    input=input_text.encode("utf-8") if input_text is not None else None,
-                    stdout=subprocess.DEVNULL,
-                    stderr=stderr_file,
-                    timeout=timeout_seconds,
-                    check=False,
-                    shell=False,
-                )
-            except subprocess.TimeoutExpired:
-                raise LocalSpeechError("The local speech process exceeded its configured time limit.") from None
+                process.wait()
             except OSError:
-                raise LocalSpeechError("The local speech executable could not be started.") from None
-            stderr_file.seek(0)
-            detail = stderr_file.read(4097).decode("utf-8", errors="replace").replace("\x00", "")[:1000]
+                pass
+            raise LocalSpeechError("The local speech process exceeded its configured time limit.") from None
+        except OSError:
+            process.kill()
+            try:
+                process.wait()
+            except OSError:
+                pass
+            raise LocalSpeechError("The local speech process could not be supervised safely.") from None
+        finally:
+            if writer is not None:
+                writer.join(timeout=5)
+                if writer.is_alive() and process.stdin is not None:
+                    try:
+                        process.stdin.close()
+                    except (OSError, ValueError):
+                        pass
+                    writer.join(timeout=1)
+            elif process.stdin is not None:
+                try:
+                    process.stdin.close()
+                except (OSError, ValueError):
+                    pass
+            reader.join(timeout=5)
+            if reader.is_alive():
+                try:
+                    process.stderr.close()
+                except (OSError, ValueError):
+                    pass
+                reader.join(timeout=1)
+            try:
+                process.stderr.close()
+            except (OSError, ValueError):
+                pass
+
+        detail = bytes(captured_stderr).decode("utf-8", errors="replace").replace("\x00", "")[:1000]
+        if return_code != 0:
+            safe_detail = " ".join(detail.split())[:400]
+            raise LocalSpeechError(
+                "The local speech process failed." + (f" {safe_detail}" if safe_detail else "")
+            )
     finally:
         _SPEECH_PROCESS_LOCK.release()
-    if result.returncode != 0:
-        safe_detail = " ".join(detail.split())[:400]
-        raise LocalSpeechError(
-            "The local speech process failed." + (f" {safe_detail}" if safe_detail else "")
-        )
 
 
 def _workspace_audio(image_path: str, workspace_root: Path) -> tuple[Path, bytes]:
