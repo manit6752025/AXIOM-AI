@@ -34,3 +34,5 @@ def test_rerank_input_validation_enforces_candidate_query_and_device_bounds():
         validate_rerank_inputs("query", ["one"], batch_size=17)
     with pytest.raises(ValueError, match="Device"):
         validate_rerank_inputs("query", ["one"], device="remote")
+    with pytest.raises(ValueError, match="Device"):
+        validate_rerank_inputs("query", ["one"], device=[])

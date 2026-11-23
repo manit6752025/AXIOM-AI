@@ -69,11 +69,16 @@ maximum, and contributing run IDs.
 When each group has at least two complete replicates, AXIOM computes a
 two-sided Welch unequal-variance t-test and reports its statistic, degrees of
 freedom, and p-value. With fewer than two replicates in either group, the
-comparison remains descriptive and the p-value is `null`. Degenerate
-zero-variance groups are reported explicitly. Treat the test as exploratory:
-it assumes independent replicates, and it does not prove causal improvement,
-training execution, or semantic quality. The comparison is read-only and does
-not run inference or alter experiment snapshots.
+comparison remains descriptive and the p-value is `null` with status
+`insufficient_replicates`. If both groups have zero within-group variance,
+the test statistic, degrees of freedom, and p-value are mathematically
+undefined; AXIOM reports status `degenerate_zero_variance` and an explanatory
+note instead of manufacturing a p-value. A single zero-variance group does
+not by itself prevent computation when the other group has a non-zero
+variance estimate. Treat the test as exploratory: it assumes independent
+replicates, and it does not prove causal improvement, training execution, or
+semantic quality. The comparison is read-only and does not run inference or
+alter experiment snapshots.
 ## CLI
 
 ```bash

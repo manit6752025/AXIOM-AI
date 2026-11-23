@@ -28,7 +28,7 @@ class EmbeddingEngineError(RuntimeError):
 
 
 def validate_embedding_inputs(texts, *, batch_size=8, max_length=256, chunk_size_chars=2048,
-                              chunk_overlap_chars=128, device="auto") -> None:
+                              chunk_overlap_chars=128, device="auto", normalize=True) -> None:
     if not isinstance(texts, (list, tuple)) or not 1 <= len(texts) <= MAX_EMBEDDING_INPUTS:
         raise ValueError(f"Provide between 1 and {MAX_EMBEDDING_INPUTS} text inputs.")
     total = 0
@@ -49,8 +49,10 @@ def validate_embedding_inputs(texts, *, batch_size=8, max_length=256, chunk_size
     if (isinstance(chunk_overlap_chars, bool) or not isinstance(chunk_overlap_chars, int)
         or not 0 <= chunk_overlap_chars <= 1024 or chunk_overlap_chars >= chunk_size_chars):
         raise ValueError("Chunk overlap must be bounded and smaller than the chunk size.")
-    if device not in {"auto", "cpu", "cuda", "rocm", "mps", "xpu"}:
+    if not isinstance(device, str) or device not in {"auto", "cpu", "cuda", "rocm", "mps", "xpu"}:
         raise ValueError("Device must be one of auto, cpu, cuda, rocm, mps, or xpu.")
+    if not isinstance(normalize, bool):
+        raise ValueError("Embedding normalization must be a boolean.")
 
 
 def split_text_into_chunks(texts, *, chunk_size_chars=2048, chunk_overlap_chars=128):
@@ -258,7 +260,8 @@ def embed_local_texts(model_path: str, texts, *, batch_size=8, max_length=256,
                       normalize=True, _runtime=None) -> dict[str, Any]:
     """Embed bounded text inputs with attention-mask mean pooling."""
     validate_embedding_inputs(texts, batch_size=batch_size, max_length=max_length,
-        chunk_size_chars=chunk_size_chars, chunk_overlap_chars=chunk_overlap_chars, device=device)
+        chunk_size_chars=chunk_size_chars, chunk_overlap_chars=chunk_overlap_chars,
+        device=device, normalize=normalize)
     chunks = split_text_into_chunks(texts, chunk_size_chars=chunk_size_chars,
         chunk_overlap_chars=chunk_overlap_chars)
     if len(chunks) > MAX_EMBEDDING_CHUNKS:

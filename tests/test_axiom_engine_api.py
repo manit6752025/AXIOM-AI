@@ -1323,6 +1323,11 @@ def test_local_embeddings_api_rejects_untrusted_paths_and_oversized_text(tmp_pat
     })
     assert oversized.status_code == 422
 
+    wrong_normalize_type = _client().post("/api/engine/embeddings", json={
+        "model_path": str(model), "texts": ["hello"], "normalize": "yes",
+    })
+    assert wrong_normalize_type.status_code == 422
+
 
 def test_local_embeddings_unload_api_releases_only_cached_runtime(monkeypatch):
     expected = {"schema_version": 1, "unloaded": True, "scope_note": "Only cached model released."}

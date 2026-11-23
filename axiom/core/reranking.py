@@ -47,7 +47,7 @@ def validate_rerank_inputs(query: str, documents, *, batch_size=8, max_length=25
         raise ValueError(f"Batch size must be an integer from 1 through {MAX_RERANK_BATCH_SIZE}.")
     if isinstance(max_length, bool) or not isinstance(max_length, int) or not 32 <= max_length <= MAX_RERANK_LENGTH:
         raise ValueError(f"Maximum token length must be an integer from 32 through {MAX_RERANK_LENGTH}.")
-    if device not in {"auto", "cpu", "cuda", "rocm", "mps", "xpu"}:
+    if not isinstance(device, str) or device not in {"auto", "cpu", "cuda", "rocm", "mps", "xpu"}:
         raise ValueError("Device must be one of auto, cpu, cuda, rocm, mps, or xpu.")
 
 
