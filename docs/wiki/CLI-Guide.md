@@ -93,6 +93,20 @@ locks, and caches. Registry and evaluation records can still contain local
 paths; inspect an archive before sharing it. The ZIP has a 24 MiB compressed
 limit, 20 MiB total uncompressed limit, and a 4 MiB per-collection limit.
 
+## Dataset and AI inspection JSON
+
+```bash
+axiom dataset profile ./data/train.jsonl --json
+axiom ai hf-search qwen --limit 10 --json
+axiom ai policy-audit ./models/my-model --json
+axiom ai plan --model ./models/my-model --json
+```
+
+These commands emit versioned JSON suitable for scripts. Dataset profiling
+returns aggregate diagnostics without row values; Hugging Face search returns
+model metadata without downloading weights; policy audit reports indicators
+without changing model files; optimization planning reports estimates rather
+than measured throughput or a runtime guarantee.
 ## Hardware and planning
 
     axiom system info
