@@ -603,3 +603,85 @@ def test_model_remove_requires_confirmation_and_never_deletes_weight_files(tmp_p
     assert payload["model"]["id"] == model.id
     assert registry.get(model.id) is None
     assert weights.read_bytes() == b"model-weight-fixture"
+
+
+
+def test_dataset_profile_json_is_versioned_privacy_safe_and_preserves_source(tmp_path: Path) -> None:
+    dataset = tmp_path / "private.jsonl"
+    original = '{"email":"private.person@example.com","text":"private row content"}\nnot-json\n'
+    dataset.write_text(original, encoding="utf-8")
+
+    result = runner.invoke(app, ["dataset", "profile", str(dataset), "--json"])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["profile"]["valid_rows"] == 1
+    assert payload["profile"]["invalid_rows"] == 1
+    assert payload["profile"]["privacy_review_recommended"] is True
+    assert "private.person@example.com" not in result.stdout
+    assert "private row content" not in result.stdout
+    assert "matched PII values are never returned" in payload["scope_note"]
+    assert dataset.read_text(encoding="utf-8") == original
+
+
+
+def test_ai_huggingface_search_json_is_versioned_and_metadata_only(monkeypatch) -> None:
+    from axiom.cli import ai_features
+
+    observed = {}
+    def fake_search(query: str, limit: int):
+        observed.update(query=query, limit=limit)
+        return [{"id": "org/tiny-qwen", "downloads": 123, "likes": 7, "pipeline_tag": "text-generation"}]
+
+    monkeypatch.setattr(ai_features, "search_models", fake_search)
+    result = runner.invoke(app, ["ai", "hf-search", "qwen", "--limit", "3", "--json"])
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert observed == {"query": "qwen", "limit": 3}
+    assert payload["schema_version"] == 1
+    assert payload["provider"] == "huggingface"
+    assert payload["results"][0]["id"] == "org/tiny-qwen"
+    assert "no model weights were downloaded" in payload["scope_note"]
+
+
+def test_ai_policy_audit_json_has_stable_envelope_and_audit_only_scope(monkeypatch) -> None:
+    from axiom.cli import ai_features
+
+    monkeypatch.setattr(ai_features, "audit_model", lambda path: {
+        "model": path,
+        "status": "review_required",
+        "policy_indicators": ["config.json: contains 'safety'"],
+        "config_files": ["config.json"],
+        "scope": "Audit only.",
+    })
+    result = runner.invoke(app, ["ai", "policy-audit", "models/test", "--json"])
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["audit"]["status"] == "review_required"
+    assert payload["audit"]["policy_indicators"] == ["config.json: contains 'safety'"]
+    assert "does not remove" in payload["scope_note"]
+
+
+def test_ai_optimization_plan_json_uses_versioned_plan_contract(monkeypatch) -> None:
+    from axiom.cli import ai_features
+
+    class FakePlan:
+        def to_dict(self):
+            return {
+                "model": "models/tiny",
+                "estimated_memory_gb": 2.5,
+                "recommended_quantization": "int4",
+                "fits_estimate": True,
+                "notes": ["Estimate only."],
+            }
+
+    monkeypatch.setattr(ai_features, "plan_optimization", lambda **_kwargs: FakePlan())
+    result = runner.invoke(app, ["ai", "plan", "--model", "models/tiny", "--json"])
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["plan"]["model"] == "models/tiny"
+    assert payload["plan"]["recommended_quantization"] == "int4"
+    assert "must be measured" in payload["scope_note"]

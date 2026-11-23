@@ -26,6 +26,7 @@ def register(dataset_app: typer.Typer) -> None:
   sensitive_rule: str=typer.Option("",help="Comma-separated additional sensitive field-name substrings."),
   ignore_sensitive_field: str=typer.Option("",help="Comma-separated exact field names to exclude from privacy flags."),
   scan_pii: bool=typer.Option(False,"--scan-pii",help="Explicitly scan local string values for common PII patterns; matched values are never shown."),
+  json_output: bool=typer.Option(False,"--json",help="Emit a versioned privacy-safe profile report as JSON."),
  ) -> None:
   """Profile bounded JSONL structure and privacy-safe diagnostics."""
   if path.suffix.lower()!=".jsonl": emit_error("Only .jsonl files are supported.", code="unsupported_dataset_format")
@@ -46,6 +47,13 @@ def register(dataset_app: typer.Typer) -> None:
    report_cancelled("Dataset profile cancelled; the source file was not changed.")
   except (OSError,ValueError) as exc:
    emit_error(str(exc), code="dataset_profile_failed")
+  if json_output:
+   typer.echo(json.dumps({
+    "schema_version": 1,
+    "profile": report,
+    "scope_note": "Aggregate dataset diagnostics only; source row values and matched PII values are never returned.",
+   },ensure_ascii=False,indent=2,sort_keys=True))
+   return
   table=Table(title="AXIOM DATASET PROFILE"); table.add_column("Metric"); table.add_column("Value",justify="right")
   for key in ("valid_rows","invalid_rows","empty_rows","duplicate_rows","unique_fields_tracked","bytes_scanned"): table.add_row(key.replace("_"," ").title(),str(report[key]))
   table.add_row("UTF-8 errors",str(report["diagnostics"]["encoding_errors"]))

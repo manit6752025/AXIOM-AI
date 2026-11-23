@@ -220,8 +220,18 @@ axiom status --json
 axiom summary --json
 axiom model list --json
 axiom dataset inspect ./data/train.jsonl --json
+axiom dataset profile ./data/train.jsonl --json
+axiom ai hf-search qwen --limit 10 --json
+axiom ai policy-audit ./models/my-model --json
+axiom ai plan --model ./models/my-model --json
 axiom engine discover --json
 ```
+
+The dataset profile payload includes aggregate counts, field/type summaries,
+privacy flags, optional opt-in PII match counts, and a schema version; it does
+not return source row values. The ai hf-search command returns model metadata
+only, ai policy-audit returns local policy indicators, and ai plan returns
+an estimate with an explicit non-benchmark scope note.
 
 JSON mode does not imply that a requested action succeeded: validation and
 operation failures keep a non-zero exit code. Commands without a documented
