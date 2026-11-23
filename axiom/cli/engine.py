@@ -19,7 +19,7 @@ from rich.table import Table
 from rich.text import Text
 
 from axiom.core.engine import ENGINE_REQUEST_ADMISSION, AxiomEngineError, benchmark_local, discover_local_engine_assets, estimate_native_quantization, generate_local, generate_local_batch, generate_local_stream, inspect_native_model_context, resolve_local_model_directory, runtime_status, runtime_telemetry
-from axiom.core.prediction_jobs import cancel_prediction_job, get_prediction_job, list_prediction_jobs, start_prediction_job, wait_prediction_job
+from axiom.core.prediction_jobs import cancel_prediction_job, get_prediction_job, list_prediction_jobs, resume_prediction_job, start_prediction_job, wait_prediction_job
 from axiom.core.workspace_context import active_workspace_root
 from axiom.core import model_studio
 from axiom.core.engine_fabric import EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
@@ -1608,6 +1608,25 @@ def prediction_job_wait(
     job = result["job"]
     console.print(f"Prediction job [cyan]{job['id']}[/cyan] · {job['status']}")
     console.print(f"Progress: {job['rows_completed']}/{job['rows_total']} rows · wait: {result['wait_outcome']}")
+
+
+@prediction_jobs_app.command("resume")
+def prediction_job_resume(
+    job_id: str,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Resume an interrupted local prediction from its verified durable checkpoint."""
+    try:
+        job = resume_prediction_job(job_id, active_workspace_root())
+    except (OSError, RuntimeError, ValueError) as exc:
+        _fail(f"Prediction job could not be resumed safely: {exc}")
+    if job is None:
+        _fail(f"Prediction job was not found: {job_id}")
+    if json_output:
+        console.print_json(json.dumps({"job": job}, ensure_ascii=False, allow_nan=False))
+        return
+    console.print(f"Prediction job [cyan]{job['id']}[/cyan] · {job['status']}")
+    console.print(f"Resumption count: {job['resumption_count']} · progress: {job['rows_completed']}/{job['rows_total']} rows")
 
 
 @prediction_jobs_app.command("cancel")

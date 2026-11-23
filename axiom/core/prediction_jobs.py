@@ -664,6 +664,7 @@ def _job_summary(job: dict[str, Any]) -> dict[str, Any]:
             and job.get("checkpoint_name")
             and job.get("checkpoint_identity")
             and job.get("checkpoint_sha256")
+            and (job.get("adapter_path") is None or job.get("adapter_fingerprint"))
         ),
         "resumption_count": int(job.get("resumption_count", 0)),
         "scope": {
@@ -1291,6 +1292,10 @@ def _recover_record(root: Path, record: dict[str, Any]) -> dict[str, Any]:
                 artifact_sha256=record["pending_artifact_sha256"],
                 pending_artifact_identity=None,
                 pending_artifact_sha256=None,
+                checkpoint_name=None,
+                checkpoint_identity=None,
+                checkpoint_bytes=0,
+                checkpoint_sha256=None,
             )
             try:
                 _replace_persisted_job(root, completed)
@@ -2335,6 +2340,165 @@ def start_prediction_job(
                     _JOBS.pop(job_id, None)
             release_local_compute_job_lock(job_id)
         raise
+
+
+
+def resume_prediction_job(job_id: str, root: Path) -> dict[str, Any] | None:
+    """Resume an interrupted job only after revalidating all source and checkpoint identities."""
+    if not isinstance(job_id, str) or not _JOB_ID.fullmatch(job_id):
+        return None
+    workspace = Path(root).resolve(strict=True)
+    recovered = _stored_job(job_id, workspace)
+    if recovered is None:
+        return None
+    if recovered.get("status") != "interrupted" or not _job_summary(recovered).get("resumable"):
+        raise ValueError("Prediction job has no verified restart checkpoint to resume.")
+
+    model_target = resolve_workspace_input(recovered["model_path"], workspace, "Model path")
+    if not model_target.is_dir():
+        raise ValueError("The original prediction model is no longer available.")
+    validate_local_model_tree(model_target)
+    trusted_model = _resolve_engine_asset(model_target, "Base model")
+    if trusted_model != model_target:
+        raise ValueError("The original prediction model path changed.")
+    model_fingerprint = _prediction_asset_fingerprint(trusted_model, adapter=False)
+    if model_fingerprint is None or model_fingerprint != recovered.get("model_fingerprint"):
+        raise ValueError("The original prediction model fingerprint changed; this job cannot be resumed.")
+
+    trusted_adapter = None
+    if recovered.get("adapter_path") is not None:
+        adapter_target = resolve_workspace_input(recovered["adapter_path"], workspace, "Adapter path")
+        if not adapter_target.is_dir():
+            raise ValueError("The original prediction adapter is no longer available.")
+        validate_local_model_tree(adapter_target)
+        trusted_adapter = _resolve_engine_asset(adapter_target, "LoRA adapter")
+        if trusted_adapter != adapter_target:
+            raise ValueError("The original prediction adapter path changed.")
+        adapter_fingerprint = _prediction_asset_fingerprint(trusted_adapter, adapter=True)
+        if (
+            adapter_fingerprint is None
+            or adapter_fingerprint != recovered.get("adapter_fingerprint")
+        ):
+            raise ValueError("The original prediction adapter fingerprint changed; this job cannot be resumed.")
+
+    source_manifest = _preflight_dataset(
+        recovered["dataset_path"],
+        workspace,
+        prompt_field=recovered["prompt_field"],
+        reference_field=recovered["reference_field"],
+    )
+    if (
+        source_manifest["sha256"] != recovered.get("dataset_sha256")
+        or source_manifest["rows"] != recovered.get("rows_total")
+        or source_manifest["path"] != recovered.get("dataset_path")
+    ):
+        raise ValueError("The original prediction dataset fingerprint or row count changed.")
+
+    data_root = _safe_data_root(workspace)
+    destination, parent_fd, _output_name, output_available = open_mcp_workspace_output_parent(
+        recovered["output_path"], workspace
+    )
+    try:
+        if not output_available or not destination.is_relative_to(data_root):
+            raise ValueError("The original prediction output path is no longer available.")
+        checkpoint_stream, _name, _path, _identity, _size, _digest = _open_prediction_checkpoint(
+            workspace,
+            recovered,
+            parent_fd=parent_fd,
+        )
+        checkpoint_stream.close()
+    finally:
+        if parent_fd is not None:
+            try:
+                os.close(parent_fd)
+            except OSError:
+                pass
+
+    if not runtime_status().get("ready"):
+        raise ValueError("AXIOM Native Engine runtime is not ready in this environment.")
+    if _active_training_job_exists():
+        raise ValueError("A local training job is active; wait for it to finish before resuming prediction.")
+
+    acquire_local_compute_job_lock(job_id)
+    worker_started = False
+    cancel_event = threading.Event()
+    try:
+        with _JOBS_LOCK:
+            current = _stored_job_without_recovery(job_id, workspace)
+            if current is None or current.get("status") != "interrupted":
+                raise ValueError("Prediction job state changed before resume; refresh its status and retry.")
+            if any(
+                item.get("workspace_root") == str(workspace)
+                and item.get("status") in _ACTIVE_JOB_STATUSES
+                for item in _JOBS.values()
+            ):
+                raise ValueError("Another local AXIOM compute job is active; inspect it before resuming.")
+            _prune_jobs()
+            resumed = _record_as_job(current, workspace)
+            resumed.update({
+                "status": "queued",
+                "runner_pid": os.getpid(),
+                "runner_identity": _process_start_identity(os.getpid()),
+                "started_at": None,
+                "finished_at": None,
+                "updated_at": _now(),
+                "error_code": None,
+                "resumption_count": int(current.get("resumption_count", 0)) + 1,
+                "pending_artifact_identity": None,
+                "pending_artifact_sha256": None,
+                "cancel_event": cancel_event,
+            })
+            _JOBS[job_id] = resumed
+            _persist_job_record(workspace, resumed)
+
+        config = {
+            "model_path": resumed["model_path"],
+            "adapter_path": resumed["adapter_path"],
+            "dataset_path": resumed["dataset_path"],
+            "prompt_field": resumed["prompt_field"],
+            "reference_field": resumed["reference_field"],
+            "prediction_field": resumed["prediction_field"],
+            "output_path": resumed["output_path"],
+            "max_new_tokens": resumed["max_new_tokens"],
+            "temperature": resumed["temperature"],
+            "seed": resumed["seed"],
+            "device": resumed["device"],
+            "precision": resumed["precision"],
+            "cancel_event": cancel_event,
+        }
+        worker = threading.Thread(
+            target=_worker,
+            args=(job_id, config, workspace, source_manifest),
+            kwargs={"resume_record": dict(current)},
+            name=f"axiom-prediction-resume-{job_id[:8]}",
+            daemon=True,
+        )
+        try:
+            worker.start()
+        except RuntimeError:
+            with _JOBS_LOCK:
+                _JOBS.pop(job_id, None)
+            failed = {
+                **resumed,
+                "status": "interrupted",
+                "finished_at": _now(),
+                "updated_at": _now(),
+                "error_code": "worker_start_failed",
+                "cancel_event": None,
+            }
+            _persist_job_record(workspace, failed)
+            raise ValueError("AXIOM could not start the resumed prediction worker.") from None
+        worker_started = True
+        return _job_summary(resumed)
+    except Exception:
+        if not worker_started:
+            with _JOBS_LOCK:
+                current = _JOBS.get(job_id)
+                if current is not None and current.get("status") == "queued":
+                    _JOBS.pop(job_id, None)
+            release_local_compute_job_lock(job_id)
+        raise
+
 
 
 def _prune_jobs() -> None:

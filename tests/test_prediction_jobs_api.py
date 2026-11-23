@@ -105,3 +105,42 @@ def test_prediction_job_api_rejects_unbounded_and_unknown_fields(tmp_path, monke
         })
         assert invalid.status_code == 422
         assert extra.status_code == 422
+
+def test_prediction_job_api_resumes_only_when_core_verification_succeeds(tmp_path, monkeypatch):
+    resumed = {}
+    summary = {**_summary("queued"), "resumable": False, "resumption_count": 1}
+
+    def fake_resume(job_id, root):
+        resumed.update(job_id=job_id, root=root)
+        return summary
+
+    monkeypatch.setattr(prediction_api, "resume_prediction_job", fake_resume)
+    with _client(tmp_path, monkeypatch) as client:
+        response = client.post(f"/api/prediction-jobs/{'a' * 32}/resume")
+        assert response.status_code == 202, response.text
+        assert response.json()["job"]["status"] == "queued"
+        assert response.json()["scope"] == {
+            "dataset_fingerprint_verified": True,
+            "model_and_adapter_fingerprints_verified": True,
+            "checkpoint_identity_and_digest_verified": True,
+            "partial_output_published": False,
+            "prompts_returned": False,
+            "predictions_returned": False,
+        }
+        assert resumed == {"job_id": "a" * 32, "root": tmp_path}
+
+
+def test_prediction_job_api_reports_resume_validation_failures(tmp_path, monkeypatch):
+    def invalid_resume(job_id, root):
+        raise ValueError("The original prediction dataset fingerprint changed.")
+
+    monkeypatch.setattr(prediction_api, "resume_prediction_job", invalid_resume)
+    with _client(tmp_path, monkeypatch) as client:
+        response = client.post(f"/api/prediction-jobs/{'a' * 32}/resume")
+        assert response.status_code == 422
+        assert "fingerprint changed" in response.json()["detail"]
+
+        monkeypatch.setattr(prediction_api, "resume_prediction_job", lambda job_id, root: None)
+        missing = client.post(f"/api/prediction-jobs/{'b' * 32}/resume")
+        assert missing.status_code == 404
+

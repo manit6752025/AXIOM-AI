@@ -63,3 +63,39 @@ def test_engine_prediction_job_cli_cancels_cooperatively(tmp_path, monkeypatch):
     result = runner.invoke(engine_cli.engine_app, ["prediction", "cancel", "d" * 32, "--json"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["cancellation_accepted"] is True
+
+def test_engine_prediction_job_cli_resumes_from_verified_checkpoint(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine_cli, "active_workspace_root", lambda: tmp_path)
+    summary = {
+        "id": "e" * 32,
+        "status": "queued",
+        "rows_total": 8,
+        "rows_completed": 4,
+        "resumable": False,
+        "resumption_count": 1,
+    }
+    captured = {}
+    monkeypatch.setattr(
+        engine_cli,
+        "resume_prediction_job",
+        lambda job_id, root: captured.update(job_id=job_id, root=root) or summary,
+    )
+
+    result = runner.invoke(engine_cli.engine_app, ["prediction", "resume", summary["id"], "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["job"]["resumption_count"] == 1
+    assert captured == {"job_id": summary["id"], "root": tmp_path}
+
+
+def test_engine_prediction_job_cli_rejects_unavailable_resume_checkpoint(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine_cli, "active_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        engine_cli,
+        "resume_prediction_job",
+        lambda job_id, root: (_ for _ in ()).throw(ValueError("No verified checkpoint is available.")),
+    )
+    result = runner.invoke(engine_cli.engine_app, ["prediction", "resume", "e" * 32])
+    assert result.exit_code != 0
+    assert "could not be resumed safely" in result.output
+
