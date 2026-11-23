@@ -897,6 +897,29 @@ export type HardwareSnapshot = {
   cuda_available: boolean;
 };
 
+
+export type HardwareSnapshotSettings = {
+  enabled: boolean; max_snapshots: number; max_age_days: number;
+};
+export type HardwareSnapshotHardware = {
+  os_name: string; architecture: string; cpu_cores: number; ram_bytes: number | null;
+  gpu_name: string | null; vram_bytes: number | null; cuda_available: boolean;
+};
+export type HardwareSnapshotRecord = {
+  id: string; captured_at: string; fingerprint: string; source: "explicit_capture";
+  software_version: string; hardware: HardwareSnapshotHardware;
+};
+export type HardwareSnapshotHistory = {
+  schema_version: 1; settings: HardwareSnapshotSettings; total: number;
+  snapshots: HardwareSnapshotRecord[];
+  privacy: {
+    host_identity_included: false; network_identifiers_included: false;
+    filesystem_paths_included: false; credentials_included: false;
+    model_or_dataset_content_included: false; automatic_sampling: false;
+  };
+  scope_note: string;
+};
+
 export type RuntimeSnapshot = {
   status: string;
   hardware: HardwareSnapshot;
@@ -2113,6 +2136,13 @@ export const axiomApi = {
   },
 
   runtime: () => requestJson<RuntimeSnapshot>("/api/workspace/runtime"),
+  hardwareSnapshots: () => requestJson<HardwareSnapshotHistory>("/api/workspace/hardware-snapshots"),
+  updateHardwareSnapshotSettings: (input: HardwareSnapshotSettings) =>
+    requestJson<HardwareSnapshotHistory>("/api/workspace/hardware-snapshots/settings", { method: "PUT", body: JSON.stringify(input) }),
+  captureHardwareSnapshot: () =>
+    requestJson<{ snapshot: HardwareSnapshotRecord; history: HardwareSnapshotHistory }>("/api/workspace/hardware-snapshots", { method: "POST" }),
+  clearHardwareSnapshots: () =>
+    requestJson<HardwareSnapshotHistory>("/api/workspace/hardware-snapshots", { method: "DELETE" }),
 
   eventsPage: (options: { limit?: number; offset?: number; search?: string } = {}) => {
     const query = new URLSearchParams();

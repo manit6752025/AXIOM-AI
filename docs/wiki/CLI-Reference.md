@@ -124,3 +124,35 @@ for CLI-specific safety, output, cancellation, and exit-code behavior.
 Python distribution: `axiom-all`
 
 npm launcher: `@netcore-technologies/axiom-cli`
+
+
+## Hardware snapshot history
+
+- `axiom system snapshots enable --max-snapshots 20 --max-age-days 90` explicitly enables capture and sets retention.
+- `axiom system snapshots capture --json` captures one snapshot; it refuses to run while capture is disabled.
+- `axiom system snapshots list --limit 20 --json` lists retained records without probing hardware.
+- `axiom system snapshots disable` prevents future captures but preserves retained records.
+- `axiom system snapshots clear --yes` permanently deletes all retained snapshots.
+
+The Dashboard provides the same opt-in, capture, retention and clear operations. Nothing is sampled automatically.
+
+
+### Generated API contract examples
+
+- `axiom api` prints a Markdown reference derived from the installed OpenAPI schema.
+- `axiom api --format json` prints machine-readable request/response schemas and synthetic examples.
+- `axiom api --output ./api-examples.md` creates a new file and refuses to overwrite an existing file. Generation never submits requests.
+
+
+## Engine resource telemetry
+
+- `axiom engine telemetry --json` returns one privacy-bounded point-in-time sample.
+- `axiom engine telemetry --watch --interval-seconds 2 --samples 30` explicitly opts into a bounded series of samples.
+- Add `--output ./resource-samples.jsonl` to write a new JSONL file; an existing file is never overwritten. `--output` is rejected unless `--watch` is enabled.
+
+
+## Benchmark resource trends and telemetry export
+
+The Runtime page automatically takes two point-in-time telemetry snapshots only when an operator explicitly starts a native benchmark. It links the snapshots to that benchmark in a bounded 20-run browser-memory trend view. Missing system/driver values are labelled `Not reported`; the charts do not infer unavailable metrics.
+
+The Resource Monitoring panel supports JSON and CSV export. Choose which metric groups are included before exporting; process IDs and prompt/model-path/credential values are not exported. Clear history removes the browser's retained samples and stops active monitoring.

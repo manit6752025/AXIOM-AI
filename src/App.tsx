@@ -1,6 +1,7 @@
 import AxiomOptimizer from "./components/AxiomOptimizer";
 import AxiomQuantizer from "./components/AxiomQuantizer";
 import ApiPlayground from "./components/ApiPlayground";
+import HardwareSnapshotPanel from "./components/HardwareSnapshotPanel";
 import RuntimeConnectorPanel from "./components/RuntimeConnectorPanel";
 import RuntimeTracePanel from "./components/RuntimeTracePanel";
 import EngineTelemetryMonitor from "./components/EngineTelemetryMonitor";
@@ -2173,6 +2174,8 @@ function Dashboard({
         <SummaryCard icon={Cpu} label="Hardware" value={runtime?.hardware.gpu_name || "CPU"} detail={runtime ? `${runtime.hardware.ram_gb.toFixed(1)} GB RAM · ${runtime.hardware.cpu_cores} cores` : "Checking local system"} tone={runtime ? "success" : "neutral"} />
         <SummaryCard icon={RadioTower} label="Inference runtime" value={runtimeLabel} detail="Open Runtime to check local inference readiness" tone={runtime?.status === "online" ? "success" : "warning"} />
       </div>
+
+      <HardwareSnapshotPanel />
 
       <div className="dashboard-grid">
         <Surface className="activity-surface" title="Recent workspace activity" eyebrow="LOCAL EVENT FEED" action={<StatusPill tone={events?.length ? "success" : "neutral"}>{events ? `${events.length} EVENTS` : "LOADING"}</StatusPill>}>

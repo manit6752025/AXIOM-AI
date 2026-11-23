@@ -89,6 +89,7 @@ test("Runtime resource monitoring is opt-in, bounded, exportable, and clearable"
   await expect(monitor.getByRole("table", { name: "Resource telemetry samples" })).toBeVisible();
 
   await monitor.getByRole("button", { name: "Stop monitoring" }).click();
+  await monitor.getByLabel("Include process RSS/thread metrics").uncheck();
   const downloadPromise = page.waitForEvent("download");
   await monitor.getByRole("button", { name: "Export JSON" }).click();
   const download = await downloadPromise;
@@ -100,6 +101,21 @@ test("Runtime resource monitoring is opt-in, bounded, exportable, and clearable"
   expect(payload.sample_count).toBeGreaterThanOrEqual(2);
   expect(payload.privacy.model_paths_included).toBe(false);
   expect(payload.privacy.prompt_content_included).toBe(false);
+  expect(payload.privacy.process_metrics_included).toBe(false);
+  expect(payload.privacy.process_ids_included).toBe(false);
+  expect(payload.samples[0].process).toBeNull();
+  expect(JSON.stringify(payload)).not.toContain('"pid"');
+
+  const csvDownloadPromise = page.waitForEvent("download");
+  await monitor.getByRole("button", { name: "Export CSV" }).click();
+  const csvDownload = await csvDownloadPromise;
+  expect(csvDownload.suggestedFilename()).toBe("axiom-resource-telemetry.csv");
+  const csvPath = await csvDownload.path();
+  expect(csvPath).not.toBeNull();
+  const csv = await (await import("node:fs/promises")).readFile(csvPath as string, "utf8");
+  expect(csv).toContain("system_cpu_percent");
+  expect(csv).toContain("system_ram_used_bytes");
+  expect(csv).not.toContain("process_rss_bytes");
 
   await monitor.getByRole("button", { name: "Clear history" }).click();
   await expect(monitor.getByText("No resource samples collected")).toBeVisible();

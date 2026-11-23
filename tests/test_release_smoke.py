@@ -310,8 +310,144 @@ def test_generated_api_example_smoke_detects_missing_secret_redaction_or_gui_bin
     e2e = (ROOT / "e2e/api-playground.spec.ts").read_text(encoding="utf-8")
     tests = (ROOT / "tests/test_api_examples.py").read_text(encoding="utf-8")
     docs = (ROOT / "docs/API.md").read_text(encoding="utf-8")
-    broken_core = core.replace("x-axiom-redacted", "x-no-redaction", 1)
+    broken_core = core.replace("x-axiom-redacted", "x-no-redaction")
     issues = release_smoke.api_contract_examples_issues(
         broken_core, api, server, cli, cli_main, client, component, e2e, tests, docs,
     )
     assert any("x-axiom-redacted" in issue for issue in issues)
+
+
+
+def test_hardware_snapshot_release_smoke_requires_opt_in_api_cli_and_gui_contract() -> None:
+    core = (ROOT / "axiom/core/hardware_snapshots.py").read_text(encoding="utf-8")
+    api = (ROOT / "axiom/api/hardware_snapshots.py").read_text(encoding="utf-8")
+    server = (ROOT / "axiom/api/server.py").read_text(encoding="utf-8")
+    cli_main = (ROOT / "axiom/cli/main.py").read_text(encoding="utf-8")
+    client = (ROOT / "src/api/client.ts").read_text(encoding="utf-8")
+    panel = (ROOT / "src/components/HardwareSnapshotPanel.tsx").read_text(encoding="utf-8")
+    app = (ROOT / "src/App.tsx").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/hardware-snapshots.spec.ts").read_text(encoding="utf-8")
+    tests = "\\n".join((ROOT / path).read_text(encoding="utf-8") for path in (
+        "tests/test_hardware_snapshots.py",
+        "tests/test_hardware_snapshots_api.py",
+        "tests/test_hardware_snapshots_cli.py",
+    ))
+    docs = "\\n".join((ROOT / path).read_text(encoding="utf-8") for path in (
+        "docs/API.md", "docs/wiki/CLI-Reference.md", "docs/Storage-Schemas-and-Migrations.md",
+    ))
+    assert release_smoke.hardware_snapshot_issues(
+        core, api, server, cli_main, client, panel, app, e2e, tests, docs,
+    ) == []
+
+
+def test_hardware_snapshot_release_smoke_detects_missing_opt_in_contract() -> None:
+    core = (ROOT / "axiom/core/hardware_snapshots.py").read_text(encoding="utf-8")
+    api = (ROOT / "axiom/api/hardware_snapshots.py").read_text(encoding="utf-8")
+    server = (ROOT / "axiom/api/server.py").read_text(encoding="utf-8")
+    cli_main = (ROOT / "axiom/cli/main.py").read_text(encoding="utf-8")
+    client = (ROOT / "src/api/client.ts").read_text(encoding="utf-8")
+    panel = (ROOT / "src/components/HardwareSnapshotPanel.tsx").read_text(encoding="utf-8")
+    app = (ROOT / "src/App.tsx").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/hardware-snapshots.spec.ts").read_text(encoding="utf-8")
+    tests = (ROOT / "tests/test_hardware_snapshots.py").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/API.md").read_text(encoding="utf-8")
+    broken_core = core.replace("raise HardwareSnapshotOptInRequired(", "raise MissingOptInGuard(")
+    issues = release_smoke.hardware_snapshot_issues(
+        broken_core, api, server, cli_main, client, panel, app, e2e, tests, docs,
+    )
+    assert any("HardwareSnapshotOptInRequired" in item for item in issues)
+
+
+def test_benchmark_resource_trend_release_contract_is_wired_end_to_end() -> None:
+    panel = (ROOT / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
+    chart = (ROOT / "src/components/BenchmarkResourceTrends.tsx").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/axiom-engine.spec.ts").read_text(encoding="utf-8")
+    assert release_smoke.benchmark_resource_trend_issues(panel, chart, e2e) == []
+
+
+def test_benchmark_resource_trend_release_contract_detects_unbounded_or_missing_charts() -> None:
+    panel = (ROOT / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
+    chart = (ROOT / "src/components/BenchmarkResourceTrends.tsx").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/axiom-engine.spec.ts").read_text(encoding="utf-8")
+    broken_chart = chart.replace("Not reported", "unknown metric")
+    failures = release_smoke.benchmark_resource_trend_issues(panel, broken_chart, e2e)
+    assert any("Not reported" in issue for issue in failures)
+
+
+def test_telemetry_export_privacy_release_contract_requires_json_csv_and_clear() -> None:
+    monitor = (ROOT / "src/components/EngineTelemetryMonitor.tsx").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/telemetry-monitor.spec.ts").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/API.md").read_text(encoding="utf-8")
+    assert release_smoke.telemetry_export_privacy_issues(monitor, e2e, docs) == []
+
+
+def test_telemetry_export_privacy_contract_detects_pid_or_missing_csv_controls() -> None:
+    monitor = (ROOT / "src/components/EngineTelemetryMonitor.tsx").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/telemetry-monitor.spec.ts").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/API.md").read_text(encoding="utf-8")
+    broken = monitor.replace('anchor.download = "axiom-resource-telemetry.csv"', "anchor.download = 'wrong.csv'")
+    failures = release_smoke.telemetry_export_privacy_issues(broken, e2e, docs)
+    assert any("axiom-resource-telemetry.csv" in issue for issue in failures)
+
+
+def test_cross_platform_package_release_contract_requires_wheel_sdist_and_install() -> None:
+    verifier = (ROOT / "scripts/verify_package_artifacts.py").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github/workflows/quality-gates.yml").read_text(encoding="utf-8")
+    tests = (ROOT / "tests/test_package_artifact_verification.py").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/Packaging.md").read_text(encoding="utf-8")
+    assert release_smoke.package_verification_issues(verifier, workflow, tests, docs) == []
+
+
+def test_cross_platform_package_release_contract_detects_missing_sdist_build() -> None:
+    verifier = (ROOT / "scripts/verify_package_artifacts.py").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github/workflows/quality-gates.yml").read_text(encoding="utf-8")
+    tests = (ROOT / "tests/test_package_artifact_verification.py").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/Packaging.md").read_text(encoding="utf-8")
+    broken_workflow = workflow.replace("python -m build --sdist --wheel --outdir dist", "python -m build --wheel --outdir dist")
+    failures = release_smoke.package_verification_issues(verifier, broken_workflow, tests, docs)
+    assert any("sdist" in issue for issue in failures)
+
+
+def test_persisted_schema_inventory_release_contract_matches_current_stores() -> None:
+    paths = {
+        "workflows": "axiom/core/workflows.py",
+        "llm_profiles": "axiom/core/llm_profiles.py",
+        "security_events": "axiom/core/security_events.py",
+        "hardware_snapshots": "axiom/core/hardware_snapshots.py",
+        "workspaces": "axiom/core/workspaces.py",
+        "prediction_jobs": "axiom/core/prediction_jobs.py",
+        "integrations": "axiom/core/integrations.py",
+        "permissions": "axiom/core/tool_permissions.py",
+        "registry": "axiom/models/registry.py",
+        "workspace_metadata": "axiom/core/workspace_metadata.py",
+        "fine_tuning": "axiom/core/fine_tuning.py",
+        "model_studio": "axiom/core/model_studio.py",
+        "runtime_traces": "axiom/core/runtime_traces.py",
+    }
+    sources = {name: (ROOT / path).read_text(encoding="utf-8") for name, path in paths.items()}
+    docs = (ROOT / "docs/Storage-Schemas-and-Migrations.md").read_text(encoding="utf-8")
+    assert release_smoke.persisted_schema_inventory_issues(docs, sources) == []
+
+
+def test_persisted_schema_inventory_detects_stale_versions_and_missing_store_notes() -> None:
+    paths = {
+        "workflows": "axiom/core/workflows.py",
+        "llm_profiles": "axiom/core/llm_profiles.py",
+        "security_events": "axiom/core/security_events.py",
+        "hardware_snapshots": "axiom/core/hardware_snapshots.py",
+        "workspaces": "axiom/core/workspaces.py",
+        "prediction_jobs": "axiom/core/prediction_jobs.py",
+        "integrations": "axiom/core/integrations.py",
+        "permissions": "axiom/core/tool_permissions.py",
+        "registry": "axiom/models/registry.py",
+        "workspace_metadata": "axiom/core/workspace_metadata.py",
+        "fine_tuning": "axiom/core/fine_tuning.py",
+        "model_studio": "axiom/core/model_studio.py",
+        "runtime_traces": "axiom/core/runtime_traces.py",
+    }
+    sources = {name: (ROOT / path).read_text(encoding="utf-8") for name, path in paths.items()}
+    docs = (ROOT / "docs/Storage-Schemas-and-Migrations.md").read_text(encoding="utf-8")
+    stale = docs.replace("schema_version: 2", "schema_version: 1", 1).replace(".axiom/tool_permissions.json", ".axiom/missing.json")
+    failures = release_smoke.persisted_schema_inventory_issues(stale, sources)
+    assert any("schema_version: 2" in failure for failure in failures)
+    assert any("tool_permissions.json" in failure for failure in failures)

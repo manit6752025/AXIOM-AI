@@ -203,9 +203,43 @@ restarting event capture.
 The supported OpenAPI schema is the source of truth for generated request and response examples.
 
 - `GET /api/contract/examples` returns a bounded, deterministic catalogue of operations, path/query parameters, request and response JSON Schema projections, synthetic JSON payloads, TypeScript request/response aliases, and cURL templates.
-- `axiom api examples` prints a Markdown reference; `axiom api examples --format json` emits the complete machine-readable catalogue. Add `--output path` to create a new file without overwriting an existing one.
+- `axiom api` prints a Markdown reference; `axiom api --format json` emits the complete machine-readable catalogue. Add `--output path` to create a new file without overwriting an existing one.
 - The API Playground displays these generated examples beside its original allowlisted GET-only inspection workflow. It never executes generated POST, PUT, PATCH, or DELETE operations.
 
 The generator resolves local schema references, bounds operation count, recursion and response size, and produces examples from field types and constraints rather than copying OpenAPI defaults or example values. Credential/password fields are redacted in request templates and omitted from response samples. Environment-reference fields such as `api_key_env` remain typed as variable names and never include the environment's value. Local paths, prompts, IDs and other operator-specific inputs are explicitly marked as templates. Generated cURL commands are illustrative only; normal consent and API-scope protections apply if an operator runs a request separately.
 
 Examples are synthetic contract fixtures, not captured workspace responses, not verified execution plans, and not permission to execute a mutating operation.
+
+
+## Hardware snapshot history (R111)
+
+Hardware history is disabled by default and stores only explicit point-in-time captures in the active workspace's `.axiom/hardware-snapshots.json`.
+
+- `GET /api/workspace/hardware-snapshots` lists records and the current opt-in/retention settings. It does not probe hardware.
+- `PUT /api/workspace/hardware-snapshots/settings` configures `enabled`, `max_snapshots` (1–100), and `max_age_days` (1–3650).
+- `POST /api/workspace/hardware-snapshots` captures one snapshot and returns HTTP 409 until opt-in is enabled.
+- `DELETE /api/workspace/hardware-snapshots` clears retained records while preserving the selected enable/retention settings.
+
+CLI equivalents are `axiom system snapshots enable|disable|capture|list|clear`; use `--yes` for destructive CLI clear. The Dashboard exposes the same controls. No background or periodic sampler is started. The allowlisted record contains OS, architecture, CPU cores, system RAM, GPU/VRAM and CUDA availability only. It excludes hostname, usernames, machine IDs, network identifiers, filesystem paths, environment values, credentials, model/dataset content and arbitrary detector fields.
+
+The store rejects symlinks, future/malformed schemas, unknown fields and oversized documents; updates are serialized with a file lock and atomic replacement. A newly created POSIX metadata directory uses mode `0700`; the snapshot file uses mode `0600`. An existing shared `.axiom` directory is not chmodded as a side effect. Snapshot fingerprints are SHA-256 content identifiers, not signed attestations or proof of hardware performance.
+
+
+## Point-in-time engine telemetry (R112)
+
+`GET /api/engine/telemetry` returns the current local system/process resource snapshot, available accelerator memory/allocator counters, loaded-engine state and free/total capacity for trusted model-storage roots. Root labels are returned; absolute paths are not. The response contains no prompt text, generated output, model paths, environment values or credentials.
+
+The Runtime panel exposes this snapshot and the resource monitor. Monitoring is off until the user starts it, keeps at most 120 samples in browser memory, and ends when stopped or when the page is left. JSON export and clear operate on this browser-local history only; no server-side time-series store is created by this endpoint.
+
+The CLI `axiom engine telemetry --json` returns a point-in-time JSON sample. `--watch` explicitly opts into a bounded sample run (`--interval-seconds 0.5..60`, `--samples 1..300`) and may write JSONL to a new `--output` path; existing files are never overwritten. Output files must only be created in operator-controlled locations.
+
+
+## Benchmark-linked resource trends (R113)
+
+After each successful native AXIOM Engine benchmark, the Runtime page requests one point-in-time resource sample immediately before and after the measured run. The last 20 benchmark-linked records are kept in browser memory only and shown as four trend charts: system CPU after the run, process RSS change, system RAM used change, and device allocator change. The chart labels each benchmark with its model/device/time context.
+
+A missing value remains null and is displayed as `Not reported`; the UI does not interpolate or invent metrics. Before/after deltas are host-wide measurements, not exclusive attribution to the benchmark, because other processes may use resources concurrently. Warm-up and failed/cancelled benchmark attempts do not generate history entries. No prompts or generated responses are recorded by the resource-history component.
+ 
+## Telemetry export, clear and privacy controls (R114)
+
+The Resource Monitoring panel offers browser-memory-only JSON and CSV exports, an explicit clear-history action, and export privacy switches for CPU, system RAM, process RSS/thread and device/allocator fields. The selected categories are projected into the export rather than mutating the live API response. Process IDs are never exported; disabled categories are omitted (JSON uses null for the category and CSV omits its columns). Prompt/response content, model paths, environment values and credentials are always excluded. Exports are created locally by the browser and are not uploaded to AXIOM or a cloud provider.

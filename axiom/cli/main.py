@@ -40,6 +40,7 @@ from axiom.cli.api import api_app
 from axiom.cli.mobile_bridge import register_mobile_bridge
 from axiom.cli.engine import engine_app
 from axiom.core.hardware import detect_hardware, estimate_model_fit
+from axiom.core.hardware_snapshots import HardwareSnapshotStore
 from axiom.core.experiments import ExperimentStore
 from axiom.core.plan_reproducibility import (
     PLANNER_ALGORITHM_VERSION,
@@ -78,6 +79,8 @@ app = typer.Typer(
 model_app = typer.Typer(help="Manage AI models.")
 dataset_app = typer.Typer(help="Inspect and manage datasets.")
 system_app = typer.Typer(help="Inspect system hardware and capabilities.")
+hardware_snapshots_app = typer.Typer(help="Capture and review explicit, local hardware snapshots.", no_args_is_help=True)
+system_app.add_typer(hardware_snapshots_app, name="snapshots")
 
 hf_app = typer.Typer(help="Authenticate and manage Hugging Face access.")
 supercompress_app = typer.Typer(help="Use SuperCompress before inference.")
@@ -1377,6 +1380,106 @@ def system_info(
         for item in fit_estimates:
             table.add_row(f"{item['parameters_billions']}B", item["assessment"])
         console.print(table)
+
+
+
+@hardware_snapshots_app.command("enable")
+def hardware_snapshots_enable(
+    max_snapshots: int = typer.Option(20, "--max-snapshots", min=1, max=100, help="Maximum retained snapshots (1–100)."),
+    max_age_days: int = typer.Option(90, "--max-age-days", min=1, max=3650, help="Maximum snapshot age in days (1–3650)."),
+    json_output: bool = typer.Option(False, "--json", help="Emit the retention settings as JSON."),
+) -> None:
+    """Explicitly enable hardware-history capture and set retention bounds."""
+    report = HardwareSnapshotStore().configure(
+        enabled=True, max_snapshots=max_snapshots, max_age_days=max_age_days,
+    )
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    else:
+        console.print(f"Hardware snapshot history enabled. Retention: {max_snapshots} snapshots / {max_age_days} days.")
+
+
+@hardware_snapshots_app.command("disable")
+def hardware_snapshots_disable(
+    json_output: bool = typer.Option(False, "--json", help="Emit the updated settings as JSON."),
+) -> None:
+    """Disable future captures without deleting existing history."""
+    store = HardwareSnapshotStore()
+    current = store.list()["settings"]
+    report = store.configure(
+        enabled=False,
+        max_snapshots=current["max_snapshots"],
+        max_age_days=current["max_age_days"],
+    )
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    else:
+        console.print("Hardware snapshot capture disabled. Existing retained records were preserved.")
+
+
+@hardware_snapshots_app.command("capture")
+def hardware_snapshots_capture(
+    json_output: bool = typer.Option(False, "--json", help="Emit the captured record and retention summary as JSON."),
+) -> None:
+    """Capture one hardware snapshot after explicit opt-in; no background sampler is started."""
+    result = HardwareSnapshotStore().capture()
+    if json_output:
+        typer.echo(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return
+    snapshot = result["snapshot"]
+    hardware = snapshot["hardware"]
+    console.print(Panel.fit(
+        f"Captured: {snapshot['captured_at']}\n"
+        f"CPU: {hardware['cpu_cores']} cores · RAM: {hardware['ram_bytes'] / (1024 ** 3):.2f} GB\n"
+        f"GPU: {hardware['gpu_name'] or 'Not detected'} · VRAM: "
+        f"{(hardware['vram_bytes'] / (1024 ** 3)) if hardware['vram_bytes'] else 0:.2f} GB\n"
+        f"Retained history: {result['history']['total']} snapshots",
+        title="AXIOM hardware snapshot",
+    ))
+
+
+@hardware_snapshots_app.command("list")
+def hardware_snapshots_list(
+    limit: int = typer.Option(20, "--limit", min=1, max=100),
+    json_output: bool = typer.Option(False, "--json", help="Emit snapshot history as JSON."),
+) -> None:
+    """List retained snapshots without collecting new hardware measurements."""
+    report = HardwareSnapshotStore().list(limit=limit)
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, sort_keys=True))
+        return
+    table = Table(title=f"Hardware snapshot history ({report['total']} retained)")
+    table.add_column("Captured at")
+    table.add_column("CPU")
+    table.add_column("RAM")
+    table.add_column("GPU")
+    for item in report["snapshots"]:
+        hardware = item["hardware"]
+        ram_gb = (hardware["ram_bytes"] or 0) / (1024 ** 3)
+        table.add_row(
+            item["captured_at"],
+            f"{hardware['cpu_cores']} cores",
+            f"{ram_gb:.2f} GB",
+            hardware["gpu_name"] or "Not detected",
+        )
+    console.print(table)
+    console.print("Snapshots are explicit point-in-time captures; this command does not sample hardware.")
+
+
+@hardware_snapshots_app.command("clear")
+def hardware_snapshots_clear(
+    yes: bool = typer.Option(False, "--yes", help="Confirm deletion of all retained hardware snapshots."),
+    json_output: bool = typer.Option(False, "--json", help="Emit the cleared history report as JSON."),
+) -> None:
+    """Delete all retained hardware snapshots without changing opt-in settings."""
+    if not yes and not typer.confirm("Clear all retained hardware snapshots?", default=False):
+        raise typer.Exit(code=1)
+    report = HardwareSnapshotStore().clear()
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    else:
+        console.print("Hardware snapshot history cleared.")
+
 
 @train_app.command("plan")
 def train_plan(

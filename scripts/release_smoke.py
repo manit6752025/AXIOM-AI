@@ -365,7 +365,7 @@ def api_contract_examples_issues(
         ("OpenAPI generator", core, (
             "def build_api_examples(", "MAX_OPERATIONS = 512", "MAX_EXAMPLES_BYTES",
             "def _safe_schema(", "def _example_value(", "def _typescript_type(",
-            "schema_defaults_replayed", "render_api_examples_markdown",
+            '"x-axiom-redacted"', "schema_defaults_replayed", "render_api_examples_markdown",
         )),
         ("API examples endpoint", api, (
             'APIRouter(prefix="/api/contract"', '@router.get("/examples")',
@@ -394,7 +394,7 @@ def api_contract_examples_issues(
             "test_cli_emits_json_and_markdown",
         )),
         ("API docs", docs, (
-            "GET /api/contract/examples", "axiom api examples",
+            "GET /api/contract/examples", "axiom api",
             "synthetic", "variable names",
         )),
     )
@@ -404,6 +404,60 @@ def api_contract_examples_issues(
             if token not in source:
                 issues.append(f"Typed API example {label} contract is missing: {token}")
     return issues
+
+
+def hardware_snapshot_issues(
+    core: str, api: str, server: str, cli_main: str, client: str,
+    panel: str, app: str, e2e: str, tests: str, docs: str,
+) -> list[str]:
+    """Keep opt-in workspace hardware-history lifecycle wired across all surfaces."""
+    checks = (
+        ("snapshot store", core, (
+            "class HardwareSnapshotStore", "MAX_SNAPSHOTS = 100",
+            "MAX_RETENTION_DAYS = 3650", "def configure(", "def capture(", "def clear(",
+            "HardwareSnapshotOptInRequired", "raise HardwareSnapshotOptInRequired(", "def _normalize_hardware(",
+        )),
+        ("snapshot API", api, (
+            '"/hardware-snapshots"', '"/hardware-snapshots/settings"',
+            "HardwareSnapshotOptInRequired", "status_code=201",
+        )),
+        ("server registration", server, ("hardware_snapshots_router",)),
+        ("CLI lifecycle", cli_main, (
+            'name="snapshots"', '@hardware_snapshots_app.command("enable")',
+            '@hardware_snapshots_app.command("disable")',
+            '@hardware_snapshots_app.command("capture")',
+            '@hardware_snapshots_app.command("list")',
+            '@hardware_snapshots_app.command("clear")',
+        )),
+        ("typed API client", client, (
+            "HardwareSnapshotHistory", "hardwareSnapshots:",
+            "updateHardwareSnapshotSettings:", "captureHardwareSnapshot:",
+            "clearHardwareSnapshots:",
+        )),
+        ("Dashboard panel", panel, (
+            "Hardware snapshot history", "Enable history", "Capture snapshot",
+            "Clear history", "No automatic sampling",
+        )),
+        ("Dashboard registration", app, ("HardwareSnapshotPanel",)),
+        ("browser acceptance", e2e, (
+            "hardware history is opt-in", "captureCalls", "Enable history",
+            "Capture snapshot", "Clear history",
+        )),
+        ("regression tests", tests, (
+            "test_history_is_disabled_by_default", "test_explicit_capture_persists_only_allowlisted_hardware",
+            "test_hardware_snapshot_api_requires_opt_in", "test_system_hardware_snapshot_commands",
+        )),
+        ("documentation", docs, (
+            "GET /api/workspace/hardware-snapshots", "axiom system snapshots",
+            "hardware-snapshots.json", "No background or periodic sampler",
+        )),
+    )
+    failures: list[str] = []
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                failures.append(f"Hardware snapshot {label} contract is missing: {token}")
+    return failures
 
 
 def resource_monitoring_issues(cli_source: str, panel_source: str, app_source: str, e2e_source: str) -> list[str]:
@@ -445,17 +499,151 @@ def resource_monitoring_issues(cli_source: str, panel_source: str, app_source: s
     return issues
 
 
+def benchmark_resource_trend_issues(panel: str, chart: str, e2e: str) -> list[str]:
+    """Require benchmark-linked before/after samples, bounded trend charts and missing labels."""
+    checks = (
+        ("native benchmark panel", panel, (
+            "axiomApi.axiomEngineTelemetry()", "telemetryBefore", "telemetryAfter",
+            "setBenchmarkResourceSamples", "slice(-20)", "BenchmarkResourceTrends",
+        )),
+        ("resource trend charts", chart, (
+            "System CPU after benchmark", "Process RSS change", "System RAM used change",
+            "Device allocator change", "Not reported", "20 runs",
+        )),
+        ("browser acceptance", e2e, (
+            "Benchmark resource trends", "1/20 runs", "System CPU after benchmark",
+            "Run 1: Not reported", "Process RSS change", "Device allocator change",
+        )),
+    )
+    failures: list[str] = []
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                failures.append(f"Benchmark resource trend {label} is missing: {token}")
+    return failures
+
+
+def telemetry_export_privacy_issues(monitor: str, e2e: str, docs: str) -> list[str]:
+    """Require export formats, explicit field privacy controls and deterministic clear."""
+    checks = (
+        ("monitor UI", monitor, (
+            "Export JSON", "Export CSV", 'aria-label="Telemetry export privacy controls"',
+            "includeCpu", "includeMemory", "includeProcess", "includeDevice",
+            "anchor.download = \"axiom-resource-telemetry.csv\"",
+            "process_ids_included: false", "setSamples([])",
+        )),
+        ("browser acceptance", e2e, (
+            "Include process RSS/thread metrics", "axiom-resource-telemetry.csv",
+            "process_metrics_included", "process_ids_included", "system_cpu_percent",
+            "Clear history",
+        )),
+        ("documentation", docs, (
+            "JSON and CSV", "privacy controls", "Process IDs are never exported",
+            "browser-memory-only",
+        )),
+    )
+    failures: list[str] = []
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                failures.append(f"Telemetry export/privacy {label} is missing: {token}")
+    return failures
+
+
+def persisted_schema_inventory_issues(docs: str, sources: dict[str, str]) -> list[str]:
+    """Ensure every persisted store and its real migration/rollback rules stay documented."""
+    expected_doc_tokens = (
+        ".axiom/workflows.json", "schema_version: 2", "Schema-v1 records are accepted",
+        ".axiom/experiments.json", ".axiom/evaluations.json", ".axiom/agent-profiles.json",
+        ".axiom/models.json", ".axiom/integrations.json", ".axiom/tool_permissions.json",
+        ".axiom/security-events.json", ".axiom/llm-provider-profiles.json",
+        ".axiom/hardware-snapshots.json", "~/.axiom/workspaces.json",
+        ".axiom/prediction_jobs.json", "Fine-tuning jobs", "Model Studio jobs",
+        "manifest.json", "Runtime traces are in-memory only", "browser-memory-only",
+        'Model Studio's reader does not yet reject every future version explicitly', "default-deny",
+    )
+    failures = [
+        f"Persisted-schema documentation is missing: {token}"
+        for token in expected_doc_tokens if token not in docs
+    ]
+    code_contracts = {
+        "workflows": ("WORKFLOW_SCHEMA_VERSION = 2",),
+        "llm_profiles": ("SCHEMA_VERSION = 2", "version not in {1, SCHEMA_VERSION}"),
+        "security_events": ("LEGACY_SCHEMA_VERSION = 1", "SCHEMA_VERSION = 2"),
+        "hardware_snapshots": ("SCHEMA_VERSION = 1",),
+        "workspaces": ("_SCHEMA_VERSION = 1",),
+        "prediction_jobs": ('"schema_version": 1', 'payload["schema_version"] != 1'),
+        "integrations": ('data.get("trust_status", "unverified")', 'data.get("connection_status", "not_inspected")'),
+        "permissions": ('"active_profile"', '"profiles"', "_default_config()"),
+        "registry": ("legacy_resource_id(", 'registry_file = self.root / "models.json"'),
+        "workspace_metadata": ("ARCHIVE_SCHEMA_VERSION = 1", '"agent_profiles": "agent-profiles.json"'),
+        "fine_tuning": ('"schema_version": 1', "def _read_job("),
+        "model_studio": ('"schema_version": 1', "def _read_job("),
+        "runtime_traces": ("MAX_RUNTIME_TRACES", "_traces_by_workspace"),
+    }
+    for name, tokens in code_contracts.items():
+        source = sources.get(name, "")
+        if not source:
+            failures.append(f"Persisted-schema source inventory is missing: {name}")
+            continue
+        for token in tokens:
+            if token not in source:
+                failures.append(f"Persisted-schema documentation/source contract for {name} is missing: {token}")
+    return failures
+
+
+def package_verification_issues(
+    verifier: str, workflow: str, tests: str, docs: str,
+) -> list[str]:
+    """Require wheel+sdist construction, safe archive inspection and import testing on every OS."""
+    checks = (
+        ("artifact verifier", verifier, (
+            "def verify_package_artifacts(", "MAX_ARCHIVE_MEMBERS",
+            "MAX_MEMBER_BYTES", "MAX_TOTAL_BYTES", "def _verify_wheel(",
+            "def _verify_sdist(", "EXPECTED_ENTRY_POINT", "axiom/webui/index.html",
+            "entry_points.txt", "testzip()", "tarfile.open", "install_wheel",
+        )),
+        ("cross-platform workflow", workflow, (
+            "matrix.os", "node-version: \"22\"", "npm ci", "npm run build",
+            "python -m build --sdist --wheel --outdir dist",
+            "python scripts/verify_package_artifacts.py --dist dist --install-wheel --json",
+            "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py",
+        )),
+        ("archive regression tests", tests, (
+            "test_verifies_wheel_and_sdist_bundle_cli_and_control_center",
+            "test_rejects_wheel_path_traversal_and_special_files",
+            "test_rejects_wheel_symlink_members",
+            "test_rejects_case_colliding_wheel_paths",
+            "test_rejects_wrong_cli_entry_point",
+            "test_rejects_sdist_symbolic_links",
+            "test_rejects_wheel_missing_control_center_css_asset",
+            "test_rejects_sdist_missing_control_center_css_asset",
+        )),
+        ("packaging documentation", docs, (
+            "Ubuntu", "Windows", "macOS", "wheel", "sdist",
+            "axiom/webui", "without extracting",
+        )),
+    )
+    failures: list[str] = []
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                failures.append(f"Cross-platform packaging {label} is missing: {token}")
+    return failures
+
+
 def inspect(root: Path) -> dict[str, Any]:
     failures: list[str] = []
     warnings: list[str] = []
     required = [
         "pyproject.toml", "axiom/version.py", "ROADMAP.md", "src/App.tsx",
-        "src/api/client.ts", "src/components/ApiPlayground.tsx", "src/components/RuntimeConnectorPanel.tsx", "src/components/AgentProfiles.tsx", "src/components/LocalInferencePanel.tsx", "src/components/RuntimeTracePanel.tsx", "src/components/EngineTelemetryMonitor.tsx", "src/components/LocalAxiomEnginePanel.tsx", "src/components/ModelStudioPanel.tsx", "src/styles.css",
-        "axiom/api/server.py", "axiom/api/workspace.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/api/model_studio.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/model_studio.py", "axiom/core/runtime_traces.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/core/engine_fabric_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "axiom/cli/model_studio.py", "scripts/release_smoke.py",
+        "src/api/client.ts", "src/components/ApiPlayground.tsx", "src/components/RuntimeConnectorPanel.tsx", "src/components/AgentProfiles.tsx", "src/components/LocalInferencePanel.tsx", "src/components/RuntimeTracePanel.tsx", "src/components/EngineTelemetryMonitor.tsx", "src/components/LocalAxiomEnginePanel.tsx", "src/components/BenchmarkResourceTrends.tsx", "src/components/ModelStudioPanel.tsx", "src/styles.css",
+        "axiom/api/server.py", "axiom/api/workspace.py", "axiom/api/workflows.py", "axiom/api/engine.py", "axiom/api/inference.py", "axiom/api/model_studio.py", "axiom/core/inference.py", "axiom/core/workflows.py", "axiom/core/ollama_service.py", "axiom/core/native_engine.py", "axiom/core/model_studio.py", "axiom/core/runtime_traces.py", "axiom/models/compatibility.py", "axiom/api/diagnostics.py", "axiom/api/runtime_discovery.py", "axiom/api/agent_profiles.py", "axiom/core/runtime_discovery.py", "axiom/core/agent_profiles.py", "axiom/core/engine_fabric_profiles.py", "axiom/cli/agent_profiles.py", "axiom/cli/workflows.py", "axiom/cli/engine.py", "axiom/cli/model_studio.py", "scripts/release_smoke.py", "scripts/verify_package_artifacts.py", "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py",
         "tests/test_release_smoke.py", "tests/test_ollama_service.py", "tests/test_ollama_service_api.py", "tests/test_ollama_model_operations.py", "tests/test_cli_inference.py", "tests/test_axiom_engine.py", "tests/test_axiom_engine_api.py", "tests/test_axiom_engine_cli.py", "tests/test_native_engine.py", "tests/test_model_studio.py", "tests/test_engine_runtime_status.py", "tests/test_cli_model_studio_jobs.py", "e2e/axiom-engine.spec.ts", "e2e/helpers/auth.ts", "e2e/modules.spec.ts", "e2e/workflows.spec.ts", "e2e/evaluation.spec.ts",
         "e2e/model-registry-filters.spec.ts", "e2e/ollama-service.spec.ts", "e2e/inference-benchmark.spec.ts", "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/axiom-engine.spec.ts", "tests/test_workspace_model_registry_filters.py", "tests/test_workflow_store_pagination.py", "tests/test_workflow_api_pagination.py", "tests/test_workflow_cli.py",
         "tests/test_model_compatibility.py", "tests/test_inference_benchmark.py", "tests/test_inference_benchmark_api.py", "tests/test_runtime_traces.py", "tests/test_runtime_traces_api.py", "tests/test_runtime_discovery.py", "tests/test_runtime_discovery_api.py", "tests/test_agent_profiles.py", "tests/test_agent_profiles_api.py", "tests/test_agent_profiles_cli.py", "tests/test_engine_fabric_profiles.py", "tests/test_engine_fabric_profiles_api.py", "tests/test_engine_fabric_profiles_cli.py", "e2e/api-playground.spec.ts", "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts", "e2e/engine-fabric.spec.ts",
-        "docs/Runtime-Discovery.md", "docs/Agent-Profiles.md", "docs/Api-Playground.md", "docs/Inference-Benchmarking.md", "docs/Local-Engine.md", "docs/Engine-Fabric.md", ".github/workflows/quality-gates.yml", ".github/workflows/nightly-build.yml",
+        "docs/Runtime-Discovery.md", "docs/Agent-Profiles.md", "docs/Api-Playground.md", "docs/Inference-Benchmarking.md", "docs/Local-Engine.md", "docs/Engine-Fabric.md",
+        "docs/Packaging.md", "docs/Storage-Schemas-and-Migrations.md", ".github/workflows/quality-gates.yml", ".github/workflows/nightly-build.yml",
     ]
     for relative in required:
         if not (root / relative).is_file():
@@ -841,6 +1029,42 @@ def inspect(root: Path) -> dict[str, Any]:
     telemetry_panel = (root / "src/components/EngineTelemetryMonitor.tsx").read_text(encoding="utf-8")
     telemetry_e2e = (root / "e2e/telemetry-monitor.spec.ts").read_text(encoding="utf-8")
     failures.extend(resource_monitoring_issues(engine_cli_source, telemetry_panel, app_source, telemetry_e2e))
+    benchmark_trend_panel = (root / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
+    benchmark_trend_chart = (root / "src/components/BenchmarkResourceTrends.tsx").read_text(encoding="utf-8")
+    benchmark_trend_e2e = (root / "e2e/axiom-engine.spec.ts").read_text(encoding="utf-8")
+    failures.extend(benchmark_resource_trend_issues(
+        benchmark_trend_panel, benchmark_trend_chart, benchmark_trend_e2e,
+    ))
+    telemetry_export_monitor = telemetry_panel
+    telemetry_export_e2e = (root / "e2e/telemetry-monitor.spec.ts").read_text(encoding="utf-8")
+    telemetry_export_docs = (root / "docs/API.md").read_text(encoding="utf-8")
+    failures.extend(telemetry_export_privacy_issues(
+        telemetry_export_monitor, telemetry_export_e2e, telemetry_export_docs,
+    ))
+    package_verifier = (root / "scripts/verify_package_artifacts.py").read_text(encoding="utf-8")
+    package_tests = (root / "tests/test_package_artifact_verification.py").read_text(encoding="utf-8")
+    package_docs = (root / "docs/Packaging.md").read_text(encoding="utf-8")
+    package_workflow = (root / ".github/workflows/quality-gates.yml").read_text(encoding="utf-8")
+    failures.extend(package_verification_issues(
+        package_verifier, package_workflow, package_tests, package_docs,
+    ))
+    schema_docs = (root / "docs/Storage-Schemas-and-Migrations.md").read_text(encoding="utf-8")
+    schema_sources = {
+        "workflows": (root / "axiom/core/workflows.py").read_text(encoding="utf-8"),
+        "llm_profiles": (root / "axiom/core/llm_profiles.py").read_text(encoding="utf-8"),
+        "security_events": (root / "axiom/core/security_events.py").read_text(encoding="utf-8"),
+        "hardware_snapshots": (root / "axiom/core/hardware_snapshots.py").read_text(encoding="utf-8"),
+        "workspaces": (root / "axiom/core/workspaces.py").read_text(encoding="utf-8"),
+        "prediction_jobs": (root / "axiom/core/prediction_jobs.py").read_text(encoding="utf-8"),
+        "integrations": (root / "axiom/core/integrations.py").read_text(encoding="utf-8"),
+        "permissions": (root / "axiom/core/tool_permissions.py").read_text(encoding="utf-8"),
+        "registry": (root / "axiom/models/registry.py").read_text(encoding="utf-8"),
+        "workspace_metadata": (root / "axiom/core/workspace_metadata.py").read_text(encoding="utf-8"),
+        "fine_tuning": (root / "axiom/core/fine_tuning.py").read_text(encoding="utf-8"),
+        "model_studio": (root / "axiom/core/model_studio.py").read_text(encoding="utf-8"),
+        "runtime_traces": (root / "axiom/core/runtime_traces.py").read_text(encoding="utf-8"),
+    }
+    failures.extend(persisted_schema_inventory_issues(schema_docs, schema_sources))
     for path in (
         "/api/health", "/api/meta", "/api/workspace/runtime",
         "/api/workspace/models?offset=0&limit=5", "/api/workspace/datasets",
@@ -862,6 +1086,25 @@ def inspect(root: Path) -> dict[str, Any]:
         contract_examples_core, contract_examples_api, contract_examples_server,
         contract_examples_cli, cli_main_source, client, contract_examples_component,
         contract_examples_e2e, contract_examples_tests, contract_examples_docs,
+    ))
+    snapshot_core = (root / "axiom/core/hardware_snapshots.py").read_text(encoding="utf-8")
+    snapshot_api = (root / "axiom/api/hardware_snapshots.py").read_text(encoding="utf-8")
+    snapshot_panel = (root / "src/components/HardwareSnapshotPanel.tsx").read_text(encoding="utf-8")
+    snapshot_e2e = (root / "e2e/hardware-snapshots.spec.ts").read_text(encoding="utf-8")
+    snapshot_tests = (
+        (root / "tests/test_hardware_snapshots.py").read_text(encoding="utf-8")
+        + (root / "tests/test_hardware_snapshots_api.py").read_text(encoding="utf-8")
+        + (root / "tests/test_hardware_snapshots_cli.py").read_text(encoding="utf-8")
+    )
+    snapshot_docs = (
+        (root / "docs/API.md").read_text(encoding="utf-8")
+        + (root / "docs/wiki/CLI-Reference.md").read_text(encoding="utf-8")
+        + (root / "docs/Storage-Schemas-and-Migrations.md").read_text(encoding="utf-8")
+    )
+    failures.extend(hardware_snapshot_issues(
+        snapshot_core, snapshot_api, (root / "axiom/api/server.py").read_text(encoding="utf-8"),
+        cli_main_source, client, snapshot_panel, app_source, snapshot_e2e,
+        snapshot_tests, snapshot_docs,
     ))
     if "15_000" not in client:
         failures.append("The shared API client timeout is missing or has changed; review timeout policy.")
@@ -922,7 +1165,7 @@ def inspect(root: Path) -> dict[str, Any]:
         "e2e/evaluation.spec.ts", "e2e/api-playground.spec.ts",
         "e2e/runtime-connectors.spec.ts", "e2e/agent-profiles.spec.ts", "e2e/engine-fabric.spec.ts",
         "e2e/model-registry-filters.spec.ts", "e2e/inference-benchmark.spec.ts",
-        "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/ollama-service.spec.ts", "e2e/settings-retention.spec.ts",
+        "e2e/runtime-traces.spec.ts", "e2e/telemetry-monitor.spec.ts", "e2e/hardware-snapshots.spec.ts", "e2e/ollama-service.spec.ts", "e2e/settings-retention.spec.ts",
     ):
         target = root / relative
         if not target.is_file():

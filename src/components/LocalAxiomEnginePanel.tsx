@@ -15,6 +15,7 @@ const formatEstimatedMemory = (gib: number): string => {
   return `${(gib * 1024 ** 3).toFixed(0)} bytes`;
 };
 
+import BenchmarkResourceTrends, { type BenchmarkResourceSample } from "./BenchmarkResourceTrends";
 import { axiomApi, type AxiomEngineAdapterCompatibility, type AxiomEngineAssets, type AxiomEngineBatchResult, type AxiomEngineBenchmark, type AxiomEngineLiveTelemetry, type AxiomEngineResult, type AxiomEngineStatus, type AxiomEngineStreamEvent, type AxiomEngineSystemTelemetry, type AxiomQuantizationEstimate } from "../api/client";
 
 export default function LocalAxiomEnginePanel() {
@@ -64,6 +65,7 @@ export default function LocalAxiomEnginePanel() {
   const [benchmarkIterations, setBenchmarkIterations] = useState("3");
   const [benchmarking, setBenchmarking] = useState(false);
   const [benchmarkResult, setBenchmarkResult] = useState<AxiomEngineBenchmark | null>(null);
+  const [benchmarkResourceSamples, setBenchmarkResourceSamples] = useState<BenchmarkResourceSample[]>([]);
   const [benchmarkError, setBenchmarkError] = useState("");
 
   const refresh = async () => {
@@ -374,6 +376,8 @@ export default function LocalAxiomEnginePanel() {
     benchmarkAbortRef.current = controller;
     setBenchmarking(true);
     try {
+      let telemetryBefore: AxiomEngineSystemTelemetry | null = null;
+      try { telemetryBefore = await axiomApi.axiomEngineTelemetry(); } catch { telemetryBefore = null; }
       const report = await axiomApi.benchmarkAxiomEngine({
         model_path: modelPath.trim(),
         adapter_path: adapterPath.trim() || undefined,
@@ -392,6 +396,25 @@ export default function LocalAxiomEnginePanel() {
         memory_mode: memoryMode,
         precision,
       }, controller.signal);
+      let telemetryAfter: AxiomEngineSystemTelemetry | null = null;
+      try { telemetryAfter = await axiomApi.axiomEngineTelemetry(); } catch { telemetryAfter = null; }
+      const beforeAllocator = telemetryBefore?.loaded_runtime.device_allocator;
+      const afterAllocator = telemetryAfter?.loaded_runtime.device_allocator;
+      const delta = (after: number | null | undefined, before: number | null | undefined) =>
+        typeof after === "number" && Number.isFinite(after) && typeof before === "number" && Number.isFinite(before)
+          ? after - before : null;
+      const resourceSample: BenchmarkResourceSample = {
+        id: `${Date.now()}-${report.iterations_completed}-${report.model}`,
+        sampled_at: telemetryAfter?.sampled_at ?? new Date().toISOString(),
+        model: report.model,
+        device: report.device,
+        cpu_percent: typeof telemetryAfter?.cpu.system_percent === "number" && Number.isFinite(telemetryAfter.cpu.system_percent)
+          ? telemetryAfter.cpu.system_percent : null,
+        process_rss_delta_bytes: delta(telemetryAfter?.process.rss_bytes, telemetryBefore?.process.rss_bytes),
+        system_ram_used_delta_bytes: delta(telemetryAfter?.memory.used_bytes, telemetryBefore?.memory.used_bytes),
+        device_allocated_delta_bytes: delta(afterAllocator?.current_allocated_bytes, beforeAllocator?.current_allocated_bytes),
+      };
+      setBenchmarkResourceSamples((current) => [...current, resourceSample].slice(-20));
       setBenchmarkResult(report);
       void refresh();
     } catch (cause) {
@@ -626,6 +649,7 @@ export default function LocalAxiomEnginePanel() {
       </section>}
       <p className="quiet-note">{benchmarkResult.scope_note} No prompts or generated responses are displayed or retained.</p>
     </section>}
+    <BenchmarkResourceTrends samples={benchmarkResourceSamples} />
     <section className="surface axiom-quantization-planner" aria-label="Memory and quantization planner">
       <div className="surface-head">
         <div>
