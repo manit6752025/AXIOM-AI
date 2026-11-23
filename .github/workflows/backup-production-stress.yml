@@ -1,0 +1,56 @@
+name: AXIOM production-scale backup stress
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_labels:
+        description: JSON array of labels for the large-storage self-hosted runner
+        required: true
+        type: string
+        default: '["self-hosted","linux","x64","axiom-large-storage"]'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: axiom-backup-production-stress
+  cancel-in-progress: false
+
+jobs:
+  production-backup-stress:
+    name: 100 GiB workspace backup and restore
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    timeout-minutes: 240
+    env:
+      AXIOM_RUN_BACKUP_PRODUCTION_STRESS: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: implement/roadmap
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install AXIOM test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+      - name: Verify large-storage test prerequisites
+        run: |
+          python - <<'PY'
+          import os
+          import shutil
+          from axiom.core import workspace_backup
+
+          free = shutil.disk_usage(".").free
+          print({
+              "free_bytes": free,
+              "per_file_limit": workspace_backup.MAX_BACKUP_FILE_BYTES,
+              "aggregate_limit": workspace_backup.MAX_BACKUP_TOTAL_BYTES,
+              "archive_limit": workspace_backup.MAX_BACKUP_ARCHIVE_BYTES,
+          })
+          if free < 10 * 1024**3:
+              raise SystemExit("The stress runner needs at least 10 GiB free working space.")
+          PY
+      - name: Run production-limit backup and restore stress
+        run: python -m pytest -q tests/integration/test_backup_production_limits.py

@@ -47,11 +47,25 @@ jobs:
         run: python -m build --sdist --wheel --outdir dist
       - name: Verify archives and install the wheel
         run: python scripts/verify_package_artifacts.py --dist dist --install-wheel --json
-
       - name: Install project and cross-platform regression test dependencies
         run: python -m pip install -e '.[test]' packaging
       - name: Run packaging, path, artifact, security-journal and dataset-snapshot regression tests
-        run: python -m pytest -q tests/test_package_artifact_verification.py tests/test_persisted_schema_inventory.py tests/test_path_safety.py tests/test_mcp_paths.py tests/test_artifact_security.py tests/test_security_events.py tests/test_dataset_snapshots.py tests/test_dataset_snapshots_api.py tests/test_dataset_snapshots_cli.py tests/test_benchmark_profiles.py tests/test_benchmark_profiles_api.py tests/test_axiom_engine_cli.py::test_native_benchmark_profile_list_cli_uses_workspace_store tests/test_axiom_engine_cli.py::test_native_benchmark_profile_compare_cli_reports_comparability tests/test_axiom_engine_cli.py::test_native_benchmark_cli_saves_named_profile_when_requested
+        run: >
+          python -m pytest -q
+          tests/test_package_artifact_verification.py
+          tests/test_persisted_schema_inventory.py
+          tests/test_path_safety.py
+          tests/test_mcp_paths.py
+          tests/test_artifact_security.py
+          tests/test_security_events.py
+          tests/test_dataset_snapshots.py
+          tests/test_dataset_snapshots_api.py
+          tests/test_dataset_snapshots_cli.py
+          tests/test_benchmark_profiles.py
+          tests/test_benchmark_profiles_api.py
+          tests/test_axiom_engine_cli.py::test_native_benchmark_profile_list_cli_uses_workspace_store
+          tests/test_axiom_engine_cli.py::test_native_benchmark_profile_compare_cli_reports_comparability
+          tests/test_axiom_engine_cli.py::test_native_benchmark_cli_saves_named_profile_when_requested
 
   full-validation:
     name: Python, lint, production build and browser E2E
@@ -77,7 +91,7 @@ jobs:
       - name: Snapshot non-editable third-party dependencies for security audit
         run: python -m pip freeze --exclude-editable > "$RUNNER_TEMP/axiom-third-party-requirements.txt"
       - name: Audit installed third-party application dependencies against vulnerability advisories
-        run: python -m pip_audit --requirement "$RUNNER_TEMP/axiom-third-party-requirements.txt" --strict --progress-spinner off
+        run: python -m pip_audit --no-deps --requirement "$RUNNER_TEMP/axiom-third-party-requirements.txt" --strict --progress-spinner off
       - name: Check Python, Node and OS compatibility
         run: python scripts/check_compatibility.py --json --require-node
       - name: Static acceptance checks
