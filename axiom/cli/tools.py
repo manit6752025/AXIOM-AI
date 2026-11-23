@@ -255,8 +255,32 @@ def register(app: typer.Typer, tools_app: typer.Typer) -> None:
         console.print(table)
 
     @tools_app.command("doctor")
-    def tools_doctor() -> None:
+    def tools_doctor(
+        json_output: bool = typer.Option(False, "--json", help="Emit a versioned local tool inventory without exposing credential values."),
+    ) -> None:
         """Check executable presence without claiming vendor authentication."""
+        if json_output:
+            records = []
+            for tool in TOOLS:
+                installed = [name for name in tool.executable_names if shutil.which(name)]
+                credential_present = bool(tool.api_key_env_vars and any(os.getenv(name) for name in tool.api_key_env_vars))
+                records.append({
+                    "id": tool.id,
+                    "name": tool.name,
+                    "kind": tool.kind,
+                    "installed_executables": installed,
+                    "status": _status(tool),
+                    "credential_reference_available": credential_present,
+                    "vendor_authentication_verified": False,
+                })
+            typer.echo(json.dumps({
+                "schema_version": 1,
+                "platform": _platform_name(),
+                "total": len(records),
+                "tools": records,
+                "scope_note": "Local executable and environment-variable presence only; AXIOM does not read, return, or verify credential values or vendor sign-in state.",
+            }, ensure_ascii=False, indent=2, sort_keys=True))
+            return
 
         table = Table(title="AXIOM Tool Doctor")
         table.add_column("Tool")
@@ -282,6 +306,7 @@ def register(app: typer.Typer, tools_app: typer.Typer) -> None:
         tool_id: str = typer.Argument(
             ..., help="Catalog ID, such as claude-code or opencode."
         ),
+        json_output: bool = typer.Option(False, "--json", help="Emit a versioned install-candidate plan without executing commands."),
     ) -> None:
         """Show the current-platform install options without running them."""
 
@@ -290,10 +315,29 @@ def register(app: typer.Typer, tools_app: typer.Typer) -> None:
         except ValueError as exc:
             emit_error(str(exc), code="tool_not_found")
 
+        candidates = _current_candidates(tool)
+        if json_output:
+            typer.echo(json.dumps({
+                "schema_version": 1,
+                "tool": {"id": tool.id, "name": tool.name, "kind": tool.kind},
+                "platform": _platform_name(),
+                "purpose": tool.purpose,
+                "authentication_guidance": tool.auth_notes,
+                "source_url": tool.source_url,
+                "candidates": [{
+                    "install_kind": candidate.install_kind,
+                    "command": candidate.command,
+                    "source_url": candidate.source_url,
+                    "notes": candidate.notes,
+                    "executed": False,
+                } for candidate in candidates],
+                "scope_note": "This is a catalog preview only. AXIOM did not execute an installer, change PATH, download software, or authenticate with the vendor.",
+            }, ensure_ascii=False, indent=2, sort_keys=True))
+            return
+
         console.print(Panel.fit(tool.purpose, title=f"{tool.name} · {tool.id}"))
         console.print(f"Auth: {tool.auth_notes}")
         console.print(f"Source: {tool.source_url}")
-        candidates = _current_candidates(tool)
         if not candidates:
             console.print(
                 f"[yellow]No {_platform_name()} install candidate is cataloged.[/yellow]"
