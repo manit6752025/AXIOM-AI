@@ -48,6 +48,35 @@ def test_prediction_checkpoint_verifies_committed_prefix_and_truncates_uncommitt
         stream.close()
 
 
+
+def test_prediction_checkpoint_rejects_same_inode_mutation_during_digest(tmp_path, monkeypatch):
+    import types
+
+    committed = b'{"prompt":"first","reference":"A","prediction":"x"}\n'
+    record, _path = _checkpoint(tmp_path, committed)
+    real_fstat = prediction_jobs.os.fstat
+    calls = 0
+
+    def changed_snapshot(descriptor):
+        nonlocal calls
+        calls += 1
+        info = real_fstat(descriptor)
+        if calls == 2:
+            return types.SimpleNamespace(
+                st_mode=info.st_mode,
+                st_dev=info.st_dev,
+                st_ino=info.st_ino,
+                st_size=info.st_size,
+                st_mtime_ns=info.st_mtime_ns + 1,
+                st_ctime_ns=info.st_ctime_ns,
+            )
+        return info
+
+    monkeypatch.setattr(prediction_jobs.os, "fstat", changed_snapshot)
+    with pytest.raises(ValueError, match="changed during digest verification"):
+        prediction_jobs._open_prediction_checkpoint(tmp_path, record)
+
+
 def test_prediction_checkpoint_rejects_modified_committed_bytes(tmp_path):
     committed = b'{"prompt":"first","reference":"A","prediction":"x"}\n'
     record, path = _checkpoint(tmp_path, committed)
