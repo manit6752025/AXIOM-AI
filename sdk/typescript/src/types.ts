@@ -60,6 +60,22 @@ export interface AxiomPredictionJobCancelResult {
   note?: string;
 }
 
+export interface AxiomPredictionJobResumeScope {
+  dataset_fingerprint_verified: true;
+  model_and_adapter_fingerprints_verified: true;
+  checkpoint_identity_and_digest_verified: true;
+  partial_output_published: false;
+  prompts_returned: false;
+  predictions_returned: false;
+  generation_resumed_after_restart: true;
+}
+
+export interface AxiomPredictionJobResumeResult {
+  schema_version: 1;
+  job: AxiomPredictionJobSummary;
+  scope: AxiomPredictionJobResumeScope;
+}
+
 export interface AxiomClientOptions {
   /** API origin. Defaults to the local AXIOM daemon. */
   baseUrl?: string;
