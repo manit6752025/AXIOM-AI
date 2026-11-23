@@ -1554,6 +1554,7 @@ def prediction_job_list(
     table.add_column("Status")
     table.add_column("Progress", justify="right")
     table.add_column("Truncated", justify="right")
+    table.add_column("Restarts", justify="right")
     table.add_column("Output")
     for job in jobs:
         table.add_row(
@@ -1561,6 +1562,7 @@ def prediction_job_list(
             str(job["status"]),
             f"{job['rows_completed']}/{job['rows_total']}",
             str(job["prompts_truncated"]),
+            str(job.get("resumption_count", 0)),
             str(job["output_path"]),
         )
     console.print(table)
@@ -1584,6 +1586,8 @@ def prediction_job_show(
     console.print(f"Prediction job [cyan]{job['id']}[/cyan] · {job['status']}")
     console.print(f"Progress: {job['rows_completed']}/{job['rows_total']} rows")
     console.print(f"Prompt truncations: {job['prompts_truncated']}")
+    if job.get("resumption_count", 0) > 0:
+        console.print(f"Resumed after restart: {job['resumption_count']} time(s)")
     console.print(f"Output: {job['output_path']} · {'published' if job['artifact_ready'] else 'not published'}")
     if job.get("error_code"):
         console.print(f"Safe error code: {job['error_code']}")
@@ -1608,6 +1612,8 @@ def prediction_job_wait(
     job = result["job"]
     console.print(f"Prediction job [cyan]{job['id']}[/cyan] · {job['status']}")
     console.print(f"Progress: {job['rows_completed']}/{job['rows_total']} rows · wait: {result['wait_outcome']}")
+    if job.get("resumption_count", 0) > 0:
+        console.print(f"Resumed after restart: {job['resumption_count']} time(s)")
 
 
 @prediction_jobs_app.command("resume")

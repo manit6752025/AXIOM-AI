@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import secrets
 import urllib.error
 import urllib.parse
@@ -496,10 +497,26 @@ class AxiomClient:
             if not isinstance(value, str) or not value.strip() or len(value) > maximum:
                 raise AxiomConfigurationError(f"Prediction job start requires a non-empty {field} of at most {maximum} characters.")
         defaults = {"prompt_field": "prompt", "reference_field": "reference", "prediction_field": "prediction"}
+        field_values = []
+        field_pattern = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,159}$")
         for field, default in defaults.items():
             value = payload.get(field, default)
-            if not isinstance(value, str) or not value.strip() or len(value) > 160:
-                raise AxiomConfigurationError(f"Prediction job {field} must contain 1 to 160 characters.")
+            if not isinstance(value, str) or not field_pattern.fullmatch(value):
+                raise AxiomConfigurationError(f"Prediction job {field} must be a valid JSON field name of at most 160 characters.")
+            field_values.append(value)
+        if len(set(field_values)) != len(field_values):
+            raise AxiomConfigurationError("Prompt, reference, and prediction fields must be different.")
+        if not payload["dataset_path"].startswith("data/"):
+            raise AxiomConfigurationError("Prediction input must be a workspace-relative path under data/.")
+        output_path = payload["output_path"]
+        if (
+            not output_path.startswith("data/")
+            or output_path.count("/") != 1
+            or not output_path.lower().endswith(".jsonl")
+        ):
+            raise AxiomConfigurationError("Prediction output must be a direct-child data/NAME.jsonl path.")
+        if output_path == payload["dataset_path"]:
+            raise AxiomConfigurationError("Prediction output must differ from the source dataset.")
         if "max_new_tokens" in payload and (
             isinstance(payload["max_new_tokens"], bool)
             or not isinstance(payload["max_new_tokens"], int)
@@ -530,6 +547,8 @@ class AxiomClient:
             raise AxiomConfigurationError("device is not a supported local prediction device.")
         if not isinstance(precision, str) or precision not in {"auto", "fp32", "fp16", "bf16"}:
             raise AxiomConfigurationError("precision is not a supported local prediction precision.")
+        if device == "mps" and precision == "bf16":
+            raise AxiomConfigurationError("BF16 precision is not supported on Metal/MPS.")
         return self.request_json("POST", "/api/prediction-jobs", json_body=payload)
 
     def prediction_job(self, job_id: str) -> PredictionJobStatusResult:

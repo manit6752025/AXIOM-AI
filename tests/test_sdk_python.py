@@ -288,4 +288,18 @@ def test_python_sdk_prediction_job_methods_reject_unsafe_ids_and_invalid_inputs(
                 "temperature": float("nan"),
             })
 
+        base = {
+            "model_path": "models/tiny",
+            "dataset_path": "data/eval.jsonl",
+            "output_path": "data/out.jsonl",
+        }
+        with pytest.raises(AxiomConfigurationError, match="direct-child"):
+            client.start_prediction_job({**base, "output_path": "data/nested/out.jsonl"})
+        with pytest.raises(AxiomConfigurationError, match="different"):
+            client.start_prediction_job({**base, "prediction_field": "prompt"})
+        with pytest.raises(AxiomConfigurationError, match="JSON field name"):
+            client.start_prediction_job({**base, "prompt_field": "not a field"})
+        with pytest.raises(AxiomConfigurationError, match="Metal/MPS"):
+            client.start_prediction_job({**base, "device": "mps", "precision": "bf16"})
+
 
