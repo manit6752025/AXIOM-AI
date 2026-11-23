@@ -46,6 +46,11 @@ test("Models can inspect bounded local provenance evidence without loading weigh
       registry_review_state: null,
       registry_review_notes: null,
       files: [{ path: "LICENSE", size_bytes: 20, sha256: "a".repeat(64), hash_status: "complete" }],
+      candidate_file_count: 1,
+      candidate_total_bytes: 20,
+      maximum_file_bytes: 1024 * 1024,
+      maximum_total_bytes: 4 * 1024 * 1024,
+      maximum_files: 64,
       note: "Local license files require human review.",
     },
     security_evidence: {
