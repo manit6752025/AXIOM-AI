@@ -14,7 +14,7 @@ import stat
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from axiom.path_safety import open_regular_file
 
@@ -102,6 +102,8 @@ def _checkpoint_directories(output_dir: Path) -> list[Path]:
     output = Path(output_dir)
     _safe_directory(output, "Adapter output directory is not a safe directory.")
     root = checkpoint_root(output)
+    if root.is_symlink() or getattr(root, "is_junction", lambda: False)():
+        raise ValueError("AXIOM checkpoint storage cannot be a symbolic link or junction.")
     if not root.exists():
         return []
     _safe_directory(root, "AXIOM checkpoint storage is not a safe directory.")

@@ -29,8 +29,16 @@ test("Training page submits a bounded local LoRA job and displays its status", a
       sequence_length: 64,
       learning_rate: 0.0001,
       lora_rank: 4,
-      checkpoint_interval: 0,
+      checkpoint_interval: 2,
       output_policy: "empty",
+    },
+    checkpoint: {
+      enabled: true,
+      interval: 2,
+      latest_step: 0,
+      retained: 0,
+      last_saved_at: null,
+      resume_available: false,
     },
     completed_steps: 0,
     loss: null,
@@ -194,6 +202,7 @@ test("Training page submits a bounded local LoRA job and displays its status", a
   const jobStatus = page.locator('[aria-label="Fine-tuning job status"]');
   await expect(jobStatus).toBeVisible({ timeout: 10_000 });
   await expect(jobStatus).toContainText(/queued/i);
+  await expect(jobStatus).toContainText(/checkpoints/i);
   const cancellationResponse = page.waitForResponse((response) =>
     response.request().method() === "POST"
     && new URL(response.url()).pathname.endsWith("/jobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/cancel"));

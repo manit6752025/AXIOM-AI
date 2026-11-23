@@ -479,7 +479,7 @@ def validate_config(
     if not isinstance(output_raw, str) or not output_raw.strip():
         raise ValueError("Adapter output directory is required.")
     raw_output_path = Path(output_raw).expanduser()
-    if raw_output_path.exists() and raw_output_path.is_symlink():
+    if raw_output_path.is_symlink() or getattr(raw_output_path, "is_junction", lambda: False)():
         raise ValueError("Adapter output directory cannot be a symbolic link.")
     try:
         output_dir = raw_output_path.resolve(strict=False)
@@ -1110,6 +1110,7 @@ def _new_job(
     validated = validate_config(config, workspace_guard=workspace_guard)
     require_runtime()
     resume_step = 0
+    resume_training: dict[str, Any] = {}
     checkpoint = {
         "enabled": validated["checkpoint_interval"] > 0,
         "interval": validated["checkpoint_interval"],
@@ -1120,7 +1121,8 @@ def _new_job(
     }
     if validated["output_policy"] == "resume":
         _, state = latest_checkpoint(Path(validated["output_dir"]))
-        training = state.get("training") if isinstance(state.get("training"), dict) else {}
+        raw_training = state.get("training")
+        resume_training = raw_training if isinstance(raw_training, dict) else {}
         resume_step = state["completed_steps"]
         checkpoint.update(
             latest_step=resume_step,
@@ -1147,7 +1149,7 @@ def _new_job(
         "config": validated,
         "cancel_requested": False,
         "completed_steps": resume_step,
-        "loss": training.get("last_loss") if resume_step and isinstance(training.get("last_loss"), (int, float)) else None,
+        "loss": float(resume_training["last_loss"]) if isinstance(resume_training.get("last_loss"), (int, float)) and not isinstance(resume_training.get("last_loss"), bool) and math.isfinite(float(resume_training["last_loss"])) else None,
         "checkpoint": checkpoint,
         "loss_samples": [],
         "error": None,
@@ -1257,7 +1259,7 @@ def _load_training_texts(
 
 
 def _assert_output_empty(output_dir: Path) -> None:
-    if output_dir.is_symlink() or not output_dir.is_dir():
+    if output_dir.is_symlink() or getattr(output_dir, "is_junction", lambda: False)() or not output_dir.is_dir():
         raise FineTuningError("Adapter output directory changed or is no longer a safe directory.")
     try:
         next(output_dir.iterdir())
@@ -1291,14 +1293,20 @@ def _prepare_output_directory(config: dict[str, Any]) -> None:
             raise FineTuningError("The adapter output directory could not be created safely.") from None
 
 
-def _assert_output_ready_for_finalization(output_dir: Path) -> None:
-    if output_dir.is_symlink() or not output_dir.is_dir():
+def _assert_output_ready_for_finalization(
+    output_dir: Path,
+    *,
+    require_checkpoint: bool = False,
+) -> None:
+    if output_dir.is_symlink() or getattr(output_dir, "is_junction", lambda: False)() or not output_dir.is_dir():
         raise FineTuningError("Adapter output directory changed or is no longer a safe directory.")
     try:
         entries = list(output_dir.iterdir())
     except OSError:
         raise FineTuningError("Adapter output directory could not be inspected safely.") from None
     if not entries:
+        if require_checkpoint:
+            raise FineTuningError("Resume checkpoint storage disappeared before finalization.")
         return
     if len(entries) != 1 or entries[0].name != CHECKPOINT_DIRECTORY:
         raise FineTuningError("Adapter output contains user-managed files; refusing to overwrite them.")
@@ -1401,6 +1409,16 @@ def _run_transformers(
         "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj",
         "c_attn", "c_proj", "query_key_value", "Wqkv", "query", "value",
     )
+    if resume_state is None:
+        torch.manual_seed(AXIOM_TRAINING_SEED)
+        if device.type == "cuda":
+            torch.cuda.manual_seed_all(AXIOM_TRAINING_SEED)
+    elif resume_state.get("training", {}).get("device") != str(device):
+        raise FineTuningError(
+            "Resume requires the same compute device as the saved checkpoint; "
+            "select the original device or start a new training run."
+        )
+
     if resume_state is not None:
         training = resume_state.get("training", {})
         targets = training.get("target_modules")
@@ -1452,16 +1470,6 @@ def _run_transformers(
         device = torch.device("mps")
     else:
         device = torch.device("cpu")
-
-    if resume_state is None:
-        torch.manual_seed(AXIOM_TRAINING_SEED)
-        if device.type == "cuda":
-            torch.cuda.manual_seed_all(AXIOM_TRAINING_SEED)
-    elif resume_state.get("training", {}).get("device") != str(device):
-        raise FineTuningError(
-            "Resume requires the same compute device as the saved checkpoint; "
-            "select the original device or start a new training run."
-        )
 
     try:
         if cancel_check:
@@ -1642,7 +1650,7 @@ def _run_transformers(
         cancel_check()
     if workspace_guard_check:
         workspace_guard_check()
-    _assert_output_ready_for_finalization(output_dir)
+    _assert_output_ready_for_finalization(output_dir, require_checkpoint=config["output_policy"] == "resume")
     try:
         model.save_pretrained(str(output_dir), safe_serialization=True)
         tokenizer.save_pretrained(str(output_dir))
