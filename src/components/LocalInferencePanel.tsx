@@ -16,6 +16,7 @@ export default function LocalInferencePanel() {
   const [seedValue, setSeedValue] = useState("");
   const [contextWindow, setContextWindow] = useState("");
   const [stopSequences, setStopSequences] = useState("");
+  const [jsonSchemaText, setJsonSchemaText] = useState("");
   const [result, setResult] = useState<LocalInferenceResult | null>(null);
   const [benchmark, setBenchmark] = useState<LocalInferenceBenchmark | null>(null);
   const [warmupRuns, setWarmupRuns] = useState("1");
@@ -172,21 +173,59 @@ export default function LocalInferencePanel() {
     if (seedText && (!Number.isSafeInteger(seedNumber) || seedNumber! < 0)) { setError("Seed must be a non-negative safe integer."); return; }
     if (contextText && (!Number.isInteger(contextNumber) || contextNumber! < 512 || contextNumber! > 131072)) { setError("Context window must be between 512 and 131072 tokens."); return; }
     if (stops.length > 16 || stops.some((value) => value.length > 256)) { setError("Use at most 16 stop sequences, each no longer than 256 characters."); return; }
+    let responseSchema: Record<string, unknown> | null = null;
+    const schemaText = jsonSchemaText.trim();
+    if (schemaText) {
+      if (new TextEncoder().encode(schemaText).length > 32 * 1024) {
+        setError("JSON Schema must be at most 32 KiB.");
+        return;
+      }
+      try {
+        const parsed: unknown = JSON.parse(schemaText);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("JSON Schema must be an object.");
+        }
+        responseSchema = parsed as Record<string, unknown>;
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Enter a valid JSON Schema object.");
+        return;
+      }
+      if (tokenLimit > 512) {
+        setError("Structured output is limited to 512 generated tokens. Lower the token limit first.");
+        return;
+      }
+    }
     setRunning(true);
-    const controller = new AbortController();
-    setStreamController(controller);
+    setStreamController(null);
     setResult({ model: model.trim(), response: "", done: false, prompt_eval_count: null, eval_count: null, total_duration_ms: null, generated_at: new Date().toISOString() });
+    const input = {
+      model: model.trim(), prompt, num_predict: tokenLimit, temperature: temperatureValue,
+      top_p: topPValue, top_k: topKValue, min_p: minPValue, repetition_penalty: repetitionPenaltyValue,
+      ...(seedNumber !== null ? { seed: seedNumber } : {}),
+      ...(contextNumber !== null ? { num_ctx: contextNumber } : {}),
+      ...(stops.length ? { stop_sequences: stops } : {}),
+    };
     try {
-      const finalResult = await axiomApi.streamLocalInference(
-        { model: model.trim(), prompt, num_predict: tokenLimit, temperature: temperatureValue, top_p: topPValue, top_k: topKValue, min_p: minPValue, repetition_penalty: repetitionPenaltyValue, ...(seedNumber !== null ? { seed: seedNumber } : {}), ...(contextNumber !== null ? { num_ctx: contextNumber } : {}), ...(stops.length ? { stop_sequences: stops } : {}) },
-        (event: LocalInferenceStreamEvent) => {
-          if (event.type === "token") {
-            setResult((current) => current ? { ...current, response: current.response + event.token, done: false } : current);
-          }
-        },
-        controller.signal,
-      );
-      setResult(finalResult);
+      if (responseSchema) {
+        const finalResult = await axiomApi.generateStructuredLocalInference({
+          ...input,
+          json_schema: responseSchema,
+        });
+        setResult(finalResult);
+      } else {
+        const controller = new AbortController();
+        setStreamController(controller);
+        const finalResult = await axiomApi.streamLocalInference(
+          input,
+          (event: LocalInferenceStreamEvent) => {
+            if (event.type === "token") {
+              setResult((current) => current ? { ...current, response: current.response + event.token, done: false } : current);
+            }
+          },
+          controller.signal,
+        );
+        setResult(finalResult);
+      }
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === "AbortError") {
         setError("Generation stopped. Partial output is retained.");
@@ -354,6 +393,15 @@ export default function LocalInferencePanel() {
         </div>
         <label className="field"><span className="field-label-row"><span>Stop sequences (one per line, optional)</span><span>{stopSequences.split(/\r?\n/).filter((value) => value.trim()).length} / 16</span></span><textarea value={stopSequences} onChange={(event) => setStopSequences(event.target.value)} rows={3} placeholder="Example: END_OF_RESPONSE\n<|end|>" /></label>
       </details>
+      <details className="surface" style={{ marginTop: 14, padding: 14, border: "1px solid var(--line-strong)", borderRadius: 2, background: "var(--surface)" }}>
+        <summary style={{ cursor: "pointer", fontWeight: 600 }}>Structured JSON output · optional</summary>
+        <p className="quiet-note" style={{ marginTop: 10 }}>Supply a bounded JSON Schema to constrain the local model and validate its complete response. This mode is non-streaming, caps output at 512 tokens / 64 KiB, and never accepts remote references or executable schema extensions.</p>
+        <label className="field">
+          <span className="field-label-row"><span>JSON Schema · Draft 2020-12 subset</span><span>{new TextEncoder().encode(jsonSchemaText).length.toLocaleString()} / 32 KiB</span></span>
+          <textarea aria-label="JSON Schema for structured output" value={jsonSchemaText} onChange={(event) => setJsonSchemaText(event.target.value)} maxLength={32768} rows={8} spellCheck={false} placeholder='{"type":"object","properties":{"answer":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1}},"required":["answer","confidence"]}' />
+        </label>
+        <p className="quiet-note">Object schemas default to deny unknown properties. Supported constraints include types, required fields, properties, array items and bounds, string lengths, numeric ranges, enum, and const. Unsupported keywords are rejected before the model is called.</p>
+      </details>
       <div className="integration-form-actions">
         <button type="submit" className="button primary-button" disabled={!online || loading || running || !model.trim() || !prompt.trim()}><Play size={15} /> {running ? "Generating locally…" : "Run locally"}</button>
         {running && <button type="button" className="button secondary-button" onClick={() => streamController?.abort()} disabled={!streamController}><Square size={13} /> Stop generation</button>}
@@ -364,6 +412,10 @@ export default function LocalInferencePanel() {
     {result && <section className="local-inference-result" aria-label="Generated response">
       <div className="surface-head"><div><p className="surface-eyebrow">GENERATED ON THIS MACHINE</p><h3>{result.model}</h3><small className="quiet-note">Request ID: {result.request_id || "unavailable"}</small></div><span className={`status-pill ${running ? "warning" : result.done ? "success" : "warning"}`}><i />{running ? "GENERATING" : result.done ? "COMPLETED" : "STOPPED"}</span></div>
       <pre data-testid="local-inference-output" className="local-inference-output">{result.response || "(The model returned an empty response.)"}</pre>
+      {result.structured_output_validated && <div className="local-inference-structured-output" role="region" aria-label="Validated structured output">
+        <span className="status-pill success"><i />SCHEMA VALIDATED</span>
+        <pre className="local-inference-output" aria-label="Structured JSON result">{JSON.stringify(result.structured_output, null, 2)}</pre>
+      </div>}
     </section>}
     <section className="surface" aria-labelledby="inference-benchmark-title" style={{ marginTop: 18, padding: 18, border: "1px solid var(--line-strong)", borderRadius: 2, background: "var(--surface)" }}>
       <div className="surface-head">

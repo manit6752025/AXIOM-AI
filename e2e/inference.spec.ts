@@ -97,3 +97,56 @@ test("Runtime can stop a streamed local Ollama generation and retain partial out
   await expect(inferencePanel.getByRole("alert").filter({ hasText: "Generation stopped. Partial output is retained." })).toBeVisible();
   unblock?.();
 });
+
+
+test("Runtime supports schema-constrained local inference and displays only validated structured JSON", async ({ page }) => {
+  await ensureAuthenticated(page);
+  await page.route("**/api/workspace/runtime", (route) => route.fulfill({ json: {
+    status: "offline",
+    hardware: { os_name: "Linux", architecture: "x86_64", cpu_cores: 8, ram_gb: 16, gpu_name: null, vram_gb: null, cuda_available: false },
+  } }));
+  await page.route("**/api/inference/status", (route) => route.fulfill({ json: {
+    backend: "ollama", endpoint: "http://127.0.0.1:11434", runtime_installed: true,
+    status: "online", models: ["qwen2.5:0.5b"], error: null, checked_at: "2026-11-21T00:00:00Z",
+  } }));
+  await page.route("**/api/diagnostics/runtime-connectors", (route) => route.fulfill({ json: {
+    schema_version: 1, discovery_mode: "passive_local_discovery", checked_at: "2026-11-21T00:00:00Z",
+    scope_note: "Presence is not a connection.", connectors: [],
+  } }));
+  let received: Record<string, unknown> | null = null;
+  await page.route("**/api/inference/generate/structured", async (route) => {
+    received = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ status: 200, json: {
+      request_id: "structured-test-request", model: "qwen2.5:0.5b",
+      response: '{"answer":"local only","confidence":0.9}', done: true,
+      prompt_eval_count: 4, eval_count: 8, total_duration_ms: 21.4,
+      generated_at: "2026-11-21T00:00:00Z",
+      structured_output: { answer: "local only", confidence: 0.9 },
+      structured_output_validated: true,
+    } });
+  });
+
+  await page.goto("/?page=runtime");
+  const panel = page.locator(".ollama-inference-panel");
+  await expect(panel.getByRole("heading", { name: "Local model inference" })).toBeVisible();
+  await panel.getByPlaceholder("Ask your local model to do something…").fill("Return an answer and confidence.");
+  await panel.getByText("Structured JSON output · optional").click();
+  const schema = {
+    type: "object",
+    properties: {
+      answer: { type: "string", minLength: 1, maxLength: 80 },
+      confidence: { type: "number", minimum: 0, maximum: 1 },
+    },
+    required: ["answer", "confidence"],
+  };
+  await panel.getByLabel("JSON Schema for structured output").fill(JSON.stringify(schema, null, 2));
+  await panel.getByRole("button", { name: "Run locally" }).click();
+  await expect(panel.getByTestId("local-inference-output")).toContainText('{"answer":"local only","confidence":0.9}');
+  await expect(panel.getByRole("region", { name: "Validated structured output" })).toContainText('"confidence": 0.9');
+  await expect(panel.getByText("SCHEMA VALIDATED", { exact: true })).toBeVisible();
+  expect(received).toMatchObject({
+    model: "qwen2.5:0.5b",
+    prompt: "Return an answer and confidence.",
+    json_schema: { type: "object", additionalProperties: false, required: ["answer", "confidence"] },
+  });
+});

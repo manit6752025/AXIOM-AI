@@ -60,6 +60,17 @@ API clients must provide a token. When both variables are unset, token enforceme
 backwards compatibility. Keep the daemon on loopback for ordinary local use;
 tokens do not replace TLS, network isolation, or host security.
 
+## Structured local inference
+
+- `POST /api/inference/generate/structured` runs one local Ollama generation with a bounded JSON Schema request and validates the returned JSON again before accepting it.
+- The request inherits the normal local inference model/prompt/sampling fields, adds a required `json_schema` object, and limits structured output to 512 requested tokens.
+- The safe Draft 2020-12 subset rejects `$ref`/remote resolution, unknown keywords, executable extensions, and unbounded object properties. Object schemas deny undeclared fields.
+- Schema size is limited to 32 KiB / 8 levels / 128 schema nodes; parsed output is limited to 65,536 characters, duplicate keys and non-finite numbers are rejected.
+- Success adds `structured_output` and `structured_output_validated: true`. Invalid schemas/requests return 422, schema-invalid model output returns 502, and unavailable local runtime returns 503.
+- This endpoint invokes a model and requires the write API scope when bearer-token scopes are enabled. It never calls a cloud provider or stores prompt/output content in runtime traces.
+
+See [Structured local inference](wiki/Structured-Output.md) for the supported schema keywords, CLI usage, and limits.
+
 ## AXIOM Engine and training
 
 - `GET /api/engine/status` reports direct local inference readiness.

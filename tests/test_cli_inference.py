@@ -94,3 +94,67 @@ def test_infer_run_forwards_advanced_sampling_options_to_local_runtime(monkeypat
     assert observed["seed"] == 17
     assert observed["num_ctx"] == 4096
     assert observed["stop_sequences"] == ["END_OF_TEXT"]
+
+
+def test_infer_run_supports_json_schema_constrained_local_output(monkeypatch, tmp_path):
+    schema_file = tmp_path / "response.schema.json"
+    schema_file.write_text(
+        '{"type":"object","properties":{"answer":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1}},"required":["answer","confidence"]}',
+        encoding="utf-8",
+    )
+    observed = {}
+
+    def fake_run(model, prompt, **options):
+        observed.update(model=model, prompt=prompt, **options)
+        return {
+            "model": model, "response": '{"answer":"local only","confidence":0.9}',
+            "done": True, "prompt_eval_count": 4, "eval_count": 8,
+            "total_duration_ms": 20, "generated_at": "2026-11-21T00:00:00Z",
+        }
+
+    monkeypatch.setattr("axiom.cli.inference.run_local_inference", fake_run)
+    result = CliRunner().invoke(app, [
+        "--no-banner", "infer", "run", "qwen2.5:0.5b",
+        "--prompt", "Return a structured answer.",
+        "--schema-file", str(schema_file), "--json",
+    ])
+    assert result.exit_code == 0, result.output
+    assert observed["response_format"]["type"] == "object"
+    assert observed["response_format"]["additionalProperties"] is False
+    payload = __import__("json").loads(result.output)
+    assert payload["structured_output"] == {"answer": "local only", "confidence": 0.9}
+    assert payload["structured_output_validated"] is True
+
+
+def test_infer_run_rejects_remote_reference_schemas_before_generation(monkeypatch, tmp_path):
+    schema_file = tmp_path / "unsafe.schema.json"
+    schema_file.write_text(
+        '{"type":"object","$ref":"https://example.invalid/schema"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "axiom.cli.inference.run_local_inference",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("runtime must not run")),
+    )
+    result = CliRunner().invoke(app, [
+        "--no-banner", "infer", "run", "qwen2.5:0.5b",
+        "--prompt", "Return JSON.", "--schema-file", str(schema_file), "--json",
+    ])
+    assert result.exit_code != 0
+    assert "Unsupported JSON Schema keyword" in result.output
+
+
+def test_infer_run_rejects_symlinked_schema_files(monkeypatch, tmp_path):
+    target = tmp_path / "schema.json"
+    target.write_text('{"type":"string"}', encoding="utf-8")
+    linked = tmp_path / "linked-schema.json"
+    linked.symlink_to(target)
+    monkeypatch.setattr(
+        "axiom.cli.inference.run_local_inference",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("runtime must not run")),
+    )
+    result = CliRunner().invoke(app, [
+        "--no-banner", "infer", "run", "qwen2.5:0.5b",
+        "--prompt", "Return JSON.", "--schema-file", str(linked), "--json",
+    ])
+    assert result.exit_code != 0
