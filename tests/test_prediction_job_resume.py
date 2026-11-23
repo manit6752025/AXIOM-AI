@@ -136,6 +136,25 @@ def test_prediction_v1_job_history_migrates_as_non_resumable(tmp_path):
     assert record["resumption_count"] == 0
     assert summary["status"] == "interrupted"
     assert summary["resumable"] is False
+    assert record["generation_fingerprint"] == prediction_jobs._prediction_generation_fingerprint(record)
+
+    v2_defaults = {
+        "dataset_sha256": None,
+        "model_fingerprint": None,
+        "adapter_fingerprint": None,
+        "checkpoint_name": None,
+        "checkpoint_identity": None,
+        "checkpoint_bytes": 0,
+        "checkpoint_sha256": None,
+        "resumption_count": 0,
+    }
+    (state_dir / "prediction_jobs.json").write_text(
+        json.dumps({"schema_version": 2, "jobs": [{**legacy, **v2_defaults}]}, indent=2),
+        encoding="utf-8",
+    )
+    [migrated_v2] = prediction_jobs._read_job_records(tmp_path)
+    assert migrated_v2["generation_fingerprint"] == prediction_jobs._prediction_generation_fingerprint(migrated_v2)
+
 
 def test_resume_prediction_job_revalidates_assets_and_schedules_checkpoint_worker(tmp_path, monkeypatch):
     import json
@@ -190,6 +209,7 @@ def test_resume_prediction_job_revalidates_assets_and_schedules_checkpoint_worke
         "adapter_fingerprint": None,
         "resumption_count": 0,
     })
+    record["generation_fingerprint"] = prediction_jobs._prediction_generation_fingerprint(record)
     state_dir = root / ".axiom"
     state_dir.mkdir()
     monkeypatch.setattr(prediction_jobs, "_JOBS", {})
@@ -284,6 +304,7 @@ def test_resume_prediction_job_refuses_dataset_fingerprint_changes(tmp_path, mon
         "adapter_fingerprint": None,
         "resumption_count": 0,
     })
+    record["generation_fingerprint"] = prediction_jobs._prediction_generation_fingerprint(record)
     (root / ".axiom").mkdir()
     monkeypatch.setattr(prediction_jobs, "_JOBS", {})
     monkeypatch.setattr(prediction_jobs, "resolve_workspace_input", lambda path, workspace, label: model)
@@ -333,6 +354,7 @@ def test_dead_prediction_worker_is_recovered_as_interrupted_with_checkpoint_reta
         "adapter_fingerprint": None,
         "resumption_count": 0,
     })
+    record["generation_fingerprint"] = prediction_jobs._prediction_generation_fingerprint(record)
     (tmp_path / ".axiom").mkdir()
     prediction_jobs._persist_job_record(tmp_path, record)
     monkeypatch.setattr(prediction_jobs, "_process_is_alive", lambda pid: False)
@@ -419,6 +441,7 @@ def test_prediction_job_recovery_after_real_owner_process_termination(tmp_path):
             "adapter_fingerprint": None,
             "resumption_count": 0,
         })
+        record["generation_fingerprint"] = prediction_jobs._prediction_generation_fingerprint(record)
         (tmp_path / ".axiom").mkdir()
         prediction_jobs._persist_job_record(tmp_path, record)
         assert worker.poll() is None
