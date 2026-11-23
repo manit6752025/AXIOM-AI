@@ -256,10 +256,10 @@ def readiness_probe(profile: dict[str, Any]) -> dict[str, Any]:
             "checkpoint_format": context["checkpoint_format"],
             "effective_context_length": context["effective_max_position_embeddings"],
         }
-    except (OSError, RuntimeError, ValueError) as exc:
+    except (OSError, RuntimeError, ValueError):
         context = None
         checks["model"] = {"available": False}
-        problems.append(f"Model checkpoint is not ready: {exc}")
+        problems.append("Model checkpoint readiness could not be verified. Check the selected local model directory and checkpoint files.")
 
     try:
         runtime = runtime_status()
@@ -337,9 +337,9 @@ def readiness_probe(profile: dict[str, Any]) -> dict[str, Any]:
             }
             if not compatible:
                 problems.append("Configured LoRA adapter is not compatible with the selected base model.")
-        except (OSError, RuntimeError, ValueError) as exc:
+        except (OSError, RuntimeError, ValueError):
             checks["adapter"] = {"available": False, "compatible": False}
-            problems.append(f"LoRA adapter readiness check failed: {exc}")
+            problems.append("LoRA adapter readiness could not be verified. Check the selected local adapter files and device compatibility.")
     else:
         checks["adapter"] = {"available": True, "configured": False}
 
