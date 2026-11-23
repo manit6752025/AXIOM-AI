@@ -72,6 +72,8 @@ def _canonical_model_root(model_path: str | Path) -> Path | None:
         if candidate.is_symlink():
             raise BenchmarkProfileError("The selected model directory must not be a symbolic link.")
         root = Path(os.path.realpath(candidate))
+    except BenchmarkProfileError:
+        raise
     except (OSError, RuntimeError, TypeError, ValueError):
         return None
     return root if root.is_dir() else None
