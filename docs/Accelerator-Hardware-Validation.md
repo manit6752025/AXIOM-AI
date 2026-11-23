@@ -17,6 +17,17 @@ uses registered self-hosted runners with explicit labels.
 | ROCm | `self-hosted, Linux, X64, axiom-rocm` |
 | Apple Metal/MPS | `self-hosted, macOS, ARM64, axiom-mps` |
 | Intel XPU | `self-hosted, Linux, X64, axiom-xpu` |
+| GitHub-hosted CUDA | Organization larger runner named `axiom-cuda-t4` |
+
+GitHub also documents a GPU larger-runner configuration with one NVIDIA
+Tesla T4 (16 GiB VRAM), available to organizations on GitHub Team or GitHub
+Enterprise Cloud. An organization owner must create a larger runner named
+`axiom-cuda-t4`, grant this repository access to it, and configure its image
+with the NVIDIA driver. The manual `cuda-github-hosted-t4` option then checks
+that the physical device is actually a T4 before executing the adapter test.
+The current repository is under a personal owner, so this hosted larger-runner
+route requires moving it to an eligible organization; no access or hardware
+is assumed by this workflow.
 
 Each runner must have the vendor driver/runtime and a PyTorch build compatible
 with that device preinstalled or installable by the configured environment.
