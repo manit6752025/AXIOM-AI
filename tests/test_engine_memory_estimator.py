@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+
+import pytest
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -162,3 +164,49 @@ def test_memory_estimator_accounts_for_tied_embeddings_and_optional_projection_b
     # Tying removes the 64-value output head; attention bias adds 24 values
     # and MLP bias adds 32 values to the base 632-parameter estimate.
     assert report["model"]["estimated_parameter_count"] == 624
+
+
+
+def test_memory_estimator_api_rejects_boolean_context_batch_and_budgets(tmp_path: Path, monkeypatch) -> None:
+    model = _model(tmp_path)
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(tmp_path))
+    base = {"model_path": str(model), "ram_budget_gib": 8}
+    invalid_payloads = (
+        {**base, "context_length": True},
+        {**base, "batch_size": True},
+        {**base, "ram_budget_gib": True},
+        {"model_path": str(model), "vram_budget_gib": False},
+    )
+    for payload in invalid_payloads:
+        response = _api_client().post("/api/engine/quantization/estimate", json=payload)
+        assert response.status_code == 422, (payload, response.text)
+
+
+def test_memory_estimator_reports_no_native_candidate_when_every_candidate_exceeds_budget(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    model = _model(
+        tmp_path,
+        "large-llama",
+        hidden_size=4096,
+        intermediate_size=11008,
+        num_hidden_layers=32,
+        num_attention_heads=32,
+        num_key_value_heads=8,
+        vocab_size=32000,
+        max_position_embeddings=8192,
+    )
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(tmp_path))
+    report = estimate_native_quantization(
+        str(model),
+        context_length=4096,
+        batch_size=1,
+        ram_budget_gib=0.1,
+        vram_budget_gib=0.1,
+    )
+    assert report["recommendation"]["format"] is None
+    assert report["recommendation"]["status"] == "no_native_candidate_fits"
+    native = [item for item in report["candidates"] if item["native_checkpoint_supported"]]
+    assert native
+    assert all(item["fits_ram_budget"] is False for item in native)
+    assert all(item["fits_vram_budget"] is False for item in native)
