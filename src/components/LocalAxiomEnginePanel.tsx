@@ -740,10 +740,10 @@ export default function LocalAxiomEnginePanel() {
         {!result && streamTokenCount > 0 && <span className="quiet-note"><Activity size={14} /> {streamTokenCount} token(s) streamed</span>}
       </div>
     </form>
-    <section className="panel-surface prediction-job-panel" aria-label="Resumable prediction jobs" style={{ padding: 14, marginTop: 14 }}>
+    <section className="panel-surface prediction-job-panel" aria-label="Prediction jobs" style={{ padding: 14, marginTop: 14 }}>
       <div className="surface-head">
         <div>
-          <p className="surface-eyebrow">AXIOM ENGINE · CHECKPOINTED JSONL JOBS</p>
+          <p className="surface-eyebrow">AXIOM ENGINE · BOUNDED JSONL JOBS</p>
           <h3>Prediction jobs</h3>
           <p className="quiet-note">Run bounded local inference over a workspace JSONL dataset. Jobs persist row progress, never persist prompts or generated text, and publish a new output file only after the complete artifact has been verified.</p>
         </div>
@@ -782,7 +782,7 @@ export default function LocalAxiomEnginePanel() {
       <p className="quiet-note">Hard limits: 100 rows · 48 MiB source · 4 prompts per generation batch · 64 generated tokens per row · 64 MiB output. Uses the selected model, adapter, device and precision above. Output paths must be new files under data/.</p>
       <div className="integration-form-actions">
         <button type="button" className="button primary-button" onClick={() => void startPredictionJob()} disabled={predictionBusy || running || benchmarking || unloading || !status?.ready || !modelPath.trim()}>
-          {predictionBusy ? "Starting prediction job…" : "Start checkpointed prediction job"}
+          {predictionBusy ? "Starting prediction job…" : "Start prediction job"}
         </button>
       </div>
       {predictionError && <div className="inline-alert warning" role="alert">{predictionError}</div>}

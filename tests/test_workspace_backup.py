@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from axiom.core import workspace_backup
+from axiom.core.knowledge import KnowledgeBaseStore
 from axiom.core.workspace_backup import (
     WorkspaceBackupError,
     create_workspace_backup,
@@ -318,4 +319,29 @@ def test_workspace_backup_round_trips_at_resource_limits_and_rejects_over_limit(
     (workspace / "second.bin").write_bytes(b"b" * 17)
     with pytest.raises(WorkspaceBackupError, match="50 GiB"):
         create_workspace_backup(workspace, io.BytesIO())
+
+def test_workspace_backup_preserves_ingested_knowledge_store_and_documents(tmp_path: Path):
+    workspace = tmp_path / "knowledge-workspace"
+    (workspace / "documents").mkdir(parents=True)
+    source = workspace / "documents" / "guide.md"
+    source.write_text("# Recovery guide\\nKnowledge documents are private workspace data.\\n", encoding="utf-8")
+
+    knowledge = KnowledgeBaseStore(workspace)
+    base = knowledge.create_base("Operations", "Runbooks and recovery notes")
+    document = knowledge.ingest_document(base["id"], "documents/guide.md")
+    expected_text = knowledge.read_document(base["id"], document["id"])
+
+    archive, _report = _archive(workspace)
+    restored = tmp_path / "restored-knowledge-workspace"
+    restored.mkdir(mode=0o700)
+    restore_workspace_backup(archive, restored)
+
+    restored_knowledge = KnowledgeBaseStore(restored)
+    restored_base = restored_knowledge.get_base(base["id"])
+    assert restored_base is not None
+    restored_documents = restored_knowledge.list_documents(base["id"])
+    assert restored_documents["total"] == 1
+    assert restored_documents["documents"][0]["id"] == document["id"]
+    assert restored_knowledge.read_document(base["id"], document["id"]) == expected_text
+    assert (restored / "documents" / "guide.md").read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
 

@@ -146,10 +146,12 @@ The Runtime page sampling loop is off until the user selects Start; it can keep 
 Weights may be placed locally or acquired through Model Studio's explicit public-Hub native pull/GGUF installation; always review model licenses. AXIOM does not claim supplied third-party base weights were pretrained by AXIOM. Native speed and memory depend on model size, precision, device, and—in GGUF mode—dequantization overhead. Native low-bit kernels and further architecture families need separate implementations and acceptance tests.
 
  
-## Checkpointed prediction jobs
+## Bounded prediction jobs
 
 The Native Engine exposes bounded JSONL prediction jobs with persisted row
-progress and cooperative cancellation.
+progress and cooperative cancellation. These jobs are not restart-resumable:
+a worker that exits before publication is marked interrupted, and its partial
+temporary output is discarded rather than treated as a durable checkpoint.
 
 ~~~bash
 axiom engine prediction start \

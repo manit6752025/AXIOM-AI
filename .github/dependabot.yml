@@ -9,4 +9,4 @@ updates:
     groups:
       all-dependencies:
         patterns:
-          - "*" # Groups all updates into one clean PR instead of spamming you
+          - "*" # Groups all updates into one clean PR instead of spamming me

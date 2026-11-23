@@ -31,7 +31,8 @@ test("Runtime creates a workspace knowledge base and ingests a local document", 
     });
   });
   await page.route("**/api/workspace/knowledge-bases/*/documents", async (route) => {
-    if (route.request().method() === "POST") {
+    const method = route.request().method();
+    if (method === "POST") {
       ingestPayload = route.request().postDataJSON() as Record<string, unknown>;
       hasDocument = true;
       await route.fulfill({
@@ -43,6 +44,13 @@ test("Runtime creates a workspace knowledge base and ingests a local document", 
           source_text_persisted: true,
           network_used: false,
         },
+      });
+      return;
+    }
+    if (method === "DELETE") {
+      hasDocument = false;
+      await route.fulfill({
+        json: { schema_version: 1, removed: document, source_file_modified: false },
       });
       return;
     }
@@ -74,13 +82,13 @@ test("Runtime creates a workspace knowledge base and ingests a local document", 
     searchPayload = route.request().postDataJSON() as Record<string, unknown>;
     await route.fulfill({ json: {
       schema_version: 1,
-      engine: "axiom-lexical-knowledge-search",
+      engine: "axiom-hybrid-knowledge-search",
       knowledge_base: base,
       query: { character_count: 5, candidate_documents: 1, chunks_scanned: 1, result_limit: 8,
-        chunk_size_chars: 1200, chunk_overlap_chars: 160, vector_enabled: false, vector_weight: 0,
+        chunk_size_chars: 1200, chunk_overlap_chars: 160, vector_enabled: true, vector_weight: 0.65,
         formats: [], source_prefixes: ["documents"], document_ids: [] },
       results: [{
-        score: 0.87, lexical_score: 0.87, vector_score: null, snippet: "AXIOM local retrieval excerpt.",
+        score: 0.91, lexical_score: 0.82, vector_score: 0.97, snippet: "AXIOM local retrieval excerpt.",
         citation: { document_id: document.id, file_name: document.file_name, source_path: document.source_path,
           format: "md", content_sha256: document.content_sha256, chunk_index: 1, start_char: 0,
           end_char: 22, character_count: 22 },
@@ -93,9 +101,22 @@ test("Runtime creates a workspace knowledge base and ingests a local document", 
   });
   await page.getByLabel("Search query").fill("AXIOM");
   await page.getByLabel("Source path prefix (optional)").fill("documents");
+  await page.getByLabel("Local embedding model path (optional hybrid search)").fill("models/local-encoder");
+  await page.getByLabel("Vector score weight").fill("0.65");
   await page.getByRole("button", { name: "Search knowledge base" }).click();
-  await expect(page.getByText("LEXICAL SEARCH", { exact: true })).toBeVisible();
+  await expect(page.getByText("HYBRID SEARCH", { exact: true })).toBeVisible();
   await expect(page.getByText("AXIOM local retrieval excerpt.", { exact: true })).toBeVisible();
-  expect(searchPayload).toMatchObject({ query: "AXIOM", source_prefixes: ["documents"], max_documents: 64 });
+  await expect(page.getByText("documents/guide.md", { exact: false })).toBeVisible();
+  await expect(page.getByText("SHA-256 " + document.content_sha256, { exact: false })).toBeVisible();
+  expect(searchPayload).toMatchObject({
+    query: "AXIOM",
+    source_prefixes: ["documents"],
+    embedding_model_path: "models/local-encoder",
+    vector_weight: 0.65,
+    max_documents: 64,
+  });
 
+  await page.getByRole("button", { name: "Remove copy" }).click();
+  await expect(page.getByText("Removed the ingested copy of guide.md; the source file was left unchanged.", { exact: true })).toBeVisible();
+  await expect(page.getByText("No documents yet", { exact: true })).toBeVisible();
 });
