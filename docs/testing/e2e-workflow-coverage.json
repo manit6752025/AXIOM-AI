@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "description": "Checked-in inventory mapping every Control Center navigation page to the Playwright specifications that exercise it. Runtime maps to its higher-risk inference/serving/knowledge workflows.",
+  "page_id_source": "src/App.tsx: const navItems",
+  "pages": [
+    {
+      "id": "optimizer",
+      "label": "Agent Optimizer",
+      "specs": [
+        "e2e/optimization-planning.spec.ts"
+      ],
+      "journeys": [
+        "profile/model/throughput inputs",
+        "bounded optimization plan and result rendering"
+      ]
+    },
+    {
+      "id": "quantizer",
+      "label": "Quantization Lab",
+      "specs": [
+        "e2e/optimization-planning.spec.ts"
+      ],
+      "journeys": [
+        "profile/model/performance target",
+        "quantization size and fit comparison rendering"
+      ]
+    },
+    {
+      "id": "dashboard",
+      "label": "Control center",
+      "specs": [
+        "e2e/global-status.spec.ts",
+        "e2e/hardware-snapshots.spec.ts"
+      ],
+      "journeys": [
+        "backend state and retry",
+        "opt-in hardware history capture and clear"
+      ]
+    },
+    {
+      "id": "models",
+      "label": "Models",
+      "specs": [
+        "e2e/model-studio.spec.ts",
+        "e2e/model-provenance.spec.ts",
+        "e2e/model-registry-duplicates.spec.ts",
+        "e2e/model-registry-filters.spec.ts",
+        "e2e/model-inspection-summary.spec.ts",
+        "e2e/model-runtime-matrix.spec.ts",
+        "e2e/model-source-attribution.spec.ts",
+        "e2e/destructive-confirmations.spec.ts"
+      ],
+      "journeys": [
+        "local model discovery/install",
+        "provenance and source attribution",
+        "registry filters and duplicates",
+        "runtime format evidence",
+        "confirmed destructive removal"
+      ]
+    },
+    {
+      "id": "datasets",
+      "label": "Datasets",
+      "specs": [
+        "e2e/datasets.spec.ts",
+        "e2e/dataset-snapshots.spec.ts"
+      ],
+      "journeys": [
+        "bounded inspection and preview-only cleaning",
+        "immutable snapshots and profile comparison"
+      ]
+    },
+    {
+      "id": "training",
+      "label": "Training",
+      "specs": [
+        "e2e/fine-tuning.spec.ts",
+        "e2e/training-plans.spec.ts"
+      ],
+      "journeys": [
+        "bounded local fine-tuning job lifecycle",
+        "hardware-aware reproducible planning and saved snapshots"
+      ]
+    },
+    {
+      "id": "workflows",
+      "label": "Workflows",
+      "specs": [
+        "e2e/workflows.spec.ts"
+      ],
+      "journeys": [
+        "planning-only autosave and dry-run",
+        "branching graph editing with typed ports"
+      ]
+    },
+    {
+      "id": "evaluation",
+      "label": "Evaluation",
+      "specs": [
+        "e2e/evaluation.spec.ts",
+        "e2e/inference-benchmark.spec.ts"
+      ],
+      "journeys": [
+        "evaluation submission and report",
+        "repeated-experiment comparison",
+        "bounded measured inference benchmark"
+      ]
+    },
+    {
+      "id": "runtime",
+      "label": "Runtime",
+      "specs": [
+        "e2e/axiom-engine.spec.ts",
+        "e2e/inference.spec.ts",
+        "e2e/engine-fabric.spec.ts",
+        "e2e/embeddings.spec.ts",
+        "e2e/reranking.spec.ts",
+        "e2e/llm-client.spec.ts",
+        "e2e/ollama-service.spec.ts",
+        "e2e/local-vision.spec.ts",
+        "e2e/local-speech.spec.ts",
+        "e2e/serving-profiles.spec.ts",
+        "e2e/telemetry-monitor.spec.ts",
+        "e2e/prediction-jobs.spec.ts",
+        "e2e/knowledge.spec.ts",
+        "e2e/runtime-connectors.spec.ts"
+      ],
+      "journeys": [
+        "native inference/load/unload and cancellation",
+        "structured output and streaming",
+        "Engine Fabric and connector selection",
+        "local embeddings and reranking",
+        "local speech and opt-in vision",
+        "serving profile admission/cancel lifecycle",
+        "telemetry opt-in/history/export/clear",
+        "prediction job create/progress/cancel",
+        "workspace knowledge ingestion/hybrid citations/removal"
+      ]
+    },
+    {
+      "id": "mcp",
+      "label": "MCP inspector",
+      "specs": [
+        "e2e/mcp-inventory.spec.ts",
+        "e2e/mcp-trust.spec.ts",
+        "e2e/plugin-manifests.spec.ts",
+        "e2e/security-events.spec.ts"
+      ],
+      "journeys": [
+        "passive tool inventory and explicit handshake",
+        "default-deny grants and trust changes",
+        "manifest validation/grants/revocation",
+        "redacted security-event review"
+      ]
+    },
+    {
+      "id": "diagnostics",
+      "label": "Diagnostics",
+      "specs": [
+        "e2e/support-bundle.spec.ts",
+        "e2e/security-supply-chain.spec.ts",
+        "e2e/supply-chain.spec.ts",
+        "e2e/frontend-error-redaction.spec.ts",
+        "e2e/frontend-error-reporting.spec.ts"
+      ],
+      "journeys": [
+        "support bundle exact-member/privacy export",
+        "SBOM and explicit advisory-scan consent",
+        "frontend diagnostic redaction and reporting"
+      ]
+    },
+    {
+      "id": "api-playground",
+      "label": "API Playground",
+      "specs": [
+        "e2e/api-playground.spec.ts"
+      ],
+      "journeys": [
+        "bounded read-only endpoint catalogue and deep analysis"
+      ]
+    },
+    {
+      "id": "agent-profiles",
+      "label": "Agent Profiles",
+      "specs": [
+        "e2e/agent-profiles.spec.ts"
+      ],
+      "journeys": [
+        "versioned profile create/update/delete and default protection"
+      ]
+    },
+    {
+      "id": "prompt-studio",
+      "label": "Prompt Studio",
+      "specs": [
+        "e2e/prompt-studio.spec.ts"
+      ],
+      "journeys": [
+        "template create/edit/render/version/delete without model invocation"
+      ]
+    },
+    {
+      "id": "roadmap",
+      "label": "Roadmap",
+      "specs": [
+        "e2e/modules.spec.ts"
+      ],
+      "journeys": [
+        "roadmap status is not represented as complete without implemented delivery"
+      ]
+    },
+    {
+      "id": "modules",
+      "label": "Module Explorer",
+      "specs": [
+        "e2e/modules.spec.ts"
+      ],
+      "journeys": [
+        "directory lists existing GUI/CLI/API surfaces and opens wired GUI pages"
+      ]
+    },
+    {
+      "id": "logs",
+      "label": "Logs",
+      "specs": [
+        "e2e/runtime-traces.spec.ts",
+        "e2e/security-events.spec.ts"
+      ],
+      "journeys": [
+        "safe runtime trace metadata/export/clear",
+        "redacted security journal review/export"
+      ]
+    },
+    {
+      "id": "settings",
+      "label": "Settings",
+      "specs": [
+        "e2e/settings-retention.spec.ts",
+        "e2e/command-palette.spec.ts",
+        "e2e/destructive-confirmations.spec.ts"
+      ],
+      "journeys": [
+        "settings and retention",
+        "global command palette navigation/security actions",
+        "accessible destructive confirmations"
+      ]
+    }
+  ]
+}
