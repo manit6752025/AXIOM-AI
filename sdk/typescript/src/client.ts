@@ -11,6 +11,7 @@ import type {
   AxiomPredictionJobPage,
   AxiomPredictionJobStartRequest,
   AxiomPredictionJobStartResult,
+  AxiomPredictionJobResumeResult,
   AxiomPredictionJobStatusResult,
   AxiomPredictionJobSummary,
   AxiomRequestOptions,
@@ -582,7 +583,7 @@ export class AxiomClient {
     return this.request("GET", `/api/prediction-jobs/${encodeURIComponent(jobId)}`);
   }
 
-  resumePredictionJob(jobId: string): Promise<AxiomPredictionJobStartResult> {
+  resumePredictionJob(jobId: string): Promise<AxiomPredictionJobResumeResult> {
     this.validatePredictionJobId(jobId);
     return this.request("POST", `/api/prediction-jobs/${encodeURIComponent(jobId)}/resume`);
   }
