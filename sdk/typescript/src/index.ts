@@ -22,6 +22,8 @@ export type {
   AxiomPredictionJobPage,
   AxiomPredictionJobStartRequest,
   AxiomPredictionJobStartResult,
+  AxiomPredictionJobResumeResult,
+  AxiomPredictionJobResumeScope,
   AxiomPredictionJobStatusResult,
   AxiomPredictionJobSummary,
   AxiomRequestOptions,
