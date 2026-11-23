@@ -65,6 +65,36 @@ def test_knowledge_search_metadata_filters_limit_candidate_documents(tmp_path):
     assert by_id["results"][0]["citation"]["document_id"] == selected_document["id"]
 
 
+def test_knowledge_search_breaks_equal_score_ties_by_stable_source_path(tmp_path):
+    (tmp_path / "docs" / "ties").mkdir(parents=True)
+    (tmp_path / "docs" / "ties" / "zeta.md").write_text(
+        "Deterministic retrieval ranking signal.", encoding="utf-8",
+    )
+    (tmp_path / "docs" / "ties" / "alpha.md").write_text(
+        "Deterministic retrieval ranking signal.", encoding="utf-8",
+    )
+    store = KnowledgeBaseStore(tmp_path)
+    base = store.create_base("Stable ties")
+    # Deliberately ingest in reverse lexical order; ranking tie-breaks must not
+    # depend on insertion/list order when scores and chunk indices are equal.
+    store.ingest_document(base["id"], "docs/ties/zeta.md")
+    store.ingest_document(base["id"], "docs/ties/alpha.md")
+
+    first = search_knowledge_base(
+        store, base["id"], "deterministic retrieval ranking",
+        source_prefixes=["docs/ties"], limit=2,
+    )
+    second = search_knowledge_base(
+        store, base["id"], "deterministic retrieval ranking",
+        source_prefixes=["docs/ties"], limit=2,
+    )
+
+    paths = [item["citation"]["source_path"] for item in first["results"]]
+    assert paths == ["docs/ties/alpha.md", "docs/ties/zeta.md"]
+    assert paths == [item["citation"]["source_path"] for item in second["results"]]
+    assert first["results"][0]["score"] == first["results"][1]["score"]
+
+
 def test_knowledge_search_fuses_local_embedding_scores_when_model_is_supplied(tmp_path, monkeypatch):
     store, base = _seed_store(tmp_path)
     calls = []
