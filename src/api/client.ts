@@ -478,6 +478,20 @@ export type LocalEmbeddingsReport = {
   generated_at: string;
 };
 
+export type LocalVisionReport = {
+  schema_version: number;
+  model: string;
+  response: string;
+  image: { format: "png" | "jpeg"; width: number; height: number; size_bytes: number };
+  generation: { max_new_tokens: number; eval_count: number | null; total_duration_ms: number | null };
+  privacy: {
+    local_loopback_only: true; network_used: false; image_returned: false;
+    image_persisted_by_axiom: false; prompt_persisted_by_axiom: false;
+    model_downloaded: false; model_weights_loaded_by_axiom: false;
+  };
+  scope_note: string;
+};
+
 export type LocalRerankingReport = {
   schema_version: number;
   engine: string;
@@ -2785,6 +2799,13 @@ export const axiomApi = {
       window.clearTimeout(timeout);
     }
   },
+
+  analyzeLocalVision: (input: {
+    model: string; image_path: string; prompt: string;
+    max_new_tokens?: number; timeout_seconds?: number;
+  }) => requestJson<LocalVisionReport>("/api/engine/vision", {
+    method: "POST", body: JSON.stringify(input),
+  }, 180_000),
 
   embedLocalTexts: (input: {
     model_path: string; texts: string[]; batch_size?: number; max_length?: number;
