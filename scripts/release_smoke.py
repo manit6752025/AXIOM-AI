@@ -227,6 +227,111 @@ def model_provenance_issues(
     return failures
 
 
+def request_admission_issues(
+    admission_core: str,
+    engine_api: str,
+    engine_cli: str,
+    client: str,
+    runtime_panel: str,
+    admission_tests: str,
+    serving_tests: str,
+    e2e: str,
+    docs: str,
+) -> list[str]:
+    """Require FIFO admission, independent profile/global bounds, cancellation and UX."""
+    checks = (
+        ("Admission core", admission_core, (
+            "class BoundedRequestAdmission",
+            "max_active: int = 1",
+            "max_queue: int = 32",
+            "queue_key: str | None = None",
+            "profile_waiters",
+            "len(self._waiters) >= self._max_queue",
+            "self._waiters[0][0] is ticket",
+            "queue_position",
+            "RequestAdmissionQueueFull",
+            "RequestAdmissionTimeout",
+            "RequestAdmissionCancelled",
+        )),
+        ("Serving API", engine_api, (
+            "NATIVE_PROFILE_ADMISSION = BoundedRequestAdmission(max_active=1, max_queue=32)",
+            "queue_key=profile[\"id\"]",
+            "RequestAdmissionQueueFull",
+            "RequestAdmissionTimeout",
+            "RequestAdmissionCancelled",
+            "HTTPException(429",
+            "\"Retry-After\": \"1\"",
+            "status_code=504",
+            "status_code=499",
+            "\"queue_position\": admission[\"queue_position\"]",
+            "\"waited_ms\": admission[\"waited_ms\"]",
+            "worker.add_done_callback",
+            "cancel_event.set()",
+            "disconnect_monitor.cancel()",
+            "except asyncio.CancelledError:",
+            "admission_cancel.set()",
+        )),
+        ("Serving CLI", engine_cli, (
+            "_CLI_PROFILE_ADMISSION = BoundedRequestAdmission(max_active=1, max_queue=32)",
+            "_CLI_PROFILE_ADMISSION.acquire(",
+            "queue_key=profile[\"id\"]",
+            "_CLI_PROFILE_ADMISSION.release()",
+            "max_queued_requests: int = typer.Option",
+            "waited {admission['waited_ms']} ms",
+            "queued at position",
+        )),
+        ("Typed API client", client, (
+            "export type AxiomEngineServingGeneration",
+            "queue_position: number",
+            "waited_ms: number",
+            "generateAxiomEngineServingProfile:",
+            "signal?: AbortSignal",
+        )),
+        ("Runtime serving panel", runtime_panel, (
+            "generationAbort.current?.abort()",
+            "Cancel generation",
+            "Admitted from FIFO queue position",
+            "admission.waited_ms",
+            "profile.max_queued_requests",
+            "profile.request_timeout_seconds",
+        )),
+        ("Admission regressions", admission_tests, (
+            "test_fifo_queue_admits_in_order_and_enforces_bound",
+            "test_queue_wait_times_out_and_cancelled_ticket_is_removed",
+            "test_queue_limits_are_scoped_per_profile_with_a_global_safety_ceiling",
+            "test_queue_position_is_recomputed_after_an_earlier_ticket_is_cancelled",
+        )),
+        ("Serving API regressions", serving_tests, (
+            "test_serving_profile_api_crud_readiness_and_profile_limited_generation",
+            "test_serving_profile_api_maps_queue_full_timeout_and_cancellation",
+            'admission_calls[0]["queue_key"] == profile_id',
+            'failed.headers["retry-after"] == "1"',
+        )),
+        ("Browser acceptance", e2e, (
+            "max_queued_requests: 3",
+            "waited_ms: 1250",
+            "Admitted from FIFO queue position 2",
+            "Cancel generation",
+            "Generation cancellation was sent",
+        )),
+        ("Serving documentation", docs, (
+            "selected profile's queue limit",
+            "global ceiling of 32 waiters",
+            "Retry-After: 1",
+            "499",
+            "queue_position",
+            "waited_ms",
+            "--max-queued-requests 4",
+        )),
+    )
+    failures: list[str] = []
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                failures.append(f"Request admission {label} is missing: {token}")
+    return failures
+
+
 def benchmark_profile_issues(profile_core: str, api_source: str, cli_source: str, client_source: str, panel_source: str, core_tests: str, api_tests: str, cli_tests: str, e2e_source: str, docs_source: str) -> list[str]:
     """Require saved benchmark provenance to be connected to tests and UX."""
     checks = (
@@ -1513,6 +1618,18 @@ def inspect(root: Path) -> dict[str, Any]:
         engine_cli_source, telemetry_panel, app_source, telemetry_e2e,
         telemetry_history_core, telemetry_history_api, client,
         telemetry_history_core_tests, telemetry_history_api_tests,
+    ))
+    request_admission_core = (root / "axiom/core/request_admission.py").read_text(encoding="utf-8")
+    request_admission_tests = (root / "tests/test_request_admission.py").read_text(encoding="utf-8")
+    serving_profiles_tests = (root / "tests/test_serving_profiles.py").read_text(encoding="utf-8")
+    serving_profiles_cli = engine_cli_source
+    serving_profiles_panel = (root / "src/components/EngineServingProfilesPanel.tsx").read_text(encoding="utf-8")
+    serving_profiles_e2e = (root / "e2e/serving-profiles.spec.ts").read_text(encoding="utf-8")
+    serving_profiles_docs = (root / "docs/Local-Serving-Profiles.md").read_text(encoding="utf-8")
+    failures.extend(request_admission_issues(
+        request_admission_core, engine_api, serving_profiles_cli, client,
+        serving_profiles_panel, request_admission_tests, serving_profiles_tests,
+        serving_profiles_e2e, serving_profiles_docs,
     ))
     benchmark_trend_panel = (root / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
     benchmark_trend_chart = (root / "src/components/BenchmarkResourceTrends.tsx").read_text(encoding="utf-8")

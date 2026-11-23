@@ -437,6 +437,59 @@ def test_serving_profile_cli_creates_probes_runs_lists_and_deletes(tmp_path, mon
     assert json.loads(removed.stdout)["model_files_deleted"] is False
 
 
+def test_serving_profile_cli_reports_queue_full_without_starting_a_worker(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    import axiom.cli.engine as engine_cli
+    from axiom.core.request_admission import RequestAdmissionQueueFull
+
+    model = tmp_path / "models" / "tiny-qwen"
+    model.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    profile = ServingProfileStore().save(_config(tmp_path, model_path=str(model), max_queued_requests=1))
+    monkeypatch.setattr(engine_cli, "readiness_probe", lambda _profile: {"ready": True, "problems": []})
+
+    def reject(**_kwargs):
+        raise RequestAdmissionQueueFull("The native request queue is full.")
+
+    monkeypatch.setattr(engine_cli._CLI_PROFILE_ADMISSION, "acquire", reject)
+    result = CliRunner().invoke(engine_cli.engine_app, [
+        "profile", "run", profile["id"], "--prompt", "Hello", "--json",
+    ])
+    assert result.exit_code != 0
+    assert "Retry after capacity becomes available" in result.output
+
+
+def test_serving_profile_cli_releases_slot_when_native_worker_cannot_start(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    import axiom.cli.engine as engine_cli
+    from axiom.core.request_admission import BoundedRequestAdmission
+
+    model = tmp_path / "models" / "tiny-qwen"
+    model.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    profile = ServingProfileStore().save(_config(tmp_path, model_path=str(model)))
+    manager = BoundedRequestAdmission(max_active=1, max_queue=32)
+    monkeypatch.setattr(engine_cli, "_CLI_PROFILE_ADMISSION", manager)
+    monkeypatch.setattr(engine_cli, "readiness_probe", lambda _profile: {"ready": True, "problems": []})
+
+    class FailedWorker:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("thread creation denied")
+
+    monkeypatch.setattr(engine_cli, "Thread", FailedWorker)
+    result = CliRunner().invoke(engine_cli.engine_app, [
+        "profile", "run", profile["id"], "--prompt", "Hello", "--json",
+    ])
+    assert result.exit_code != 0
+    assert "worker could not be started" in result.output
+    assert manager.active_count == 0
+
+
 def test_serving_profile_schema_accepts_bounded_queue_depth(tmp_path):
     profile = ServingProfileStore(tmp_path / ".axiom").save(
         _config(tmp_path, max_queued_requests=8)
