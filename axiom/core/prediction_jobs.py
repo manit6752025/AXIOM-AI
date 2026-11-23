@@ -26,6 +26,8 @@ from axiom.core.engine import (
     runtime_status,
 )
 from axiom.core.fine_tuning import (
+    ActiveFineTuningJobError,
+    FineTuningError,
     acquire_local_compute_job_lock,
     list_jobs,
     release_local_compute_job_lock,
@@ -666,6 +668,7 @@ def _job_summary(job: dict[str, Any]) -> dict[str, Any]:
             and job.get("checkpoint_name")
             and job.get("checkpoint_identity")
             and job.get("checkpoint_sha256")
+            and job.get("generation_fingerprint")
             and (job.get("adapter_path") is None or job.get("adapter_fingerprint"))
         ),
         "resumption_count": int(job.get("resumption_count", 0)),
@@ -2447,7 +2450,12 @@ def resume_prediction_job(job_id: str, root: Path) -> dict[str, Any] | None:
 
     # Acquire the workspace compute slot before opening the checkpoint read/write;
     # this prevents concurrent resume requests from truncating the same tail.
-    acquire_local_compute_job_lock(job_id)
+    try:
+        acquire_local_compute_job_lock(job_id)
+    except ActiveFineTuningJobError as exc:
+        raise ValueError(str(exc)) from None
+    except FineTuningError:
+        raise ValueError("AXIOM could not reserve the shared local compute slot.") from None
     try:
         data_root = _safe_data_root(workspace)
         destination, parent_fd, _output_name, output_available = open_mcp_workspace_output_parent(

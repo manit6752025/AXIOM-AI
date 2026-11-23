@@ -150,7 +150,10 @@ def resume_interrupted_prediction_job(job_id: str) -> dict[str, Any]:
         job = resume_prediction_job(job_id, active_workspace_root())
     except ValueError as exc:
         message = str(exc)
-        status = 409 if "another local AXIOM compute job is active" in message else 422
+        status = 409 if (
+            "another axiom local compute job is active" in message.casefold()
+            or "a local training job is active" in message.casefold()
+        ) else 422
         raise HTTPException(status_code=status, detail=message) from None
     except (OSError, RuntimeError) as exc:
         raise HTTPException(status_code=503, detail="Prediction job could not be resumed safely.") from exc

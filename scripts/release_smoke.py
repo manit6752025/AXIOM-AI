@@ -988,6 +988,97 @@ def persisted_schema_inventory_issues(docs: str, sources: dict[str, str]) -> lis
     return failures
 
 
+def prediction_job_resume_issues(
+    core: str,
+    api: str,
+    cli: str,
+    mcp_server: str,
+    permissions: str,
+    client: str,
+    gui: str,
+    core_tests: str,
+    api_tests: str,
+    cli_tests: str,
+    mcp_tests: str,
+    e2e: str,
+    docs: str,
+) -> list[str]:
+    """Require checkpoint integrity and restart-resume wiring across every public surface."""
+    failures: list[str] = []
+    checks = (
+        ("prediction checkpoint core", core, (
+            "def resume_prediction_job(",
+            "def _open_prediction_checkpoint(",
+            "generation_fingerprint",
+            "os.fsync(output_stream.fileno())",
+            "resume_record is not None",
+            "acquire_local_compute_job_lock(job_id)",
+            "if rows_read <= resume_rows:",
+        )),
+        ("prediction resume REST API", api, (
+            '@router.post("/{job_id}/resume", status_code=202)',
+            "def resume_interrupted_prediction_job(",
+            "resume_prediction_job(job_id, active_workspace_root())",
+        )),
+        ("prediction resume CLI", cli, (
+            '@prediction_jobs_app.command("resume")',
+            "def prediction_job_resume(",
+            "resume_prediction_job(job_id, active_workspace_root())",
+        )),
+        ("prediction resume MCP tool", mcp_server, (
+            "def axiom_prediction_job_resume(",
+            'require("axiom_prediction_job_resume"',
+            "checkpoint_identity_and_digest_verified",
+        )),
+        ("prediction resume MCP permission", permissions, (
+            '"axiom_prediction_job_resume"',
+            '"axiom_prediction_job_resume"}',
+        )),
+        ("prediction resume TypeScript client", client, (
+            "resumeAxiomPredictionJob:",
+            "generation_resumed_after_restart: boolean;",
+        )),
+        ("prediction resume Runtime GUI", gui, (
+            "resumeAxiomPredictionJob(",
+            "job.resumable",
+            "Resume from checkpoint",
+        )),
+        ("prediction resume core tests", core_tests, (
+            "test_resume_prediction_job_revalidates_assets_and_schedules_checkpoint_worker",
+            "test_prediction_checkpoint_rejects_modified_committed_bytes",
+            "test_prediction_job_recovery_after_real_owner_process_termination",
+            "generation_fingerprint",
+        )),
+        ("prediction resume API tests", api_tests, (
+            "test_prediction_job_api_resumes_only_when_core_verification_succeeds",
+            "test_prediction_job_api_maps_active_compute_slot_to_conflict",
+        )),
+        ("prediction resume CLI tests", cli_tests, (
+            "test_engine_prediction_job_cli_resumes_from_verified_checkpoint",
+            "prediction_job_resume",
+        )),
+        ("prediction resume MCP tests", mcp_tests, (
+            "test_mcp_prediction_resume_requires_its_own_explicit_permission",
+        )),
+        ("prediction resume browser acceptance", e2e, (
+            "Resume prediction job",
+            "resumeRequests",
+            "generation_resumed_after_restart: true",
+        )),
+        ("prediction resume documentation", docs, (
+            "axiom engine prediction resume",
+            "axiom_prediction_job_resume",
+            "checkpoint",
+            "generation-settings fingerprint",
+        )),
+    )
+    for label, source, tokens in checks:
+        for token in tokens:
+            if token not in source:
+                failures.append(f"{label} is missing: {token}")
+    return failures
+
+
 def supply_chain_issues(
     core: str, api: str, cli: str, client: str, gui: str,
     tests: str, api_tests: str, e2e: str, docs: str,
@@ -1722,6 +1813,27 @@ def inspect(root: Path) -> dict[str, Any]:
         "runtime_traces": (root / "axiom/core/runtime_traces.py").read_text(encoding="utf-8"),
     }
     failures.extend(persisted_schema_inventory_issues(schema_docs, schema_sources))
+    prediction_resume_core = (root / "axiom/core/prediction_jobs.py").read_text(encoding="utf-8")
+    prediction_resume_api = (root / "axiom/api/prediction_jobs.py").read_text(encoding="utf-8")
+    prediction_resume_cli = engine_cli_source
+    prediction_resume_mcp = (root / "axiom/mcp/server.py").read_text(encoding="utf-8")
+    prediction_resume_permissions = (root / "axiom/core/tool_permissions.py").read_text(encoding="utf-8")
+    prediction_resume_gui = (root / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
+    prediction_resume_core_tests = (root / "tests/test_prediction_job_resume.py").read_text(encoding="utf-8")
+    prediction_resume_api_tests = (root / "tests/test_prediction_jobs_api.py").read_text(encoding="utf-8")
+    prediction_resume_cli_tests = (root / "tests/test_prediction_jobs_cli.py").read_text(encoding="utf-8")
+    prediction_resume_e2e = (root / "e2e/prediction-jobs.spec.ts").read_text(encoding="utf-8")
+    prediction_resume_docs = (
+        (root / "docs/Local-Engine.md").read_text(encoding="utf-8")
+        + (root / "docs/integrations.md").read_text(encoding="utf-8")
+    )
+    failures.extend(prediction_job_resume_issues(
+        prediction_resume_core, prediction_resume_api, prediction_resume_cli,
+        prediction_resume_mcp, prediction_resume_permissions, client,
+        prediction_resume_gui, prediction_resume_core_tests,
+        prediction_resume_api_tests, prediction_resume_cli_tests,
+        prediction_resume_core_tests, prediction_resume_e2e, prediction_resume_docs,
+    ))
     for path in (
         "/api/health", "/api/meta", "/api/workspace/runtime",
         "/api/workspace/models?offset=0&limit=5", "/api/workspace/datasets",
