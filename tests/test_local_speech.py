@@ -4,7 +4,6 @@ import base64
 import io
 import wave
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -270,7 +269,12 @@ def test_local_speech_stderr_is_drained_but_only_a_fixed_prefix_is_retained(tmp_
     executable = tmp_path / "whisper-cli"
     executable.write_text("stub", encoding="utf-8")
     emitted = b"runtime diagnostic " + (b"x" * 256_000)
-    stream = io.BytesIO(emitted)
+    class InspectableBytesIO(io.BytesIO):
+        def close(self):
+            # Keep the consumed-byte cursor observable after the parent closes the pipe.
+            return None
+
+    stream = InspectableBytesIO(emitted)
 
     class FakeProcess:
         stdin = None
