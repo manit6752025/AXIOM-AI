@@ -17,6 +17,8 @@ def test_scope_classifier_defaults_mutations_to_write() -> None:
     assert _required_api_scope("POST", "/api/workflows/validate") == "read"
     assert _required_api_scope("POST", "/api/workflows/workflow_123/dry-run") == "read"
     assert _required_api_scope("POST", "/api/optimizer/plan") == "read"
+    assert _required_api_scope("POST", "/api/prompt-templates/" + "a" * 32 + "/render") == "read"
+    assert _required_api_scope("POST", "/api/prompt-templates") == "write"
     assert _required_api_scope("POST", "/api/workflows") == "write"
     assert _required_api_scope("POST", "/api/fine-tuning/jobs") == "write"
     assert _required_api_scope("POST", "/api/engine/generate") == "write"
@@ -86,6 +88,31 @@ def test_read_token_can_inspect_validate_and_dry_run_but_not_mutate(tmp_path, mo
         created = client.post("/api/workflows", json=workflow_payload, headers=write_headers)
         assert created.status_code == 201
         workflow_id = created.json()["workflow"]["id"]
+
+        prompt_created = client.post(
+            "/api/prompt-templates",
+            json={
+                "name": "Read scoped prompt",
+                "body": "Summarize {{topic}}",
+                "variables": [{"name": "topic", "type": "string", "required": True}],
+            },
+            headers=write_headers,
+        )
+        assert prompt_created.status_code == 201
+        prompt_id = prompt_created.json()["template"]["id"]
+        prompt_render = client.post(
+            f"/api/prompt-templates/{prompt_id}/render",
+            json={"values": {"topic": "workspace metadata"}},
+            headers=read_headers,
+        )
+        assert prompt_render.status_code == 200
+        assert prompt_render.json()["rendered"] == "Summarize workspace metadata"
+        denied_prompt_create = client.post(
+            "/api/prompt-templates",
+            json={"name": "Denied", "body": "Prompt", "variables": []},
+            headers=read_headers,
+        )
+        assert denied_prompt_create.status_code == 403
 
         preview = client.post(
             f"/api/workflows/{workflow_id}/dry-run",

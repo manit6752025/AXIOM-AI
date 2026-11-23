@@ -47,6 +47,7 @@ def test_cli_reference_api_examples_match_typed_api_client():
         "/api/llm/chat",
         "/api/optimizer/plan",
         "/api/agent-profiles",
+        "/api/prompt-templates",
         "/api/security/tool-permissions",
         "/api/diagnostics/runtime-connectors",
     ]
@@ -67,6 +68,7 @@ def test_cli_reference_gui_names_match_control_center_navigation():
         "Runtime",
         "API Playground",
         "Agent Profiles",
+        "Prompt Studio",
         "Roadmap",
         "Settings",
     ]
