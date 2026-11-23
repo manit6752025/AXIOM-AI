@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Activity, KeyRound, Play, RefreshCcw, ShieldCheck } from "lucide-react";
-import { axiomApi, type LLMProvider, type LLMProviderInfo, type LLMChatResult } from "../api/client";
+import { axiomApi, type LLMProvider, type LLMProviderInfo, type LLMChatResult, type LLMProviderProfile } from "../api/client";
 
 const providerFallback: LLMProviderInfo[] = [
   { id: "axiom-local", label: "AXIOM Native Engine", kind: "local", requires_api_key: false, supports_model_listing: true, privacy: "local-only", note: "Local trusted safetensors checkpoints." },
@@ -131,15 +131,35 @@ export default function LLMClientPanel() {
     setConnectionVerified(false);
     setError("");
     try {
-      const next = await axiomApi.llmModels({
-        provider: targetProvider,
-        api_key: targetProvider === "axiom-local" || targetProvider === "ollama-local" ? undefined : apiKey,
-        base_url: targetProvider === "openai-compatible" ? baseUrl : undefined,
-      });
+      const currentBaseUrl = targetProvider === "openai-compatible" ? safeProfileBaseUrl(targetProvider, baseUrl.trim()) : "";
+      const selectedProfile = savedProfiles.find((item) =>
+        item.id === selectedProfileId &&
+        /^[0-9a-f]{32}$/i.test(item.id) &&
+        item.provider === targetProvider &&
+        item.base_url === currentBaseUrl &&
+        item.model === model.trim()
+      );
+      let nextModels: string[];
+      let catalogueNote = "";
+      if (selectedProfile) {
+        const verified = await axiomApi.connectLLMProfile(
+          selectedProfile.id,
+          targetProvider === "axiom-local" || targetProvider === "ollama-local" ? undefined : apiKey,
+        );
+        nextModels = verified.models;
+      } else {
+        const next = await axiomApi.llmModels({
+          provider: targetProvider,
+          api_key: targetProvider === "axiom-local" || targetProvider === "ollama-local" ? undefined : apiKey,
+          base_url: targetProvider === "openai-compatible" ? baseUrl : undefined,
+        });
+        nextModels = next.models;
+        catalogueNote = next.note || "";
+      }
       setConnectionVerified(true);
-      setModels(next.models);
-      setModel((current) => current && next.models.includes(current) ? current : next.models[0] || current);
-      if (next.models.length === 0) setError(next.note || "No models were returned. Check provider access or enter a model ID manually.");
+      setModels(nextModels);
+      setModel((current) => current && nextModels.includes(current) ? current : nextModels[0] || current);
+      if (nextModels.length === 0) setError(catalogueNote || "No models were returned. Check provider access or enter a model ID manually.");
     } catch (cause) {
       setConnectionVerified(false);
       setModels([]);
@@ -150,7 +170,22 @@ export default function LLMClientPanel() {
   };
 
   useEffect(() => {
-    setSavedProfiles(readSavedProfiles());
+    const cachedProfiles = readSavedProfiles();
+    setSavedProfiles(cachedProfiles);
+    void axiomApi.llmProfiles().then((report) => {
+      const workspaceProfiles: SavedLLMProfile[] = report.profiles.map((item: LLMProviderProfile) => ({
+        id: item.id,
+        name: item.name,
+        provider: item.provider,
+        model: item.model,
+        base_url: item.base_url,
+        updated_at: item.updated_at,
+      }));
+      setSavedProfiles(workspaceProfiles);
+      writeSavedProfiles(workspaceProfiles);
+    }).catch(() => {
+      // Keep browser-local cached profiles available when the workspace API is offline.
+    });
     axiomApi.llmProviders().then((value) => setProviders(value.providers)).catch(() => setProviders(providerFallback));
     void axiomApi.llmModels({ provider: "axiom-local" }).then((next) => {
       setModels(next.models);
@@ -175,7 +210,7 @@ export default function LLMClientPanel() {
     setError("");
   };
 
-  const saveProfile = () => {
+  const saveProfile = async () => {
     const name = profileName.trim();
     if (!/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,47}$/.test(name)) {
       setError("Profile names must be 1–48 safe characters and start with a letter or number.");
@@ -192,25 +227,49 @@ export default function LLMClientPanel() {
     }
     const existing = savedProfiles.find((item) => item.name.toLowerCase() === name.toLowerCase());
     if (!existing && savedProfiles.length >= MAX_SAVED_PROFILES) {
-      setError("The browser profile limit of 25 has been reached. Delete an unused profile first.");
+      setError("The provider profile limit of 25 has been reached. Delete an unused profile first.");
       return;
     }
-    const profile: SavedLLMProfile = {
-      id: existing?.id || `profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
-      name,
-      provider,
-      model: model.trim(),
-      base_url: normalizedBaseUrl,
-      updated_at: new Date().toISOString(),
-    };
-    const next = [profile, ...savedProfiles.filter((item) => item.id !== profile.id)];
-    if (!writeSavedProfiles(next)) {
-      setError("The browser could not save provider-profile metadata. Check local storage availability and quota.");
+    try {
+      const saved = await axiomApi.saveLLMProfile({
+        name,
+        provider,
+        model: model.trim(),
+        base_url: normalizedBaseUrl || undefined,
+      });
+      const profile: SavedLLMProfile = {
+        id: saved.profile.id,
+        name: saved.profile.name,
+        provider: saved.profile.provider,
+        model: saved.profile.model,
+        base_url: saved.profile.base_url,
+        updated_at: saved.profile.updated_at,
+      };
+      const next = [profile, ...savedProfiles.filter((item) => item.id !== profile.id && item.name.toLowerCase() !== name.toLowerCase())];
+      setSavedProfiles(next);
+      writeSavedProfiles(next);
+      setSelectedProfileId(profile.id);
+      setError("");
       return;
+    } catch (cause) {
+      // Keep a clearly-labelled browser-only fallback for disconnected/offline API use.
+      const profile: SavedLLMProfile = {
+        id: existing?.id || `profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+        name,
+        provider,
+        model: model.trim(),
+        base_url: normalizedBaseUrl,
+        updated_at: new Date().toISOString(),
+      };
+      const next = [profile, ...savedProfiles.filter((item) => item.id !== profile.id && item.name.toLowerCase() !== name.toLowerCase())];
+      if (!writeSavedProfiles(next)) {
+        setError(cause instanceof Error ? cause.message : "The workspace and browser could not save provider-profile metadata.");
+        return;
+      }
+      setSavedProfiles(next);
+      setSelectedProfileId(profile.id);
+      setError("Workspace profile storage is unavailable. This profile was saved in this browser only.");
     }
-    setSavedProfiles(next);
-    setSelectedProfileId(profile.id);
-    setError("");
   };
 
   const applyProfile = () => {
@@ -225,11 +284,18 @@ export default function LLMClientPanel() {
     setError(profile.provider === "openai-compatible" ? "Profile loaded. Enter the API key and explicitly connect; credentials are never stored in a profile." : "Profile loaded. Connect to verify the selected provider.");
   };
 
-  const deleteProfile = () => {
+  const deleteProfile = async () => {
+    const profile = savedProfiles.find((item) => item.id === selectedProfileId);
+    if (!profile) return;
+    try {
+      if (/^[0-9a-f]{32}$/i.test(profile.id)) await axiomApi.deleteLLMProfile(profile.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The workspace provider profile could not be deleted.");
+      return;
+    }
     const next = savedProfiles.filter((item) => item.id !== selectedProfileId);
-    if (next.length === savedProfiles.length) return;
     if (!writeSavedProfiles(next)) {
-      setError("The browser could not update provider profiles.");
+      setError("The provider profile was deleted from the workspace but the browser cache could not be updated.");
       return;
     }
     setSavedProfiles(next);

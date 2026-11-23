@@ -4,6 +4,7 @@ import { ensureAuthenticated } from "./helpers/auth";
 test("unified LLM client runs local chats and requires consent for cloud chats", async ({ page }) => {
   const chatRequests: Array<Record<string, unknown>> = [];
   let modelCatalogueCalls = 0;
+  let workspaceProfile: Record<string, unknown> | null = null;
 
   await page.route((url) => url.pathname.startsWith("/api/"), async (route) => {
     const request = route.request();
@@ -38,6 +39,39 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
       await route.fulfill({ json: {
         schema_version: 1, discovery_mode: "passive_local_discovery", checked_at: "2026-10-24T00:00:00Z",
         connectors: [], scope_note: "Test fixture.",
+      } });
+    } else if (path === "/api/llm/profiles" && request.method() === "GET") {
+      await route.fulfill({ json: {
+        schema_version: 1,
+        profiles: workspaceProfile ? [workspaceProfile] : [],
+        total: workspaceProfile ? 1 : 0,
+        max_profiles: 25,
+        credentials_persisted: false,
+      } });
+    } else if (path === "/api/llm/profiles" && request.method() === "POST") {
+      const body = request.postDataJSON() as { name: string; provider: string; model: string; base_url?: string };
+      workspaceProfile = {
+        id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        name: body.name,
+        provider: body.provider,
+        model: body.model,
+        base_url: body.base_url || "",
+        created_at: "2026-11-20T09:00:00Z",
+        updated_at: "2026-11-20T09:00:00Z",
+      };
+      await route.fulfill({ status: 201, json: { profile: workspaceProfile, credentials_persisted: false } });
+    } else if (path.startsWith("/api/llm/profiles/") && path.endsWith("/connect") && request.method() === "POST") {
+      const body = request.postDataJSON() as { api_key?: string };
+      expect(body.api_key).toBe("never-return-this");
+      await route.fulfill({ json: {
+        profile_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        provider: "deepseek",
+        status: "verified",
+        models: ["deepseek-chat"],
+        checked_at: "2026-11-20T09:00:00Z",
+        credential_storage: "not_saved",
+        connection_scope: "catalogue_check_only",
+        persistent_connection: false,
       } });
     } else if (path === "/api/llm/providers") {
       await route.fulfill({ json: {
@@ -141,10 +175,12 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
   expect(storedProfiles).toContain("DeepSeek team");
   expect(storedProfiles).not.toContain("never-return-this");
   expect(storedProfiles).not.toContain("Hello cloud model");
+  expect(workspaceProfile?.["name"]).toBe("DeepSeek team");
   await page.reload();
   const reloadedPanel = page.locator(".llm-client-panel");
   await expect(reloadedPanel.getByRole("heading", { name: "Unified LLM client" })).toBeVisible();
   await expect(reloadedPanel.getByLabel("Provider API key")).toHaveValue("");
+  await expect(reloadedPanel.getByLabel("Saved provider profile")).toContainText("DeepSeek team · deepseek");
   await reloadedPanel.getByLabel("Saved provider profile").selectOption({ label: "DeepSeek team · deepseek" });
   await reloadedPanel.getByRole("button", { name: "Apply profile" }).click();
   await expect(reloadedPanel.getByLabel("LLM provider")).toHaveValue("deepseek");
@@ -157,4 +193,5 @@ test("unified LLM client runs local chats and requires consent for cloud chats",
   await expect(reloadedPanel.getByRole("button", { name: "Connect" })).toBeDisabled();
   const afterDisconnect = await page.evaluate(() => localStorage.getItem("axiom-llm-provider-profiles-v1") || "");
   expect(afterDisconnect).not.toContain("never-return-this");
+  expect(JSON.stringify(workspaceProfile)).not.toContain("never-return-this");
 });

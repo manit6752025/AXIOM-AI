@@ -504,6 +504,19 @@ export type LLMProviderInfo = {
   supports_model_listing: boolean; privacy: "local-only" | "remote-consent-required"; note: string;
 };
 export type LLMProviderCatalog = { schema_version: 1; providers: LLMProviderInfo[]; credentials_persisted: false };
+export type LLMProviderProfile = {
+  id: string; name: string; provider: LLMProvider; model: string; base_url: string;
+  created_at: string; updated_at: string;
+};
+export type LLMProviderProfileReport = {
+  schema_version: 1; profiles: LLMProviderProfile[]; total: number; max_profiles: number;
+  credentials_persisted: false;
+};
+export type LLMProviderProfileConnection = {
+  profile_id: string; provider: LLMProvider; status: "verified"; models: string[];
+  checked_at: string; credential_storage: "not_saved" | "not_applicable";
+  connection_scope: "catalogue_check_only"; persistent_connection: false;
+};
 export type LLMModelRequest = { provider: LLMProvider; api_key?: string; base_url?: string };
 export type LLMModelResult = {
   provider: LLMProvider; models: string[]; model_details?: Array<{ id: string; model_type?: string | null; architecture?: string | null }>;
@@ -2242,6 +2255,13 @@ export const axiomApi = {
   modelStudioSearch: (q: string, limit = 12, consent = false) => requestJson<{ provider: string; query: string; count: number; results: ModelStudioModel[]; note: string }>(`/api/models/studio/search?${new URLSearchParams({ q, limit: String(limit), consent: String(consent) })}`),
   modelStudioFiles: (repoId: string) => requestJson<{ repo_id: string; files: ModelStudioFile[]; count: number; url: string; note: string }>(`/api/models/studio/files?${new URLSearchParams({ repo_id: repoId })}`),
   llmProviders: () => requestJson<LLMProviderCatalog>("/api/llm/providers"),
+  llmProfiles: () => requestJson<LLMProviderProfileReport>("/api/llm/profiles"),
+  saveLLMProfile: (input: { name: string; provider: LLMProvider; model: string; base_url?: string }) =>
+    requestJson<{ profile: LLMProviderProfile; credentials_persisted: false }>("/api/llm/profiles", { method: "POST", body: JSON.stringify(input) }),
+  deleteLLMProfile: (id: string) =>
+    requestJson<{ deleted: LLMProviderProfile; credentials_persisted: false }>(`/api/llm/profiles/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  connectLLMProfile: (id: string, apiKey?: string) =>
+    requestJson<LLMProviderProfileConnection>(`/api/llm/profiles/${encodeURIComponent(id)}/connect`, { method: "POST", body: JSON.stringify(apiKey ? { api_key: apiKey } : {}) }),
   llmModels: (input: LLMModelRequest) => requestJson<LLMModelResult>("/api/llm/models", { method: "POST", body: JSON.stringify(input) }),
   llmChat: (input: LLMChatRequest) => requestJson<LLMChatResult>("/api/llm/chat", { method: "POST", body: JSON.stringify(input) }, 300_000),
   testRemoteModelConnection: (input: { base_url: string; api_key: string }) => requestJson<RemoteModelCatalog>("/api/models/studio/remote/models", { method: "POST", body: JSON.stringify(input) }),
