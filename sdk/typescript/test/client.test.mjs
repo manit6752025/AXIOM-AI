@@ -351,3 +351,51 @@ test("validates prediction job identifiers and required local start paths", () =
 });
 
 
+
+
+test("exposes read-only diagnostics, roadmap, runtime-trace and security operations", async () => {
+  const requests = [];
+  const client = new AxiomClient({
+    fetchImpl: async (input, init = {}) => {
+      const url = new URL(input.toString());
+      requests.push({ url, init });
+      if (url.pathname === "/api/diagnostics/workspace") return jsonResponse({ status: "healthy", checks: [] });
+      if (url.pathname === "/api/diagnostics/roadmap") return jsonResponse({ status: "verified", deliverable_count: 140 });
+      if (url.pathname === "/api/diagnostics/runtime-traces") return jsonResponse({ traces: [], total: 0 });
+      if (url.pathname === "/api/security/audit") return jsonResponse({ schema_version: 1, checks: [] });
+      if (url.pathname === "/api/security/sbom") return jsonResponse({ spdxVersion: "SPDX-2.3", packages: [] });
+      return jsonResponse({ detail: "not found" }, 404);
+    },
+  });
+
+  assert.equal((await client.workspaceDiagnostics()).status, "healthy");
+  assert.equal((await client.roadmapAudit()).deliverable_count, 140);
+  await client.runtimeTraces({ limit: 17, offset: 4, search: "engine" });
+  assert.equal((await client.securityAudit()).schema_version, 1);
+  assert.equal((await client.softwareBillOfMaterials()).spdxVersion, "SPDX-2.3");
+  assert.equal(requests.length, 5);
+  assert.deepEqual(
+    requests.map(({ url, init }) => [init.method, url.pathname]),
+    [
+      ["GET", "/api/diagnostics/workspace"],
+      ["GET", "/api/diagnostics/roadmap"],
+      ["GET", "/api/diagnostics/runtime-traces"],
+      ["GET", "/api/security/audit"],
+      ["GET", "/api/security/sbom"],
+    ],
+  );
+  assert.equal(requests[2].url.searchParams.get("limit"), "17");
+  assert.equal(requests[2].url.searchParams.get("offset"), "4");
+  assert.equal(requests[2].url.searchParams.get("search"), "engine");
+  client.close();
+});
+
+test("bounds runtime-trace SDK query arguments before network requests", () => {
+  const client = new AxiomClient();
+  assert.throws(() => client.runtimeTraces({ limit: 0 }), AxiomConfigurationError);
+  assert.throws(() => client.runtimeTraces({ limit: 201 }), AxiomConfigurationError);
+  assert.throws(() => client.runtimeTraces({ offset: -1 }), AxiomConfigurationError);
+  assert.throws(() => client.runtimeTraces({ offset: 201 }), AxiomConfigurationError);
+  assert.throws(() => client.runtimeTraces({ search: "x".repeat(121) }), AxiomConfigurationError);
+  client.close();
+});

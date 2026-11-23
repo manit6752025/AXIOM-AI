@@ -617,6 +617,38 @@ export class AxiomClient {
     return this.request("GET", "/api/security/plugins");
   }
 
+  workspaceDiagnostics(): Promise<Record<string, unknown>> {
+    return this.request("GET", "/api/diagnostics/workspace");
+  }
+
+  roadmapAudit(): Promise<Record<string, unknown>> {
+    return this.request("GET", "/api/diagnostics/roadmap");
+  }
+
+  runtimeTraces(options: { limit?: number; offset?: number; search?: string } = {}): Promise<Record<string, unknown>> {
+    const limit = options.limit ?? 50;
+    const offset = options.offset ?? 0;
+    const search = options.search ?? "";
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
+      throw new AxiomConfigurationError("Runtime trace limit must be between 1 and 200.");
+    }
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 200) {
+      throw new AxiomConfigurationError("Runtime trace offset must be between 0 and 200.");
+    }
+    if (typeof search !== "string" || search.length > 120) {
+      throw new AxiomConfigurationError("Runtime trace search must contain at most 120 characters.");
+    }
+    return this.request("GET", "/api/diagnostics/runtime-traces", { params: { limit, offset, search } });
+  }
+
+  securityAudit(): Promise<Record<string, unknown>> {
+    return this.request("GET", "/api/security/audit");
+  }
+
+  softwareBillOfMaterials(): Promise<Record<string, unknown>> {
+    return this.request("GET", "/api/security/sbom");
+  }
+
   close(): void {
     this.closed = true;
   }

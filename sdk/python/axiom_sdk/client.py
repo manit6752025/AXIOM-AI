@@ -569,6 +569,37 @@ class AxiomClient:
     def plugin_manifests(self) -> dict[str, Any]:
         return self.request_json("GET", "/api/security/plugins")
 
+    def workspace_diagnostics(self) -> dict[str, Any]:
+        """Return read-only workspace configuration, dependency, path, and storage diagnostics."""
+        return self.request_json("GET", "/api/diagnostics/workspace")
+
+    def roadmap_audit(self) -> dict[str, Any]:
+        """Return the local scoped-roadmap status audit without accepting arbitrary paths."""
+        return self.request_json("GET", "/api/diagnostics/roadmap")
+
+    def runtime_traces(
+        self, *, limit: int = 50, offset: int = 0, search: str = ""
+    ) -> dict[str, Any]:
+        """Read a bounded page of privacy-filtered in-memory runtime trace metadata."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
+            raise AxiomConfigurationError("Runtime trace limit must be between 1 and 200.")
+        if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= 200:
+            raise AxiomConfigurationError("Runtime trace offset must be between 0 and 200.")
+        if not isinstance(search, str) or len(search) > 120:
+            raise AxiomConfigurationError("Runtime trace search must contain at most 120 characters.")
+        return self.request_json(
+            "GET", "/api/diagnostics/runtime-traces",
+            params={"limit": limit, "offset": offset, "search": search},
+        )
+
+    def security_audit(self) -> dict[str, Any]:
+        """Return read-only, credential-redacted local security posture findings."""
+        return self.request_json("GET", "/api/security/audit")
+
+    def software_bill_of_materials(self) -> dict[str, Any]:
+        """Return the bounded SPDX 2.3 inventory of installed Python distributions."""
+        return self.request_json("GET", "/api/security/sbom")
+
     def close(self) -> None:
         self._closed = True
 

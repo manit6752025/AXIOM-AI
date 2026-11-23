@@ -55,6 +55,7 @@ Both clients expose:
 - Explicitly enabled persistent telemetry history settings, record, list and
   clear operations.
 - Knowledge-base list/create/search and plugin-manifest inventory.
+- Read-only workspace diagnostics, scoped-roadmap audit, bounded privacy-filtered runtime traces, security posture audit and SPDX 2.3 SBOM inventory.
 - Full workspace backup download and restore as a new workspace.
 - Local prediction-job start, list, status, cooperative cancellation and verified restart-resume.
 
@@ -132,7 +133,7 @@ Publisher configured for this repository/workflow and the `pypi` environment;
 npm requires an `NPM_TOKEN` secret in the `npm` environment and publishes
 with provenance. Pushes and pull requests do not publish packages.
 
-The 25-operation registry in
+The 30-operation registry in
 [`sdk/openapi/axiom-v1-operations.json`](../sdk/openapi/axiom-v1-operations.json)
 is validated against the application's live FastAPI OpenAPI document and both
 SDK method declarations by `scripts/verify_sdk_contract.py`.
