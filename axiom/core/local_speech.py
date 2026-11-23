@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 import base64
 
-from axiom.core.mcp_paths import open_mcp_workspace_file
+from axiom.core.mcp_paths import open_mcp_workspace_file, open_mcp_workspace_output_parent
 
 MAX_SPEECH_INPUT_BYTES = 64 * 1024 * 1024
 MAX_TRANSCRIPT_CHARS = 65_536
@@ -362,3 +362,51 @@ def synthesize_local_speech(
         },
         "scope_note": "AXIOM sent the text only to the installed local Piper executable. WAV bytes remain in the response and temporary directory; no cloud synthesis or model download was used.",
     }
+
+
+
+def write_speech_output_create_only(output_path: str, workspace_root: Path, audio: bytes) -> dict[str, Any]:
+    """Create a new workspace WAV without following links or overwriting an existing file."""
+    if (
+        not isinstance(output_path, str) or not output_path.startswith("data/")
+        or output_path != output_path.strip() or not output_path.lower().endswith(".wav")
+    ):
+        raise ValueError("Speech output must be a new workspace-relative data/NAME.wav file.")
+    if not isinstance(audio, bytes) or not 44 <= len(audio) <= MAX_SYNTHESIS_WAV_BYTES:
+        raise ValueError("Speech output bytes are outside the supported WAV size bounds.")
+    path, parent_fd, name, available = open_mcp_workspace_output_parent(output_path, workspace_root)
+    if not available:
+        if parent_fd is not None:
+            os.close(parent_fd)
+        raise FileExistsError("Speech output already exists; choose a new data/NAME.wav path.")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor: int | None = None
+    created = False
+    try:
+        if parent_fd is not None:
+            descriptor = os.open(name, flags, 0o600, dir_fd=parent_fd)
+        else:
+            descriptor = os.open(path, flags, 0o600)
+        created = True
+        view = memoryview(audio)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("Short write while saving speech audio.")
+            view = view[written:]
+        os.fsync(descriptor)
+    except FileExistsError:
+        raise FileExistsError("Speech output already exists; choose a new data/NAME.wav path.") from None
+    except OSError:
+        raise OSError("Speech audio could not be saved safely inside the workspace.") from None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if parent_fd is not None:
+            if created and descriptor is not None:
+                try:
+                    os.fsync(parent_fd)
+                except OSError:
+                    pass
+            os.close(parent_fd)
+    return {"path": output_path, "size_bytes": len(audio), "created": True}
