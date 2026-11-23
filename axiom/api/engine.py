@@ -382,12 +382,20 @@ async def engine_benchmark(
     raw_request: Request,
 ) -> dict[str, Any]:
     """Run a bounded native-only benchmark with client-disconnect cancellation."""
+    try:
+        trusted_model_path = resolve_local_model_directory(request.model_path, "Base model")
+        trusted_adapter_path = (
+            resolve_local_model_directory(request.adapter_path, "LoRA adapter")
+            if request.adapter_path is not None else None
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
     cancel_event = Event()
     worker = asyncio.create_task(asyncio.to_thread(
         benchmark_local,
-        request.model_path,
+        trusted_model_path,
         request.prompt,
-        adapter_path=request.adapter_path,
+        adapter_path=trusted_adapter_path,
         warmup_runs=request.warmup_runs,
         iterations=request.iterations,
         max_new_tokens=request.max_new_tokens,
@@ -424,8 +432,8 @@ async def engine_benchmark(
         report = await worker
         if request.profile_name:
             report["profile_record"] = BenchmarkProfileStore().create(
-                request.profile_name, report, request.prompt, request.model_path,
-                adapter_used=request.adapter_path is not None,
+                request.profile_name, report, request.prompt, trusted_model_path,
+                adapter_used=trusted_adapter_path is not None,
             )
         else:
             report["profile_record"] = None

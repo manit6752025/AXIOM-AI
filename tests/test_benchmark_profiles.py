@@ -84,6 +84,7 @@ def _hardware(gpu_name="Test GPU"):
 
 
 def _patch_environment(monkeypatch: pytest.MonkeyPatch, gpu_name="Test GPU"):
+    monkeypatch.setattr(benchmark_profiles, "_trusted_model_directory", lambda value: Path(value).resolve(strict=True))
     monkeypatch.setattr(benchmark_profiles, "_hardware_record", lambda: _hardware(gpu_name))
     monkeypatch.setattr(benchmark_profiles, "_software_record", lambda: {
         "axiom_version": "0.3.0-test",
@@ -232,3 +233,26 @@ def test_missing_model_configuration_fingerprint_prevents_controlled_comparison(
     assert comparison["match"]["model_metadata"] is False
     assert comparison["comparable"] is False
     assert comparison["metrics"]["median_elapsed_ms"]["delta"] == -10.0
+
+
+
+def test_model_config_fingerprint_refuses_untrusted_model_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    model = tmp_path / "outside-model"
+    model.mkdir()
+    (model / "config.json").write_text('{"model_type":"qwen3"}', encoding="utf-8")
+    monkeypatch.setattr(benchmark_profiles, "_trusted_model_directory", lambda _value: None)
+    assert benchmark_profiles._model_config_fingerprint(model) is None
+
+
+def test_model_config_fingerprint_opens_fixed_metadata_without_following_symlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    root = tmp_path / "model"
+    root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"model_type":"qwen3"}', encoding="utf-8")
+    try:
+        (root / "config.json").symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"File symlinks unavailable: {exc}")
+    monkeypatch.setattr(benchmark_profiles, "_trusted_model_directory", lambda _value: root)
+    with pytest.raises(BenchmarkProfileError, match="could not be read safely"):
+        benchmark_profiles._model_config_fingerprint(root)

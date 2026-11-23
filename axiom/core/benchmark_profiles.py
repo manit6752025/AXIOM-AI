@@ -20,6 +20,7 @@ from typing import Any
 from axiom.core.hardware import detect_hardware
 from axiom.core.storage import atomic_write_text, file_lock
 from axiom.core.workspace_context import workspace_metadata_dir
+from axiom.path_safety import SafePathError, open_regular_file
 from axiom.version import __version__
 
 SCHEMA_VERSION = 1
@@ -62,38 +63,55 @@ def _canonical(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
-def _model_config_fingerprint(model_path: str | Path) -> str | None:
-    """Hash a bounded set of model configuration files, never model weights."""
-    root = Path(model_path).expanduser()
-    if root.is_symlink():
-        raise BenchmarkProfileError("The selected model directory must not be a symbolic link.")
+def _trusted_model_directory(model_path: str | Path) -> Path | None:
+    """Resolve a model through the native engine's allowlisted model inventory."""
     try:
-        root = root.resolve(strict=True)
-    except (OSError, RuntimeError):
+        from axiom.core.engine import _allowed_model_roots, resolve_local_model_directory
+
+        supplied = os.fspath(model_path)
+        resolved = Path(resolve_local_model_directory(supplied, "Base model"))
+        trusted_roots = tuple(Path(root).resolve(strict=True) for root in _allowed_model_roots())
+        if not resolved.is_absolute() or not any(resolved.is_relative_to(root) for root in trusted_roots):
+            return None
+        return resolved
+    except (OSError, RuntimeError, TypeError, ValueError):
         return None
-    if not root.is_dir():
+
+
+def _model_config_fingerprint(model_path: str | Path) -> str | None:
+    """Hash fixed-name configuration metadata from an allowlisted local model."""
+    root = _trusted_model_directory(model_path)
+    if root is None:
         return None
     parts: list[tuple[str, str]] = []
     total = 0
     for name in _MODEL_CONFIG_FILES:
+        if name != os.path.basename(name) or name not in _MODEL_CONFIG_FILES:
+            raise BenchmarkProfileError("Model configuration filename is invalid.")
         path = root / name
-        if path.is_symlink():
-            raise BenchmarkProfileError("Model configuration metadata must not use symbolic links.")
-        if not path.exists():
-            continue
         try:
-            info = path.stat()
-            if not stat.S_ISREG(info.st_mode) or info.st_size > 2 * 1024 * 1024:
-                raise BenchmarkProfileError("A model configuration file exceeds the benchmark provenance limit.")
-            total += info.st_size
-            if total > 8 * 1024 * 1024:
-                raise BenchmarkProfileError("Model configuration metadata exceeds the 8 MiB provenance limit.")
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            with open_regular_file(path) as stream:
+                before = os.fstat(stream.fileno())
+                if not stat.S_ISREG(before.st_mode) or before.st_size < 0 or before.st_size > 2 * 1024 * 1024:
+                    raise BenchmarkProfileError("A model configuration file exceeds the benchmark provenance limit.")
+                total += before.st_size
+                if total > 8 * 1024 * 1024:
+                    raise BenchmarkProfileError("Model configuration metadata exceeds the 8 MiB provenance limit.")
+                raw = stream.read(2 * 1024 * 1024 + 1)
+                after = os.fstat(stream.fileno())
+            if len(raw) > 2 * 1024 * 1024 or len(raw) != before.st_size:
+                raise BenchmarkProfileError("A model configuration file changed during provenance inspection.")
+            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
+            ):
+                raise BenchmarkProfileError("A model configuration file changed during provenance inspection.")
+        except FileNotFoundError:
+            continue
         except BenchmarkProfileError:
             raise
-        except OSError:
+        except (OSError, SafePathError):
             raise BenchmarkProfileError("Model configuration metadata could not be read safely.") from None
-        parts.append((name, digest))
+        parts.append((name, hashlib.sha256(raw).hexdigest()))
     return hashlib.sha256(_canonical(parts)).hexdigest() if parts else None
 
 
