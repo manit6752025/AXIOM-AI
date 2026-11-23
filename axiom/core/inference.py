@@ -10,6 +10,8 @@ from typing import Any, Callable, Iterator
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
+from axiom.core.json_schema import JsonSchemaError, validate_json_schema
+
 OLLAMA_ENDPOINT = "http://127.0.0.1:11434"
 _STATUS_TIMEOUT_SECONDS = 2.5
 _GENERATION_TIMEOUT_SECONDS = 300
@@ -502,19 +504,26 @@ def run_local_inference(
     seed: int | None = None,
     stop_sequences: list[str] | tuple[str, ...] | None = None,
     num_ctx: int | None = None,
+    response_format: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Generate text through a local Ollama service with bounded input/output."""
     model = validate_model_name(model)
     prompt, num_predict, temperature = validate_generation(prompt, num_predict, temperature)
     sampling_options = validate_sampling_options(top_p=top_p, top_k=top_k, min_p=min_p, repetition_penalty=repetition_penalty, seed=seed, stop_sequences=stop_sequences, num_ctx=num_ctx)
+    payload: dict[str, Any] = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"num_predict": num_predict, "temperature": temperature, **sampling_options},
+    }
+    if response_format is not None:
+        try:
+            payload["format"] = validate_json_schema(response_format)
+        except JsonSchemaError as exc:
+            raise ValueError(str(exc)) from None
     result = _request_json(
         "/api/generate",
-        payload={
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"num_predict": num_predict, "temperature": temperature, **sampling_options},
-        },
+        payload=payload,
         timeout=_GENERATION_TIMEOUT_SECONDS,
     )
     response = result.get("response")

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import stat
 import time
 
 import typer
@@ -15,6 +17,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from axiom.core.inference import InferenceRuntimeError, inspect_local_model, list_running_local_models, remove_local_model, run_local_inference, unload_local_model
+from axiom.core.json_schema import MAX_SCHEMA_BYTES, JsonSchemaError, parse_and_validate_json_output, validate_json_schema
 from axiom.core.ollama_service import (
     OllamaServiceError, cancel_model_pull, get_model_pull, service_status,
     start_model_pull, start_service, stop_service,
@@ -34,6 +37,31 @@ console = Console()
 
 def _fail(message: str) -> None:
     emit_error(message, code="inference_error")
+
+
+def _load_json_schema_file(path: Path) -> dict:
+    """Read a small regular schema file without following symlinks where supported."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    descriptor = os.open(path, flags)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            raise JsonSchemaError("JSON Schema path must be a regular file.")
+        if info.st_size > MAX_SCHEMA_BYTES:
+            raise JsonSchemaError(f"JSON Schema file exceeds the {MAX_SCHEMA_BYTES}-byte limit.")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            raw = handle.read(MAX_SCHEMA_BYTES + 1)
+        if len(raw) > MAX_SCHEMA_BYTES:
+            raise JsonSchemaError(f"JSON Schema file exceeds the {MAX_SCHEMA_BYTES}-byte limit.")
+        try:
+            parsed = json.loads(raw.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError):
+            raise JsonSchemaError("JSON Schema file must contain valid UTF-8 JSON.") from None
+        return validate_json_schema(parsed)
+    finally:
+        os.close(descriptor)
 
 
 @infer_app.command("status")
@@ -248,6 +276,7 @@ def infer_run(
     seed: int | None = typer.Option(None, "--seed", min=0, help="Optional deterministic seed."),
     num_ctx: int | None = typer.Option(None, "--num-ctx", min=512, max=131_072, help="Optional context window (512–131072 tokens)."),
     stop_sequences: list[str] | None = typer.Option(None, "--stop", help="Optional stop sequence; repeat the flag for multiple values."),
+    schema_file: Path | None = typer.Option(None, "--schema-file", exists=True, dir_okay=False, readable=True, help="Apply a local, bounded JSON Schema to constrain and validate output."),
     json_output: bool = typer.Option(False, "--json", help="Print the complete result as JSON."),
 ) -> None:
     """Run real text generation on the local Ollama runtime; no cloud API is used."""
@@ -270,7 +299,13 @@ def infer_run(
         if seed is not None: sampling["seed"] = seed
         if num_ctx is not None: sampling["num_ctx"] = num_ctx
         if stop_sequences: sampling["stop_sequences"] = stop_sequences
+        response_schema = _load_json_schema_file(schema_file) if schema_file is not None else None
+        if response_schema is not None:
+            sampling["response_format"] = response_schema
         result = run_local_inference(model, prompt, num_predict=num_predict, temperature=temperature, **sampling)
+        if response_schema is not None:
+            result["structured_output"] = parse_and_validate_json_output(result["response"], response_schema)
+            result["structured_output_validated"] = True
     except (ValueError, InferenceRuntimeError) as exc:
         _fail(str(exc))
     if json_output:

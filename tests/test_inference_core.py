@@ -188,3 +188,44 @@ def test_invalid_sampling_options_are_rejected_before_any_request(monkeypatch, o
     monkeypatch.setattr(inference, "_open_loopback", lambda *_args, **_kwargs: pytest.fail("invalid sampling options must not reach Ollama"))
     with pytest.raises(ValueError):
         inference.run_local_inference("qwen2.5:0.5b", "Hello", **options)
+
+
+def test_structured_generation_passes_validated_schema_to_ollama_format(monkeypatch):
+    observed = {}
+
+    def fake_open(request, timeout):
+        observed["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse({
+            "response": '{"name":"AXIOM","count":3}',
+            "done": True,
+            "eval_count": 8,
+            "total_duration": 10_000_000,
+        })
+
+    monkeypatch.setattr(inference, "_open_loopback", fake_open)
+    schema = {
+        "type": "object",
+        "properties": {"name": {"type": "string"}, "count": {"type": "integer"}},
+        "required": ["name", "count"],
+    }
+    result = inference.run_local_inference(
+        "qwen2.5:0.5b", "Return a product object.", num_predict=128,
+        response_format=schema,
+    )
+
+    assert observed["payload"]["format"]["type"] == "object"
+    assert observed["payload"]["format"]["additionalProperties"] is False
+    assert observed["payload"]["format"]["required"] == ["name", "count"]
+    assert result["response"] == '{"name":"AXIOM","count":3}'
+
+
+def test_invalid_structured_schema_is_rejected_before_loopback(monkeypatch):
+    monkeypatch.setattr(
+        inference, "_open_loopback",
+        lambda *_args, **_kwargs: pytest.fail("invalid schema must not reach Ollama"),
+    )
+    with pytest.raises(ValueError, match="Unsupported JSON Schema keyword"):
+        inference.run_local_inference(
+            "qwen2.5:0.5b", "Return JSON.",
+            response_format={"type": "object", "$ref": "https://example.invalid/schema"},
+        )
