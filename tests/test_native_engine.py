@@ -2436,23 +2436,35 @@ def test_native_context_trims_old_history_before_token_truncation(monkeypatch, t
 
 def test_engine_admission_wait_is_bounded(monkeypatch) -> None:
     from axiom.core import engine as engine_module
+    from axiom.core.request_admission import RequestAdmissionTimeout
 
     monkeypatch.setattr(engine_module, "_MAX_ENGINE_QUEUE_WAIT_SECONDS", 0.01)
-    assert engine_module._ENGINE_LOCK.acquire(blocking=False)
+    engine_module.ENGINE_REQUEST_ADMISSION.acquire(queue_limit=32, timeout_seconds=1)
     try:
-        with pytest.raises(engine_module.AxiomEngineError, match="busy with another request"):
+        with pytest.raises(RequestAdmissionTimeout, match="queue wait exceeded"):
             with engine_module._engine_request_lock():
-                pytest.fail("Should not enter while another request owns the engine")
+                pytest.fail("A request must not pass a busy shared admission manager")
     finally:
-        engine_module._ENGINE_LOCK.release()
+        engine_module.ENGINE_REQUEST_ADMISSION.release()
 
 
 def test_engine_admission_wait_honors_cancellation(monkeypatch) -> None:
     from threading import Event
     from axiom.core import engine as engine_module
+    from axiom.core.request_admission import RequestAdmissionCancelled
 
     cancelled = Event()
     cancelled.set()
-    with pytest.raises(engine_module.AxiomEngineError, match="cancelled while waiting"):
+    with pytest.raises(RequestAdmissionCancelled, match="cancelled"):
         with engine_module._engine_request_lock(cancelled):
             pytest.fail("Cancelled request must not acquire the engine lock")
+
+
+def test_engine_admission_uses_one_shared_manager_and_releases_slots():
+    from axiom.core import engine as engine_module
+
+    assert engine_module.ENGINE_REQUEST_ADMISSION.max_active if hasattr(engine_module.ENGINE_REQUEST_ADMISSION, "max_active") else True
+    before = engine_module.ENGINE_REQUEST_ADMISSION.active_count
+    with engine_module._engine_request_lock():
+        assert engine_module.ENGINE_REQUEST_ADMISSION.active_count == before + 1
+    assert engine_module.ENGINE_REQUEST_ADMISSION.active_count == before

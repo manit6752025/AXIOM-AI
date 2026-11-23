@@ -229,8 +229,11 @@ def model_provenance_issues(
 
 def request_admission_issues(
     admission_core: str,
+    engine_core: str,
     engine_api: str,
+    serving_core: str,
     engine_cli: str,
+    server_source: str,
     client: str,
     runtime_panel: str,
     admission_tests: str,
@@ -253,12 +256,28 @@ def request_admission_issues(
             "RequestAdmissionTimeout",
             "RequestAdmissionCancelled",
         )),
+        ("Native engine integration", engine_core, (
+            "ENGINE_REQUEST_ADMISSION = BoundedRequestAdmission(max_active=1, max_queue=32)",
+            "ENGINE_REQUEST_ADMISSION.acquire(",
+            "with _ENGINE_LOCK:",
+            "ENGINE_REQUEST_ADMISSION.release()",
+            "with _engine_request_lock():",
+        )),
+        ("Serving profile execution", serving_core, (
+            "admission_held: bool = False",
+            "engine_execution_lock() if admission_held else nullcontext()",
+            "_lock_held=admission_held",
+        )),
         ("Serving API", engine_api, (
-            "NATIVE_PROFILE_ADMISSION = BoundedRequestAdmission(max_active=1, max_queue=32)",
+            "NATIVE_PROFILE_ADMISSION = ENGINE_REQUEST_ADMISSION",
             "queue_key=profile[\"id\"]",
+            "admission_held=True",
             "RequestAdmissionQueueFull",
             "RequestAdmissionTimeout",
             "RequestAdmissionCancelled",
+            "request_queue_full",
+            "request_queue_timeout",
+            "request_cancelled",
             "HTTPException(429",
             "\"Retry-After\": \"1\"",
             "status_code=504",
@@ -272,10 +291,12 @@ def request_admission_issues(
             "admission_cancel.set()",
         )),
         ("Serving CLI", engine_cli, (
-            "_CLI_PROFILE_ADMISSION = BoundedRequestAdmission(max_active=1, max_queue=32)",
+            "_CLI_PROFILE_ADMISSION = ENGINE_REQUEST_ADMISSION",
             "_CLI_PROFILE_ADMISSION.acquire(",
             "queue_key=profile[\"id\"]",
+            "admission_held=True",
             "_CLI_PROFILE_ADMISSION.release()",
+            "RequestAdmissionQueueFull, RequestAdmissionTimeout, RequestAdmissionCancelled",
             "max_queued_requests: int = typer.Option",
             "waited {admission['waited_ms']} ms",
             "queued at position",
@@ -300,6 +321,9 @@ def request_admission_issues(
             "test_queue_wait_times_out_and_cancelled_ticket_is_removed",
             "test_queue_limits_are_scoped_per_profile_with_a_global_safety_ceiling",
             "test_queue_position_is_recomputed_after_an_earlier_ticket_is_cancelled",
+        "test_engine_admission_wait_is_bounded",
+        "test_engine_admission_wait_honors_cancellation",
+        "test_engine_admission_uses_one_shared_manager_and_releases_slots",
         )),
         ("Serving API regressions", serving_tests, (
             "test_serving_profile_api_crud_readiness_and_profile_limited_generation",
@@ -314,9 +338,26 @@ def request_admission_issues(
             "Cancel generation",
             "Generation cancellation was sent",
         )),
+        ("Global API error mapping", engine_api, (
+            "NATIVE_PROFILE_ADMISSION = ENGINE_REQUEST_ADMISSION",
+        )),
+        ("API admission error handlers", server_source, (
+            "@app.exception_handler(RequestAdmissionQueueFull)",
+            "@app.exception_handler(RequestAdmissionTimeout)",
+            "@app.exception_handler(RequestAdmissionCancelled)",
+            "request_queue_full",
+            "request_queue_timeout",
+            "request_cancelled",
+            "Retry-After",
+        )),
         ("Serving documentation", docs, (
             "selected profile's queue limit",
             "global ceiling of 32 waiters",
+            "ordinary `axiom engine run` / API generation",
+            "native benchmark runs",
+            "model unload share the same active slot",
+            "ordinary native engine admission wait is bounded to 30 seconds",
+            "Cancel generation",
             "Retry-After: 1",
             "499",
             "queue_position",
@@ -1620,16 +1661,23 @@ def inspect(root: Path) -> dict[str, Any]:
         telemetry_history_core_tests, telemetry_history_api_tests,
     ))
     request_admission_core = (root / "axiom/core/request_admission.py").read_text(encoding="utf-8")
-    request_admission_tests = (root / "tests/test_request_admission.py").read_text(encoding="utf-8")
+    native_engine_core = (root / "axiom/core/engine.py").read_text(encoding="utf-8")
+    serving_profile_core = (root / "axiom/core/serving_profiles.py").read_text(encoding="utf-8")
+    request_admission_tests = (
+        (root / "tests/test_request_admission.py").read_text(encoding="utf-8")
+        + (root / "tests/test_native_engine.py").read_text(encoding="utf-8")
+    )
     serving_profiles_tests = (root / "tests/test_serving_profiles.py").read_text(encoding="utf-8")
+    server_source = (root / "axiom/api/server.py").read_text(encoding="utf-8")
     serving_profiles_cli = engine_cli_source
     serving_profiles_panel = (root / "src/components/EngineServingProfilesPanel.tsx").read_text(encoding="utf-8")
     serving_profiles_e2e = (root / "e2e/serving-profiles.spec.ts").read_text(encoding="utf-8")
     serving_profiles_docs = (root / "docs/Local-Serving-Profiles.md").read_text(encoding="utf-8")
     failures.extend(request_admission_issues(
-        request_admission_core, engine_api, serving_profiles_cli, client,
-        serving_profiles_panel, request_admission_tests, serving_profiles_tests,
-        serving_profiles_e2e, serving_profiles_docs,
+        request_admission_core, native_engine_core, engine_api, serving_profile_core,
+        serving_profiles_cli, server_source, client, serving_profiles_panel,
+        request_admission_tests, serving_profiles_tests, serving_profiles_e2e,
+        serving_profiles_docs,
     ))
     benchmark_trend_panel = (root / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
     benchmark_trend_chart = (root / "src/components/BenchmarkResourceTrends.tsx").read_text(encoding="utf-8")
