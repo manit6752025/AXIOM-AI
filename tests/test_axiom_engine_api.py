@@ -1268,3 +1268,65 @@ def test_engine_fabric_benchmark_endpoint_returns_conflict_when_preflight_fails(
     })
     assert response.status_code == 409
     assert "exact model ID" in response.json()["detail"]
+
+
+
+def test_local_embeddings_api_uses_local_adapter_and_never_returns_source_text(tmp_path, monkeypatch):
+    model = tmp_path / "embedding-model"
+    model.mkdir()
+    (model / "config.json").write_text('{"model_type":"bert","hidden_size":3}', encoding="utf-8")
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(tmp_path))
+    captured = {}
+    expected = {
+        "schema_version": 1, "engine": "axiom-local-embeddings",
+        "model": {"name": "embedding-model", "dimension": 3}, "device": "cpu",
+        "request": {"input_count": 1, "chunk_count": 1},
+        "chunks": [{"embedding_index": 1, "start_char": 0, "end_char": 5, "characters": 5}],
+        "embeddings": [[0.1, 0.2, 0.3]],
+        "privacy": {"source_text_returned": False, "source_text_persisted": False,
+                    "model_files_uploaded": False, "network_used": False, "results_persisted": False},
+    }
+
+    def fake_embed(model_path, texts, **kwargs):
+        captured.update(model_path=model_path, texts=texts, **kwargs)
+        return expected
+
+    monkeypatch.setattr(engine_api, "embed_local_texts", fake_embed)
+    response = _client().post("/api/engine/embeddings", json={
+        "model_path": str(model), "texts": ["secret text"], "batch_size": 2,
+        "max_length": 128, "device": "cpu",
+    })
+    assert response.status_code == 200, response.text
+    assert response.json() == expected
+    assert "secret text" not in response.text
+    assert captured == {
+        "model_path": str(model.resolve()), "texts": ["secret text"], "batch_size": 2,
+        "max_length": 128, "chunk_size_chars": 2048, "chunk_overlap_chars": 128,
+        "device": "cpu", "normalize": True,
+    }
+
+
+def test_local_embeddings_api_rejects_untrusted_paths_and_oversized_text(tmp_path, monkeypatch):
+    root = tmp_path / "trusted"
+    root.mkdir()
+    model = root / "model"
+    model.mkdir()
+    (model / "config.json").write_text('{"model_type":"bert"}', encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "config.json").write_text('{"model_type":"bert"}', encoding="utf-8")
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(root))
+    response = _client().post("/api/engine/embeddings", json={"model_path": str(outside), "texts": ["hello"]})
+    assert response.status_code == 422
+    oversized = _client().post("/api/engine/embeddings", json={
+        "model_path": str(model), "texts": ["x" * 65_537],
+    })
+    assert oversized.status_code == 422
+
+
+def test_local_embeddings_unload_api_releases_only_cached_runtime(monkeypatch):
+    expected = {"schema_version": 1, "unloaded": True, "scope_note": "Only cached model released."}
+    monkeypatch.setattr(engine_api, "unload_local_embeddings", lambda: expected)
+    response = _client().post("/api/engine/embeddings/unload")
+    assert response.status_code == 200
+    assert response.json() == expected

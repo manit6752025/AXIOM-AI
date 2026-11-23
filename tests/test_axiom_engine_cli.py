@@ -698,3 +698,54 @@ def test_native_benchmark_cli_saves_named_profile_when_requested(tmp_path, monke
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["profile_record"]["id"] == "c" * 32
     assert saved == [("Qwen baseline", "private prompt", model, False)]
+
+
+
+def test_engine_embed_cli_returns_vector_json_without_echoing_input(tmp_path, monkeypatch):
+    model = tmp_path / "embedding-model"
+    model.mkdir()
+    expected = {
+        "schema_version": 1, "model": {"name": "embedding-model", "dimension": 3},
+        "request": {"input_count": 1, "chunk_count": 1, "normalized": True},
+        "embeddings": [[0.1, 0.2, 0.3]],
+        "privacy": {"source_text_returned": False, "source_text_persisted": False},
+    }
+    captured = {}
+
+    def fake_embed(model_path, texts, **kwargs):
+        captured.update(model_path=model_path, texts=texts, **kwargs)
+        return expected
+
+    monkeypatch.setattr(engine_cli, "embed_local_texts", fake_embed)
+    result = runner.invoke(engine_app, [
+        "embed", "--model-path", str(model), "--text", "private input", "--device", "cpu", "--json",
+    ])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == expected
+    assert "private input" not in result.stdout
+    assert captured["texts"] == ["private input"]
+    assert captured["device"] == "cpu"
+
+
+def test_engine_embed_cli_supports_text_file_and_rejects_conflicting_inputs(tmp_path, monkeypatch):
+    model = tmp_path / "embedding-model"
+    model.mkdir()
+    source = tmp_path / "document.txt"
+    source.write_text("local document content", encoding="utf-8")
+    captured = []
+
+    def fake_embed(model_path, texts, **kwargs):
+        captured.append((model_path, texts, kwargs))
+        return {"model": {"name": "tiny", "dimension": 2},
+                "request": {"input_count": 1, "chunk_count": 1, "batch_size": 1, "normalized": True},
+                "device": "cpu", "scope_note": "local only"}
+
+    monkeypatch.setattr(engine_cli, "embed_local_texts", fake_embed)
+    result = runner.invoke(engine_app, ["embed", "--model-path", str(model), "--input-file", str(source)])
+    assert result.exit_code == 0, result.output
+    assert captured[0][1] == ["local document content"]
+    conflict = runner.invoke(engine_app, [
+        "embed", "--model-path", str(model), "--input-file", str(source), "--text", "also supplied",
+    ])
+    assert conflict.exit_code != 0
+    assert "but not both" in conflict.output
