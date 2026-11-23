@@ -65,6 +65,66 @@ class WorkspaceBackupRestoreResult(TypedDict, total=False):
     scope_note: str
 
 
+
+class PredictionJobSummary(TypedDict, total=False):
+    id: str
+    status: str
+    created_at: str
+    started_at: str | None
+    finished_at: str | None
+    dataset_path: str
+    output_path: str
+    artifact_ready: bool
+    rows_total: int
+    rows_completed: int
+    resumable: bool
+    resumption_count: int
+    error_code: str | None
+
+
+class _PredictionJobStartRequired(TypedDict):
+    model_path: str
+    dataset_path: str
+    output_path: str
+
+
+class PredictionJobStartRequest(_PredictionJobStartRequired, total=False):
+    adapter_path: str | None
+    prompt_field: str
+    reference_field: str
+    prediction_field: str
+    max_new_tokens: int
+    temperature: float
+    seed: int | None
+    device: Literal["auto", "cpu", "cuda", "rocm", "mps", "xpu"]
+    precision: Literal["auto", "fp32", "fp16", "bf16"]
+
+
+class PredictionJobPage(TypedDict):
+    schema_version: Literal[1]
+    jobs: list[PredictionJobSummary]
+    limit: int
+
+
+class PredictionJobStatusResult(TypedDict):
+    schema_version: Literal[1]
+    job: PredictionJobSummary
+
+
+class PredictionJobStartResult(TypedDict, total=False):
+    schema_version: Literal[1]
+    job: PredictionJobSummary
+    limits: dict[str, int]
+    scope: dict[str, Any]
+
+
+class PredictionJobCancelResult(TypedDict, total=False):
+    schema_version: Literal[1]
+    job: PredictionJobSummary
+    cancellation_accepted: bool
+    note: str
+
+
 class AxiomClientOptions(TypedDict, total=False):
     base_url: str
     token: str | None

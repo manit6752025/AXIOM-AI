@@ -122,3 +122,42 @@ to check compatibility before relying on newer endpoints.
 The SDK has no automatic retries, implicit cloud-provider calls or background
 polling. Sampling, mutations, model loading and generation happen only when
 their explicit methods are called.
+
+## Local prediction jobs
+
+Prediction jobs run only when explicitly requested. They use the selected
+workspace's local model, dataset and compute device; the SDK does not download
+models or send prompts to a cloud service.
+
+\`\`\`python
+from axiom_sdk import AxiomClient
+
+request = {
+    "model_path": "models/my-model",
+    "dataset_path": "data/evaluation.jsonl",
+    "output_path": "data/predictions.jsonl",
+    "max_new_tokens": 32,
+    "device": "cpu",
+}
+
+with AxiomClient(token="WRITE_TOKEN") as axiom:
+    started = axiom.start_prediction_job(request)
+    job_id = started["job"]["id"]
+
+    # Job summaries contain progress and integrity status, not prompts or output.
+    print(axiom.prediction_job(job_id)["job"]["status"])
+    print(axiom.prediction_jobs(limit=20)["jobs"])
+
+    # Resume only an interrupted job with a verified checkpoint.
+    resumed = axiom.resume_prediction_job(job_id)
+    print(resumed["job"]["resumption_count"])
+
+    # Cancellation is cooperative and only applies while the worker is active.
+    # axiom.cancel_prediction_job(job_id)
+\`\`\`
+
+The server revalidates the dataset, model/adapter and saved generation settings
+before resuming. A changed input or invalid checkpoint is rejected; partial
+checkpoint data is never reported as a completed evaluation artifact. Use
+resume_prediction_job only after inspecting the job state and deciding to
+continue the local computation.

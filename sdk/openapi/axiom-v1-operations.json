@@ -141,6 +141,41 @@
       "path": "/api/security/plugins",
       "python": "plugin_manifests",
       "typescript": "pluginManifests"
+    },
+    {
+      "name": "prediction_jobs",
+      "method": "GET",
+      "path": "/api/prediction-jobs",
+      "python": "prediction_jobs",
+      "typescript": "predictionJobs"
+    },
+    {
+      "name": "start_prediction_job",
+      "method": "POST",
+      "path": "/api/prediction-jobs",
+      "python": "start_prediction_job",
+      "typescript": "startPredictionJob"
+    },
+    {
+      "name": "prediction_job",
+      "method": "GET",
+      "path": "/api/prediction-jobs/{job_id}",
+      "python": "prediction_job",
+      "typescript": "predictionJob"
+    },
+    {
+      "name": "resume_prediction_job",
+      "method": "POST",
+      "path": "/api/prediction-jobs/{job_id}/resume",
+      "python": "resume_prediction_job",
+      "typescript": "resumePredictionJob"
+    },
+    {
+      "name": "cancel_prediction_job",
+      "method": "POST",
+      "path": "/api/prediction-jobs/{job_id}/cancel",
+      "python": "cancel_prediction_job",
+      "typescript": "cancelPredictionJob"
     }
   ]
 }

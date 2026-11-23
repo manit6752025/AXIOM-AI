@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import secrets
 import urllib.error
 import urllib.parse
@@ -10,7 +11,17 @@ from typing import Any, BinaryIO, Mapping
 from urllib.parse import quote
 
 from .errors import AxiomAPIError, AxiomConfigurationError, AxiomNetworkError
-from .types import APIContractMetadata, TelemetryHistory, WorkspaceBackupRestoreResult, WorkspaceCatalog
+from .types import (
+    APIContractMetadata,
+    PredictionJobCancelResult,
+    PredictionJobPage,
+    PredictionJobStartRequest,
+    PredictionJobStartResult,
+    PredictionJobStatusResult,
+    TelemetryHistory,
+    WorkspaceBackupRestoreResult,
+    WorkspaceCatalog,
+)
 
 DEFAULT_BASE_URL = "http://127.0.0.1:40507"
 API_CONTRACT_VERSION = 1
@@ -450,6 +461,90 @@ class AxiomClient:
             "POST", f"/api/workspace/knowledge-bases/{quote(base_id, safe='')}/search",
             json_body={"query": query, **options},
         )
+
+
+    @staticmethod
+    def _validate_prediction_job_id(job_id: str) -> None:
+        if (
+            not isinstance(job_id, str)
+            or len(job_id) != 32
+            or any(character not in "0123456789abcdef" for character in job_id)
+        ):
+            raise AxiomConfigurationError("Prediction job ID must be 32 lowercase hexadecimal characters.")
+
+    def prediction_jobs(self, *, limit: int = 20) -> PredictionJobPage:
+        """List workspace-local prediction-job summaries without returning generated text."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 50:
+            raise AxiomConfigurationError("Prediction job list limit must be between 1 and 50.")
+        return self.request_json("GET", "/api/prediction-jobs", params={"limit": limit})
+
+    def start_prediction_job(self, request: PredictionJobStartRequest) -> PredictionJobStartResult:
+        """Start a bounded local JSONL prediction job; this consumes local compute."""
+        if not isinstance(request, Mapping):
+            raise AxiomConfigurationError("Prediction job start request must be a mapping.")
+        payload = dict(request)
+        allowed = {
+            "model_path", "adapter_path", "dataset_path", "output_path",
+            "prompt_field", "reference_field", "prediction_field",
+            "max_new_tokens", "temperature", "seed", "device", "precision",
+        }
+        if set(payload) - allowed:
+            raise AxiomConfigurationError("Prediction job start request contains unsupported fields.")
+        for field, maximum in (("model_path", 4096), ("dataset_path", 512), ("output_path", 512)):
+            value = payload.get(field)
+            if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+                raise AxiomConfigurationError(f"Prediction job start requires a non-empty {field} of at most {maximum} characters.")
+        defaults = {"prompt_field": "prompt", "reference_field": "reference", "prediction_field": "prediction"}
+        for field, default in defaults.items():
+            value = payload.get(field, default)
+            if not isinstance(value, str) or not value.strip() or len(value) > 160:
+                raise AxiomConfigurationError(f"Prediction job {field} must contain 1 to 160 characters.")
+        if "max_new_tokens" in payload and (
+            isinstance(payload["max_new_tokens"], bool)
+            or not isinstance(payload["max_new_tokens"], int)
+            or not 1 <= payload["max_new_tokens"] <= 64
+        ):
+            raise AxiomConfigurationError("max_new_tokens must be an integer between 1 and 64.")
+        if "temperature" in payload and (
+            isinstance(payload["temperature"], bool)
+            or not isinstance(payload["temperature"], (int, float))
+            or not math.isfinite(payload["temperature"])
+            or not 0 <= payload["temperature"] <= 2
+        ):
+            raise AxiomConfigurationError("temperature must be a finite number between 0 and 2.")
+        if "seed" in payload and payload["seed"] is not None and (
+            isinstance(payload["seed"], bool)
+            or not isinstance(payload["seed"], int)
+            or not 0 <= payload["seed"] <= 2**63 - 1
+        ):
+            raise AxiomConfigurationError("seed must be an integer between 0 and 2^63-1.")
+        adapter = payload.get("adapter_path")
+        if adapter is not None and (
+            not isinstance(adapter, str) or not adapter.strip() or len(adapter) > 4096
+        ):
+            raise AxiomConfigurationError("adapter_path must be omitted or contain 1 to 4096 characters.")
+        device = payload.get("device", "auto")
+        precision = payload.get("precision", "auto")
+        if not isinstance(device, str) or device not in {"auto", "cpu", "cuda", "rocm", "mps", "xpu"}:
+            raise AxiomConfigurationError("device is not a supported local prediction device.")
+        if not isinstance(precision, str) or precision not in {"auto", "fp32", "fp16", "bf16"}:
+            raise AxiomConfigurationError("precision is not a supported local prediction precision.")
+        return self.request_json("POST", "/api/prediction-jobs", json_body=payload)
+
+    def prediction_job(self, job_id: str) -> PredictionJobStatusResult:
+        """Read a single workspace-local prediction job summary."""
+        self._validate_prediction_job_id(job_id)
+        return self.request_json("GET", f"/api/prediction-jobs/{quote(job_id, safe='')}")
+
+    def resume_prediction_job(self, job_id: str) -> PredictionJobStartResult:
+        """Resume an interrupted job after AXIOM verifies its saved inputs and checkpoint."""
+        self._validate_prediction_job_id(job_id)
+        return self.request_json("POST", f"/api/prediction-jobs/{quote(job_id, safe='')}/resume")
+
+    def cancel_prediction_job(self, job_id: str) -> PredictionJobCancelResult:
+        """Request cooperative cancellation of a workspace-local prediction job."""
+        self._validate_prediction_job_id(job_id)
+        return self.request_json("POST", f"/api/prediction-jobs/{quote(job_id, safe='')}/cancel")
 
     def plugin_manifests(self) -> dict[str, Any]:
         return self.request_json("GET", "/api/security/plugins")

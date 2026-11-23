@@ -51,6 +51,10 @@ class _Handler(BaseHTTPRequestHandler):
             })
         elif parsed.path == "/api/workspace/models":
             self._send(200, {"models": [], "total": 0})
+        elif parsed.path == "/api/prediction-jobs":
+            self._send(200, {"schema_version": 1, "jobs": [{"id": "a" * 32, "status": "interrupted", "resumable": True}], "limit": 20})
+        elif parsed.path == f"/api/prediction-jobs/{'a' * 32}":
+            self._send(200, {"schema_version": 1, "job": {"id": "a" * 32, "status": "interrupted", "resumable": True}})
         elif parsed.path == "/api/workspaces/ws-1/backup":
             self._send_raw(200, b"PK\x03\x04backup", "application/zip")
         elif parsed.path == "/api/redirect":
@@ -79,6 +83,12 @@ class _Handler(BaseHTTPRequestHandler):
             "headers": dict(self.headers.items()),
             "body": body,
         })
+        if parsed.path == "/api/prediction-jobs":
+            self._send(202, {"schema_version": 1, "job": {"id": "a" * 32, "status": "queued", "resumable": False}, "limits": {}, "scope": {}})
+        elif parsed.path == f"/api/prediction-jobs/{'a' * 32}/resume":
+            self._send(202, {"schema_version": 1, "job": {"id": "a" * 32, "status": "queued", "resumption_count": 1}, "scope": {"checkpoint_identity_and_digest_verified": True}})
+        elif parsed.path == f"/api/prediction-jobs/{'a' * 32}/cancel":
+            self._send(200, {"schema_version": 1, "job": {"id": "a" * 32, "status": "cancelling"}, "cancellation_accepted": True, "note": "Cancellation requested."})
         if parsed.path == "/api/workspaces/backup/restore":
             self._send(201, {
                 "schema_version": 1,
@@ -227,3 +237,54 @@ def test_python_sdk_models_no_implicit_retries_or_network_fallback(api_server):
     request = _Handler.requests[-1]
     assert request["body"] == b""
     assert len(_Handler.requests) == 1
+
+def test_python_sdk_prediction_jobs_support_start_history_status_resume_and_cancel(api_server):
+    request = {
+        "model_path": "models/tiny",
+        "dataset_path": "data/eval.jsonl",
+        "output_path": "data/predictions.jsonl",
+        "max_new_tokens": 16,
+        "device": "cpu",
+    }
+    job_id = "a" * 32
+    with AxiomClient(api_server) as client:
+        page = client.prediction_jobs(limit=12)
+        started = client.start_prediction_job(request)
+        shown = client.prediction_job(job_id)
+        resumed = client.resume_prediction_job(job_id)
+        cancelled = client.cancel_prediction_job(job_id)
+
+    assert page["jobs"][0]["resumable"] is True
+    assert started["job"]["status"] == "queued"
+    assert shown["job"]["id"] == job_id
+    assert resumed["job"]["resumption_count"] == 1
+    assert cancelled["cancellation_accepted"] is True
+    records = _Handler.requests
+    assert [item["path"] for item in records] == [
+        "/api/prediction-jobs",
+        "/api/prediction-jobs",
+        f"/api/prediction-jobs/{job_id}",
+        f"/api/prediction-jobs/{job_id}/resume",
+        f"/api/prediction-jobs/{job_id}/cancel",
+    ]
+    assert records[0]["query"] == {"limit": ["12"]}
+    assert json.loads(records[1]["body"]) == request
+    assert records[3]["body"] == b""
+    assert records[4]["body"] == b""
+
+
+def test_python_sdk_prediction_job_methods_reject_unsafe_ids_and_invalid_inputs():
+    with AxiomClient() as client:
+        with pytest.raises(AxiomConfigurationError, match="32 lowercase hexadecimal"):
+            client.resume_prediction_job("../unsafe")
+        with pytest.raises(AxiomConfigurationError, match="model_path"):
+            client.start_prediction_job({"dataset_path": "data/eval.jsonl", "output_path": "data/out.jsonl"})
+        with pytest.raises(AxiomConfigurationError, match="temperature"):
+            client.start_prediction_job({
+                "model_path": "models/tiny",
+                "dataset_path": "data/eval.jsonl",
+                "output_path": "data/out.jsonl",
+                "temperature": float("nan"),
+            })
+
+

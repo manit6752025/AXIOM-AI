@@ -219,3 +219,74 @@ test("refuses calls after close", async () => {
   client.close();
   await assert.rejects(() => client.health(), AxiomConfigurationError);
 });
+
+test("exposes typed prediction-job start, history, status, cancellation and checkpoint resume", async () => {
+  const requests = [];
+  const jobId = "a".repeat(32);
+  const client = new AxiomClient({
+    fetchImpl: async (input, init = {}) => {
+      const url = new URL(input.toString());
+      requests.push({ url, init });
+      if (init.method === "GET" && url.pathname === "/api/prediction-jobs") {
+        return jsonResponse({ schema_version: 1, jobs: [{ id: jobId, status: "interrupted", resumable: true }], limit: 20 });
+      }
+      if (init.method === "GET" && url.pathname === `/api/prediction-jobs/${jobId}`) {
+        return jsonResponse({ schema_version: 1, job: { id: jobId, status: "interrupted", resumable: true } });
+      }
+      if (url.pathname.endsWith("/resume")) {
+        return jsonResponse({ schema_version: 1, job: { id: jobId, status: "queued", resumption_count: 1 }, scope: { checkpoint_identity_and_digest_verified: true } }, 202);
+      }
+      if (url.pathname.endsWith("/cancel")) {
+        return jsonResponse({ schema_version: 1, job: { id: jobId, status: "cancelling" }, cancellation_accepted: true, note: "Cancellation requested." });
+      }
+      return jsonResponse({ schema_version: 1, job: { id: jobId, status: "queued" }, limits: {}, scope: {} }, 202);
+    },
+  });
+
+  const page = await client.predictionJobs(12);
+  const started = await client.startPredictionJob({
+    model_path: "models/tiny",
+    dataset_path: "data/eval.jsonl",
+    output_path: "data/predictions.jsonl",
+    max_new_tokens: 16,
+    device: "cpu",
+  });
+  const shown = await client.predictionJob(jobId);
+  const resumed = await client.resumePredictionJob(jobId);
+  const cancelled = await client.cancelPredictionJob(jobId);
+
+  assert.equal(page.jobs[0].resumable, true);
+  assert.equal(started.job.status, "queued");
+  assert.equal(shown.job.id, jobId);
+  assert.equal(resumed.job.resumption_count, 1);
+  assert.equal(cancelled.cancellation_accepted, true);
+  assert.deepEqual(requests.map((item) => [item.init.method, item.url.pathname]), [
+    ["GET", "/api/prediction-jobs"],
+    ["POST", "/api/prediction-jobs"],
+    ["GET", `/api/prediction-jobs/${jobId}`],
+    ["POST", `/api/prediction-jobs/${jobId}/resume`],
+    ["POST", `/api/prediction-jobs/${jobId}/cancel`],
+  ]);
+  assert.deepEqual(JSON.parse(requests[1].init.body), {
+    model_path: "models/tiny",
+    dataset_path: "data/eval.jsonl",
+    output_path: "data/predictions.jsonl",
+    max_new_tokens: 16,
+    device: "cpu",
+  });
+  assert.equal(requests[3].init.body, undefined);
+  assert.equal(requests[4].init.body, undefined);
+  client.close();
+});
+
+test("validates prediction job identifiers and required local start paths", async () => {
+  const client = new AxiomClient();
+  await assert.rejects(() => client.resumePredictionJob("../unsafe"), AxiomConfigurationError);
+  assert.throws(
+    () => client.startPredictionJob({ model_path: "", dataset_path: "data/eval.jsonl", output_path: "data/out.jsonl" }),
+    AxiomConfigurationError,
+  );
+  client.close();
+});
+
+
