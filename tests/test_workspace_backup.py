@@ -378,7 +378,7 @@ def test_workspace_backup_rejects_sparse_file_above_production_per_file_limit_be
     sparse_file = workspace / "oversized.gguf"
     with sparse_file.open("wb") as stream:
         stream.seek(workspace_backup.MAX_BACKUP_FILE_BYTES)
-        stream.write(b"\\0")
+        stream.write(bytes([0]))
 
     assert sparse_file.stat().st_size == workspace_backup.MAX_BACKUP_FILE_BYTES + 1
     monkeypatch.setattr(

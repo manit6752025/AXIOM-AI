@@ -425,7 +425,7 @@ def test_model_provenance_rejects_sparse_checkpoint_over_production_hash_limit_w
     sparse_weight = model / "large-model.safetensors"
     with sparse_weight.open("wb") as stream:
         stream.seek(provenance.MAX_PROVENANCE_HASH_BYTES)
-        stream.write(b"\\0")
+        stream.write(bytes([0]))
 
     assert sparse_weight.stat().st_size == provenance.MAX_PROVENANCE_HASH_BYTES + 1
     monkeypatch.setattr(
