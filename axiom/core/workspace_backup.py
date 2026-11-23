@@ -536,7 +536,7 @@ def restore_workspace_backup(archive_source: BinaryIO, staging_root: str | Path)
                                 # instead of allocating every byte during restore.
                                 # The content is still fully read, hashed, CRC-checked
                                 # by zipfile, and included in the declared byte count.
-                                if any(block):
+                                if block.count(0) != len(block):
                                     target.write(block)
                                 else:
                                     target.seek(len(block), os.SEEK_CUR)
