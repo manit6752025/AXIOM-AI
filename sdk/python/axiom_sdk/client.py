@@ -17,7 +17,24 @@ API_CONTRACT_VERSION = 1
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Prevent forwarding bearer credentials to a redirect target."""
+    """Reject every redirect before urllib can contact another origin."""
+
+    def _reject_redirect(self, request, response, code, message, headers):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            code,
+            "AXIOM SDK redirects are disabled.",
+            headers,
+            response,
+        )
+
+    http_error_300 = _reject_redirect
+    http_error_301 = _reject_redirect
+    http_error_302 = _reject_redirect
+    http_error_303 = _reject_redirect
+    http_error_305 = _reject_redirect
+    http_error_307 = _reject_redirect
+    http_error_308 = _reject_redirect
 
     def redirect_request(self, request, response, code, message, headers, new_url):
         return None

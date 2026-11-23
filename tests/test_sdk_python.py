@@ -179,7 +179,7 @@ def test_python_sdk_stops_redirects_before_credentials_can_escape(api_server):
     _Handler.redirect_target = "https://example.invalid/collect"
     with AxiomClient(api_server, token="secret") as client:
         with pytest.raises(AxiomAPIError) as raised:
-            client.health()
+            client.request_json("GET", "/api/redirect")
     assert raised.value.status_code == 302
     assert len(_Handler.requests) == 1
 
@@ -205,11 +205,11 @@ def test_python_sdk_rejects_invalid_ports_credentials_and_duplicate_headers():
             AxiomClient(origin)
 
     with pytest.raises(AxiomConfigurationError, match="control"):
-        AxiomClient(token="secret\\r\\nX-Evil: true")
+        AxiomClient(token="secret\r\nX-Evil: true")
     with pytest.raises(AxiomConfigurationError, match="more than once"):
         AxiomClient(headers={"X-Client": "one", "x-client": "two"})
     with pytest.raises(AxiomConfigurationError, match="printable"):
-        AxiomClient(workspace_id="workspace\\nheader")
+        AxiomClient(workspace_id="workspace\nheader")
 
 
 def test_python_sdk_closes_cleanly(api_server):
