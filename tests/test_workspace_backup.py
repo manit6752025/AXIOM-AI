@@ -29,12 +29,28 @@ def _staging(tmp_path: Path) -> Path:
     return destination
 
 
-def test_published_backup_manifest_schema_and_example_match_runtime_limits():
-    from pathlib import Path
+def test_published_backup_manifest_schema_and_example_match_runtime_limits(tmp_path: Path):
+    from jsonschema import Draft202012Validator, FormatChecker
 
     root = Path(__file__).resolve().parents[1]
     schema = json.loads((root / "docs/schemas/workspace-backup-manifest-v1.schema.json").read_text(encoding="utf-8"))
     example = json.loads((root / "examples/workspace-backup-manifest-v1.example.json").read_text(encoding="utf-8"))
+
+    # Validate the published schema itself and both the published example and
+    # a manifest emitted by the production ZIP writer with a standards-based
+    # Draft 2020-12 validator (including date-time format checking).
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema, format_checker=FormatChecker())
+    validator.validate(example)
+
+    workspace = tmp_path / "schema-validated-workspace"
+    workspace.mkdir()
+    (workspace / "README.md").write_text("AXIOM backup schema smoke test\\n", encoding="utf-8")
+    archive, _report = _archive(workspace)
+    with zipfile.ZipFile(archive) as bundle:
+        generated_manifest = json.loads(bundle.read("manifest.json"))
+    validator.validate(generated_manifest)
+
     assert schema["properties"]["schema_version"]["const"] == workspace_backup.BACKUP_SCHEMA_VERSION
     assert schema["properties"]["files"]["maxItems"] == workspace_backup.MAX_BACKUP_FILES
     assert example["limits"] == {
