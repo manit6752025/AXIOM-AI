@@ -497,8 +497,13 @@ def inspect_native_adapter_compatibility(
         adapter_config = _read_json_object(
             adapter_dir / "adapter_config.json", _MAX_CONFIG_BYTES, "LoRA adapter config", roots
         )
+        if adapter_config.get("peft_type") not in (None, "LORA"):
+            issues.append("Only PEFT LORA adapter configurations are supported.")
         for flag in ("use_dora", "use_qalora", "use_rslora"):
-            if adapter_config.get(flag) is True:
+            value = adapter_config.get(flag, False)
+            if not isinstance(value, bool):
+                issues.append(f"LoRA option {flag} must be a boolean.")
+            elif value:
                 issues.append(f"LoRA option {flag} is not supported by AXIOM Native Engine.")
         if adapter_config.get("bias", "none") != "none":
             issues.append("Bias-enabled LoRA adapters are unsupported.")
@@ -508,7 +513,10 @@ def inspect_native_adapter_compatibility(
             or adapter_config.get("alpha_pattern")
         ):
             issues.append("Per-module rank/alpha patterns and modules_to_save are unsupported.")
-        if adapter_config.get("fan_in_fan_out") is True:
+        fan_in_fan_out = adapter_config.get("fan_in_fan_out", False)
+        if not isinstance(fan_in_fan_out, bool):
+            issues.append("LoRA option fan_in_fan_out must be a boolean.")
+        elif fan_in_fan_out:
             issues.append("fan_in_fan_out adapters are unsupported.")
         if adapter_config.get("task_type") not in (None, "CAUSAL_LM"):
             issues.append("Only CAUSAL_LM LoRA adapters are supported.")

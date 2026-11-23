@@ -99,6 +99,8 @@ Before advertising a particular accelerator/driver combination as hardware-valid
 
 The capability probe is a readiness report, not a guarantee that every operator, precision, checkpoint or model size is compatible with a detected device. Until physical runs are recorded, CUDA/ROCm/MPS/XPU remain supported-by-code/probed backends rather than hardware-certified configurations.
 
+Adapter preflight only treats an absent or explicit `peft_type: LORA` as a LoRA adapter. Optional feature flags (`use_dora`, `use_qalora`, `use_rslora`, and `fan_in_fan_out`) must be JSON booleans; true values are rejected where the native runtime does not implement the feature. Malformed strings/numbers are not treated as false. This is a metadata compatibility check, not a device-execution guarantee.
+
 A standard bias-free CAUSAL_LM LoRA adapter may be selected. AXIOM applies its A/B projection deltas in its own linear-projection path. DoRA, QALoRA, per-module rank/alpha patterns, saved replacement modules, bias-enabled adapters, unsupported target modules, and pickle adapter weights are rejected.
 
 Before generation, use **Check adapter compatibility** to run a metadata/tensor-shape preflight against the chosen base model. The report separates CPU, NVIDIA CUDA, AMD ROCm, Apple Metal/MPS, and Intel XPU availability and lists structural blockers by target module, rank, or shape. It does not allocate the full base model or guarantee device memory/driver/kernel success; actual generation remains the final execution test.

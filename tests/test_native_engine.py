@@ -1242,6 +1242,43 @@ def test_native_adapter_compatibility_classifies_accelerator_availability(
     assert "does not load the full model" in report["scope_note"]
 
 
+@pytest.mark.parametrize(
+    ("config_updates", "issue_fragment"),
+    [
+        ({"peft_type": "IA3"}, "Only PEFT LORA"),
+        ({"use_dora": "false"}, "use_dora must be a boolean"),
+        ({"use_qalora": 0}, "use_qalora must be a boolean"),
+        ({"fan_in_fan_out": "false"}, "fan_in_fan_out must be a boolean"),
+    ],
+)
+def test_native_adapter_preflight_rejects_unsupported_or_malformed_peft_metadata(
+    tmp_path: Path,
+    config_updates: dict[str, object],
+    issue_fragment: str,
+) -> None:
+    torch = pytest.importorskip("torch")
+    safetensors_torch = pytest.importorskip("safetensors.torch")
+    from axiom.core.native_engine import inspect_native_adapter_compatibility
+
+    root = tmp_path / "trusted"
+    model = root / "base"
+    model.mkdir(parents=True)
+    (model / "config.json").write_text(json.dumps(_config()), encoding="utf-8")
+    (model / "tokenizer.json").write_text("{}", encoding="utf-8")
+    safetensors_torch.save_file(_tiny_weights(torch), str(model / "model.safetensors"))
+    adapter = _tiny_adapter_file(safetensors_torch, torch, root)
+    config_path = adapter / "adapter_config.json"
+    adapter_config = json.loads(config_path.read_text(encoding="utf-8"))
+    adapter_config.update(config_updates)
+    config_path.write_text(json.dumps(adapter_config), encoding="utf-8")
+
+    report = inspect_native_adapter_compatibility(model, adapter, trusted_roots=(root.resolve(),))
+
+    assert report["structurally_compatible"] is False
+    assert any(issue_fragment in issue for issue in report["issues"])
+    assert next(device for device in report["devices"] if device["name"] == "CPU")["compatible"] is False
+
+
 def test_native_adapter_compatibility_rejects_projection_shape_mismatch(tmp_path: Path) -> None:
     torch = pytest.importorskip("torch")
     safetensors_torch = pytest.importorskip("safetensors.torch")
