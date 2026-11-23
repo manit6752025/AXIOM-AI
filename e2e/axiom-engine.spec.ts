@@ -457,7 +457,7 @@ test("Runtime page exposes direct AXIOM Engine inference with local model and ad
   });
   await engine.getByLabel("Prediction dataset path").fill("data/evaluation.jsonl");
   await engine.getByLabel("Prediction output path").fill("data/predictions.jsonl");
-  await engine.getByRole("button", { name: "Start checkpointed prediction job" }).click();
+  await engine.getByRole("button", { name: "Start prediction job" }).click();
   const predictionJobs = engine.getByRole("region", { name: "Saved prediction job history" });
   await expect.poll(() => predictionRequest).not.toBeNull();
   expect(predictionRequest).toMatchObject({
