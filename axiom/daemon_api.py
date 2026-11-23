@@ -42,7 +42,10 @@ class WorkspacePathError(ValueError):
 
 def resolve_in_workspace(raw: str, root: Path | None = None) -> Path:
     """Resolve an existing workspace entry through a trusted directory listing."""
-    base = (Path.cwd() if root is None else root).resolve()
+    selected_root = Path.cwd() if root is None else Path(root)
+    if selected_root.is_symlink():
+        raise WorkspacePathError("workspace root must not be a symbolic link")
+    base = selected_root.resolve()
     try:
         return find_existing_relative_path(
             base,

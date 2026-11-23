@@ -119,13 +119,13 @@ def audit_security_posture(
                 "Review the file owner and access bits manually.",
             ))
         else:
-            if mode & 0o022:
+            if os.name == "posix" and mode & 0o022:
                 checks.append(_check(
                     "security.config.permissions", "Project configuration permissions", "fail", "error",
                     "axiom.yaml is writable by group or other local users.",
                     "Remove group/other write permission and restrict file ownership to trusted users.",
                 ))
-            elif mode & 0o044:
+            elif os.name == "posix" and mode & 0o044:
                 checks.append(_check(
                     "security.config.permissions", "Project configuration permissions", "warn", "warning",
                     "axiom.yaml can be read by group or other local users; configuration may contain local paths or provider settings.",
@@ -134,7 +134,7 @@ def audit_security_posture(
             else:
                 checks.append(_check(
                     "security.config.permissions", "Project configuration permissions", "pass", "info",
-                    "axiom.yaml is not group/other readable or writable.",
+                    "No unsafe POSIX group/other configuration permissions were detected.",
                 ))
     else:
         checks.append(_check(
@@ -346,8 +346,8 @@ def audit_security_posture(
         ))
 
     checks.append(_check(
-        "security.network.gui_bind", "Control Center network binding", "pass", "info",
-        "The built-in axiom gui launcher binds its FastAPI listener to 127.0.0.1.",
+        "security.network.gui_bind", "Built-in Control Center bind contract", "info", "info",
+        "The axiom gui CLI launcher binds its FastAPI socket to 127.0.0.1; this does not assert the bind of externally started ASGI servers.",
     ))
     checks.append(_check(
         "security.network.listener_visibility", "Live listener visibility", "info", "info",
