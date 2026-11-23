@@ -2581,7 +2581,7 @@ def wait_prediction_job(
             "logs_returned": False,
             "absolute_paths_returned": False,
             "job_state_persisted": True,
-            "generation_resumed_after_restart": False,
+            "generation_resumed_after_restart": bool(job.get("resumption_count", 0)),
         },
     }
 
