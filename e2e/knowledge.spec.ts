@@ -30,7 +30,7 @@ test("Runtime creates a workspace knowledge base and ingests a local document", 
       },
     });
   });
-  await page.route("**/api/workspace/knowledge-bases/*/documents", async (route) => {
+  await page.route("**/api/workspace/knowledge-bases/**/documents**", async (route) => {
     const method = route.request().method();
     if (method === "POST") {
       ingestPayload = route.request().postDataJSON() as Record<string, unknown>;
