@@ -143,6 +143,41 @@
       "typescript": "pluginManifests"
     },
     {
+      "name": "workspace_diagnostics",
+      "method": "GET",
+      "path": "/api/diagnostics/workspace",
+      "python": "workspace_diagnostics",
+      "typescript": "workspaceDiagnostics"
+    },
+    {
+      "name": "roadmap_audit",
+      "method": "GET",
+      "path": "/api/diagnostics/roadmap",
+      "python": "roadmap_audit",
+      "typescript": "roadmapAudit"
+    },
+    {
+      "name": "runtime_traces",
+      "method": "GET",
+      "path": "/api/diagnostics/runtime-traces",
+      "python": "runtime_traces",
+      "typescript": "runtimeTraces"
+    },
+    {
+      "name": "security_audit",
+      "method": "GET",
+      "path": "/api/security/audit",
+      "python": "security_audit",
+      "typescript": "securityAudit"
+    },
+    {
+      "name": "software_bill_of_materials",
+      "method": "GET",
+      "path": "/api/security/sbom",
+      "python": "software_bill_of_materials",
+      "typescript": "softwareBillOfMaterials"
+    },
+    {
       "name": "prediction_jobs",
       "method": "GET",
       "path": "/api/prediction-jobs",

@@ -23,8 +23,9 @@ the AXIOM API contract v1.
   workspace and does not overwrite the active workspace.
 - Typed methods for metadata, health, workspace inventory, models, datasets,
   local runtime, engine status/telemetry, persistent telemetry history,
-  workspace knowledge bases, plugin-manifest inventory, and local prediction
-  job start/list/status/resume/cancel.
+  workspace knowledge bases, workspace diagnostics and roadmap audit,
+  privacy-filtered runtime trace pages, security posture, SPDX SBOM inventory,
+  plugin-manifest inventory, and local prediction job start/list/status/resume/cancel.
 
 The Python SDK uses the standard library. It provides both a bytes-returning
 backup convenience method and a chunked method that writes to a

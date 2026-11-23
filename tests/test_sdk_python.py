@@ -49,6 +49,16 @@ class _Handler(BaseHTTPRequestHandler):
                 "openapi_url": "/api/openapi.json",
                 "compatibility_policy": "Additive v1.",
             })
+        elif parsed.path == "/api/diagnostics/workspace":
+            self._send(200, {"status": "healthy", "checks": []})
+        elif parsed.path == "/api/diagnostics/roadmap":
+            self._send(200, {"status": "verified", "deliverable_count": 140})
+        elif parsed.path == "/api/diagnostics/runtime-traces":
+            self._send(200, {"traces": [], "total": 0, "limit": int(parse_qs(parsed.query).get("limit", ["50"])[0])})
+        elif parsed.path == "/api/security/audit":
+            self._send(200, {"schema_version": 1, "checks": []})
+        elif parsed.path == "/api/security/sbom":
+            self._send(200, {"spdxVersion": "SPDX-2.3", "packages": []})
         elif parsed.path == "/api/workspace/models":
             self._send(200, {"models": [], "total": 0})
         elif parsed.path == "/api/prediction-jobs":
@@ -304,3 +314,39 @@ def test_python_sdk_prediction_job_methods_reject_unsafe_ids_and_invalid_inputs(
             client.start_prediction_job({**base, "device": "mps", "precision": "bf16"})
 
 
+
+
+def test_python_sdk_exposes_read_only_diagnostics_and_security_operations(api_server):
+    with AxiomClient(api_server) as client:
+        assert client.workspace_diagnostics()["status"] == "healthy"
+        assert client.roadmap_audit()["deliverable_count"] == 140
+        assert client.runtime_traces(limit=17, offset=4, search="engine")["limit"] == 17
+        assert client.security_audit()["schema_version"] == 1
+        assert client.software_bill_of_materials()["spdxVersion"] == "SPDX-2.3"
+
+    records = _Handler.requests
+    assert [item["path"] for item in records] == [
+        "/api/diagnostics/workspace",
+        "/api/diagnostics/roadmap",
+        "/api/diagnostics/runtime-traces",
+        "/api/security/audit",
+        "/api/security/sbom",
+    ]
+    assert records[2]["query"] == {"limit": ["17"], "offset": ["4"], "search": ["engine"]}
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"limit": 0}, "limit"),
+        ({"limit": 201}, "limit"),
+        ({"offset": -1}, "offset"),
+        ({"offset": 201}, "offset"),
+        ({"search": "x" * 121}, "search"),
+    ],
+)
+def test_python_sdk_rejects_out_of_bounds_runtime_trace_queries(kwargs, message):
+    client = AxiomClient()
+    with pytest.raises(AxiomConfigurationError, match=message):
+        client.runtime_traces(**kwargs)
+    client.close()
