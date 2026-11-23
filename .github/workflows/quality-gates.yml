@@ -1,9 +1,10 @@
 name: AXIOM quality gates
 
-# Keep only the newest push per branch in the expensive test/build/browser gate.
+# Keep one validation run active per branch. New pushes replace the pending
+# run but must not terminate a running Python/build/Playwright validation job.
 concurrency:
   group: axiom-quality-gates-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 on:
   push:

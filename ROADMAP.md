@@ -94,7 +94,7 @@ feature exists or a delivery-date promise.
 - [R066 · Implemented; tests passing] Add autosave, rename, duplicate, and version history for workflows.
 - [R067 · Implemented; tests passing] Add backend-owned workflow validation before execution is possible.
 - [R068 · Implemented; tests passing] Add planning-only dry-run summaries with estimated resource requirements.
-- [R069 · Planned] Add explicit job execution states and cancellation contracts.
+- [R069 · In progress; validation pending] Define and enforce local training job lifecycle transitions (`queued`, `running`, `cancelling`, `finalizing`, and terminal states), expose cancellation capability/reasons in API summaries, and wire cooperative cancellation through CLI and GUI. Saved workflow graphs remain planning-only until a safe graph runner and per-node I/O contracts exist; verify focused tests, lint, production build, and browser E2E before closing.
 - [R070 · Planned] Add checkpoint, resume, and output-path policy controls.
 - [R071 · In progress] Export seed and software-version manifests; seeds remain unapplied until an execution runner exists.
 - [R072 · Implemented; tests passing] Keep planning-only states visually distinct from executed training.

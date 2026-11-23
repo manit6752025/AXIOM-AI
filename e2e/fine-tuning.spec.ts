@@ -39,7 +39,7 @@ test("Training page submits a bounded local LoRA job and displays its status", a
 
   let submittedConfig: Record<string, unknown> | undefined;
   let postRequestCount = 0;
-  let currentJob = queuedJob;
+  let currentJob: Record<string, unknown> = queuedJob;
 
   await ensureAuthenticated(page);
 

@@ -49,7 +49,7 @@ def _validate_job_transition(current: Any, target: str) -> None:
     """Reject lifecycle transitions that could misreport work or reopen cancellation."""
     if current == target:
         return
-    allowed = _JOB_ALLOWED_TRANSITIONS.get(current)
+    allowed = _JOB_ALLOWED_TRANSITIONS.get(current) if isinstance(current, str) else None
     if allowed is None or target not in allowed:
         raise FineTuningError(f"Invalid fine-tuning job transition: {current} -> {target}.")
 
@@ -573,7 +573,7 @@ def _public_training_job(job: dict[str, Any]) -> dict[str, Any]:
 
     status = job.get("status")
     requested = job.get("cancel_requested") is True
-    requestable = status in {"queued", "running"} and not requested
+    requestable = isinstance(status, str) and status in {"queued", "running"} and not requested
     if requestable:
         unavailable_reason = None
     elif status == "cancelling":
