@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import os
+import shutil
 import struct
 import zlib
 from pathlib import Path
@@ -50,10 +51,24 @@ def _blue_png(width: int = 16, height: int = 16) -> bytes:
     )
 
 
-def test_real_local_ollama_vision_inference_and_nonvision_refusal(tmp_path: Path):
+
+
+@pytest.fixture
+def repository_workspace(tmp_path: Path):
+    """Create temporary workspace data under the repository root required by MCP path guards."""
+    root = Path.cwd() / ".axiom-local-model-integration" / tmp_path.name
+    root.mkdir(parents=True, exist_ok=False)
+    try:
+        yield root
+    finally:
+        shutil.rmtree(root, ignore_errors=False)
+
+
+def test_real_local_ollama_vision_inference_and_nonvision_refusal(repository_workspace: Path):
+
     model = os.environ.get("AXIOM_INTEGRATION_VISION_MODEL", "moondream:1.8b")
     text_model = os.environ.get("AXIOM_INTEGRATION_TEXT_MODEL", "qwen2.5:0.5b")
-    workspace = tmp_path / "vision-workspace"
+    workspace = repository_workspace
     (workspace / "data").mkdir(parents=True)
     image_path = workspace / "data" / "blue-square.png"
     image_path.write_bytes(_blue_png())
@@ -85,7 +100,7 @@ def test_real_local_ollama_vision_inference_and_nonvision_refusal(tmp_path: Path
         )
 
 
-def test_real_local_piper_synthesis_and_whisper_transcription(tmp_path: Path, monkeypatch):
+def test_real_local_piper_synthesis_and_whisper_transcription(repository_workspace: Path, monkeypatch):
     models = Path(os.environ["AXIOM_SPEECH_MODEL_ROOTS"]).resolve(strict=True)
     piper_voice = models / "en_US-lessac-medium.onnx"
     whisper_model = models / "ggml-tiny.en.bin"
@@ -93,7 +108,7 @@ def test_real_local_piper_synthesis_and_whisper_transcription(tmp_path: Path, mo
     assert Path(str(piper_voice) + ".json").is_file()
     assert whisper_model.is_file()
 
-    workspace = tmp_path / "speech-workspace"
+    workspace = repository_workspace
     (workspace / "data").mkdir(parents=True)
     monkeypatch.setenv("AXIOM_SPEECH_MODEL_ROOTS", str(models))
 
