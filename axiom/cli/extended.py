@@ -460,16 +460,30 @@ def register(app, model_app, dataset_app) -> None:
         print_next_commands(next_commands(root))
 
     @app.command("check")
-    def check() -> None:
+    def check(
+        json_output: bool = typer.Option(False, "--json", help="Emit a versioned project status report."),
+    ) -> None:
         """Quickly check for a local AXIOM project and its standard paths."""
         root = Path.cwd()
+        detected = project_detected(root)
+        missing = missing_project_paths(root) if detected else list(PROJECT_PATHS)
+        if json_output:
+            typer.echo(json.dumps({
+                "schema_version": 1,
+                "status": "ready" if detected and not missing else "incomplete" if detected else "not_project",
+                "project_detected": detected,
+                "root": str(root),
+                "required_paths": list(PROJECT_PATHS),
+                "missing_paths": missing,
+                "next_commands": list(next_commands(root)),
+            }, ensure_ascii=False, sort_keys=True))
+            return
 
-        if not project_detected(root):
+        if not detected:
             console.print(f"[yellow]No AXIOM project detected:[/yellow] {root}")
             console.print("Next: [cyan]axiom init my-ai[/cyan]")
             return
 
-        missing = missing_project_paths(root)
         console.print(f"[green]✓ AXIOM project detected:[/green] {root}")
 
         if missing:
@@ -642,21 +656,24 @@ def register(app, model_app, dataset_app) -> None:
         )
 
     @project_app.command("validate")
-    def project_validate() -> None:
+    def project_validate(
+        json_output: bool = typer.Option(False, "--json", help="Emit a versioned project validation report."),
+    ) -> None:
         """Check expected AXIOM project paths in the current directory."""
         root = Path.cwd()
-
-        required = [
-            "axiom.yaml",
-            "README.md",
-            "data",
-            "models",
-            "experiments",
-            "evaluations",
-            "outputs",
-        ]
-
+        required = list(PROJECT_PATHS)
         missing = [item for item in required if not (root / item).exists()]
+        if json_output:
+            typer.echo(json.dumps({
+                "schema_version": 1,
+                "valid": not missing,
+                "root": str(root),
+                "required_paths": required,
+                "missing_paths": missing,
+            }, ensure_ascii=False, sort_keys=True))
+            if missing:
+                raise typer.Exit(code=1)
+            return
 
         if missing:
             console.print("[red]Project validation failed.[/red]")
