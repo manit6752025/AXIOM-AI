@@ -48,7 +48,7 @@ def tiny_local_transformer_checkpoints(tmp_path, monkeypatch):
         "plugin", "model", "text", "semantic", "safe",
     ]
     vocab_path = model_root / "vocab.txt"
-    vocab_path.write_text("\\n".join(vocab) + "\\n", encoding="utf-8")
+    vocab_path.write_text("\n".join(vocab) + "\n", encoding="utf-8")
     tokenizer = transformers.BertTokenizerFast(vocab_file=str(vocab_path), do_lower_case=True)
 
     embedding_dir = model_root / "tiny-embedding"
