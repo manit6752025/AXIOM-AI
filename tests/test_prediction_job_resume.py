@@ -378,3 +378,62 @@ def test_mcp_prediction_resume_requires_its_own_explicit_permission(tmp_path, mo
     assert "axiom_prediction_job_resume" in TOOL_DESCRIPTIONS
     assert result["scope"]["partial_output_published"] is False
 
+def test_prediction_job_recovery_after_real_owner_process_termination(tmp_path):
+    import subprocess
+    import sys
+
+    worker = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        payload = b'{"prompt":"one","reference":"A","prediction":"first"}\n'
+        record, checkpoint_path = _checkpoint(tmp_path, payload)
+        record.update({
+            "status": "running",
+            "created_at": "2026-11-20T00:00:00+00:00",
+            "updated_at": "2026-11-20T00:00:10+00:00",
+            "started_at": "2026-11-20T00:00:01+00:00",
+            "finished_at": None,
+            "dataset_path": "data/eval.jsonl",
+            "output_path": "data/predictions.jsonl",
+            "model_path": "models/tiny",
+            "adapter_path": None,
+            "max_new_tokens": 16,
+            "temperature": 0.7,
+            "seed": 7,
+            "device": "cpu",
+            "precision": "fp32",
+            "prompt_field": "prompt",
+            "reference_field": "reference",
+            "prediction_field": "prediction",
+            "rows_total": 2,
+            "prompts_truncated": 0,
+            "error_code": None,
+            "evaluation_run_ids": [],
+            "artifact_identity": None,
+            "artifact_sha256": None,
+            "pending_artifact_identity": None,
+            "pending_artifact_sha256": None,
+            "runner_pid": worker.pid,
+            "runner_identity": prediction_jobs._process_start_identity(worker.pid),
+            "dataset_sha256": "2" * 64,
+            "model_fingerprint": "1" * 64,
+            "adapter_fingerprint": None,
+            "resumption_count": 0,
+        })
+        (tmp_path / ".axiom").mkdir()
+        prediction_jobs._persist_job_record(tmp_path, record)
+        assert worker.poll() is None
+        worker.terminate()
+        worker.wait(timeout=10)
+
+        [saved] = prediction_jobs._read_job_records(tmp_path)
+        recovered = prediction_jobs._recover_record(tmp_path, saved)
+
+        assert recovered["status"] == "interrupted"
+        assert recovered["error_code"] == "worker_process_exited"
+        assert recovered["checkpoint_name"] == checkpoint_path.name
+        assert recovered["checkpoint_sha256"] == record["checkpoint_sha256"]
+    finally:
+        if worker.poll() is None:
+            worker.kill()
+            worker.wait(timeout=10)
+
