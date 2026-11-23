@@ -1,0 +1,50 @@
+name: AXIOM production-size workspace backup stress
+
+on:
+  push:
+    branches: [implement/roadmap]
+    paths:
+      - "axiom/core/workspace_backup.py"
+      - "tests/integration/test_backup_scale.py"
+      - ".github/workflows/backup-scale-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: axiom-backup-scale-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  backup-restore-production-limits:
+    name: 50 GiB per file / 100 GiB aggregate backup and restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      AXIOM_RUN_BACKUP_SCALE_TESTS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install AXIOM and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+      - name: Verify runner storage and filesystem support
+        run: |
+          df -h "$RUNNER_TEMP"
+          python - <<'PY'
+          import os
+          import tempfile
+          from pathlib import Path
+
+          with tempfile.TemporaryFile(dir=os.environ["RUNNER_TEMP"]) as stream:
+              stream.truncate(100 * 1024**3)
+              assert os.fstat(stream.fileno()).st_size == 100 * 1024**3
+          print("Sparse 100 GiB logical file support: OK")
+          PY
+      - name: Run full production-size backup and restore
+        run: python -m pytest -q tests/integration/test_backup_scale.py
