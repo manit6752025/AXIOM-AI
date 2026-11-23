@@ -13,5 +13,4 @@ extensions:
       - ["axiom.core.training_preflight", "Member[resolve_workspace_output].ReturnValue", "path-injection"]
       - ["axiom.core.knowledge", "Member[_document_file_path].ReturnValue", "path-injection"]
       - ["axiom.core.model_studio", "Member[_job_path].ReturnValue", "path-injection"]
-      - ["axiom.core.engine", "Member[resolve_local_model_directory].ReturnValue", "path-injection"]
       - ["axiom.core.benchmark_profiles", "Member[_trusted_model_directory].ReturnValue", "path-injection"]
