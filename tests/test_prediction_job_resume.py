@@ -201,20 +201,40 @@ def test_resume_prediction_job_revalidates_assets_and_schedules_checkpoint_worke
     monkeypatch.setattr(prediction_jobs, "_active_training_job_exists", lambda: False)
     monkeypatch.setattr(prediction_jobs, "acquire_local_compute_job_lock", lambda job: None)
     monkeypatch.setattr(prediction_jobs, "release_local_compute_job_lock", lambda job: None)
-    monkeypatch.setattr(prediction_jobs.threading, "Thread", lambda **kwargs: SimpleNamespace(start=lambda: None))
+    generated_prompts = []
+
+    def fake_generate(model_path, prompts, **kwargs):
+        generated_prompts.extend(prompts)
+        return {"results": [{
+            "response": "second",
+            "context_management": {"token_truncation_applied": False},
+        } for _prompt in prompts]}
+
+    class SynchronousThread:
+        def __init__(self, *, target, args, kwargs, **_options):
+            self.target, self.args, self.kwargs = target, args, kwargs
+
+        def start(self):
+            self.target(*self.args, **self.kwargs)
+
+    monkeypatch.setattr(prediction_jobs, "generate_local_batch", fake_generate)
+    monkeypatch.setattr(prediction_jobs.threading, "Thread", SynchronousThread)
     prediction_jobs._persist_job_record(root, record)
 
     resumed = prediction_jobs.resume_prediction_job(job_id, root)
 
     assert resumed is not None
-    assert resumed["status"] == "queued"
+    assert resumed["status"] == "completed"
     assert resumed["resumption_count"] == 1
-    assert resumed["rows_completed"] == 1
+    assert resumed["rows_completed"] == 2
+    assert generated_prompts == ["two"]
+    published = data / "predictions.jsonl"
+    output_rows = [json.loads(line) for line in published.read_text(encoding="utf-8").splitlines()]
+    assert [row["prediction"] for row in output_rows] == ["first", "second"]
     persisted = next(item for item in prediction_jobs._read_job_records(root) if item["id"] == job_id)
-    assert persisted["status"] == "queued"
-    assert persisted["checkpoint_name"] == checkpoint_path.name
-    assert persisted["checkpoint_sha256"] == hashlib.sha256(committed).hexdigest()
-    assert persisted["runner_pid"] == os.getpid()
+    assert persisted["status"] == "completed"
+    assert persisted["checkpoint_name"] is None
+    assert persisted["artifact_sha256"] == hashlib.sha256(published.read_bytes()).hexdigest()
 
 
 def test_resume_prediction_job_refuses_dataset_fingerprint_changes(tmp_path, monkeypatch):
