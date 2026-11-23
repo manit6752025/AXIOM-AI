@@ -142,7 +142,7 @@ test("Diagnostics downloads and restores a full workspace into a new isolated wo
   });
   await page.getByRole("button", { name: "Verify and restore as new workspace" }).click();
 
-  await expect(page.getByText(/Restored 3 file(s) into new workspace "Restored workspace"/)).toBeVisible();
+  await expect(page.getByText('Restored 3 file(s) into new workspace "Restored workspace".', { exact: true })).toBeVisible();
   expect(restoreRequestName).toBe("Restored workspace");
   expect(await page.evaluate(() => localStorage.getItem("axiom-active-workspace"))).toBe(defaultWorkspace.id);
 
