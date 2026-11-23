@@ -24,6 +24,35 @@ visible request errors, and the CLI daemon readiness probe sends one as well.
 - Persisted resource ID and workspace schema migration rules are defined in
   [Storage schemas and migrations](Storage-Schemas-and-Migrations.md).
 
+## Supported SDKs
+
+AXIOM provides independently installable Python and TypeScript SDK packages.
+Both target API contract v1 and use the same operation registry:
+
+- Python: `axiom-ai-sdk`, installed with `python -m pip install axiom-ai-sdk`.
+- TypeScript: `@axiom-ai/sdk`, installed with `npm install @axiom-ai/sdk`.
+
+The SDKs add request IDs, workspace selection, optional bearer tokens,
+timeouts, structured API errors, no-redirect credential protection, and typed
+methods for workspace/model/dataset inventory, local runtime, engine telemetry,
+persistent telemetry history, knowledge bases, plugins, and workspace backup
+and restore. They do not add hidden retries, cloud calls, background
+sampling, or model execution.
+
+The shared contract manifest is
+`sdk/openapi/axiom-v1-operations.json`. Verify it against the live FastAPI
+OpenAPI schema and both SDK public method surfaces with:
+
+```bash
+python scripts/verify_sdk_contract.py --json
+python -m pytest -q tests/test_sdk_contract.py tests/test_sdk_python.py
+npm install --prefix sdk/typescript
+npm test --prefix sdk/typescript
+```
+
+See [SDK install, authentication and streaming guide](SDKs.md) for examples,
+large-backup streaming APIs, package metadata and compatibility details.
+
 ## API permission scopes
 
 API scope enforcement is opt-in so existing loopback-only Control Center and CLI

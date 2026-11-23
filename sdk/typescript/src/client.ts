@@ -187,7 +187,7 @@ export class AxiomClient {
       externalSignal?.removeEventListener("abort", abortExternal);
     };
     try {
-      const response = await this.fetchImpl(this.url(path, options.params), {
+      const response = await this.fetchImpl(url, {
         method,
         headers,
         body,

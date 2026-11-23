@@ -1,9 +1,10 @@
 """Public structural types for the AXIOM v1 SDK."""
 from __future__ import annotations
 
+from types import NoneType
 from typing import Any, Literal, TypedDict
 
-JSONValue = None | bool | int | float | str | list["JSONValue"] | dict[str, "JSONValue"]
+JSONValue = NoneType | bool | int | float | str | list["JSONValue"] | dict[str, "JSONValue"]
 
 
 class APIErrorDetails(TypedDict, total=False):
