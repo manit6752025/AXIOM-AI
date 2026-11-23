@@ -711,3 +711,34 @@ def test_benchmark_profile_release_contract_checks_all_integration_layers() -> N
         core.replace("prompt_sha256", "prompt_hash"), api, cli, client, panel,
         core_tests, api_tests, cli_tests, e2e, docs,
     ))
+
+def test_prediction_job_restart_resume_release_contract_covers_every_surface() -> None:
+    core = (ROOT / "axiom/core/prediction_jobs.py").read_text(encoding="utf-8")
+    api = (ROOT / "axiom/api/prediction_jobs.py").read_text(encoding="utf-8")
+    cli = (ROOT / "axiom/cli/engine.py").read_text(encoding="utf-8")
+    mcp_server = (ROOT / "axiom/mcp/server.py").read_text(encoding="utf-8")
+    permissions = (ROOT / "axiom/core/tool_permissions.py").read_text(encoding="utf-8")
+    client = (ROOT / "src/api/client.ts").read_text(encoding="utf-8")
+    gui = (ROOT / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
+    core_tests = (ROOT / "tests/test_prediction_job_resume.py").read_text(encoding="utf-8")
+    api_tests = (ROOT / "tests/test_prediction_jobs_api.py").read_text(encoding="utf-8")
+    cli_tests = (ROOT / "tests/test_prediction_jobs_cli.py").read_text(encoding="utf-8")
+    e2e = (ROOT / "e2e/prediction-jobs.spec.ts").read_text(encoding="utf-8")
+    docs = (
+        (ROOT / "docs/Local-Engine.md").read_text(encoding="utf-8")
+        + (ROOT / "docs/integrations.md").read_text(encoding="utf-8")
+    )
+
+    args = (
+        core, api, cli, mcp_server, permissions, client, gui,
+        core_tests, api_tests, cli_tests, core_tests, e2e, docs,
+    )
+    assert release_smoke.prediction_job_resume_issues(*args) == []
+
+    failures = release_smoke.prediction_job_resume_issues(
+        core.replace("generation_fingerprint", "missing_generation_fingerprint", 1),
+        *args[1:],
+    )
+    assert any("generation_fingerprint" in item for item in failures)
+
+
