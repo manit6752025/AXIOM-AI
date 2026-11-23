@@ -122,8 +122,10 @@ _PERSISTED_JOB_FIELDS = (
     "checkpoint_bytes",
     "checkpoint_sha256",
     "resumption_count",
+    "generation_fingerprint",
 )
-_LEGACY_PERSISTED_JOB_FIELDS = _PERSISTED_JOB_FIELDS[:-8]
+_LEGACY_V1_PERSISTED_JOB_FIELDS = _PERSISTED_JOB_FIELDS[:-9]
+_LEGACY_V2_PERSISTED_JOB_FIELDS = _PERSISTED_JOB_FIELDS[:-1]
 _CHECKPOINT_EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 
 
@@ -880,6 +882,22 @@ def _valid_persisted_timestamp(value: Any) -> bool:
     return value == parsed.isoformat() and parsed.utcoffset() == UTC.utcoffset(parsed)
 
 
+def _prediction_generation_fingerprint(record: dict[str, Any]) -> str:
+    """Hash all generation and row-mapping settings needed for deterministic resume."""
+    payload = {
+        "max_new_tokens": record.get("max_new_tokens"),
+        "temperature": record.get("temperature"),
+        "seed": record.get("seed"),
+        "device": record.get("device"),
+        "precision": record.get("precision"),
+        "prompt_field": record.get("prompt_field"),
+        "reference_field": record.get("reference_field"),
+        "prediction_field": record.get("prediction_field"),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return hashlib.sha256(b"axiom-prediction-generation-v1\\0" + encoded).hexdigest()
+
+
 def _validate_persisted_job(record: Any) -> dict[str, Any]:
     if not isinstance(record, dict) or set(record) != set(_PERSISTED_JOB_FIELDS):
         raise ValueError("Saved prediction job state has an invalid schema.")
@@ -1004,10 +1022,12 @@ def _validate_persisted_job(record: Any) -> dict[str, Any]:
     runner_identity = record.get("runner_identity")
     if runner_identity is not None and (not isinstance(runner_identity, str) or len(runner_identity) > 128):
         raise ValueError("Saved prediction job state has an invalid worker identity.")
-    for field in ("dataset_sha256", "model_fingerprint", "adapter_fingerprint", "checkpoint_sha256"):
+    for field in ("dataset_sha256", "model_fingerprint", "adapter_fingerprint", "checkpoint_sha256", "generation_fingerprint"):
         value = record.get(field)
         if value is not None and (not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)):
             raise ValueError("Saved prediction job state has an invalid integrity fingerprint.")
+    if record["generation_fingerprint"] != _prediction_generation_fingerprint(record):
+        raise ValueError("Saved prediction job state has a mismatched generation configuration fingerprint.")
     if record["dataset_sha256"] is not None and record["rows_total"] < 1:
         raise ValueError("Saved prediction job state has an invalid dataset identity.")
     if record["adapter_path"] is None and record["adapter_fingerprint"] is not None:
@@ -1074,28 +1094,35 @@ def _read_job_records(root: Path, *, directory_fd: int | None = None) -> list[di
         not isinstance(payload, dict)
         or set(payload) != {"schema_version", "jobs"}
         or type(payload.get("schema_version")) is not int
-        or payload["schema_version"] not in {1, 2}
+        or payload["schema_version"] not in {1, 2, 3}
         or not isinstance(payload.get("jobs"), list)
         or len(payload["jobs"]) > _MAX_RETAINED_JOBS
     ):
         raise ValueError("Saved prediction job history has an invalid schema.")
-    if payload["schema_version"] == 1:
-        defaults = {
-            "dataset_sha256": None,
-            "model_fingerprint": None,
-            "adapter_fingerprint": None,
-            "checkpoint_name": None,
-            "checkpoint_identity": None,
-            "checkpoint_bytes": 0,
-            "checkpoint_sha256": None,
-            "resumption_count": 0,
-        }
+    if payload["schema_version"] in {1, 2}:
         migrated = []
         for item in payload["jobs"]:
-            if not isinstance(item, dict) or set(item) != set(_LEGACY_PERSISTED_JOB_FIELDS):
+            if not isinstance(item, dict):
                 raise ValueError("Saved prediction job history has an invalid legacy schema.")
-            migrated.append({**item, **defaults})
-        payload = {"schema_version": 2, "jobs": migrated}
+            if payload["schema_version"] == 1:
+                if set(item) != set(_LEGACY_V1_PERSISTED_JOB_FIELDS):
+                    raise ValueError("Saved prediction job history has an invalid schema-v1 record.")
+                defaults = {
+                    "dataset_sha256": None,
+                    "model_fingerprint": None,
+                    "adapter_fingerprint": None,
+                    "checkpoint_name": None,
+                    "checkpoint_identity": None,
+                    "checkpoint_bytes": 0,
+                    "checkpoint_sha256": None,
+                    "resumption_count": 0,
+                }
+                item = {**item, **defaults}
+            elif set(item) != set(_LEGACY_V2_PERSISTED_JOB_FIELDS):
+                raise ValueError("Saved prediction job history has an invalid schema-v2 record.")
+            item = {**item, "generation_fingerprint": _prediction_generation_fingerprint(item)}
+            migrated.append(item)
+        payload = {"schema_version": 3, "jobs": migrated}
     try:
         records = [_validate_persisted_job(item) for item in payload["jobs"]]
     except (OverflowError, TypeError):
@@ -1136,7 +1163,7 @@ def _persist_job_record(root: Path, job: dict[str, Any]) -> dict[str, Any]:
             if removable is None or records[removable]["id"] == current["id"]:
                 raise ValueError("Prediction job history is full; no completed job can be pruned safely.")
             records.pop(removable)
-        payload = {"schema_version": 2, "jobs": records}
+        payload = {"schema_version": 3, "jobs": records}
         serialized = json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
         if len(serialized.encode("utf-8")) > _MAX_PERSISTED_JOB_BYTES:
             raise ValueError("Prediction job history exceeds the 512 KiB workspace limit.")
@@ -1158,7 +1185,7 @@ def _replace_persisted_job(root: Path, record: dict[str, Any]) -> None:
         records = [item for item in records if item["id"] != replacement["id"]]
         records.append(replacement)
         records.sort(key=lambda item: str(item.get("created_at", "")), reverse=True)
-        payload = {"schema_version": 2, "jobs": records[:_MAX_RETAINED_JOBS]}
+        payload = {"schema_version": 3, "jobs": records[:_MAX_RETAINED_JOBS]}
         serialized = json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
         if len(serialized.encode("utf-8")) > _MAX_PERSISTED_JOB_BYTES:
             raise ValueError("Prediction job history exceeds the 512 KiB workspace limit.")
@@ -1675,6 +1702,8 @@ def _worker(
         trusted_model = _resolve_engine_asset(model_target, "Base model")
         if trusted_model != model_target:
             raise ValueError("Model path changed during validation.")
+        if resume_record is not None and _prediction_asset_fingerprint(trusted_model, adapter=False) != resume_record.get("model_fingerprint"):
+            raise ValueError("The base model changed after prediction resume validation.")
 
         trusted_adapter = None
         if config["adapter_path"] is not None:
@@ -1685,6 +1714,11 @@ def _worker(
             trusted_adapter = _resolve_engine_asset(adapter_target, "LoRA adapter")
             if trusted_adapter != adapter_target:
                 raise ValueError("Adapter path changed during validation.")
+            if resume_record is not None and _prediction_asset_fingerprint(trusted_adapter, adapter=True) != resume_record.get("adapter_fingerprint"):
+                raise ValueError("The LoRA adapter changed after prediction resume validation.")
+
+        if resume_record is not None and _prediction_generation_fingerprint(config) != resume_record.get("generation_fingerprint"):
+            raise ValueError("Prediction generation settings changed after resume validation.")
 
         stage = "dataset_validation"
         data_root = _safe_data_root(root)
@@ -2280,6 +2314,16 @@ def start_prediction_job(
                 "checkpoint_bytes": 0,
                 "checkpoint_sha256": None,
                 "resumption_count": 0,
+                "generation_fingerprint": _prediction_generation_fingerprint({
+                    "max_new_tokens": max_new_tokens,
+                    "temperature": temperature,
+                    "seed": seed,
+                    "device": device,
+                    "precision": precision,
+                    "prompt_field": prompt_field,
+                    "reference_field": reference_field,
+                    "prediction_field": prediction_field,
+                }),
                 "status": "queued",
                 "created_at": _now(),
                 "updated_at": _now(),
@@ -2353,6 +2397,8 @@ def resume_prediction_job(job_id: str, root: Path) -> dict[str, Any] | None:
         return None
     if recovered.get("status") != "interrupted" or not _job_summary(recovered).get("resumable"):
         raise ValueError("Prediction job has no verified restart checkpoint to resume.")
+    if recovered.get("generation_fingerprint") != _prediction_generation_fingerprint(recovered):
+        raise ValueError("The original prediction generation configuration changed; this job cannot be resumed.")
 
     model_target = resolve_workspace_input(recovered["model_path"], workspace, "Model path")
     if not model_target.is_dir():
