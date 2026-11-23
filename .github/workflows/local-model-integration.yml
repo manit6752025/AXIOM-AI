@@ -1,0 +1,105 @@
+name: AXIOM real local model integration
+
+on:
+  push:
+    branches: [implement/roadmap]
+    paths:
+      - "axiom/core/inference.py"
+      - "axiom/core/local_speech.py"
+      - "tests/integration/**"
+      - ".github/workflows/local-model-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: axiom-local-model-integration-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  local-vision:
+    name: Real Ollama vision inference (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AXIOM_RUN_REAL_LOCAL_MODEL_TESTS: "1"
+      AXIOM_INTEGRATION_VISION_MODEL: moondream:1.8b
+      AXIOM_INTEGRATION_TEXT_MODEL: qwen2.5:0.5b
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install AXIOM and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+      - name: Install the local Ollama runtime
+        run: curl -fsSL https://ollama.com/install.sh | sh
+      - name: Start Ollama and install local test checkpoints
+        run: |
+          ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
+          ollama pull "$AXIOM_INTEGRATION_VISION_MODEL"
+          ollama pull "$AXIOM_INTEGRATION_TEXT_MODEL"
+      - name: Run real local vision inference and non-vision refusal
+        run: python -m pytest -q tests/integration/test_local_model_runtime.py::test_real_local_ollama_vision_inference_and_nonvision_refusal
+      - name: Upload Ollama diagnostic log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ollama-local-model-integration-log
+          path: ${{ runner.temp }}/ollama.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  local-speech:
+    name: Real Piper synthesis and whisper.cpp transcription (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AXIOM_RUN_REAL_LOCAL_MODEL_TESTS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install native build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential cmake git
+      - name: Install AXIOM, test dependencies and local Piper runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]" "piper-tts==1.8.0"
+          piper --help
+      - name: Build pinned whisper.cpp and verify the tiny English checkpoint
+        run: |
+          git clone --depth 1 --branch v1.9.5 https://github.com/ggml-org/whisper.cpp.git "$RUNNER_TEMP/whisper.cpp"
+          cmake -S "$RUNNER_TEMP/whisper.cpp" -B "$RUNNER_TEMP/whisper.cpp/build" -DCMAKE_BUILD_TYPE=Release -DWHISPER_BUILD_TESTS=OFF
+          cmake --build "$RUNNER_TEMP/whisper.cpp/build" --config Release --parallel 2 --target whisper-cli
+          sudo install -m 0755 "$RUNNER_TEMP/whisper.cpp/build/bin/whisper-cli" /usr/local/bin/whisper-cli
+          bash "$RUNNER_TEMP/whisper.cpp/models/download-ggml-model.sh" tiny.en
+          echo "c78c86eb1a8faa21b369bcd33207cc90d64ae9df  $RUNNER_TEMP/whisper.cpp/models/ggml-tiny.en.bin" | sha1sum --check
+      - name: Fetch the pinned Piper voice and verify its weights
+        run: |
+          models="$RUNNER_TEMP/axiom-speech-models"
+          mkdir -p "$models"
+          revision=b145f2ac26522d6a2ccde0164b7b0e48b1e3199c
+          base="https://huggingface.co/rhasspy/piper-voices/resolve/$revision/en/en_US/lessac/medium"
+          curl --fail --location --retry 3 "$base/en_US-lessac-medium.onnx" --output "$models/en_US-lessac-medium.onnx"
+          curl --fail --location --retry 3 "$base/en_US-lessac-medium.onnx.json" --output "$models/en_US-lessac-medium.onnx.json"
+          echo "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f  $models/en_US-lessac-medium.onnx" | sha256sum --check
+          cp "$RUNNER_TEMP/whisper.cpp/models/ggml-tiny.en.bin" "$models/ggml-tiny.en.bin"
+          echo "AXIOM_SPEECH_MODEL_ROOTS=$models" >> "$GITHUB_ENV"
+      - name: Run real Piper synthesis and whisper.cpp transcription
+        run: python -m pytest -q tests/integration/test_local_model_runtime.py::test_real_local_piper_synthesis_and_whisper_transcription
