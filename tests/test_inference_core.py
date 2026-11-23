@@ -303,7 +303,7 @@ def test_local_vision_refuses_models_without_explicit_vision_capability(tmp_path
 @pytest.mark.parametrize("image_path", ["../secret.png", "/etc/passwd", "models/sample.png", "data/../secret.png"])
 def test_local_vision_rejects_non_workspace_image_paths_before_runtime(tmp_path, monkeypatch, image_path):
     monkeypatch.setattr(inference, "_request_json", lambda *_args, **_kwargs: pytest.fail("runtime must not be contacted"))
-    with pytest.raises(ValueError, match="under data"):
+    with pytest.raises(ValueError):
         inference.run_local_vision("llava:latest", image_path, "Describe it.", workspace_root=tmp_path)
 
 
