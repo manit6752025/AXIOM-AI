@@ -196,6 +196,22 @@ def test_python_sdk_rejects_insecure_remote_origins_and_invalid_paths():
             client.request_json("GET", "/api/../openapi.json")
 
 
+def test_python_sdk_rejects_invalid_ports_credentials_and_duplicate_headers():
+    for origin in (
+        "http://127.0.0.1:70000",
+        "https://user:password@example.com",
+    ):
+        with pytest.raises(AxiomConfigurationError):
+            AxiomClient(origin)
+
+    with pytest.raises(AxiomConfigurationError, match="control"):
+        AxiomClient(token="secret\\r\\nX-Evil: true")
+    with pytest.raises(AxiomConfigurationError, match="more than once"):
+        AxiomClient(headers={"X-Client": "one", "x-client": "two"})
+    with pytest.raises(AxiomConfigurationError, match="printable"):
+        AxiomClient(workspace_id="workspace\\nheader")
+
+
 def test_python_sdk_closes_cleanly(api_server):
     client = AxiomClient(api_server)
     client.close()

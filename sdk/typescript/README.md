@@ -90,6 +90,29 @@ Restore always creates a new managed workspace; it does not overwrite the
 active workspace. Backup files can contain secrets, datasets and model weights.
 They are not encrypted by AXIOM and must be protected by the caller.
 
+For very large backup archives, use the streaming method instead of
+buffering the complete ZIP in a single `Uint8Array`:
+
+```ts
+const stream = await axiom.downloadWorkspaceBackupStream("ws-example");
+const reader = stream.getReader();
+const file = await openDestinationFileSomehow();
+try {
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    await file.write(chunk.value);
+  }
+} finally {
+  reader.releaseLock();
+  await file.close();
+}
+```
+
+The stream owns the request timeout and abort controller until it reaches EOF,
+is cancelled, or errors. Always consume or cancel it to release the request
+resources. The bytes-returning method remains convenient for smaller archives.
+
 ## API v1 compatibility
 
 The SDK targets API contract v1; this is independent of the application version.

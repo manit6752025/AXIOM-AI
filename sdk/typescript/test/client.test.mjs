@@ -170,6 +170,50 @@ test("does not retry failures and converts aborted requests into network errors"
   client.close();
 });
 
+test("keeps request timeouts active while streaming a large backup body", async () => {
+  let fetchCalls = 0;
+  const client = new AxiomClient({
+    timeoutMs: 25,
+    fetchImpl: async (_input, init = {}) => {
+      fetchCalls += 1;
+      const body = new ReadableStream({
+        start(controller) {
+          init.signal?.addEventListener("abort", () => {
+            controller.error(new DOMException("Request aborted", "AbortError"));
+          }, { once: true });
+        },
+      });
+      return new Response(body, { status: 200, headers: { "content-type": "application/zip" } });
+    },
+  });
+  const stream = await client.downloadWorkspaceBackupStream("ws-slow");
+  const reader = stream.getReader();
+  await assert.rejects(
+    () => reader.read(),
+    (error) => {
+      assert.ok(error instanceof AxiomNetworkError);
+      assert.match(error.message, /timed out/);
+      return true;
+    },
+  );
+  assert.equal(fetchCalls, 1);
+  client.close();
+});
+
+test("rejects control characters in workspace names and duplicate headers", () => {
+  assert.throws(
+    () => new AxiomClient({ workspaceId: "ws\\nheader" }),
+    AxiomConfigurationError,
+  );
+  assert.throws(
+    () => new AxiomClient({ headers: { "X-SDK": "one", "x-sdk": "two" } }),
+    AxiomConfigurationError,
+  );
+  const client = new AxiomClient();
+  assert.throws(() => client.createWorkspace("bad\\nname"), AxiomConfigurationError);
+  client.close();
+});
+
 test("refuses calls after close", async () => {
   const client = new AxiomClient();
   client.close();
