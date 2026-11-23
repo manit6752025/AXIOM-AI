@@ -48,7 +48,8 @@ def test_storage_schema_inventory_matches_all_persisted_store_contracts() -> Non
     assert ".axiom/hardware-snapshots.json" in docs
     assert "_SCHEMA_VERSION = 1" in source["workspaces"]
     assert "~/.axiom/workspaces.json" in docs
-    assert '"schema_version": 1' in source["prediction_jobs"]
+    assert '"schema_version": 2' in source["prediction_jobs"]
+    assert 'payload["schema_version"] not in {1, 2}' in source["prediction_jobs"]
     assert ".axiom/prediction_jobs.json" in docs
 
     for store in ("experiments.json", "evaluations.json", "agent-profiles.json", "models.json",
