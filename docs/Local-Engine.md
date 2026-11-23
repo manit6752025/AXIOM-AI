@@ -138,3 +138,42 @@ A checkpoint outside this contract is rejected with a compatibility error; the e
 - The OpenAI-compatible `GET /v1/models` and `POST /v1/chat/completions` endpoints expose only discovered trusted local Llama/Mistral/Qwen2/Qwen3 models. Set `stream: true` on `POST /v1/chat/completions` to receive SSE chunks. Chat messages are limited to system/user/assistant text; tools, multimodal content, multi-choice sampling, and continuous batching are not supported by this compatibility surface.
 
 Weights may be placed locally or acquired through Model Studio's explicit public-Hub native pull/GGUF installation; always review model licenses. AXIOM does not claim supplied third-party base weights were pretrained by AXIOM. Native speed and memory depend on model size, precision, device, and—in GGUF mode—dequantization overhead. Native low-bit kernels and further architecture families need separate implementations and acceptance tests.
+
+ 
+## Checkpointed prediction jobs
+
+The Native Engine exposes bounded JSONL prediction jobs with persisted row
+progress and cooperative cancellation.
+
+~~~bash
+axiom engine prediction start \
+  --model-path models/qwen \
+  --dataset-path data/evaluation.jsonl \
+  --output-path data/predictions.jsonl \
+  --prompt-field prompt --reference-field reference \
+  --prediction-field prediction --max-new-tokens 64 --device auto --json
+
+axiom engine prediction list --json
+axiom engine prediction show JOB_ID --json
+axiom engine prediction wait JOB_ID --timeout 10 --json
+axiom engine prediction cancel JOB_ID --json
+~~~
+
+The same jobs are exposed in the Native Engine panel and through the
+workspace-scoped POST/GET /api/prediction-jobs routes. Hard bounds are 100
+rows, 48 MiB source data, 768 KiB per input line, 8,000 prompt characters,
+four prompts per generation batch, 64 generated tokens per row, 16,000
+characters per prediction, 64 MiB total output, and 1 MiB per output line.
+AXIOM checks dataset identity and content hash before publication; the output
+must be a new .jsonl file under data/ and is atomically published only after
+all rows complete and the artifact hash is verified.
+
+Status responses contain progress counts, workspace-relative file names and
+safe error codes only. They never include prompts, generated predictions,
+logs, credentials, model paths or absolute paths. The GUI can request
+cooperative cancellation. CLI jobs remain attached to the owning process;
+Ctrl+C requests cancellation and waits for the worker to reach a safe boundary.
+A worker exit is recorded as interrupted or recovery-unverified. This version
+persists progress for inspection but does not resume generation after a
+process restart. Inspect any published file before evaluation; incomplete jobs
+are not evidence of complete datasets or successful model runs.

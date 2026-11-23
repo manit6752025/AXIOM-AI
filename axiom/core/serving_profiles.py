@@ -85,7 +85,7 @@ def normalize_profile_config(value: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(precision, str) or precision not in _PRECISIONS:
         raise ServingProfileError("Precision must be auto, fp32, fp16, or bf16.")
     concurrency = _bounded_int(value["max_concurrent_requests"], "Maximum concurrent requests", 1, 1)
-    queue_depth = _bounded_int(value["max_queued_requests"], "Maximum queued requests", 0, 0)
+    queue_depth = _bounded_int(value["max_queued_requests"], "Maximum queued requests", 0, 32)
     timeout = _bounded_int(value["request_timeout_seconds"], "Request timeout", 5, 900)
     return {
         "name": name.strip(),

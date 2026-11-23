@@ -4553,7 +4553,7 @@ function LocalRerankerPanel() {
       </label>
       <label className="field">
         <span className="field-label-row"><span>Execution device</span></span>
-        <select value={device} onChange={(event) => setDevice(event.target.value as typeof device)}>
+        <select aria-label="Local embedding execution device" value={device} onChange={(event) => setDevice(event.target.value as typeof device)}>
           <option value="auto">Automatic</option>
           <option value="cpu">CPU</option>
           <option value="cuda">CUDA</option>

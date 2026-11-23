@@ -71,6 +71,7 @@ def serving_profile_create(
     max_new_tokens: int = typer.Option(256, min=1, max=2048),
     max_prompt_chars: int = typer.Option(12000, min=1, max=12000),
     request_timeout_seconds: int = typer.Option(300, min=5, max=900),
+    max_queued_requests: int = typer.Option(2, "--max-queued-requests", min=0, max=32),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Save a local serving configuration without loading weights or starting a listener."""
@@ -97,7 +98,7 @@ def serving_profile_create(
             "max_new_tokens": max_new_tokens,
             "max_prompt_chars": max_prompt_chars,
             "max_concurrent_requests": 1,
-            "max_queued_requests": 0,
+            "max_queued_requests": max_queued_requests,
             "request_timeout_seconds": request_timeout_seconds,
         })
     except (OSError, RuntimeError, ValueError) as exc:

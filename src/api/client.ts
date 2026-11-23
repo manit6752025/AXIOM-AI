@@ -573,6 +573,79 @@ export type AxiomEngineStatus = {
   supported_model_types?: string[]; supported_weights?: string[]; remote_code: false;
   setup_note: string; scope_note: string; checked_at: string;
 };
+export type AxiomPredictionJobStatus =
+  | "queued" | "running" | "cancelling" | "finalizing" | "publishing"
+  | "completed" | "cancelled" | "failed" | "interrupted" | "recovery_unverified";
+
+export type AxiomPredictionJob = {
+  id: string;
+  status: AxiomPredictionJobStatus;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  dataset_path: string;
+  output_path: string;
+  artifact_ready: boolean;
+  rows_total: number;
+  rows_completed: number;
+  prompts_truncated: number;
+  evaluation_run_ids: string[];
+  error_code: string | null;
+  recovery_note?: string;
+  scope: {
+    prompts_returned: false;
+    predictions_returned: false;
+    logs_returned: false;
+    absolute_paths_returned: false;
+    output_file_published_only_after_completion: true;
+    job_state_persisted: true;
+    server_restart_clears_job_state: false;
+    generation_resumed_after_restart: false;
+  };
+};
+export type AxiomPredictionJobPage = {
+  schema_version: 1;
+  jobs: AxiomPredictionJob[];
+  limit: number;
+  scope: {
+    prompts_returned: false;
+    predictions_returned: false;
+    logs_returned: false;
+    absolute_paths_returned: false;
+    job_state_persisted: true;
+  };
+};
+export type AxiomPredictionJobStart = {
+  schema_version: 1;
+  job: AxiomPredictionJob;
+  limits: {
+    rows: number;
+    input_bytes: number;
+    input_line_bytes: number;
+    prompt_characters: number;
+    generated_tokens_per_row: number;
+    batch_rows: number;
+    prediction_characters_per_row: number;
+    output_bytes: number;
+    output_line_bytes: number;
+  };
+  scope: {
+    network_accessed: false;
+    model_downloaded: false;
+    prompts_returned: false;
+    predictions_returned: false;
+    logs_returned: false;
+    job_state_persisted: true;
+    output_published_only_after_completion: true;
+  };
+};
+export type AxiomPredictionJobCancellation = {
+  schema_version: 1;
+  job: AxiomPredictionJob;
+  cancellation_accepted: boolean;
+  note: string;
+};
+
 export type AxiomEngineServingProfile = {
   id: string;
   name: string;
@@ -2975,6 +3048,28 @@ export const axiomApi = {
     requestJson<{ deleted: AxiomEngineServingProfile; model_files_deleted: false }>(
       "/api/engine/serving-profiles/" + encodeURIComponent(id), { method: "DELETE" },
     ),
+  axiomPredictionJobs: (limit = 20) =>
+    requestJson<AxiomPredictionJobPage>(`/api/prediction-jobs?limit=${limit}`),
+  startAxiomPredictionJob: (input: {
+    model_path: string;
+    adapter_path?: string;
+    dataset_path: string;
+    output_path: string;
+    prompt_field: string;
+    reference_field: string;
+    prediction_field: string;
+    max_new_tokens: number;
+    temperature: number;
+    seed: number | null;
+    device: "auto" | "cpu" | "cuda" | "rocm" | "mps" | "xpu";
+    precision: "auto" | "fp32" | "fp16" | "bf16";
+  }) => requestJson<AxiomPredictionJobStart>("/api/prediction-jobs", {
+    method: "POST", body: JSON.stringify(input),
+  }),
+  cancelAxiomPredictionJob: (id: string) =>
+    requestJson<AxiomPredictionJobCancellation>(`/api/prediction-jobs/${encodeURIComponent(id)}/cancel`, {
+      method: "POST", body: JSON.stringify({}),
+    }),
   axiomEngineStatus: () => requestJson<AxiomEngineStatus>("/api/engine/status"),
   engineBackends: (profile: EngineFabricProfile = "balanced") => requestJson<EngineFabricReport>("/api/engine/backends?" + new URLSearchParams({ profile })),
   engineBackendProfiles: () => requestJson<EngineFabricProfileReport>("/api/engine/backends/profiles"),
