@@ -726,9 +726,9 @@ def supply_chain_issues(
             'page.waitForEvent("dialog")', "axiom-installed-environment.spdx.json",
             "axiom-dependency-vulnerability-report.json", "allow_network: true",
         )),
-        ("Security documentation", docs, (
+        ("Security documentation and optional scanner", docs, (
             "SPDX 2.3", "pip-audit", "network authorization",
-            "unavailable", "installed Python",
+            "unavailable", "installed Python", "security-audit", "pip-audit>=2.10.1,<3",
         )),
     )
     failures: list[str] = []
@@ -754,7 +754,7 @@ def package_verification_issues(
             "matrix.os", "node-version: \"22\"", "npm ci", "npm run build",
             "python -m build --sdist --wheel --outdir dist",
             "python scripts/verify_package_artifacts.py --dist dist --install-wheel --json",
-            "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py", "axiom/core/supply_chain.py", "tests/test_supply_chain.py", "tests/test_security_supply_chain_api.py", "axiom/api/security.py",
+            "tests/test_package_artifact_verification.py", "tests/test_persisted_schema_inventory.py",
         )),
         ("archive regression tests", tests, (
             "test_verifies_wheel_and_sdist_bundle_cli_and_control_center",
@@ -814,18 +814,6 @@ def inspect(root: Path) -> dict[str, Any]:
     roadmap = (root / "ROADMAP.md").read_text(encoding="utf-8")
     failures.extend(roadmap_issues(roadmap))
 
-    supply_chain_core = (root / "axiom/core/supply_chain.py").read_text(encoding="utf-8")
-    supply_chain_api = (root / "axiom/api/security.py").read_text(encoding="utf-8")
-    supply_chain_cli = (root / "axiom/cli/extended.py").read_text(encoding="utf-8")
-    supply_chain_e2e = (root / "e2e/security-supply-chain.spec.ts").read_text(encoding="utf-8")
-    supply_chain_tests = (root / "tests/test_supply_chain.py").read_text(encoding="utf-8")
-    supply_chain_api_tests = (root / "tests/test_security_supply_chain_api.py").read_text(encoding="utf-8")
-    supply_chain_docs = (root / "docs/wiki/Security-and-Privacy.md").read_text(encoding="utf-8")
-    failures.extend(supply_chain_issues(
-        supply_chain_core, supply_chain_api, supply_chain_cli, client,
-        app_source, supply_chain_tests, supply_chain_api_tests,
-        supply_chain_e2e, supply_chain_docs,
-    ))
 
     app_source = (root / "src/App.tsx").read_text(encoding="utf-8")
     failures.extend(page_registration_issues(app_source, "api-playground"))
@@ -833,6 +821,20 @@ def inspect(root: Path) -> dict[str, Any]:
     failures.extend(module_catalog_issues(app_source))
     component = (root / "src/components/ApiPlayground.tsx").read_text(encoding="utf-8")
     client = (root / "src/api/client.ts").read_text(encoding="utf-8")
+
+    supply_chain_core = (root / "axiom/core/supply_chain.py").read_text(encoding="utf-8")
+    supply_chain_api = (root / "axiom/api/security.py").read_text(encoding="utf-8")
+    supply_chain_cli = (root / "axiom/cli/extended.py").read_text(encoding="utf-8")
+    supply_chain_e2e = (root / "e2e/security-supply-chain.spec.ts").read_text(encoding="utf-8")
+    supply_chain_tests = (root / "tests/test_supply_chain.py").read_text(encoding="utf-8")
+    supply_chain_api_tests = (root / "tests/test_security_supply_chain_api.py").read_text(encoding="utf-8")
+    supply_chain_docs = (root / "docs/wiki/Security-and-Privacy.md").read_text(encoding="utf-8")
+    supply_chain_docs += "\\n" + (root / "pyproject.toml").read_text(encoding="utf-8")
+    failures.extend(supply_chain_issues(
+        supply_chain_core, supply_chain_api, supply_chain_cli, client,
+        app_source, supply_chain_tests, supply_chain_api_tests,
+        supply_chain_e2e, supply_chain_docs,
+    ))
     workspace_api = (root / "axiom/api/workspace.py").read_text(encoding="utf-8")
     model_registry_e2e = (root / "e2e/model-registry-filters.spec.ts").read_text(encoding="utf-8")
     failures.extend(model_registry_filter_issues(workspace_api, client, app_source, model_registry_e2e))

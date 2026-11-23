@@ -22,14 +22,16 @@ where both installed distributions are present. Unavailable license metadata
 is represented as `NOASSERTION`; AXIOM does not guess license data.
 
 The separate dependency vulnerability scan invokes `pip-audit --local`
-against the active Python environment only after the operator selects the
-action and confirms network access. It may contact external advisory services.
+against the installed Python environment only after the operator selects the
+action and confirms network authorization for network access. It may contact external advisory services.
 AXIOM restricts the subprocess environment so arbitrary API tokens and private
 package-index URLs are not passed to the scanner, applies a hard timeout and
 output-size bound, and returns structured advisory IDs, aliases and available
 fix versions. No package upgrades are performed. If the scanner is not
 installed, times out or cannot complete, the report is marked unavailable or
 error; that outcome is never described as a clean scan.
+
+Install the optional scanner with `python -m pip install "axiom-all[security-audit]"`; this extra provides `pip-audit` while keeping the scanner out of AXIOM's default local-first runtime dependencies.
 
 CLI equivalents are `axiom security sbom --output axiom.spdx.json` and
 `axiom security vulnerabilities --allow-network --json`. Export files are

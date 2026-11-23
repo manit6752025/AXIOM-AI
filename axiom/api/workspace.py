@@ -23,6 +23,7 @@ from axiom.datasets.profiler import (
 )
 from axiom.datasets.manifest import DEFAULT_MANIFEST_MAX_BYTES, create_dataset_manifest
 from axiom.datasets.cleaning_preview import preview_jsonl_cleaning
+from axiom.datasets.snapshots import DatasetSnapshotCapacityError, DatasetSnapshotError, DatasetSnapshotStore
 from axiom.datasets.quality import compare_dataset_schemas, validate_dataset_profile
 from axiom.models.registry import Model, ModelRegistry
 from axiom.models.compatibility import estimate_model_compatibility
@@ -267,6 +268,14 @@ class WorkspaceDatasetCleaningPreviewInput(BaseModel):
     max_bytes: int = Field(default=DEFAULT_MAX_BYTES, ge=1, le=256 * 1024 * 1024)
     max_rows: int = Field(default=DEFAULT_MAX_ROWS, ge=1, le=500_000)
     max_line_bytes: int = Field(default=DEFAULT_MAX_LINE_BYTES, ge=1, le=8 * 1024 * 1024)
+
+
+class WorkspaceDatasetSnapshotInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1, max_length=512)
+    max_bytes: int = Field(default=256 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024, strict=True)
+    parent_snapshot_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
 
 def record_workspace_event(action: str, detail: str | None = None) -> dict[str, Any]:
@@ -817,6 +826,55 @@ def workspace_dataset_manifest(
         raise HTTPException(status_code=422, detail="Dataset manifest could not be created.") from exc
     record_workspace_event("datasets.manifest", f"Hashed {manifest['bytes_hashed']} bytes for {manifest['path']}")
     return {"manifest": manifest}
+
+
+@router.get("/dataset-snapshots")
+def workspace_dataset_snapshots(
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=250),
+) -> dict[str, Any]:
+    """List immutable workspace-local dataset snapshots and their lineage."""
+    try:
+        return DatasetSnapshotStore(active_workspace_root()).list(limit=limit, offset=offset)
+    except DatasetSnapshotError:
+        raise HTTPException(status_code=409, detail="Dataset snapshot history could not be verified safely.") from None
+
+
+@router.post("/dataset-snapshots", status_code=201)
+def workspace_create_dataset_snapshot(request: WorkspaceDatasetSnapshotInput) -> dict[str, Any]:
+    """Create a bounded content-addressed snapshot of a JSONL file under data/."""
+    root = _workspace_dataset_root()
+    candidate = _resolve_workspace_dataset(root, request.path)
+    store = DatasetSnapshotStore(active_workspace_root())
+    try:
+        with open_regular_file(candidate) as stream:
+            result = store.create_snapshot(
+                stream,
+                source_path=candidate.relative_to(root).as_posix(),
+                file_name=candidate.name,
+                max_bytes=request.max_bytes,
+                parent_snapshot_id=request.parent_snapshot_id,
+            )
+    except DatasetSnapshotCapacityError:
+        raise HTTPException(status_code=413, detail="Dataset snapshot capacity or byte limit was reached.") from None
+    except DatasetSnapshotError:
+        raise HTTPException(status_code=409, detail="Dataset snapshot could not be created safely.") from None
+    except (OSError, ValueError, SafePathError):
+        raise HTTPException(status_code=422, detail="Dataset snapshot source could not be read safely.") from None
+    snapshot = result["snapshot"]["manifest"]
+    record_workspace_event("datasets.snapshot.created", f"Snapshotted {snapshot['source_path']} · {snapshot['sha256'][:12]}")
+    return result
+
+
+@router.get("/dataset-snapshots/{snapshot_id}/verify")
+def workspace_verify_dataset_snapshot(snapshot_id: str) -> dict[str, Any]:
+    """Verify a snapshot's stored content hash and immutable manifest lineage."""
+    try:
+        return DatasetSnapshotStore(active_workspace_root()).verify(snapshot_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Dataset snapshot was not found.") from None
+    except DatasetSnapshotError:
+        raise HTTPException(status_code=409, detail="Dataset snapshot metadata could not be verified safely.") from None
 
 
 @router.post("/dataset-cleaning-preview")

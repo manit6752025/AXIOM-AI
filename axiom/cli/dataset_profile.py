@@ -10,6 +10,9 @@ from axiom.datasets.profiler import profile_jsonl
 from axiom.datasets.progress import DatasetScanCancelled
 from axiom.datasets.manifest import create_dataset_manifest
 from axiom.datasets.cleaning_preview import preview_jsonl_cleaning
+from axiom.core.workspace_context import active_workspace_root
+from axiom.datasets.snapshots import DatasetSnapshotCapacityError, DatasetSnapshotError, DatasetSnapshotStore
+from axiom.path_safety import SafePathError, find_existing_relative_path, open_regular_file
 console=Console()
 def register(dataset_app: typer.Typer) -> None:
  @dataset_app.command("profile")
@@ -109,3 +112,102 @@ def register(dataset_app: typer.Typer) -> None:
   except (OSError,ValueError) as exc:
    emit_error(str(exc), code="dataset_clean_preview_failed")
   console.print_json(json.dumps(preview,ensure_ascii=False))
+
+
+ @dataset_app.command("snapshot")
+ def dataset_snapshot(
+  path: Path=typer.Argument(...,exists=True,dir_okay=False,readable=True),
+  max_mb: int=typer.Option(256,min=1,max=1024,help="Maximum snapshot size in MiB."),
+  parent_snapshot_id: str=typer.Option(None,"--parent-snapshot-id",help="Optional earlier snapshot ID to link in immutable lineage."),
+  json_output: bool=typer.Option(False,"--json",help="Emit the complete snapshot record as JSON."),
+ ) -> None:
+  """Create an immutable, content-addressed snapshot of a workspace data/ JSONL file."""
+  workspace=active_workspace_root()
+  data_entry=workspace / "data"
+  if data_entry.is_symlink() or not data_entry.is_dir():
+   emit_error("Workspace data directory is unavailable or unsafe.", code="dataset_snapshot_source_unavailable")
+  try:
+   data_root=data_entry.resolve(strict=True)
+   supplied=path.expanduser()
+   if supplied.is_absolute():
+    relative=supplied.relative_to(data_root).as_posix()
+   else:
+    parts=supplied.parts
+    if parts and parts[0] == "data":
+     parts=parts[1:]
+    relative=Path(*parts).as_posix()
+   candidate=find_existing_relative_path(data_root,relative,allow_directories=False)
+   with open_regular_file(candidate) as stream:
+    result=DatasetSnapshotStore(workspace).create_snapshot(
+     stream,
+     source_path=candidate.relative_to(data_root).as_posix(),
+     file_name=candidate.name,
+     max_bytes=max_mb*1024*1024,
+     parent_snapshot_id=parent_snapshot_id,
+    )
+  except DatasetSnapshotCapacityError as exc:
+   emit_error(str(exc), code="dataset_snapshot_capacity")
+  except (OSError,ValueError,SafePathError) as exc:
+   emit_error(str(exc), code="dataset_snapshot_failed")
+  if json_output:
+   typer.echo(json.dumps(result,ensure_ascii=False,indent=2,sort_keys=True))
+  else:
+   manifest=result["snapshot"]["manifest"]
+   console.print(f"[green]Snapshot created[/green] · {manifest['snapshot_id']}")
+   console.print(f"SHA-256: {manifest['sha256']}")
+   console.print(f"Size: {manifest['file_size_bytes']} bytes · Object: {manifest['object_name']}")
+   if manifest["parent_snapshot_id"]:
+    console.print(f"Parent: {manifest['parent_snapshot_id']}")
+
+
+ @dataset_app.command("snapshots")
+ def dataset_snapshots(
+  limit: int=typer.Option(50,min=1,max=100),
+  offset: int=typer.Option(0,min=0,max=250),
+  json_output: bool=typer.Option(False,"--json",help="Emit the snapshot history as JSON."),
+ ) -> None:
+  """List immutable dataset snapshots and their parent lineage."""
+  try:
+   report=DatasetSnapshotStore(active_workspace_root()).list(limit=limit,offset=offset)
+  except DatasetSnapshotError as exc:
+   emit_error(str(exc),code="dataset_snapshot_history_failed")
+  if json_output:
+   typer.echo(json.dumps(report,ensure_ascii=False,indent=2,sort_keys=True))
+   return
+  table=Table(title="AXIOM DATASET SNAPSHOTS")
+  table.add_column("Snapshot ID")
+  table.add_column("Created")
+  table.add_column("SHA-256")
+  table.add_column("Size",justify="right")
+  table.add_column("Parent")
+  for record in report["snapshots"]:
+   manifest=record["manifest"]
+   table.add_row(
+    manifest["snapshot_id"],
+    manifest["created_at"],
+    manifest["sha256"],
+    str(manifest["file_size_bytes"]),
+    manifest["parent_snapshot_id"] or "source",
+   )
+  console.print(table)
+  console.print(f"{report['total']} immutable snapshot(s) · page offset {offset}")
+
+
+ @dataset_app.command("snapshot-verify")
+ def dataset_snapshot_verify(
+  snapshot_id: str=typer.Argument(...,help="32-character immutable snapshot ID."),
+  json_output: bool=typer.Option(False,"--json",help="Emit machine-readable verification results."),
+ ) -> None:
+  """Verify snapshot object content and its manifest lineage chain."""
+  try:
+   report=DatasetSnapshotStore(active_workspace_root()).verify(snapshot_id)
+  except FileNotFoundError:
+   emit_error("Dataset snapshot was not found.",code="dataset_snapshot_not_found")
+  except DatasetSnapshotError as exc:
+   emit_error(str(exc),code="dataset_snapshot_verification_failed")
+  if json_output:
+   typer.echo(json.dumps(report,ensure_ascii=False,indent=2,sort_keys=True))
+  else:
+   marker="[green]VALID[/green]" if report["valid"] and report["lineage_valid"] else "[red]INVALID[/red]"
+   console.print(f"{marker} · {report['snapshot_id']}")
+   console.print(f"SHA-256: {report['expected_sha256']} · {report['file_size_bytes']} bytes")

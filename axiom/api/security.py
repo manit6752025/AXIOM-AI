@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/security", tags=["security"])
 class DependencyAuditRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    allow_network: bool
+    allow_network: bool = Field(strict=True)
     timeout_seconds: int = Field(default=90, ge=1, le=300, strict=True)
 
 
