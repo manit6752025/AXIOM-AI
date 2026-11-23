@@ -288,7 +288,7 @@ def engine_telemetry() -> dict[str, Any]:
 
 
 @router.get("/telemetry-history")
-def engine_telemetry_history(limit: int = Query(default=500, ge=1, le=500, strict=True)) -> dict[str, Any]:
+def engine_telemetry_history(limit: int = Query(default=500, ge=1, le=500)) -> dict[str, Any]:
     """Read explicit, bounded workspace resource history without probing hardware."""
     try:
         return ResourceTelemetryStore().list(limit=limit)

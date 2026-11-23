@@ -36,8 +36,15 @@ def _model(tmp_path: Path, name: str = "tiny-llama", **overrides: object) -> Pat
     model = tmp_path / name
     model.mkdir()
     config = {**BASE_CONFIG, **overrides}
-    if config["model_type"] == "mistral":
-        config["architectures"] = ["MistralForCausalLM"]
+    architecture_by_model_type = {
+        "mistral": "MistralForCausalLM",
+        "qwen3": "Qwen3ForCausalLM",
+    }
+    if config["model_type"] in architecture_by_model_type:
+        # Hugging Face config.json stores architectures as a JSON array.
+        # Keep fixtures schema-accurate so strict native-engine preflight is
+        # exercised with the same shape as real checkpoints.
+        config["architectures"] = [architecture_by_model_type[config["model_type"]]]
     (model / "config.json").write_text(json.dumps(config), encoding="utf-8")
     return model
 
@@ -210,3 +217,25 @@ def test_memory_estimator_reports_no_native_candidate_when_every_candidate_excee
     assert native
     assert all(item["fits_ram_budget"] is False for item in native)
     assert all(item["fits_vram_budget"] is False for item in native)
+
+
+
+def test_memory_estimator_counts_qwen3_query_and_key_norm_parameters(tmp_path: Path, monkeypatch) -> None:
+    model = _model(tmp_path, "tiny-qwen3", model_type="qwen3")
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(tmp_path))
+
+    report = estimate_native_quantization(
+        str(model),
+        context_length=16,
+        batch_size=1,
+        ram_budget_gib=8,
+    )
+
+    # Qwen3 adds q_norm and k_norm vectors of head_dim=8/2=4 per layer.
+    # The tiny Llama-shaped fixture therefore gains 2 * 4 = 8 parameters.
+    assert report["model"]["estimated_parameter_count"] == 640
+    assert report["assumptions"]["qk_norm_parameters"] == 8
+    bf16 = next(item for item in report["candidates"] if item["format"] == "bf16")
+    assert bf16["estimated_weight_gib"] == _gib(1280)
+
+

@@ -124,7 +124,7 @@ test("Runtime creates, probes, uses, and deletes a bounded native serving profil
   await expect(page.getByRole("region", { name: "Native model serving profiles" }).locator("b").filter({ hasText: "Runtime smoke" })).toBeVisible();
 
   await page.getByRole("button", { name: "Probe" }).click();
-  await expect(page.getByText("READY", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Native model serving profiles" }).getByText("READY", { exact: true })).toBeVisible();
 
   await page.getByLabel("Profile for generation").selectOption("a".repeat(32));
   await page.getByLabel("Serving profile prompt").fill("Hello local model");
@@ -139,7 +139,7 @@ test("Runtime creates, probes, uses, and deletes a bounded native serving profil
   await page.getByRole("button", { name: "Generate through profile" }).click();
   await expect.poll(() => generateRequests).toBe(2);
   await page.getByRole("button", { name: "Cancel generation" }).click();
-  await expect(page.getByRole("alert")).toContainText("Generation cancellation was sent");
+  await expect(page.getByText("Generation cancellation was sent.", { exact: false })).toBeVisible();
 
   await page.getByRole("button", { name: "Delete serving profile Runtime smoke" }).click();
   await expect(page.getByText("0 profile(s)", { exact: true })).toBeVisible();

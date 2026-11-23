@@ -1059,27 +1059,36 @@ def hf_login():
 
 
 @hf_app.command("status")
-def hf_status():
-    """Show Hugging Face authentication status."""
+def hf_status(
+    json_output: bool = typer.Option(False, "--json", help="Emit a versioned, secret-free Hugging Face login status."),
+) -> None:
+    """Show Hugging Face authentication status without exposing token values."""
     try:
         user = whoami()
     except Exception as exc:  # noqa: BLE001
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
         if exc.__class__.__name__ == "LocalTokenNotFoundError" or status_code == 401:
-            console.print(
-                Panel.fit(
-                    "[yellow]Not authenticated[/yellow]\n\nRun:\n  axiom hf login",
-                    title="AXIOM",
+            if json_output:
+                typer.echo(json.dumps({
+                    "schema_version": 1,
+                    "status": "not_authenticated",
+                    "authenticated": False,
+                    "account": None,
+                    "organizations": [],
+                    "scope_note": "Local Hugging Face authentication presence only; no token value is returned.",
+                }, ensure_ascii=False, sort_keys=True))
+            else:
+                console.print(
+                    Panel.fit(
+                        "[yellow]Not authenticated[/yellow]\n\nRun:\n  axiom hf login",
+                        title="AXIOM",
+                    )
                 )
-            )
             return
-
         _cli_error(f"Hugging Face status check failed: {exc}")
 
     name = user.get("name") or user.get("fullname") or user.get("username") or "Unknown"
-
     orgs = user.get("orgs") or []
-
     if isinstance(orgs, list):
         organization_names = [
             item.get("name", str(item)) if isinstance(item, dict) else str(item)
@@ -1087,6 +1096,17 @@ def hf_status():
         ]
     else:
         organization_names = []
+
+    if json_output:
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "status": "authenticated",
+            "authenticated": True,
+            "account": name,
+            "organizations": organization_names,
+            "scope_note": "Hugging Face whoami metadata only; token values and credentials are never returned.",
+        }, ensure_ascii=False, sort_keys=True))
+        return
 
     console.print(
         Panel.fit(
@@ -1098,7 +1118,6 @@ def hf_status():
             title="AXIOM",
         )
     )
-
 
 @hf_app.command("logout")
 def hf_logout():
@@ -1112,16 +1131,26 @@ def hf_logout():
 
 
 @supercompress_app.command("status")
-def supercompress_status():
+def supercompress_status(
+    json_output: bool = typer.Option(False, "--json", help="Emit a versioned, redacted SuperCompress configuration status."),
+) -> None:
     """Show SuperCompress configuration without exposing secrets."""
     configured = bool(os.getenv("SUPERCOMPRESS_API_KEY", "").strip())
-
     endpoint = redacted_base_url()
+    if json_output:
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "configured": configured,
+            "endpoint": endpoint,
+            "credential_reference_available": configured,
+            "credential_value_returned": False,
+            "scope_note": "Local environment-variable presence and redacted endpoint only; AXIOM does not authenticate with the provider or contact it during this status check.",
+        }, ensure_ascii=False, sort_keys=True))
+        return
 
     key_status = (
         "[green]configured[/green]" if configured else "[red]not configured[/red]"
     )
-
     console.print(
         Panel.fit(
             f"[bold cyan]AXIOM SUPERCOMPRESS[/bold cyan]\n\n"
@@ -1131,7 +1160,6 @@ def supercompress_status():
             title="AXIOM",
         )
     )
-
 
 @supercompress_app.command("compress")
 def supercompress_compress(
@@ -1398,12 +1426,47 @@ def integration_remove(name: str):
 
 
 @integration_app.command("doctor")
-def integration_doctor():
-    """Check whether configured integration commands exist."""
-    import shutil
-
+def integration_doctor(
+    json_output: bool = typer.Option(False, "--json", help="Emit a versioned, redacted integration availability report."),
+) -> None:
+    """Check configured integration availability without running or contacting targets."""
     registry = IntegrationRegistry()
     integrations = registry.list()
+    import shutil
+
+    records: list[dict[str, object]] = []
+    for item in integrations:
+        executable_name: str | None = None
+        executable_available: bool | None = None
+        if item.command:
+            executable_name = Path(item.command.split()[0]).name
+            executable_available = shutil.which(item.command.split()[0]) is not None
+            status = "available" if executable_available else "not_found"
+            target_kind = "command"
+        elif item.url:
+            status = "configured"
+            target_kind = "url"
+        else:
+            status = "incomplete"
+            target_kind = "missing"
+        records.append({
+            "name": item.name,
+            "type": item.type.value,
+            "status": status,
+            "target_kind": target_kind,
+            "executable": executable_name,
+            "executable_available": executable_available,
+            "url_configured": bool(item.url),
+        })
+
+    if json_output:
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "total": len(records),
+            "integrations": records,
+            "scope_note": "Local command PATH and URL configuration presence only; command arguments, endpoint URLs, credentials, and authentication state are not returned. No command is executed and no network request is made.",
+        }, ensure_ascii=False, sort_keys=True))
+        return
 
     if not integrations:
         console.print("[yellow]No agent integrations configured.[/yellow]")
@@ -1414,29 +1477,22 @@ def integration_doctor():
     table.add_column("Type")
     table.add_column("Status")
     table.add_column("Target")
-
-    for item in integrations:
-        if item.command:
-            executable = item.command.split()[0]
-            available = shutil.which(executable) is not None
-
-            status = (
-                "[green]✓ Available[/green]" if available else "[red]✗ Not found[/red]"
-            )
-        elif item.url:
-            status = "[cyan]Configured[/cyan]"
+    for item, record in zip(integrations, records):
+        if record["status"] == "available":
+            display_status = "[green]✓ Available[/green]"
+        elif record["status"] == "not_found":
+            display_status = "[red]✗ Not found[/red]"
+        elif record["status"] == "configured":
+            display_status = "[cyan]Configured[/cyan]"
         else:
-            status = "[yellow]Incomplete[/yellow]"
-
+            display_status = "[yellow]Incomplete[/yellow]"
         table.add_row(
             item.name,
             item.type.value,
-            status,
+            display_status,
             item.command or item.url or "-",
         )
-
     console.print(table)
-
 
 @integration_app.command("schemas")
 def integration_schemas(

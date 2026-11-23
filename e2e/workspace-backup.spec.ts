@@ -19,8 +19,16 @@ test("Diagnostics downloads and restores a full workspace into a new isolated wo
     status: "ready" as const,
   };
   let restored = false;
-  let downloadedWorkspaceId: string | null = null;
   let restoreRequestName: string | null = null;
+  await page.addInitScript(() => {
+    const originalClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      if (this.download === "axiom-workspace-backup.zip") {
+        (window as Window & { __axiomBackupHref?: string }).__axiomBackupHref = this.href;
+      }
+      originalClick.call(this);
+    };
+  });
   await page.route((url) => new URL(url).pathname.startsWith("/api/"), async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -32,17 +40,6 @@ test("Diagnostics downloads and restores a full workspace into a new isolated wo
         workspaces: restored ? [defaultWorkspace, restoredWorkspace] : [defaultWorkspace],
         scope_note: "Workspace filesystem paths remain local and are not returned by this API.",
       } });
-    } else if (/^\/api\/workspaces\/[^/]+\/backup$/.test(url.pathname) && request.method() === "GET") {
-      downloadedWorkspaceId = url.pathname.split("/")[3];
-      await route.fulfill({
-        status: 200,
-        contentType: "application/zip",
-        headers: {
-          "Content-Disposition": 'attachment; filename="axiom-workspace-backup.zip"',
-          "Cache-Control": "no-store",
-        },
-        body: Buffer.from("AXIOM test ZIP fixture"),
-      });
     } else if (url.pathname === "/api/workspaces/backup/restore" && request.method() === "POST") {
       restoreRequestName = url.searchParams.get("name");
       const body = request.postDataBuffer();
@@ -105,8 +102,7 @@ test("Diagnostics downloads and restores a full workspace into a new isolated wo
   // Install a dedicated route after the API fixture to verify the exact selected workspace.
   await page.route("**/api/workspaces/*/backup", async (route) => {
     const url = new URL(route.request().url());
-    const match = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/backup$/);
-    downloadedWorkspaceId = match?.[1] ?? null;
+    expect(url.pathname).toBe(`/api/workspaces/${defaultWorkspace.id}/backup`);
     await route.fulfill({
       status: 200,
       contentType: "application/zip",
@@ -128,7 +124,11 @@ test("Diagnostics downloads and restores a full workspace into a new isolated wo
   await page.getByRole("button", { name: "Download full workspace backup" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe("axiom-workspace-backup.zip");
-  expect(downloadedWorkspaceId).toBe(defaultWorkspace.id);
+  const backupHref = await page.evaluate(() =>
+    (window as Window & { __axiomBackupHref?: string }).__axiomBackupHref ?? null
+  );
+  expect(backupHref).not.toBeNull();
+  expect(new URL(backupHref!).pathname).toBe(`/api/workspaces/${defaultWorkspace.id}/backup`);
 
   await page.getByLabel("Backup archive (.zip)").setInputFiles({
     name: "project-backup.zip",
@@ -142,7 +142,7 @@ test("Diagnostics downloads and restores a full workspace into a new isolated wo
   });
   await page.getByRole("button", { name: "Verify and restore as new workspace" }).click();
 
-  await expect(page.getByText(/Restored 3 file(s) into new workspace "Restored workspace"/)).toBeVisible();
+  await expect(page.getByText('Restored 3 file(s) into new workspace "Restored workspace".', { exact: true })).toBeVisible();
   expect(restoreRequestName).toBe("Restored workspace");
   expect(await page.evaluate(() => localStorage.getItem("axiom-active-workspace"))).toBe(defaultWorkspace.id);
 
