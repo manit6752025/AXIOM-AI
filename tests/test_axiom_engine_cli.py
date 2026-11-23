@@ -859,3 +859,89 @@ def test_engine_vision_cli_rejects_bad_image_path_before_inference(monkeypatch):
     ])
     assert result.exit_code != 0
     assert "under data" in result.output
+
+
+
+def test_engine_speech_transcribe_cli_exposes_local_json_contract(tmp_path, monkeypatch):
+    captured = {}
+    report = {
+        "schema_version": 1,
+        "engine": "whisper.cpp",
+        "model": "ggml-base.bin",
+        "transcript": "Local words.",
+        "privacy": {"network_used": False},
+    }
+
+    def fake_transcribe(model_path, audio_path, **kwargs):
+        captured.update(model_path=model_path, audio_path=audio_path, **kwargs)
+        return report
+
+    monkeypatch.setattr(engine_cli, "active_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(engine_cli, "transcribe_local_audio", fake_transcribe)
+    result = runner.invoke(engine_app, [
+        "speech", "transcribe", "--model-path", "/trusted/ggml-base.bin",
+        "--audio-path", "data/meeting.wav", "--language", "en",
+        "--timeout", "90", "--threads", "2", "--accelerator", "--json",
+    ])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == report
+    assert captured == {
+        "model_path": "/trusted/ggml-base.bin",
+        "audio_path": "data/meeting.wav",
+        "workspace_root": tmp_path,
+        "language": "en",
+        "timeout_seconds": 90,
+        "threads": 2,
+        "use_accelerator": True,
+    }
+
+
+def test_engine_speech_synthesize_cli_saves_new_workspace_wav_without_emitting_audio_payload(tmp_path, monkeypatch):
+    audio = b"RIFF" + b"\x00" * 60
+    report = {
+        "schema_version": 1,
+        "engine": "piper",
+        "model": "voice.onnx",
+        "audio_base64": __import__("base64").b64encode(audio).decode("ascii"),
+        "audio": {"format": "wav", "size_bytes": len(audio)},
+        "privacy": {"network_used": False},
+        "scope_note": "Local Piper only.",
+    }
+    captured = {}
+
+    def fake_synthesize(model_path, text, **kwargs):
+        captured.update(model_path=model_path, text=text, **kwargs)
+        return report
+
+    def fake_write(output_path, root, payload):
+        captured.update(output_path=output_path, root=root, payload=payload)
+        return {"path": output_path, "size_bytes": len(payload), "created": True}
+
+    monkeypatch.setattr(engine_cli, "active_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(engine_cli, "synthesize_local_speech", fake_synthesize)
+    monkeypatch.setattr(engine_cli, "write_speech_output_create_only", fake_write)
+    result = runner.invoke(engine_app, [
+        "speech", "synthesize", "--model-path", "/trusted/voice.onnx",
+        "--text", "Say hello.", "--output", "data/hello.wav",
+        "--speaker", "1", "--json",
+    ])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert "audio_base64" not in payload
+    assert payload["output"] == {"path": "data/hello.wav", "size_bytes": len(audio), "created": True}
+    assert captured["payload"] == audio
+    assert captured["root"] == tmp_path
+    assert captured["speaker_id"] == 1
+
+
+def test_engine_speech_synthesize_cli_rejects_runtime_output_errors(monkeypatch):
+    monkeypatch.setattr(engine_cli, "synthesize_local_speech", lambda *_args, **_kwargs: {
+        "audio_base64": __import__("base64").b64encode(b"R" * 64).decode("ascii"),
+    })
+    monkeypatch.setattr(engine_cli, "write_speech_output_create_only", lambda *_args: (_ for _ in ()).throw(FileExistsError("Speech output already exists.")))
+    result = runner.invoke(engine_app, [
+        "speech", "synthesize", "--model-path", "/trusted/voice.onnx",
+        "--text", "Say hello.", "--output", "data/existing.wav",
+    ])
+    assert result.exit_code != 0
+    assert "already exists" in result.output

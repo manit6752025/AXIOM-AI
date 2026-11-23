@@ -478,6 +478,38 @@ export type LocalEmbeddingsReport = {
   generated_at: string;
 };
 
+export type LocalSpeechTranscriptionReport = {
+  schema_version: number;
+  engine: "whisper.cpp";
+  model: string;
+  transcript: string;
+  audio: { format: "wav" | "mp3" | "flac" | "ogg"; size_bytes: number };
+  execution: { device: "cpu" | "auto"; threads: number; language: string };
+  privacy: {
+    local_process_only: true; network_used: false; audio_returned: false;
+    audio_persisted_by_axiom: false; transcript_persisted_by_axiom: false;
+    model_downloaded: false;
+  };
+  scope_note: string;
+};
+
+export type LocalSpeechSynthesisReport = {
+  schema_version: number;
+  engine: "piper";
+  model: string;
+  audio_base64: string;
+  audio: {
+    format: "wav"; size_bytes: number; channels: number; sample_rate_hz: number;
+    sample_width_bytes: number; duration_seconds: number;
+  };
+  execution: { device: "cpu" | "cuda"; speaker_id: number };
+  privacy: {
+    local_process_only: true; network_used: false; text_persisted_by_axiom: false;
+    audio_persisted_by_axiom: false; model_downloaded: false;
+  };
+  scope_note: string;
+};
+
 export type LocalVisionReport = {
   schema_version: number;
   model: string;
@@ -2799,6 +2831,19 @@ export const axiomApi = {
       window.clearTimeout(timeout);
     }
   },
+
+  transcribeLocalAudio: (input: {
+    model_path: string; audio_path: string; language?: string; timeout_seconds?: number;
+    threads?: number; use_accelerator?: boolean;
+  }) => requestJson<LocalSpeechTranscriptionReport>("/api/engine/speech/transcribe", {
+    method: "POST", body: JSON.stringify(input),
+  }, 600_000),
+  synthesizeLocalSpeech: (input: {
+    model_path: string; text: string; timeout_seconds?: number; speaker_id?: number;
+    max_audio_bytes?: number; use_accelerator?: boolean;
+  }) => requestJson<LocalSpeechSynthesisReport>("/api/engine/speech/synthesize", {
+    method: "POST", body: JSON.stringify(input),
+  }, 300_000),
 
   analyzeLocalVision: (input: {
     model: string; image_path: string; prompt: string;

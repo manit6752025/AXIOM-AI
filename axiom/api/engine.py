@@ -15,6 +15,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from starlette.responses import StreamingResponse
 from axiom.core import model_studio
 from axiom.core.inference import InferenceRuntimeError, run_local_vision
+from axiom.core.local_speech import (
+    LocalSpeechError,
+    synthesize_local_speech,
+    transcribe_local_audio,
+)
 from axiom.core.workspace_context import active_workspace_root
 from axiom.core.engine_fabric import EngineFabricBenchmarkRequirementError, EngineFabricError, discover_engine_backends, inspect_engine_backend_benchmark_requirements, run_engine_backend_benchmark, run_engine_backend_chat, run_engine_fabric_chat
 from axiom.core.engine_fabric_profiles import EngineFabricProfileError, EngineFabricProfileStore
@@ -897,6 +902,94 @@ def engine_backend_benchmark(request: EngineFabricBenchmarkRequest) -> dict[str,
 
 
 
+
+class LocalSpeechTranscriptionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    model_path: str = Field(min_length=1, max_length=4096)
+    audio_path: str = Field(min_length=1, max_length=4096)
+    language: str = Field(default="auto", pattern="^(auto|[a-z]{2,3})$")
+    timeout_seconds: int = Field(default=300, ge=10, le=600, strict=True)
+    threads: int = Field(default=4, ge=1, le=16, strict=True)
+    use_accelerator: bool = Field(default=False, strict=True)
+
+    @field_validator("model_path", "audio_path")
+    @classmethod
+    def paths_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Speech model and audio paths must not be blank.")
+        return value
+
+    @field_validator("audio_path")
+    @classmethod
+    def audio_must_be_supported_workspace_file(cls, value: str) -> str:
+        if not value.startswith("data/") or value.strip() != value:
+            raise ValueError("Audio path must be workspace-relative under data/.")
+        if not value.lower().endswith((".wav", ".mp3", ".flac", ".ogg")):
+            raise ValueError("Audio input must be a WAV, MP3, FLAC, or OGG file.")
+        return value
+
+
+class LocalSpeechSynthesisRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    model_path: str = Field(min_length=1, max_length=4096)
+    text: str = Field(min_length=1, max_length=4096)
+    timeout_seconds: int = Field(default=180, ge=10, le=300, strict=True)
+    speaker_id: int = Field(default=0, ge=0, le=255, strict=True)
+    max_audio_bytes: int = Field(default=12 * 1024 * 1024, ge=1024, le=12 * 1024 * 1024, strict=True)
+    use_accelerator: bool = Field(default=False, strict=True)
+
+    @field_validator("model_path")
+    @classmethod
+    def model_path_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Piper model path must not be blank.")
+        return value
+
+    @field_validator("text")
+    @classmethod
+    def speech_text_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Speech text must contain non-whitespace characters.")
+        return value
+
+
+@router.post("/speech/transcribe")
+def engine_local_speech_transcription(request: LocalSpeechTranscriptionRequest) -> dict[str, Any]:
+    """Transcribe workspace audio using an explicitly installed local whisper.cpp runtime."""
+    try:
+        return transcribe_local_audio(
+            request.model_path,
+            request.audio_path,
+            workspace_root=active_workspace_root(),
+            language=request.language,
+            timeout_seconds=request.timeout_seconds,
+            threads=request.threads,
+            use_accelerator=request.use_accelerator,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except LocalSpeechError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+@router.post("/speech/synthesize")
+def engine_local_speech_synthesis(request: LocalSpeechSynthesisRequest) -> dict[str, Any]:
+    """Generate a bounded in-memory WAV using an explicitly installed local Piper voice."""
+    try:
+        return synthesize_local_speech(
+            request.model_path,
+            request.text,
+            max_audio_bytes=request.max_audio_bytes,
+            timeout_seconds=request.timeout_seconds,
+            speaker_id=request.speaker_id,
+            use_accelerator=request.use_accelerator,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except LocalSpeechError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
 class LocalVisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     model: str = Field(min_length=1, max_length=120)
@@ -917,7 +1010,7 @@ class LocalVisionRequest(BaseModel):
     def image_must_be_workspace_relative(cls, value: str) -> str:
         if not value.startswith("data/") or value.strip() != value:
             raise ValueError("Image path must be workspace-relative under data/.")
-        if Path(value).suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+        if not value.lower().endswith((".png", ".jpg", ".jpeg")):
             raise ValueError("Image path must refer to a PNG or JPEG file.")
         return value
 
