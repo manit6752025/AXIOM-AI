@@ -167,3 +167,30 @@ The fingerprint intentionally excludes display names, notes, tags, record IDs, a
 - The response reports per-collection imported counts, mode, and excluded categories. Invalid archives return HTTP 422; uploads over 24 MiB return HTTP 413 and unsupported media types return HTTP 415.
 
 The archive is not a complete workspace backup. It excludes `axiom.yaml`, credentials, MCP permission grants, external integration commands and URLs, prediction-job history, runtime traces, datasets, model weights, checkpoints, generated artifacts, and temporary files. Some included metadata can still contain local filesystem paths; review archives before sharing. Imports never extract arbitrary ZIP paths and use staged, restrictive-permission writes with rollback on commit failure.
+
+
+## Security event journal
+
+The workspace-local security journal records only allowlisted MCP permission
+and profile changes. It does not store token values, prompts, commands, profile
+contents, or user-supplied event summaries. The event list is bounded to 2,000
+records (including review acknowledgements) and a 5 MiB JSON file.
+
+- `GET /api/security/events?limit=50&offset=0`: lists up to 100 recent action events, newest first, with their review state and chain-integrity summary. Review acknowledgements are attached to their target action and are not counted as separate actions in the list.
+- `GET /api/security/events/verify`: verifies the complete retained hash chain.
+- `GET /api/security/events/export`: returns the complete redacted JSON journal and its head hash for external retention.
+- `POST /api/security/events/{event_id}/review`: appends one review acknowledgement. The JSON body is `{"reviewer_label":"Security Admin"}`; labels are restricted to 2–48 safe characters and a given event can be reviewed only once.
+
+The event-list, verification, and export endpoints use the API read scope. Review
+is a mutation and therefore requires the API write scope under the normal
+request-scope middleware. In the bundled Control Center, the same-origin
+administrator session follows the existing local API policy.
+
+Reviewer labels are **self-attested**, not verified account identities. The
+journal's SHA-256 chain detects partial edits, deletion, and accidental
+reordering, but it is not a digital signature: a fully privileged local user
+who can rewrite the entire journal can recompute the chain. For independent
+tamper resistance, export the journal to storage controlled separately from
+the AXIOM workspace. At capacity, AXIOM refuses further entries instead of
+silently rotating or deleting history; export and archive the journal before
+restarting event capture.

@@ -47,6 +47,8 @@ import {
   type WorkspaceEvent,
   type WorkspaceDiagnostics,
   type SecurityAudit,
+  type SecurityEventPage,
+  type SecurityEventListItem,
   type RoadmapAudit,
   type WorkspaceModel,
   type WorkspaceModelCompatibility,
@@ -4217,6 +4219,9 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
   const [datasetCount, setDatasetCount] = useState<number | null>(null);
   const [workspaceDiagnostics, setWorkspaceDiagnostics] = useState<WorkspaceDiagnostics | null>(null);
   const [securityAudit, setSecurityAudit] = useState<SecurityAudit | null>(null);
+  const [securityEvents, setSecurityEvents] = useState<SecurityEventPage | null>(null);
+  const [reviewerLabel, setReviewerLabel] = useState("");
+  const [securityEventsBusy, setSecurityEventsBusy] = useState(false);
   const [bundleBusy, setBundleBusy] = useState(false);
   const [frontendErrors, setFrontendErrors] = useState(() => getFrontendErrorReport().events);
   const [frontendReportBusy, setFrontendReportBusy] = useState(false);
@@ -4261,13 +4266,14 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
 
   const runScan = async () => {
     setScanState("scanning");
-    const [healthResult, hardwareResult, modelResult, datasetResult, workspaceDiagnosticsResult, securityAuditResult] = await Promise.allSettled([
+    const [healthResult, hardwareResult, modelResult, datasetResult, workspaceDiagnosticsResult, securityAuditResult, securityEventsResult] = await Promise.allSettled([
       axiomApi.health(),
       axiomApi.optimizationHardware(),
       axiomApi.models(),
       axiomApi.datasets(),
       axiomApi.workspaceDiagnostics(),
       axiomApi.securityAudit(),
+      axiomApi.securityEvents(),
     ]);
     const failures: string[] = [];
     if (healthResult.status === "fulfilled") setHealth({ online: healthResult.value.status === "ok", version: healthResult.value.version });
@@ -4282,8 +4288,63 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
     else { setWorkspaceDiagnostics(null); failures.push("workspace diagnostics"); }
     if (securityAuditResult.status === "fulfilled") setSecurityAudit(securityAuditResult.value);
     else { setSecurityAudit(null); failures.push("security audit"); }
+    if (securityEventsResult.status === "fulfilled") setSecurityEvents(securityEventsResult.value);
+    else { setSecurityEvents(null); failures.push("security event journal"); }
     setScanState(failures.length ? "failed" : "idle");
     if (failures.length) onNotify(`Some diagnostics could not complete: ${failures.join(", ")}.`, "warning");
+  };
+
+  const refreshSecurityEvents = async () => {
+    try {
+      setSecurityEvents(await axiomApi.securityEvents());
+    } catch (cause) {
+      onNotify(cause instanceof Error ? cause.message : "Security event journal could not be refreshed.", "warning");
+    }
+  };
+
+  const exportSecurityEvents = async () => {
+    setSecurityEventsBusy(true);
+    try {
+      const report = await axiomApi.exportSecurityEvents();
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+      downloadBlob(blob, "axiom-security-events.json");
+      onNotify("Redacted security event journal exported. Review it before sharing.", "success");
+    } catch (cause) {
+      onNotify(cause instanceof Error ? cause.message : "Security event journal could not be exported.", "warning");
+    } finally {
+      setSecurityEventsBusy(false);
+    }
+  };
+
+  const verifySecurityEvents = async () => {
+    setSecurityEventsBusy(true);
+    try {
+      const report = await axiomApi.verifySecurityEvents();
+      await refreshSecurityEvents();
+      onNotify(report.valid ? `Security event chain verified · ${report.event_count} events.` : "Security event chain verification failed.", report.valid ? "success" : "warning");
+    } catch (cause) {
+      onNotify(cause instanceof Error ? cause.message : "Security event chain could not be verified.", "warning");
+    } finally {
+      setSecurityEventsBusy(false);
+    }
+  };
+
+  const reviewSecurityEvent = async (eventId: string) => {
+    const label = reviewerLabel.trim();
+    if (label.length < 2 || label.length > 48 || !/^[A-Za-z0-9][A-Za-z0-9 ._-]{1,47}$/.test(label)) {
+      onNotify("Enter a 2–48 character reviewer label using letters, numbers, spaces, dots, underscores or hyphens.", "warning");
+      return;
+    }
+    setSecurityEventsBusy(true);
+    try {
+      const result = await axiomApi.reviewSecurityEvent(eventId, label);
+      await refreshSecurityEvents();
+      onNotify(result.already_reviewed ? "This event already has a review acknowledgement." : "Review acknowledgement recorded. The reviewer label is self-attested, not verified.", "success");
+    } catch (cause) {
+      onNotify(cause instanceof Error ? cause.message : "Security event review could not be recorded.", "warning");
+    } finally {
+      setSecurityEventsBusy(false);
+    }
   };
 
   useEffect(() => { void runScan(); }, []);

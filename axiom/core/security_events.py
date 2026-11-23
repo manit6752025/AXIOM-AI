@@ -30,6 +30,7 @@ MAX_PAGE_SIZE = 100
 _GENESIS_HASH = "0" * 64
 _EVENT_ID = re.compile(r"^[a-f0-9]{32}$")
 _REVIEWER_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{1,47}$")
+_SHA256 = re.compile(r"^[a-f0-9]{64}$")
 
 _EVENT_SUMMARIES = {
     "mcp.profile.created": "Created a default-deny MCP profile",
@@ -84,11 +85,52 @@ class SecurityEventStore:
     def _locked(self) -> Iterator[None]:
         self._check_paths(create=True)
         try:
-            with file_lock(self.lock_path):
-                self._check_paths()
-                if os.name == "posix":
-                    os.chmod(self.lock_path, stat.S_IRUSR | stat.S_IWUSR)
-                yield
+            if (
+                os.name == "posix"
+                and getattr(os, "O_NOFOLLOW", 0)
+                and getattr(os, "O_DIRECTORY", 0)
+                and os.open in getattr(os, "supports_dir_fd", set())
+            ):
+                directory_fd = os.open(
+                    self.directory,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                )
+                handle = None
+                descriptor = None
+                import fcntl
+
+                try:
+                    descriptor = os.open(
+                        self.lock_path.name,
+                        os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                        0o600,
+                        dir_fd=directory_fd,
+                    )
+                    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                        raise SecurityEventError("Security journal lock must be a regular file.")
+                    os.fchmod(descriptor, stat.S_IRUSR | stat.S_IWUSR)
+                    handle = os.fdopen(descriptor, "r+b")
+                    descriptor = None
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                    self._check_paths()
+                    yield
+                finally:
+                    if handle is not None:
+                        try:
+                            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                        finally:
+                            handle.close()
+                    if descriptor is not None:
+                        os.close(descriptor)
+                    os.close(directory_fd)
+            else:
+                # Windows uses the portable path-based lock fallback; symlink
+                # checks are repeated after acquiring the handle.
+                with file_lock(self.lock_path):
+                    self._check_paths()
+                    yield
+        except SecurityEventError:
+            raise
         except (OSError, TimeoutError) as exc:
             raise SecurityEventError("Security journal lock could not be acquired safely.") from exc
 
@@ -147,15 +189,38 @@ class SecurityEventStore:
             allowed = required | {"reviewer_label", "target_event_id"}
             if not required.issubset(event) or not set(event).issubset(allowed):
                 raise SecurityEventError("Security event journal record fields are invalid.")
-            if event.get("seq") != expected_seq or not isinstance(event.get("event_id"), str):
+            sequence = event.get("seq")
+            if isinstance(sequence, bool) or sequence != expected_seq:
                 raise SecurityEventError("Security event sequence is invalid.")
-            event_id = event["event_id"]
-            if not _EVENT_ID.fullmatch(event_id) or event_id in seen_ids:
+            event_id = event.get("event_id")
+            if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id) or event_id in seen_ids:
                 raise SecurityEventError("Security event IDs are invalid or duplicated.")
-            if event.get("prev_hash") != previous or event.get("hash") != _event_digest(event):
+            occurred_at = event.get("occurred_at")
+            if not isinstance(occurred_at, str) or len(occurred_at) > 40:
+                raise SecurityEventError("Security event timestamp is invalid.")
+            try:
+                parsed_timestamp = datetime.fromisoformat(occurred_at)
+            except ValueError as exc:
+                raise SecurityEventError("Security event timestamp is invalid.") from exc
+            if parsed_timestamp.tzinfo is None:
+                raise SecurityEventError("Security event timestamp must include a timezone.")
+            event_type = event.get("event_type")
+            summary = event.get("summary")
+            if not isinstance(event_type, str) or not isinstance(summary, str):
+                raise SecurityEventError("Security event type and summary must be text.")
+            previous_hash = event.get("prev_hash")
+            current_hash = event.get("hash")
+            if (
+                not isinstance(previous_hash, str)
+                or not _SHA256.fullmatch(previous_hash)
+                or not isinstance(current_hash, str)
+                or not _SHA256.fullmatch(current_hash)
+                or previous_hash != previous
+                or current_hash != _event_digest(event)
+            ):
                 raise SecurityEventError("Security event hash chain verification failed.")
-            if event.get("event_type") == _REVIEW_EVENT:
-                if event.get("summary") != _REVIEW_SUMMARY:
+            if event_type == _REVIEW_EVENT:
+                if set(event) != required | {"reviewer_label", "target_event_id"} or summary != _REVIEW_SUMMARY:
                     raise SecurityEventError("Security review record is invalid.")
                 target = event.get("target_event_id")
                 reviewer = event.get("reviewer_label")
@@ -163,8 +228,9 @@ class SecurityEventStore:
                     raise SecurityEventError("Security review target is invalid.")
                 if not isinstance(reviewer, str) or not _REVIEWER_LABEL.fullmatch(reviewer):
                     raise SecurityEventError("Security reviewer label is invalid.")
-            elif event.get("event_type") not in _EVENT_SUMMARIES or event.get("summary") != _EVENT_SUMMARIES.get(event.get("event_type")):
-                raise SecurityEventError("Security event type or summary is not allowlisted.")
+            else:
+                if set(event) != required or event_type not in _EVENT_SUMMARIES or summary != _EVENT_SUMMARIES.get(event_type):
+                    raise SecurityEventError("Security event type or summary is not allowlisted.")
             seen_ids.add(event_id)
             previous = event["hash"]
         targets = {event["event_id"] for event in events if event["event_type"] != _REVIEW_EVENT}
@@ -281,9 +347,12 @@ class SecurityEventStore:
             raise SecurityEventError(f"Limit must be between 1 and {MAX_PAGE_SIZE}.")
         if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset < MAX_EVENTS:
             raise SecurityEventError(f"Offset must be between 0 and {MAX_EVENTS - 1}.")
-        with self._locked():
-            self._check_paths()
-            events = self._read_locked()
+        self._check_paths()
+        if self.path.exists():
+            with self._locked():
+                events = self._read_locked()
+        else:
+            events = []
         reviews = {
             event["target_event_id"]: event
             for event in events if event["event_type"] == _REVIEW_EVENT
@@ -301,6 +370,14 @@ class SecurityEventStore:
                 "reviewer_label": review.get("reviewer_label") if review else None,
                 "reviewer_identity_verified": False if review else None,
             })
+        integrity = {
+            "schema_version": SCHEMA_VERSION,
+            "valid": True,
+            "event_count": len(events),
+            "max_events": MAX_EVENTS,
+            "head_hash": events[-1]["hash"] if events else _GENESIS_HASH,
+            "capacity_reached": len(events) >= MAX_EVENTS,
+        }
         return {
             "schema_version": SCHEMA_VERSION,
             "events": projected,
@@ -308,7 +385,7 @@ class SecurityEventStore:
             "limit": limit,
             "offset": offset,
             "has_more": offset + len(page) < total,
-            "integrity": self.verify(),
+            "integrity": integrity,
             "privacy": {
                 "event_summaries_allowlisted": True,
                 "credential_values_stored": False,
@@ -319,9 +396,12 @@ class SecurityEventStore:
         }
 
     def export(self) -> dict[str, Any]:
-        with self._locked():
-            self._check_paths()
-            events = self._read_locked()
+        self._check_paths()
+        if self.path.exists():
+            with self._locked():
+                events = self._read_locked()
+        else:
+            events = []
         return {
             "schema_version": SCHEMA_VERSION,
             "exported_at": _utc_now(),

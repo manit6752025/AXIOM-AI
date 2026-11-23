@@ -1238,6 +1238,63 @@ export type SecurityAudit = {
   checks: WorkspaceDiagnosticCheck[];
 };
 
+export type SecurityEventRecord = {
+  seq: number;
+  event_id: string;
+  occurred_at: string;
+  event_type: string;
+  summary: string;
+  prev_hash: string;
+  hash: string;
+  reviewer_label?: string;
+  target_event_id?: string;
+};
+
+export type SecurityEventListItem = SecurityEventRecord & {
+  reviewed: boolean;
+  reviewed_at: string | null;
+  reviewer_label: string | null;
+  reviewer_identity_verified: false | null;
+};
+
+export type SecurityEventIntegrity = {
+  schema_version: number;
+  valid: boolean;
+  event_count: number;
+  max_events: number;
+  head_hash: string;
+  capacity_reached: boolean;
+};
+
+export type SecurityEventPage = {
+  schema_version: number;
+  events: SecurityEventListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  integrity: SecurityEventIntegrity;
+  privacy: {
+    event_summaries_allowlisted: true;
+    credential_values_stored: false;
+    arbitrary_user_text_stored: false;
+    reviewer_identity_authenticated: false;
+    journal_is_append_only: true;
+  };
+};
+
+export type SecurityEventExport = {
+  schema_version: number;
+  exported_at: string;
+  integrity: SecurityEventIntegrity;
+  events: SecurityEventRecord[];
+  privacy: {
+    credential_values_stored: false;
+    arbitrary_user_text_stored: false;
+    reviewer_identity_authenticated: false;
+  };
+};
+
 export type RoadmapAuditItem = {
   id: string;
   status: "implemented" | "in_progress" | "planned" | "unknown";
@@ -1688,6 +1745,25 @@ export const axiomApi = {
   workspaceDiagnostics: () => requestJson<WorkspaceDiagnostics>("/api/diagnostics/workspace"),
 
   securityAudit: () => requestJson<SecurityAudit>("/api/security/audit"),
+
+  securityEvents: (limit = 50, offset = 0) => {
+    const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    return requestJson<SecurityEventPage>(`/api/security/events?${query.toString()}`);
+  },
+
+  verifySecurityEvents: () => requestJson<SecurityEventIntegrity>("/api/security/events/verify"),
+
+  exportSecurityEvents: () => requestJson<SecurityEventExport>("/api/security/events/export"),
+
+  reviewSecurityEvent: (eventId: string, reviewerLabel: string) =>
+    requestJson<{
+      review: SecurityEventRecord;
+      already_reviewed: boolean;
+      reviewer_identity_verified: false;
+    }>(`/api/security/events/${encodeURIComponent(eventId)}/review`, {
+      method: "POST",
+      body: JSON.stringify({ reviewer_label: reviewerLabel }),
+    }),
 
   roadmapAudit: () => requestJson<RoadmapAudit>("/api/diagnostics/roadmap"),
 
