@@ -44,6 +44,36 @@ axiom evaluation run ./data/baseline.jsonl --prediction-field prediction --refer
 axiom evaluation run ./data/candidate.jsonl --prediction-field prediction --reference-field reference --baseline-run-id <baseline-run-id>
 ```
 
+## Repeated saved-experiment comparisons
+
+An offline evaluation can be linked to a saved, immutable training-plan snapshot.
+The association records which plan the report is grouped under; it does not prove
+that the plan was executed or that the saved model label is verified.
+
+~~~bash
+axiom evaluation run ./data/eval.jsonl \
+  --prediction-field prediction --reference-field reference \
+  --experiment-id <saved-experiment-id> --json
+
+axiom evaluation compare-experiments <baseline-experiment-id> <candidate-experiment-id> \
+  --metric token_f1_micro --json
+~~~
+
+The machine-readable comparison requires two distinct saved experiment IDs and
+at least one complete linked offline evaluation per experiment. Every included
+run must share the same full comparison-corpus SHA-256, reference field, split
+configuration, and sample count. Incomplete or partial reports are excluded and
+counted. Scores are summarized by mean, sample standard deviation, minimum,
+maximum, and contributing run IDs.
+
+When each group has at least two complete replicates, AXIOM computes a
+two-sided Welch unequal-variance t-test and reports its statistic, degrees of
+freedom, and p-value. With fewer than two replicates in either group, the
+comparison remains descriptive and the p-value is `null`. Degenerate
+zero-variance groups are reported explicitly. Treat the test as exploratory:
+it assumes independent replicates, and it does not prove causal improvement,
+training execution, or semantic quality. The comparison is read-only and does
+not run inference or alter experiment snapshots.
 ## CLI
 
 ```bash

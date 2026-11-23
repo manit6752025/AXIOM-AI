@@ -172,6 +172,35 @@ step.
 
 The fingerprint intentionally excludes display names, notes, tags, record IDs, and timestamps. It covers the model/dataset labels, parameter count, requested method, captured hardware, planner provenance, and exact plan estimate. Snapshot printing and diffing are read-only: neither reruns the planner nor creates a job or artifact. A matching fingerprint is not a guarantee of identical runtime behavior or training results.
 
+## Repeated offline evaluation by saved experiment (R131)
+
+`POST /api/evaluation/runs` accepts an optional `experiment_id` containing the
+32-character ID of an existing saved training-plan snapshot. The association
+is metadata only; it does not assert that the plan was executed.
+
+`POST /api/evaluation/experiment-comparisons` accepts:
+
+```json
+{
+  "baseline_experiment_id": "<32-character-experiment-id>",
+  "candidate_experiment_id": "<32-character-experiment-id>",
+  "metric": "token_f1_micro"
+}
+```
+
+The response is a deterministic-schema report containing the two plan
+fingerprints, linked complete evaluation run IDs, replicate count, mean,
+sample standard deviation, minimum, maximum, and candidate-minus-baseline
+mean. All included runs must share the exact fully hashed comparison-corpus
+fingerprint, reference field, split configuration, and sample count. Partial
+or incomplete runs are excluded and counted; mismatched corpora are rejected.
+
+A two-sided Welch unequal-variance t-test is returned only when each group
+has at least two complete replicates. Otherwise `statistical_test.status` is
+`insufficient_replicates` and `p_value` is `null`. The test assumes independent
+replicates and is exploratory, not proof of causality or semantic quality.
+The endpoint is read-only: it does not execute training or inference, modify
+saved experiments, or return prediction/reference text.
 ## Workspace metadata transfer
 
 - `GET /api/workspace/metadata/export`: returns a versioned ZIP archive with media type `application/vnd.axiom.workspace-metadata+zip`. The archive contains the model registry, workflow designs, experiment plans, evaluation reports, and agent task profiles.
