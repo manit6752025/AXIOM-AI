@@ -1,12 +1,45 @@
 version: 2
 updates:
-  - package-ecosystem: "npm"
-    directory: "/"
+  - package-ecosystem: pip
+    directory: /
     schedule:
-      interval: "daily" # Checks daily for latest versions & security patches
-    versioning-strategy: increase # Always bumps package.json to the newest version
+      interval: weekly
     open-pull-requests-limit: 10
+    commit-message:
+      prefix: deps
     groups:
-      all-dependencies:
+      python-runtime:
         patterns:
-          - "*" # Groups all updates into one clean PR instead of spamming me
+          - "*"
+
+  - package-ecosystem: pip
+    directory: /sdk/python
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: deps(sdk-python)
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: deps(root-npm)
+
+  - package-ecosystem: npm
+    directory: /sdk/typescript
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: deps(sdk-typescript)
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: ci(deps)
