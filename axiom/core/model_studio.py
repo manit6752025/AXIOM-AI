@@ -854,9 +854,10 @@ def convert_local_model_to_gguf(source_dir: str, llama_cpp_dir: str, output_path
 
 
 def _job_path(job_id: str) -> Path:
-    if not re.fullmatch(r"[0-9a-f]{32}", job_id):
+    safe_id = os.path.basename(job_id)
+    if safe_id != job_id or not re.fullmatch(r"[0-9a-f]{32}", safe_id):
         raise ValueError("Invalid Model Studio job ID.")
-    return jobs_directory() / f"{job_id}.json"
+    return jobs_directory() / (safe_id + ".json")
 
 
 def _write_job(job: dict[str, Any]) -> None:

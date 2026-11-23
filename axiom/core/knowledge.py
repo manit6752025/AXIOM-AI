@@ -39,6 +39,13 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _document_file_path(documents_root: Path, document_id: str) -> Path:
+    safe_id = os.path.basename(document_id)
+    if safe_id != document_id or not _DOCUMENT_ID.fullmatch(safe_id):
+        raise KnowledgeStoreError("Document ID is invalid.")
+    return documents_root / (safe_id + ".txt")
+
+
 def _validate_name(value: Any, *, maximum: int, label: str) -> str:
     if not isinstance(value, str):
         raise KnowledgeStoreError(f"{label} must be text.")
@@ -292,7 +299,7 @@ class KnowledgeBaseStore:
             "size_bytes": len(raw), "character_count": len(text), "ingested_at": _now(),
         }
         self._ensure_layout(create=True)
-        destination = self.documents_root / f"{document['id']}.txt"
+        destination = _document_file_path(self.documents_root, document["id"])
         with file_lock(self.lock_path):
             records = self._read_index()
             base = next((item for item in records if item["id"] == base_id), None)
@@ -328,7 +335,7 @@ class KnowledgeBaseStore:
             document = next((item for item in base["documents"] if item["id"] == document_id), None)
             if document is None:
                 raise KeyError("Knowledge document not found.")
-            path = self.documents_root / f"{document_id}.txt"
+            path = _document_file_path(self.documents_root, document_id)
             if path.is_symlink() or not path.is_file():
                 raise KnowledgeStoreError("Stored knowledge document is unavailable.")
             try:
@@ -357,7 +364,7 @@ class KnowledgeBaseStore:
             document = next((item for item in base["documents"] if item["id"] == document_id), None)
             if document is None:
                 return None
-            path = self.documents_root / f"{document_id}.txt"
+            path = _document_file_path(self.documents_root, document_id)
             if path.is_symlink():
                 raise KnowledgeStoreError("Stored knowledge document is a symbolic link.")
             base["documents"] = [item for item in base["documents"] if item["id"] != document_id]
@@ -378,7 +385,7 @@ class KnowledgeBaseStore:
                 return None
             paths = []
             for document in base["documents"]:
-                path = self.documents_root / f"{document['id']}.txt"
+                path = _document_file_path(self.documents_root, document["id"])
                 if path.is_symlink():
                     raise KnowledgeStoreError("Stored knowledge document is a symbolic link.")
                 paths.append(path)

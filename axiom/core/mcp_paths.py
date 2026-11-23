@@ -20,9 +20,11 @@ def _parts(raw: str) -> tuple[str, ...]:
     ):
         raise ValueError("Use a workspace-relative file path.")
 
-    parts = tuple(raw.split("/"))
+    raw_parts = tuple(raw.split("/"))
+    parts = tuple(os.path.basename(part) for part in raw_parts)
     if (
-        any(part in {"", ".", ".."} for part in parts)
+        any(safe != original for safe, original in zip(parts, raw_parts))
+        or any(part in {"", ".", ".."} for part in parts)
         or (len(parts[0]) >= 2 and parts[0][1] == ":")
     ):
         raise ValueError("Use a safe workspace-relative file path.")

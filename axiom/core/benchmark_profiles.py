@@ -62,21 +62,33 @@ def _canonical(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
+def _canonical_model_root(model_path: str | Path) -> Path | None:
+    """Resolve an explicitly selected model directory to a canonical filesystem root."""
+    try:
+        supplied = os.path.expanduser(os.fspath(model_path))
+        if not supplied or "\\x00" in supplied:
+            return None
+        candidate = Path(os.path.abspath(supplied))
+        if candidate.is_symlink():
+            raise BenchmarkProfileError("The selected model directory must not be a symbolic link.")
+        root = Path(os.path.realpath(candidate))
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+    return root if root.is_dir() else None
+
+
 def _model_config_fingerprint(model_path: str | Path) -> str | None:
     """Hash a bounded set of model configuration files, never model weights."""
-    root = Path(model_path).expanduser()
-    if root.is_symlink():
-        raise BenchmarkProfileError("The selected model directory must not be a symbolic link.")
-    try:
-        root = root.resolve(strict=True)
-    except (OSError, RuntimeError):
-        return None
-    if not root.is_dir():
+    root = _canonical_model_root(model_path)
+    if root is None:
         return None
     parts: list[tuple[str, str]] = []
     total = 0
     for name in _MODEL_CONFIG_FILES:
-        path = root / name
+        safe_name = os.path.basename(name)
+        if safe_name != name or safe_name not in _MODEL_CONFIG_FILES:
+            raise BenchmarkProfileError("Model configuration filename is invalid.")
+        path = root / safe_name
         if path.is_symlink():
             raise BenchmarkProfileError("Model configuration metadata must not use symbolic links.")
         if not path.exists():

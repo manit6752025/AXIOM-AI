@@ -130,12 +130,15 @@ def resolve_workspace_input(raw: str, root: Path, label: str) -> Path:
     ):
         raise ValueError(f"{label} must be a workspace-relative path.")
 
-    parts = raw.split("/")
+    raw_parts = raw.split("/")
+    parts = [os.path.basename(part) for part in raw_parts]
     if (
-        any(part in {"", ".", ".."} for part in parts)
+        any(safe != original for safe, original in zip(parts, raw_parts))
+        or any(part in {"", ".", ".."} for part in parts)
         or (len(parts[0]) >= 2 and parts[0][1] == ":")
     ):
         raise ValueError(f"{label} must be a safe workspace-relative path.")
+    safe_raw = "/".join(parts)
 
     try:
         workspace = Path(root).resolve(strict=True)
@@ -152,7 +155,7 @@ def resolve_workspace_input(raw: str, root: Path, label: str) -> Path:
             raise ValueError(f"{label} cannot contain symbolic links.")
 
     try:
-        target = safe_child(workspace, raw, must_exist=True)
+        target = safe_child(workspace, safe_raw, must_exist=True)
     except (FileNotFoundError, OSError, RuntimeError, ValueError):
         raise ValueError(f"{label} was not found inside the workspace.") from None
     if not target.is_relative_to(workspace):
@@ -178,9 +181,11 @@ def resolve_workspace_output(
     ):
         raise ValueError("Adapter output must be a workspace-relative path under outputs/.")
 
-    parts = raw.split("/")
+    raw_parts = raw.split("/")
+    parts = [os.path.basename(part) for part in raw_parts]
     if (
-        len(parts) < 2
+        any(safe != original for safe, original in zip(parts, raw_parts))
+        or len(parts) < 2
         or parts[0] != "outputs"
         or any(part in {"", ".", ".."} for part in parts)
         or (len(parts[0]) >= 2 and parts[0][1] == ":")
