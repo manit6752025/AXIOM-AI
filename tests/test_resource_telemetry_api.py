@@ -99,5 +99,15 @@ def test_resource_telemetry_history_accepts_valid_http_query_limits(tmp_path, mo
     assert default_page.status_code == 200, default_page.text
     assert explicit_page.status_code == 200, explicit_page.text
     assert small_page.status_code == 200, small_page.text
+    assert default_page.json()["limit"] == 500
     assert explicit_page.json()["limit"] == 500
     assert small_page.json()["limit"] == 20
+    assert default_page.json()["returned"] == 0
+    assert default_page.json()["total"] == 0
+
+    below_minimum = client.get("/api/engine/telemetry-history?limit=0")
+    above_maximum = client.get("/api/engine/telemetry-history?limit=501")
+    malformed = client.get("/api/engine/telemetry-history?limit=not-a-number")
+    assert below_minimum.status_code == 422
+    assert above_maximum.status_code == 422
+    assert malformed.status_code == 422

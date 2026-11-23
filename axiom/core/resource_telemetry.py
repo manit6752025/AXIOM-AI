@@ -480,6 +480,8 @@ class ResourceTelemetryStore:
             "schema_version": SCHEMA_VERSION,
             "settings": settings,
             "total": len(retained),
+            "limit": limit,
+            "returned": len(ordered),
             "samples": ordered,
             "privacy": {
                 "process_ids_included": False,
