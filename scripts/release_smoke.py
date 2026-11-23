@@ -20,6 +20,7 @@ VALID_STATUSES = {
     "In progress",
     "In progress; validation pending",
     "In progress; validation and registry publication pending",
+    "In progress; registry publication pending",
     "Implemented; tests passing; code-scan review pending",
 }
 
@@ -1035,6 +1036,7 @@ def prediction_job_resume_issues(
             "def axiom_prediction_job_resume(",
             'require("axiom_prediction_job_resume"',
             "checkpoint_identity_and_digest_verified",
+            "generation_configuration_fingerprint_verified",
         )),
         ("prediction resume MCP permission", permissions, (
             '"axiom_prediction_job_resume"',
@@ -1096,6 +1098,7 @@ def prediction_job_resume_issues(
         )),
         ("TypeScript SDK restart-resume contract", sdk_typescript_types, (
             "export interface AxiomPredictionJobResumeScope",
+            "generation_configuration_fingerprint_verified: true;",
             "generation_resumed_after_restart: true;",
             "export interface AxiomPredictionJobResumeResult",
         )),

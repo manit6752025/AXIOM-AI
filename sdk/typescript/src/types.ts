@@ -64,6 +64,7 @@ export interface AxiomPredictionJobResumeScope {
   dataset_fingerprint_verified: true;
   model_and_adapter_fingerprints_verified: true;
   checkpoint_identity_and_digest_verified: true;
+  generation_configuration_fingerprint_verified: true;
   partial_output_published: false;
   prompts_returned: false;
   predictions_returned: false;

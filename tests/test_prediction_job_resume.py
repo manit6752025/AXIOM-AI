@@ -28,7 +28,10 @@ def _checkpoint(root, payload: bytes, *, rows: int = 1):
 
 def test_prediction_checkpoint_verifies_committed_prefix_and_truncates_uncommitted_tail(tmp_path):
     committed = b'{"prompt":"first","reference":"A","prediction":"x"}\n'
-    record, path = _checkpoint(tmp_path, committed + b'{"partial":"uncommitted')
+    record, path = _checkpoint(tmp_path, committed)
+    # Simulate a crash after writing bytes but before checkpoint metadata commits.
+    with path.open("ab") as tail:
+        tail.write(b'{"partial":"uncommitted')
     stream, name, checkpoint_path, identity, size, digest = prediction_jobs._open_prediction_checkpoint(
         tmp_path, record
     )
@@ -411,6 +414,7 @@ def test_mcp_prediction_resume_requires_its_own_explicit_permission(tmp_path, mo
     assert "write" in TOOL_SCOPES["axiom_prediction_job_resume"]
     assert "axiom_prediction_job_resume" in TOOL_DESCRIPTIONS
     assert result["scope"]["partial_output_published"] is False
+    assert result["scope"]["generation_configuration_fingerprint_verified"] is True
 
 def test_prediction_job_recovery_after_real_owner_process_termination(tmp_path):
     import subprocess

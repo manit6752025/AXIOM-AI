@@ -86,7 +86,7 @@ class _Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/prediction-jobs":
             self._send(202, {"schema_version": 1, "job": {"id": "a" * 32, "status": "queued", "resumable": False}, "limits": {}, "scope": {}})
         elif parsed.path == f"/api/prediction-jobs/{'a' * 32}/resume":
-            self._send(202, {"schema_version": 1, "job": {"id": "a" * 32, "status": "queued", "resumption_count": 1}, "scope": {"checkpoint_identity_and_digest_verified": True, "generation_resumed_after_restart": True}})
+            self._send(202, {"schema_version": 1, "job": {"id": "a" * 32, "status": "queued", "resumption_count": 1}, "scope": {"checkpoint_identity_and_digest_verified": True, "generation_configuration_fingerprint_verified": True, "generation_resumed_after_restart": True}})
         elif parsed.path == f"/api/prediction-jobs/{'a' * 32}/cancel":
             self._send(200, {"schema_version": 1, "job": {"id": "a" * 32, "status": "cancelling"}, "cancellation_accepted": True, "note": "Cancellation requested."})
         if parsed.path == "/api/workspaces/backup/restore":
@@ -258,6 +258,7 @@ def test_python_sdk_prediction_jobs_support_start_history_status_resume_and_canc
     assert started["job"]["status"] == "queued"
     assert shown["job"]["id"] == job_id
     assert resumed["job"]["resumption_count"] == 1
+    assert resumed["scope"]["generation_configuration_fingerprint_verified"] is True
     assert resumed["scope"]["generation_resumed_after_restart"] is True
     assert cancelled["cancellation_accepted"] is True
     records = _Handler.requests
