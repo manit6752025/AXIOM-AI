@@ -251,7 +251,9 @@ def test_download_uses_pep440_version_for_pypi_and_wheel_metadata(monkeypatch):
     def fake_urlopen(request, timeout=20):
         requests.append(request.full_url)
         if urlsplit(request.full_url).hostname == "pypi.org":
-            assert request.full_url.endswith(f"/{normalized}/json")
+            parsed_request_url = urlsplit(request.full_url)
+            assert parsed_request_url.hostname == "pypi.org"
+            assert parsed_request_url.path == f"/{normalized}/json"
             return io.BytesIO(json.dumps(pypi).encode("utf-8"))
         return io.BytesIO(wheel)
 
