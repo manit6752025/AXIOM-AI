@@ -5490,6 +5490,7 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
   const [workspaceRestoreBusy, setWorkspaceRestoreBusy] = useState(false);
   const [workspaceBackupFile, setWorkspaceBackupFile] = useState<File | null>(null);
   const [workspaceRestoreName, setWorkspaceRestoreName] = useState("Restored workspace");
+  const [workspaceRestoreNotice, setWorkspaceRestoreNotice] = useState<string | null>(null);
   const [frontendErrors, setFrontendErrors] = useState(() => getFrontendErrorReport().events);
   const [frontendReportBusy, setFrontendReportBusy] = useState(false);
   const [supplyChainBusy, setSupplyChainBusy] = useState(false);
@@ -5600,16 +5601,18 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
       `Restore "${workspaceBackupFile.name}" as a new workspace named "${name}"? The archive can contain credentials, project configuration, datasets and model weights. AXIOM verifies paths and checksums before registration. Your current workspace will not be overwritten.`
     )) return;
     setWorkspaceRestoreBusy(true);
+    setWorkspaceRestoreNotice(null);
     try {
       const result = await axiomApi.restoreWorkspaceBackup(workspaceBackupFile, name);
+      const message = `Restored ${result.backup.file_count.toLocaleString()} file(s) into new workspace "${result.workspace.name}". Your current workspace remains active.`;
       setWorkspaceBackupFile(null);
+      setWorkspaceRestoreNotice(message);
       window.dispatchEvent(new CustomEvent("axiom:workspaces-changed"));
-      onNotify(
-        `Restored ${result.backup.file_count.toLocaleString()} file(s) into new workspace "${result.workspace.name}". Your current workspace remains active.`,
-        "success",
-      );
+      onNotify(message, "success");
     } catch (cause) {
-      onNotify(cause instanceof Error ? cause.message : "Workspace backup could not be restored.", "warning");
+      const message = cause instanceof Error ? cause.message : "Workspace backup could not be restored.";
+      setWorkspaceRestoreNotice(`Restore failed: ${message}`);
+      onNotify(message, "warning");
     } finally {
       setWorkspaceRestoreBusy(false);
     }
@@ -5758,6 +5761,11 @@ function Diagnostics({ onNotify }: { onNotify: (message: string, tone?: Tone) =>
           </button>
         </div>
       </form>
+      {workspaceRestoreNotice && (
+        <div className="workspace-restore-result" role="status" aria-live="polite">
+          {workspaceRestoreNotice}
+        </div>
+      )}
       <Callout tone="warning" title="Restore never overwrites the current workspace">
         AXIOM verifies the archive manifest, per-file SHA-256 checksums, sizes and safe paths, then extracts into a private staging directory. Only after the complete restore succeeds is a separate managed workspace registered. The active workspace and its files remain unchanged.
       </Callout>
