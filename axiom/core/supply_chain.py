@@ -464,7 +464,7 @@ def _audit_dependency_vulnerabilities_unlocked(
     # Do not let pip configuration in the invoking workspace or user profile
     # inject private package-index URLs or credentials into the audit process.
     environment["PIP_CONFIG_FILE"] = os.devnull
-    args = [executable, "-m", "pip_audit", "--local", "--format", "json", "--progress-spinner", "off"]
+    args = [executable, "-m", "pip_audit", "--local", "--skip-editable", "--format", "json", "--progress-spinner", "off"]
     scan_cwd = Path(sys.prefix)
     if not scan_cwd.is_dir():
         raise SupplyChainError("The active Python environment directory is unavailable.")
