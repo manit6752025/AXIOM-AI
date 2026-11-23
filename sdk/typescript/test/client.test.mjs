@@ -318,6 +318,33 @@ test("validates prediction job identifiers and required local start paths", () =
     }),
     AxiomConfigurationError,
   );
+  assert.throws(
+    () => client.startPredictionJob({
+      model_path: "models/tiny",
+      dataset_path: "data/eval.jsonl",
+      output_path: "data/nested/out.jsonl",
+    }),
+    AxiomConfigurationError,
+  );
+  assert.throws(
+    () => client.startPredictionJob({
+      model_path: "models/tiny",
+      dataset_path: "data/eval.jsonl",
+      output_path: "data/out.jsonl",
+      prediction_field: "prompt",
+    }),
+    AxiomConfigurationError,
+  );
+  assert.throws(
+    () => client.startPredictionJob({
+      model_path: "models/tiny",
+      dataset_path: "data/eval.jsonl",
+      output_path: "data/out.jsonl",
+      device: "mps",
+      precision: "bf16",
+    }),
+    AxiomConfigurationError,
+  );
   client.close();
 });
 
