@@ -12,7 +12,7 @@ def _models() -> list[Model]:
         Model(name="Zeta", source="/models/zeta", format="gguf", parameters="7B", tags=["local"], favorite=True),
         Model(name="Alpha", source="/models/alpha", format="safetensors", parameters="13B", tags=["training"], favorite=False),
         Model(name="Qwen Mini", source="/models/qwen-mini", format="gguf", parameters="1.5B", tags=["local", "chat"], favorite=False),
-        Model(name="Qwen Seven", source="/models/qwen-seven", format="gguf", parameters="7B", tags=["local", "chat"], favorite=True),
+        Model(name="Qwen Seven", source="/models/qwen-seven", format="gguf", parameters="7B", tags=["local", "chat"], favorite=True, workspace_labels=["production", "team-a"]),
         Model(name="Unknown size", source="/models/unknown", format="gguf", parameters=None, tags=["local"], favorite=False),
     ]
 
@@ -87,3 +87,17 @@ def test_model_registry_rejects_unknown_sort_fields(monkeypatch) -> None:
     response = client.get("/api/workspace/models", params={"sort_by": "arbitrary-expression"})
 
     assert response.status_code == 422
+
+
+
+def test_model_registry_search_includes_workspace_labels_without_reusing_tags(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    response = client.get("/api/workspace/models", params={"search": "PRODUCTION"})
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()["models"]] == ["Qwen Seven"]
+    assert response.json()["models"][0]["workspace_labels"] == ["production", "team-a"]
+
+    # Workspace labels are a distinct metadata field and do not become tags.
+    exact_tag = client.get("/api/workspace/models", params={"tag": "production"})
+    assert exact_tag.status_code == 200
+    assert exact_tag.json()["total"] == 0

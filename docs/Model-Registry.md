@@ -6,7 +6,11 @@ The Control Center's **Models** page reads from the local AXIOM model registry. 
 
 Each registry record supports a stable ID, display name, source or local path, format,
 parameter metadata, quantization, architecture, licence, tags, favorite status,
-optional SHA-256 content digest, and optional `size_bytes`. Weight size is the
+optional SHA-256 content digest, optional `size_bytes`, and workspace labels.
+Workspace labels are separate from classification tags: a model may be tagged
+`chat` and labelled `production` or `team-a` without mixing those namespaces.
+Up to 32 workspace labels are accepted, each a non-empty string of at most 40
+characters. Weight size is the
 combined weight-file size in bytes when known; it is metadata, not a live disk
 measurement. Discovering and inspecting a local model folder pre-fills the size
 from the files found during that bounded inspection. Manual registration can
@@ -22,14 +26,28 @@ candidate record before writing it.
 The Models page displays known sizes and exposes the size and digest fields in
 the registration form. The CLI accepts `--size-bytes` for both
 `axiom model add` and `axiom model update`; `axiom model list` displays
-the stored byte count. These operations update registry metadata only and do
+the stored byte count. Repeat `--workspace-label` when adding/updating models;
+`--clear-workspace-labels` explicitly clears the separate workspace labels. These operations update registry metadata only and do
 not hash, move, download, or rewrite model weights.
+
+## Duplicate protection
+
+The registry rejects a second record when its case-insensitive display name,
+normalized source identity, or non-empty SHA-256 content digest matches an
+existing record. A source path or catalogue identifier is treated as an
+identity, not as proof that two remote snapshots contain identical weights;
+the optional digest is the content-level comparison. Digest comparison is
+case-insensitive. API creation/import reports conflicts with HTTP 409, while
+invalid metadata remains a validation error; failed imports and duplicate
+creates do not partially mutate the registry. The CLI returns a structured
+error for the same conflicts, and the Models form leaves the user's entered
+metadata available for correction.
 
 ## Search, filter, sort, and paginate
 
 The Models page provides server-side inventory controls:
 
-- **Search metadata** performs a case-insensitive substring search across name, source, format, parameter metadata, quantization, architecture, licence, and tags.
+- **Search metadata** performs a case-insensitive substring search across name, source, format, parameter metadata, quantization, architecture, licence, classification tags, and workspace labels.
 - **Exact format** matches the format label case-insensitively, such as gguf or safetensors.
 - **Exact tag** matches an entire tag label case-insensitively; it does not match a partial tag.
 - **Favorites only** limits results to records marked as favorites.

@@ -528,6 +528,7 @@ export type WorkspaceModel = {
   favorite?: boolean;
   content_sha256?: string | null;
   size_bytes?: number | null;
+  workspace_labels?: string[];
 };
 
 export type WorkspaceModelPage = {

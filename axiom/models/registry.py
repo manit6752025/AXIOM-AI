@@ -25,6 +25,7 @@ class Model:
     favorite: bool = False
     content_sha256: str | None = None
     size_bytes: int | None = None
+    workspace_labels: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
@@ -57,6 +58,15 @@ class Model:
             or not 0 <= self.size_bytes <= 9_007_199_254_740_991
         ):
             raise TypeError("Model size_bytes must be a non-negative safe integer.")
+        if (
+            not isinstance(self.workspace_labels, list)
+            or len(self.workspace_labels) > 32
+            or any(
+                not isinstance(label, str) or not label.strip() or len(label) > 40
+                for label in self.workspace_labels
+            )
+        ):
+            raise TypeError("Model workspace_labels must be a list of up to 32 short labels.")
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -57,6 +57,7 @@ from axiom.datasets.inspector import inspect_dataset
 from axiom.models.analysis import analyze_config, disk_info
 from axiom.models.inspector import inspect_model
 from axiom.models.registry import Model, ModelRegistry
+from axiom.models.runtime_matrix import probe_local_runtime_matrix
 from axiom.core.storage import atomic_write_text
 from axiom.runtime.supercompress import compress_context, redacted_base_url
 from axiom.training.planner import create_training_plan
@@ -1211,6 +1212,34 @@ def train_plan(
         console.print(f"Saved plan snapshot [cyan]{saved_record['id']}[/cyan]. No training job was started.")
 
 
+@model_app.command("runtimes")
+def model_runtimes(
+    refresh: bool = typer.Option(False, "--refresh", help="Probe local runtimes again instead of using the 30-second cache."),
+    json_output: bool = typer.Option(False, "--json", help="Emit the format/runtime matrix and version evidence as JSON."),
+) -> None:
+    """Show local model runtime candidates and their detected version evidence."""
+    matrix = probe_local_runtime_matrix(force_refresh=refresh)
+    if json_output:
+        typer.echo(json.dumps(matrix, ensure_ascii=False, sort_keys=True))
+        return
+
+    table = Table(title="AXIOM Local Runtime Compatibility")
+    table.add_column("Format")
+    table.add_column("Runtime")
+    table.add_column("Availability")
+    table.add_column("Version evidence")
+    for format_entry in matrix["formats"]:
+        for candidate in format_entry["candidates"]:
+            table.add_row(
+                format_entry["format"],
+                candidate["runtime_name"],
+                candidate["availability"],
+                candidate["version"] or "Not detected",
+            )
+    console.print(table)
+    console.print(matrix["scope_note"])
+
+
 @model_app.command("list")
 def model_list(
     json_output: bool = typer.Option(False, "--json", help="Emit registered model records as JSON."),
@@ -1237,6 +1266,7 @@ def model_list(
     table.add_column("Parameters")
     table.add_column("Quantization")
     table.add_column("Weight size (bytes)", justify="right")
+    table.add_column("Workspace labels")
     for model in models:
         table.add_row(
             model.name,
@@ -1245,6 +1275,7 @@ def model_list(
             model.parameters or "-",
             model.quantization or "-",
             str(model.size_bytes) if model.size_bytes is not None else "-",
+            ", ".join(model.workspace_labels) or "-",
         )
     console.print(table)
 
@@ -1522,6 +1553,7 @@ def model_add(
     tag: list[str] | None = typer.Option(None, "--tag", help="Repeat for each model tag."),
     content_sha256: str | None = typer.Option(None, "--content-sha256", help="Optional 64-hex digest for inspected local weights."),
     size_bytes: int | None = typer.Option(None, "--size-bytes", help="Known combined weight-file size in bytes."),
+    workspace_label: list[str] | None = typer.Option(None, "--workspace-label", help="Repeat to assign workspace labels."),
     json_output: bool = typer.Option(False, "--json", help="Emit the created model record as JSON."),
 ):
     """Register model metadata without downloading or moving weights."""
@@ -1538,6 +1570,7 @@ def model_add(
             tags=tag or [],
             content_sha256=content_sha256,
             size_bytes=size_bytes,
+            workspace_labels=workspace_label or [],
         )
         registry.add(model)
     except (TypeError, ValueError) as exc:
@@ -1565,6 +1598,8 @@ def model_update(
     clear_tags: bool = typer.Option(False, "--clear-tags", help="Clear all tags."),
     content_sha256: str | None = typer.Option(None, "--content-sha256"),
     size_bytes: int | None = typer.Option(None, "--size-bytes", help="Known combined weight-file size in bytes."),
+    workspace_label: list[str] | None = typer.Option(None, "--workspace-label", help="Replace workspace labels; repeat for each label."),
+    clear_workspace_labels: bool = typer.Option(False, "--clear-workspace-labels", help="Clear all workspace labels."),
     favorite: bool | None = typer.Option(None, "--favorite/--unfavorite"),
     json_output: bool = typer.Option(False, "--json", help="Emit the updated model record as JSON."),
 ):
@@ -1585,6 +1620,16 @@ def model_update(
             changes[key] = value
     if tag is not None:
         changes["tags"] = tag
+    if workspace_label is not None:
+        changes["workspace_labels"] = workspace_label
+    if clear_workspace_labels:
+        if workspace_label is not None:
+            message = "--clear-workspace-labels cannot be combined with --workspace-label."
+            _cli_command_error(
+                message, code="model_update_invalid", json_output=json_output,
+                legacy_payload={"schema_version": 1, "error": {"code": "model_update_invalid", "message": message}},
+            )
+        changes["workspace_labels"] = []
     if clear_tags:
         if tag is not None:
             message = "--clear-tags cannot be combined with --tag."

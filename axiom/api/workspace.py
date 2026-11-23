@@ -27,6 +27,7 @@ from axiom.models.registry import Model, ModelRegistry
 from axiom.models.compatibility import estimate_model_compatibility
 from axiom.models.discovery import discover_local_model_folders
 from axiom.models.inspector import inspect_model
+from axiom.models.runtime_matrix import probe_local_runtime_matrix
 from axiom.api.model_paths import validate_model_path
 from axiom.path_safety import (
     DEFAULT_SKIP_DIRECTORIES,
@@ -97,6 +98,7 @@ class WorkspaceModelInput(BaseModel):
     favorite: bool = False
     content_sha256: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
     size_bytes: int | None = Field(default=None, strict=True, ge=0, le=9_007_199_254_740_991)
+    workspace_labels: list[str] = Field(default_factory=list, max_length=32)
     id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
 
@@ -112,6 +114,7 @@ class WorkspaceModelPatch(BaseModel):
     favorite: bool | None = None
     content_sha256: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
     size_bytes: int | None = Field(default=None, strict=True, ge=0, le=9_007_199_254_740_991)
+    workspace_labels: list[str] | None = Field(default=None, max_length=32)
 
 
 class WorkspaceModelImportInput(BaseModel):
@@ -322,7 +325,8 @@ def workspace_models(
         def matches(model: Model) -> bool:
             fields = (
                 model.name, model.source, model.format, model.parameters,
-                model.quantization, model.architecture, model.license, *model.tags,
+                model.quantization, model.architecture, model.license,
+                *model.tags, *model.workspace_labels,
             )
             return any(needle in value.casefold() for value in fields if isinstance(value, str))
         models = [model for model in models if matches(model)]
@@ -449,6 +453,14 @@ def workspace_import_models(request: WorkspaceModelImportInput) -> dict[str, Any
     return {"models": [model.to_dict() for model in imported], "imported": len(imported)}
 
 
+@router.get("/models/runtime-matrix")
+def workspace_model_runtime_matrix(refresh: bool = Query(False)) -> dict[str, Any]:
+    """Return local runtime/version evidence without network access or model loading."""
+    matrix = probe_local_runtime_matrix(force_refresh=refresh)
+    record_workspace_event("models.runtime_matrix", "Checked local runtime version evidence")
+    return {"matrix": matrix}
+
+
 @router.get("/models/{model_id}")
 def workspace_model(model_id: str) -> dict[str, Any]:
     model = ModelRegistry().get(model_id)
@@ -478,7 +490,7 @@ def workspace_update_model(model_id: str, request: WorkspaceModelPatch) -> dict[
     changes = request.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=422, detail="At least one metadata field is required.")
-    if any(value is None for key, value in changes.items() if key not in {"license", "content_sha256", "architecture", "parameters", "quantization", "tags", "size_bytes"}):
+    if any(value is None for key, value in changes.items() if key not in {"license", "content_sha256", "architecture", "parameters", "quantization", "tags", "size_bytes", "workspace_labels"}):
         raise HTTPException(status_code=422, detail="Non-null metadata values are required.")
     try:
         model = ModelRegistry().update(model_id, changes)
