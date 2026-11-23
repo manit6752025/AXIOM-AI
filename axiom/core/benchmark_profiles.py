@@ -66,7 +66,7 @@ def _canonical_model_root(model_path: str | Path) -> Path | None:
     """Resolve an explicitly selected model directory to a canonical filesystem root."""
     try:
         supplied = os.path.expanduser(os.fspath(model_path))
-        if not supplied or "\\0" in supplied:
+        if not supplied:
             return None
         candidate = Path(os.path.abspath(supplied))
         if candidate.is_symlink():
