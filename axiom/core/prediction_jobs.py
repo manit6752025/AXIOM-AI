@@ -395,6 +395,15 @@ def cleanup_orphaned_prediction_temporaries(root: Path) -> int:
     removed = 0
     directory_fd: int | None = None
     try:
+        protected_names = {
+            record["checkpoint_name"]
+            for record in _read_job_records(root)
+            if isinstance(record.get("checkpoint_name"), str)
+        }
+    except (OSError, RuntimeError, ValueError):
+        # Do not delete possible checkpoints when the job store cannot be trusted.
+        return 0
+    try:
         data_root = _safe_data_root(root)
         descriptor_supported = (
             os.open in os.supports_dir_fd
@@ -416,7 +425,7 @@ def cleanup_orphaned_prediction_temporaries(root: Path) -> int:
                 if index >= 5000:
                     break
                 match = _TEMP_NAME.fullmatch(entry.name)
-                if match is None:
+                if match is None or entry.name in protected_names:
                     continue
                 try:
                     if descriptor_supported:
@@ -460,6 +469,175 @@ def _resolve_engine_asset(path: Path, label: str) -> Path:
     except ValueError:
         refresh_local_engine_asset_index()
         return Path(resolve_local_model_directory(str(path), label))
+
+
+
+
+
+def _prediction_asset_fingerprint(path: Path, *, adapter: bool) -> str | None:
+    """Fingerprint bounded local weight and generation metadata without loading model code."""
+    try:
+        from axiom.models.provenance import inspect_model_provenance
+
+        report = inspect_model_provenance(path)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    evidence = report.get("hash_evidence", {})
+    weight_digest = evidence.get("checkpoint_sha256") if isinstance(evidence, dict) else None
+    if evidence.get("status") != "complete" or not isinstance(weight_digest, str):
+        return None
+
+    digest = hashlib.sha256()
+    digest.update(b"axiom-prediction-asset-v1\0")
+    digest.update(bytes.fromhex(weight_digest))
+    names = ("adapter_config.json",) if adapter else (
+        "config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+        "generation_config.json",
+    )
+    for name in names:
+        candidate = path / name
+        try:
+            metadata = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return None
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 64 * 1024 * 1024:
+            return None
+        descriptor = -1
+        try:
+            descriptor = os.open(candidate, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(descriptor, "rb") as stream:
+                descriptor = -1
+                before = os.fstat(stream.fileno())
+                if not stat.S_ISREG(before.st_mode) or before.st_size != metadata.st_size:
+                    return None
+                file_digest = hashlib.sha256()
+                total = 0
+                while True:
+                    block = stream.read(_READ_CHUNK_BYTES)
+                    if not block:
+                        break
+                    total += len(block)
+                    if total > 64 * 1024 * 1024:
+                        return None
+                    file_digest.update(block)
+                after = os.fstat(stream.fileno())
+                current = candidate.lstat()
+            identity = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+            if (
+                identity != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+                or identity != (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns)
+                or total != metadata.st_size
+            ):
+                return None
+        except (OSError, ValueError):
+            return None
+        finally:
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(total).encode("ascii"))
+        digest.update(b"\0")
+        digest.update(file_digest.digest())
+    return digest.hexdigest()
+
+
+def _open_prediction_checkpoint(
+    root: Path,
+    record: dict[str, Any],
+    *,
+    parent_fd: int | None = None,
+) -> tuple[Any, str, Path, tuple[int, int], int, Any]:
+    """Open and verify a durable JSONL prefix; truncate only bytes beyond its committed digest."""
+    name = record.get("checkpoint_name")
+    match = _TEMP_NAME.fullmatch(name) if isinstance(name, str) else None
+    if match is None or match.group(2) != record.get("id"):
+        raise ValueError("Prediction checkpoint name is invalid.")
+    data_root = _safe_data_root(root)
+    path = data_root / name
+    try:
+        path_info = path.lstat()
+    except OSError:
+        raise ValueError("Prediction checkpoint is missing or unavailable.") from None
+    if not stat.S_ISREG(path_info.st_mode):
+        raise ValueError("Prediction checkpoint must be a regular file.")
+    flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = -1
+    try:
+        descriptor = os.open(name, flags, dir_fd=parent_fd) if parent_fd is not None else os.open(path, flags)
+        stream = os.fdopen(descriptor, "r+b")
+        descriptor = -1
+        before = os.fstat(stream.fileno())
+        expected_identity = record.get("checkpoint_identity")
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or not isinstance(expected_identity, list)
+            or list(_file_identity(before)) != expected_identity
+            or list(_file_identity(path_info)) != expected_identity
+        ):
+            stream.close()
+            raise ValueError("Prediction checkpoint identity changed.")
+        committed_bytes = record.get("checkpoint_bytes")
+        if (
+            isinstance(committed_bytes, bool)
+            or not isinstance(committed_bytes, int)
+            or not 0 <= committed_bytes <= _MAX_OUTPUT_BYTES
+            or before.st_size < committed_bytes
+        ):
+            stream.close()
+            raise ValueError("Prediction checkpoint size is inconsistent.")
+        digest = hashlib.sha256()
+        rows = 0
+        total = 0
+        last_byte = b""
+        stream.seek(0)
+        while total < committed_bytes:
+            block = stream.read(min(_READ_CHUNK_BYTES, committed_bytes - total))
+            if not block:
+                stream.close()
+                raise ValueError("Prediction checkpoint ended before its committed size.")
+            total += len(block)
+            rows += block.count(b"\n")
+            last_byte = block[-1:]
+            digest.update(block)
+        if (
+            digest.hexdigest() != record.get("checkpoint_sha256")
+            or rows != record.get("rows_completed")
+            or (committed_bytes > 0 and last_byte != b"\n")
+        ):
+            stream.close()
+            raise ValueError("Prediction checkpoint digest or row count does not match saved job state.")
+        if before.st_size > committed_bytes:
+            os.ftruncate(stream.fileno(), committed_bytes)
+            stream.flush()
+            os.fsync(stream.fileno())
+        after = os.fstat(stream.fileno())
+        current_path = path.lstat()
+        if (
+            _file_identity(after) != _file_identity(before)
+            or _file_identity(current_path) != _file_identity(before)
+            or not stat.S_ISREG(current_path.st_mode)
+            or after.st_size != committed_bytes
+        ):
+            stream.close()
+            raise ValueError("Prediction checkpoint changed during verification.")
+        stream.seek(committed_bytes)
+        return stream, name, path, _file_identity(after), committed_bytes, digest
+    except Exception:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise
 
 
 def _job_summary(job: dict[str, Any]) -> dict[str, Any]:
