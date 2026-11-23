@@ -4207,7 +4207,9 @@ def axiom_prediction_job_status(job_id: str | None = None, limit: int = 10) -> d
                 "logs_returned": False,
                 "absolute_paths_returned": False,
                 "job_state_persisted": True,
-                "generation_resumed_after_restart": False,
+                "generation_resumed_after_restart": any(
+                    int(item.get("resumption_count", 0)) > 0 for item in jobs
+                ),
             },
         }
     job = get_prediction_job(job_id, root)
@@ -4220,7 +4222,7 @@ def axiom_prediction_job_status(job_id: str | None = None, limit: int = 10) -> d
             "logs_returned": False,
             "absolute_paths_returned": False,
             "job_state_persisted": True,
-            "generation_resumed_after_restart": False,
+            "generation_resumed_after_restart": bool(job and job.get("resumption_count", 0)),
         },
     }
 
