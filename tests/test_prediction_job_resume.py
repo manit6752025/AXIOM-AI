@@ -136,6 +136,25 @@ def test_prediction_v1_job_history_migrates_as_non_resumable(tmp_path):
     assert record["resumption_count"] == 0
     assert summary["status"] == "interrupted"
     assert summary["resumable"] is False
+    assert record["generation_fingerprint"] == prediction_jobs._prediction_generation_fingerprint(record)
+
+    v2_defaults = {
+        "dataset_sha256": None,
+        "model_fingerprint": None,
+        "adapter_fingerprint": None,
+        "checkpoint_name": None,
+        "checkpoint_identity": None,
+        "checkpoint_bytes": 0,
+        "checkpoint_sha256": None,
+        "resumption_count": 0,
+    }
+    (state_dir / "prediction_jobs.json").write_text(
+        json.dumps({"schema_version": 2, "jobs": [{**legacy, **v2_defaults}]}, indent=2),
+        encoding="utf-8",
+    )
+    [migrated_v2] = prediction_jobs._read_job_records(tmp_path)
+    assert migrated_v2["generation_fingerprint"] == prediction_jobs._prediction_generation_fingerprint(migrated_v2)
+
 
 def test_resume_prediction_job_revalidates_assets_and_schedules_checkpoint_worker(tmp_path, monkeypatch):
     import json
