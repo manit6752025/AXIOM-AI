@@ -41,6 +41,31 @@ def test_knowledge_base_ingests_supported_text_privately_and_verifies_integrity(
     assert str(workspace) not in index
 
 
+def test_private_document_lookup_rejects_symlinked_storage_entries(tmp_path):
+    workspace, _ = _workspace(tmp_path)
+    external = tmp_path / "external.txt"
+    external.write_text("must never be read or removed", encoding="utf-8")
+    store = KnowledgeBaseStore(workspace)
+    base = store.create_base("Private")
+    document = store.ingest_document(base["id"], "documents/guide.md")
+    stored = workspace / ".axiom" / "knowledge" / "documents" / f"{document['id']}.txt"
+    stored.unlink()
+    try:
+        stored.symlink_to(external)
+    except (OSError, NotImplementedError):
+        pytest.skip("File symlink creation is unavailable in this environment.")
+
+    with pytest.raises(KnowledgeStoreError, match="symbolic link"):
+        store.read_document(base["id"], document["id"])
+    with pytest.raises(KnowledgeStoreError, match="symbolic link"):
+        store.remove_document(base["id"], document["id"])
+    with pytest.raises(KnowledgeStoreError, match="symbolic link"):
+        store.remove_base(base["id"])
+
+    assert external.read_text(encoding="utf-8") == "must never be read or removed"
+    assert store.get_base(base["id"]) is not None
+
+
 def test_knowledge_store_isolated_between_workspaces(tmp_path):
     workspace_a, _ = _workspace(tmp_path / "a")
     workspace_b, _ = _workspace(tmp_path / "b")
