@@ -18,6 +18,7 @@ import math
 import os
 import re
 import shutil
+import stat
 import statistics
 import sys
 import threading
@@ -738,6 +739,21 @@ def _path_is_within_root(path: Path, root: Path) -> bool:
         return False
 
 
+def _is_link_or_reparse_point(path: str) -> bool:
+    """Detect symbolic links and Windows reparse points without following them."""
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        # An unreadable directory entry must not be silently trusted.
+        return True
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag
+    )
+
+
 @lru_cache(maxsize=8)
 def _trusted_file_entry(path: str, root_text: str) -> bool:
     try:
@@ -784,7 +800,7 @@ def _trusted_directory_index(
             allowed_subdirs: list[str] = []
             for name in subdirs:
                 child = os.path.join(directory, name)
-                if os.path.islink(child):
+                if _is_link_or_reparse_point(child):
                     blocked_subdirs.append(child)
                 else:
                     allowed_subdirs.append(name)
