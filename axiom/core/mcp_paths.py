@@ -43,7 +43,12 @@ def _is_link_like(path: Path) -> bool:
         metadata = path.lstat()
     except FileNotFoundError:
         return False
-    if stat.S_ISLNK(metadata.st_mode) or getattr(metadata, "st_reparse_tag", 0):
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or getattr(metadata, "st_reparse_tag", 0)
+        or (reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag)
+    ):
         return True
     is_junction = getattr(path, "is_junction", None)
     return bool(is_junction and is_junction())
