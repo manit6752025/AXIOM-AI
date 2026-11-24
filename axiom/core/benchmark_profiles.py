@@ -69,12 +69,18 @@ def _trusted_model_directory(model_path: str | Path) -> Path | None:
     it is not used to construct or probe a filesystem path before validation.
     """
     try:
-        from axiom.core.engine import _allowed_model_roots, resolve_local_model_directory
+        from axiom.core.engine import (
+            _allowed_model_roots,
+            _path_is_within_root,
+            resolve_local_model_directory,
+        )
 
         resolved_text = resolve_local_model_directory(os.fspath(model_path), "Base model")
         resolved = Path(resolved_text)
         trusted_roots = tuple(Path(root).resolve(strict=True) for root in _allowed_model_roots())
-        if not resolved.is_absolute() or not any(resolved.is_relative_to(root) for root in trusted_roots):
+        if not resolved.is_absolute() or not any(
+            _path_is_within_root(resolved, root) for root in trusted_roots
+        ):
             return None
         return resolved
     except BenchmarkProfileError:
