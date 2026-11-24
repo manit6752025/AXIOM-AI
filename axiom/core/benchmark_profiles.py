@@ -79,7 +79,17 @@ def _trusted_model_directory(model_path: str | Path) -> Path | None:
         return resolved
     except BenchmarkProfileError:
         raise
-    except (OSError, RuntimeError, TypeError, ValueError):
+    except ValueError as exc:
+        # Keep the model inventory's explicit symlink rejection visible to
+        # callers. Treating this particular trust-boundary violation as an
+        # absent fingerprint would let a benchmark profile accept a path that
+        # the engine deliberately rejects.
+        if "symlinked path component" in str(exc):
+            raise BenchmarkProfileError(
+                "The selected model directory must not use symbolic links or junctions."
+            ) from None
+        return None
+    except (OSError, RuntimeError, TypeError):
         return None
 
 
