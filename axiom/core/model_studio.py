@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -856,11 +857,54 @@ def convert_local_model_to_gguf(source_dir: str, llama_cpp_dir: str, output_path
     return {"operation": "convert_gguf", "source_dir": str(source), "output_path": str(output), "outtype": "f16", "quantization": quantization, "summary": summary}
 
 
-def _job_path(job_id: str) -> Path:
-    safe_id = os.path.basename(job_id) if isinstance(job_id, str) else ""
-    if safe_id != job_id or not re.fullmatch(r"[0-9a-f]{32}", safe_id):
+def _validate_job_id(job_id: str) -> str:
+    if not isinstance(job_id, str) or not re.fullmatch(r"[0-9a-f]{32}", job_id):
         raise ValueError("Invalid Model Studio job ID.")
+    return job_id
+
+
+def _job_path(job_id: str) -> Path:
+    """Build a path for writing a job with an internally generated/validated ID."""
+    safe_id = _validate_job_id(job_id)
     return jobs_directory() / f"{safe_id}.json"
+
+
+def _existing_job_file(job_id: str) -> Path | None:
+    """Find a saved job by directory enumeration, never by joining caller input."""
+    safe_id = _validate_job_id(job_id)
+    folder = jobs_directory()
+    if folder.is_symlink():
+        raise ModelStudioError("Model Studio job directory must not be a symbolic link.")
+    if not folder.exists():
+        return None
+    if not folder.is_dir():
+        raise ModelStudioError("Model Studio job storage is not a directory.")
+    expected_name = f"{safe_id}.json"
+    try:
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                if entry.name != expected_name:
+                    continue
+                try:
+                    metadata = entry.stat(follow_symlinks=False)
+                except OSError:
+                    raise ModelStudioError("Saved Model Studio job state could not be inspected safely.") from None
+                reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+                is_reparse_point = bool(
+                    reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag
+                )
+                if not stat.S_ISREG(metadata.st_mode) or is_reparse_point:
+                    raise ModelStudioError(
+                        "Saved Model Studio job state must be a regular file, not a symbolic link or reparse point."
+                    )
+                if getattr(metadata, "st_nlink", 1) != 1:
+                    raise ModelStudioError("Saved Model Studio job state must not be hard-linked.")
+                return Path(entry.path)
+    except ModelStudioError:
+        raise
+    except OSError:
+        raise ModelStudioError("Model Studio job directory could not be inspected safely.") from None
+    return None
 
 
 def _write_job(job: dict[str, Any]) -> None:
@@ -874,7 +918,9 @@ def _write_job(job: dict[str, Any]) -> None:
 
 def _read_job(job_id: str) -> dict[str, Any] | None:
     """Read bounded job metadata without following a file or parent symlink."""
-    path = _job_path(job_id)
+    path = _existing_job_file(job_id)
+    if path is None:
+        return None
     try:
         with open_regular_file(path) as stream:
             metadata = os.fstat(stream.fileno())
@@ -890,7 +936,11 @@ def _read_job(job_id: str) -> dict[str, Any] | None:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError, SafePathError):
         raise ModelStudioError("Saved Model Studio job state could not be read safely.") from None
-    return value if isinstance(value, dict) else None
+    if not isinstance(value, dict):
+        return None
+    if value.get("id") != job_id:
+        raise ModelStudioError("Saved Model Studio job ID does not match its directory entry.")
+    return value
 
 
 def _pid_alive(pid: Any) -> bool:
@@ -928,7 +978,7 @@ def get_job(job_id: str) -> dict[str, Any] | None:
 
 def cancel_job(job_id: str) -> dict[str, Any] | None:
     """Request cooperative cancellation of an active Model Studio job."""
-    _job_path(job_id)
+    _validate_job_id(job_id)
     with _ACTIVE_LOCK:
         job = _read_job(job_id)
         if job is None:
