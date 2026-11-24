@@ -200,6 +200,41 @@ class KnowledgeBaseStore:
             raise KnowledgeStoreCapacityError("Knowledge metadata exceeds the 4 MiB workspace index limit.")
         atomic_write_text(self.index_path, serialized)
 
+    def _document_storage_path(self, document_id: str, *, required: bool = True) -> Path | None:
+        """Find a stored document by enumerating the fixed private directory.
+
+        The caller-provided identifier is used only for equality comparison;
+        it is never interpolated into a filesystem path. Returned paths originate
+        from directory entries and are checked without following symlinks.
+        """
+        if not isinstance(document_id, str) or not _DOCUMENT_ID.fullmatch(document_id):
+            raise KnowledgeStoreError("Document ID is invalid.")
+        self._ensure_layout(create=False)
+        expected_name = f"{document_id}.txt"
+        try:
+            with os.scandir(self.documents_root) as entries:
+                for entry in entries:
+                    if entry.name != expected_name:
+                        continue
+                    try:
+                        metadata = entry.stat(follow_symlinks=False)
+                    except OSError:
+                        raise KnowledgeStoreError("Stored knowledge document could not be inspected safely.") from None
+                    if not stat.S_ISREG(metadata.st_mode):
+                        raise KnowledgeStoreError(
+                            "Stored knowledge document must be a regular file, not a symbolic link or special file."
+                        )
+                    if getattr(metadata, "st_nlink", 1) != 1:
+                        raise KnowledgeStoreError("Stored knowledge document must not be hard-linked.")
+                    return Path(entry.path)
+        except KnowledgeStoreError:
+            raise
+        except OSError:
+            raise KnowledgeStoreError("Stored knowledge directory could not be inspected safely.") from None
+        if required:
+            raise KnowledgeStoreError("Stored knowledge document is unavailable.")
+        return None
+
     @staticmethod
     def _public_base(base: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -328,9 +363,8 @@ class KnowledgeBaseStore:
             document = next((item for item in base["documents"] if item["id"] == document_id), None)
             if document is None:
                 raise KeyError("Knowledge document not found.")
-            path = self.documents_root / f"{document_id}.txt"
-            if path.is_symlink() or not path.is_file():
-                raise KnowledgeStoreError("Stored knowledge document is unavailable.")
+            path = self._document_storage_path(document["id"])
+            assert path is not None
             try:
                 with open_regular_file(path) as handle:
                     raw = handle.read(MAX_DOCUMENT_BYTES + 1)
@@ -357,13 +391,11 @@ class KnowledgeBaseStore:
             document = next((item for item in base["documents"] if item["id"] == document_id), None)
             if document is None:
                 return None
-            path = self.documents_root / f"{document_id}.txt"
-            if path.is_symlink():
-                raise KnowledgeStoreError("Stored knowledge document is a symbolic link.")
+            path = self._document_storage_path(document["id"], required=False)
             base["documents"] = [item for item in base["documents"] if item["id"] != document_id]
             base["updated_at"] = _now()
             self._write_index(records)
-            if path.exists():
+            if path is not None:
                 path.unlink()
             return dict(document)
 
@@ -378,10 +410,9 @@ class KnowledgeBaseStore:
                 return None
             paths = []
             for document in base["documents"]:
-                path = self.documents_root / f"{document['id']}.txt"
-                if path.is_symlink():
-                    raise KnowledgeStoreError("Stored knowledge document is a symbolic link.")
-                paths.append(path)
+                path = self._document_storage_path(document["id"], required=False)
+                if path is not None:
+                    paths.append(path)
             records = [item for item in records if item["id"] != base_id]
             self._write_index(records)
             for path in paths:
