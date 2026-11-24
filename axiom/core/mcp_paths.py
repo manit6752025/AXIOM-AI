@@ -100,8 +100,8 @@ def _fallback_workspace_path(
                 raise ValueError("The workspace output parent changed while being inspected.") from None
             if not _path_is_within_root(resolved_parent, workspace):
                 raise ValueError("The path must stay inside the MCP workspace.")
-            if candidate.exists() or _is_link_like(candidate):
-                raise ValueError("The workspace output path changed while being inspected.")
+            if not _path_is_within_root(candidate, workspace):
+                raise ValueError("The workspace output must stay inside the MCP workspace.")
             return candidate
 
         try:
@@ -126,13 +126,9 @@ def _fallback_workspace_path(
             raise ValueError("Workspace parent directories must already exist.")
         current = candidate
 
-    try:
-        resolved = current.resolve(strict=True)
-    except (OSError, RuntimeError):
-        raise ValueError("The workspace path changed while being inspected.") from None
-    if not _path_is_within_root(resolved, workspace) or resolved == workspace:
+    if not _path_is_within_root(current, workspace) or current == workspace:
         raise ValueError("The path must stay inside the MCP workspace.")
-    return resolved
+    return current
 
 
 def _path_is_within_root(path: Path, root: Path) -> bool:
