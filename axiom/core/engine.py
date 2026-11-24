@@ -898,7 +898,7 @@ def _resolve_model_directory(value: str, label: str) -> Path:
             for part in parts:
                 try:
                     with os.scandir(current) as entries:
-                        selected = next((entry for entry in entries if entry.name == part), None)
+                        selected = next((entry for entry in entries if os.path.normcase(entry.name) == os.path.normcase(part)), None)
                 except OSError:
                     found = False
                     break
