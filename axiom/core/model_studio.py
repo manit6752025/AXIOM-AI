@@ -873,11 +873,19 @@ def _existing_job_file(job_id: str) -> Path | None:
     """Find a saved job by directory enumeration, never by joining caller input."""
     safe_id = _validate_job_id(job_id)
     folder = jobs_directory()
-    if folder.is_symlink():
-        raise ModelStudioError("Model Studio job directory must not be a symbolic link.")
-    if not folder.exists():
+    try:
+        folder_info = folder.lstat()
+    except FileNotFoundError:
         return None
-    if not folder.is_dir():
+    except OSError:
+        raise ModelStudioError("Model Studio job directory could not be inspected safely.") from None
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    folder_is_reparse = bool(
+        reparse_flag and getattr(folder_info, "st_file_attributes", 0) & reparse_flag
+    )
+    if stat.S_ISLNK(folder_info.st_mode) or folder_is_reparse:
+        raise ModelStudioError("Model Studio job directory must not be a symbolic link or reparse point.")
+    if not stat.S_ISDIR(folder_info.st_mode):
         raise ModelStudioError("Model Studio job storage is not a directory.")
     expected_name = f"{safe_id}.json"
     try:
@@ -895,7 +903,7 @@ def _existing_job_file(job_id: str) -> Path | None:
                 )
                 if not stat.S_ISREG(metadata.st_mode) or is_reparse_point:
                     raise ModelStudioError(
-                        "Saved Model Studio job state must be a regular file, not a symbolic link or reparse point."
+                        "Saved Model Studio job state could not be read safely; it must be a regular file, not a symbolic link or reparse point."
                     )
                 if getattr(metadata, "st_nlink", 1) != 1:
                     raise ModelStudioError("Saved Model Studio job state must not be hard-linked.")
