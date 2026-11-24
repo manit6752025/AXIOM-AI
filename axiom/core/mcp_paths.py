@@ -231,11 +231,21 @@ def open_mcp_workspace_output_parent(
         os.link not in os.supports_dir_fd or os.unlink not in os.supports_dir_fd
     ):
         path = _fallback_workspace_path(raw, root, allow_existing_output=True)
-        if path.exists():
-            if not path.is_file() or path.is_symlink():
-                raise ValueError("The workspace output must be a regular file path.")
-            return path, None, path.name, False
-        return path, None, path.name, True
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            return path, None, path.name, True
+        except OSError:
+            raise ValueError("The workspace output path could not be inspected safely.") from None
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        is_reparse_point = bool(
+            reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag
+        )
+        if stat.S_ISLNK(metadata.st_mode) or is_reparse_point:
+            raise ValueError("Symbolic links and junctions are not supported for MCP output paths.")
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("The workspace output must be a regular file path.")
+        return path, None, path.name, False
 
     parts = _parts(raw)
     path, parent_descriptor, name = _open_parent(root, parts)
