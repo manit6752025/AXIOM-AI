@@ -360,6 +360,16 @@ def test_engine_smoke_requires_platform_normalized_trusted_root_containment() ->
     )
     assert any("_is_link_or_reparse_point(child)" in item for item in issues)
 
+    broken_component_walk = engine_source.replace(
+        "with os.scandir(current) as entries:",
+        "with os.scandir(root) as entries:",
+        1,
+    )
+    issues = release_smoke.engine_security_and_lifecycle_issues(
+        broken_component_walk, native_source, api_source, client_source, panel_source, e2e_source,
+    )
+    assert any("with os.scandir(current) as entries:" in item for item in issues)
+
 
 def test_native_engine_smoke_rejects_missing_kv_cache_mechanics() -> None:
     engine_source = (ROOT / "axiom" / "core" / "engine.py").read_text(encoding="utf-8")
