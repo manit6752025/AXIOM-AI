@@ -846,7 +846,7 @@ def refresh_local_engine_asset_index() -> None:
 
 
 def _resolve_model_directory(value: str, label: str) -> Path:
-    """Resolve a request by matching it to an inventoried trusted model folder."""
+    """Resolve a model path by walking trusted directory entries component by component."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{label} is required.")
     if len(value) > 4096 or any(character in value for character in ("\\x00", "\\r", "\\n")):
@@ -859,47 +859,99 @@ def _resolve_model_directory(value: str, label: str) -> Path:
             "or set AXIOM_MODEL_ROOTS to trusted local directories."
         )
 
-    # Normalization here is lexical only. All filesystem reads are performed
-    # against paths obtained independently from a walk of trusted roots.
+    # Treat request text as lexical input only. All filesystem operations below
+    # are anchored at an independently canonicalized trusted root and each path
+    # component is selected by matching a real directory entry.
     raw_value = os.path.expanduser(value.strip())
-    # Reject traversal components up front. These are string operations only;
-    # the request value is never passed to a filesystem API or Path constructor.
-    components = raw_value.replace("\\", "/").split("/")
-    if os.pardir in components:
+    if any(part == os.pardir for part in raw_value.replace("\\", "/").split("/")):
         raise ValueError(f"{label} must not contain parent-directory traversal components.")
 
-    root_strings = tuple(str(root) for root in roots)
-    candidate_keys = {os.path.normcase(os.path.normpath(raw_value))}
-    if not os.path.isabs(raw_value):
-        # Relative CLI/UI input is first interpreted from the current working
-        # directory; matching still happens against the inventory before any
-        # filesystem operation uses a model path.
-        cwd_key = os.getcwd().rstrip("/\\") + os.sep + raw_value
-        candidate_keys.add(os.path.normcase(os.path.normpath(cwd_key)))
-        candidate_keys.update(
-            os.path.normcase(os.path.normpath(root_text.rstrip("/\\") + os.sep + raw_value))
-            for root_text in root_strings
+    candidates = (
+        (os.path.normpath(raw_value),)
+        if os.path.isabs(raw_value)
+        else tuple(
+            os.path.normpath(os.path.join(base, raw_value))
+            for base in (os.getcwd(), *(os.fspath(root) for root in roots))
         )
-    freshness_bucket = int(time.monotonic() // 30)
-    entries = _trusted_directory_index(root_strings, freshness_bucket)
-    for discovered, is_model, is_adapter, is_symlink in entries:
-        key = os.path.normcase(os.path.normpath(discovered))
-        matched = key in candidate_keys
-        if is_symlink and not matched:
-            separator = os.sep
-            matched = any(candidate.startswith(key.rstrip("/\\\\") + separator) for candidate in candidate_keys)
-        if not matched:
-            continue
-        if is_symlink:
-            raise ValueError(f"{label} cannot use a symlinked path component; trusted-root escapes are not allowed.")
-        lowered = label.casefold()
-        if lowered == "base model" and not is_model:
-            continue
-        if lowered == "lora adapter" and not is_adapter:
-            continue
-        # The returned path is from the trusted directory inventory, never
-        # constructed from the request-supplied path.
-        return Path(discovered)
+    )
+    for candidate_text in candidates:
+        candidate_key = os.path.normcase(os.path.normpath(candidate_text))
+        for root in roots:
+            root_text = os.fspath(root)
+            root_key = os.path.normcase(os.path.normpath(root_text))
+            try:
+                if os.path.commonpath((candidate_key, root_key)) != root_key:
+                    continue
+                relative = os.path.relpath(candidate_text, root_text)
+            except (OSError, ValueError):
+                continue
+            parts = tuple(relative.replace("\\", "/").split("/"))
+            if (
+                not parts
+                or len(parts) > 12
+                or any(part in {"", ".", ".."} for part in parts)
+            ):
+                continue
+
+            current = root
+            found = True
+            for part in parts:
+                try:
+                    with os.scandir(current) as entries:
+                        selected = next((entry for entry in entries if entry.name == part), None)
+                except OSError:
+                    found = False
+                    break
+                if selected is None:
+                    found = False
+                    break
+                try:
+                    metadata = selected.stat(follow_symlinks=False)
+                except OSError:
+                    raise ValueError(f"{label} changed while its trusted path was being inspected.") from None
+                if _is_link_or_reparse_point(selected.path):
+                    raise ValueError(
+                        f"{label} cannot use a symlinked path component; trusted-root escapes are not allowed."
+                    )
+                if not stat.S_ISDIR(metadata.st_mode):
+                    found = False
+                    break
+                current = Path(selected.path)
+
+            if not found or not _path_is_within_root(current, root) or current == root:
+                continue
+
+            has_config = False
+            has_adapter_config = False
+            gguf_found = False
+            try:
+                with os.scandir(current) as marker_entries:
+                    for entry in marker_entries:
+                        name = entry.name
+                        if name not in {"config.json", "adapter_config.json"} and not name.lower().endswith(".gguf"):
+                            continue
+                        if not _trusted_file_entry(entry.path, root_text):
+                            continue
+                        if name == "config.json":
+                            has_config = True
+                        elif name == "adapter_config.json":
+                            has_adapter_config = True
+                        elif name.lower().endswith(".gguf"):
+                            gguf_found = True
+            except OSError:
+                continue
+
+            is_model = has_config or gguf_found
+            is_adapter = has_adapter_config
+            lowered = label.casefold()
+            if lowered == "base model" and not is_model:
+                continue
+            if lowered == "lora adapter" and not is_adapter:
+                continue
+            if not is_model and not is_adapter:
+                continue
+            return current
+
     raise ValueError(
         f"{label} must match an existing checkpoint directory discovered under a trusted model root. "
         "Set AXIOM_MODEL_ROOTS to add a trusted location and retry."
