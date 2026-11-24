@@ -413,6 +413,38 @@ def test_model_studio_job_reader_rejects_symlinked_job_file(tmp_path, monkeypatc
         studio.get_job(job_id)
 
 
+def test_model_studio_job_reader_rejects_mismatched_embedded_identity(tmp_path, monkeypatch):
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    requested_id = "1" * 32
+    other_id = "2" * 32
+    (jobs_dir / f"{requested_id}.json").write_text(
+        json.dumps({"id": other_id, "status": "completed"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(studio, "jobs_directory", lambda: jobs_dir)
+
+    with pytest.raises(studio.ModelStudioError, match="does not match its directory entry"):
+        studio.get_job(requested_id)
+
+
+def test_model_studio_job_reader_rejects_hard_linked_job_state(tmp_path, monkeypatch):
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    job_id = "3" * 32
+    job_file = jobs_dir / f"{job_id}.json"
+    job_file.write_text(json.dumps({"id": job_id, "status": "completed"}), encoding="utf-8")
+    alias = tmp_path / "external-job-alias.json"
+    try:
+        os.link(job_file, alias)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Hard links unavailable: {exc}")
+    monkeypatch.setattr(studio, "jobs_directory", lambda: jobs_dir)
+
+    with pytest.raises(studio.ModelStudioError, match="must not be hard-linked"):
+        studio.get_job(job_id)
+
+
 def test_model_studio_job_reader_rejects_oversized_job_state(tmp_path, monkeypatch):
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir()
