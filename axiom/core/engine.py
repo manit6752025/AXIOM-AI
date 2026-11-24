@@ -731,9 +731,10 @@ def _allowed_model_roots() -> tuple[Path, ...]:
 
 def _path_is_within_root(path: Path, root: Path) -> bool:
     try:
-        path.relative_to(root)
-        return True
-    except ValueError:
+        normalized_path = os.path.normcase(os.path.normpath(os.fspath(path)))
+        normalized_root = os.path.normcase(os.path.normpath(os.fspath(root)))
+        return os.path.commonpath((normalized_path, normalized_root)) == normalized_root
+    except (OSError, TypeError, ValueError):
         return False
 
 
@@ -741,7 +742,13 @@ def _path_is_within_root(path: Path, root: Path) -> bool:
 def _trusted_file_entry(path: str, root_text: str) -> bool:
     try:
         resolved = os.path.realpath(path)
-        return os.path.isfile(resolved) and os.path.commonpath((resolved, root_text)) == root_text
+        canonical_root = os.path.realpath(root_text)
+        normalized_path = os.path.normcase(os.path.normpath(resolved))
+        normalized_root = os.path.normcase(os.path.normpath(canonical_root))
+        return (
+            os.path.isfile(resolved)
+            and os.path.commonpath((normalized_path, normalized_root)) == normalized_root
+        )
     except (OSError, ValueError):
         return False
 
@@ -805,11 +812,14 @@ def _trusted_directory_index(
                 continue
             try:
                 canonical = os.path.realpath(directory)
-                if os.path.commonpath((canonical, root_text)) != root_text:
+                canonical_root = os.path.realpath(root_text)
+                canonical_key = os.path.normcase(os.path.normpath(canonical))
+                root_key = os.path.normcase(os.path.normpath(canonical_root))
+                if os.path.commonpath((canonical_key, root_key)) != root_key:
                     continue
             except (OSError, ValueError):
                 continue
-            key = os.path.normcase(os.path.normpath(canonical))
+            key = canonical_key
             entries[key] = (canonical, model_config, adapter_config, False)
     return tuple(entries[key] for key in sorted(entries))
 
