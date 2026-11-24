@@ -14,7 +14,7 @@ def test_training_preflight_resolves_existing_files_and_directories_from_workspa
     model.mkdir(parents=True)
     data.mkdir()
     dataset = data / "train.jsonl"
-    dataset.write_text('{"text":"hello"}\\n', encoding="utf-8")
+    dataset.write_text('{"text":"hello"}', encoding="utf-8")
 
     assert resolve_workspace_input("models/tiny", workspace, "Model path") == model
     assert resolve_workspace_input("data/train.jsonl", workspace, "Dataset path") == dataset
