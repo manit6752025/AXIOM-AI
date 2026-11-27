@@ -71,7 +71,6 @@ def _trusted_model_directory(model_path: str | Path) -> Path | None:
     try:
         from axiom.core.engine import (
             _allowed_model_roots,
-            _is_link_or_reparse_point,
             _path_is_within_root,
             resolve_local_model_directory,
         )
