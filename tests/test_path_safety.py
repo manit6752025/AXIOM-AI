@@ -217,8 +217,14 @@ def test_codeql_models_the_directory_entry_selector_as_a_path_barrier():
     fallback_start = mcp_source.index("def open_mcp_workspace_file(")
     fallback_end = mcp_source.index("def open_mcp_workspace_output_parent(", fallback_start)
     fallback = mcp_source[fallback_start:fallback_end]
-    assert "if path.is_relative_to(workspace):" in fallback
-    assert fallback.index("if path.is_relative_to(workspace):") < fallback.index("open_regular_file(path)")
+    helper_start = mcp_source.index("def _resolve_mcp_workspace_file(")
+    helper_end = mcp_source.index("def _path_is_within_root(", helper_start)
+    resolver = mcp_source[helper_start:helper_end]
+    assert "_workspace_root(root)" in resolver
+    assert "resolve_workspace_output_path(raw, workspace)" in resolver
+    assert "resolved.relative_to(workspace)" in resolver
+    assert "resolved.lstat()" in resolver
+    assert fallback.index("_resolve_mcp_workspace_file(raw, root)") < fallback.index("open_regular_file(path)")
     assert "Member[_find_directory_entry].ReturnValue" not in model
 
 
