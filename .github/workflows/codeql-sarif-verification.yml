@@ -2,7 +2,7 @@ name: AXIOM CodeQL SARIF verification
 
 on:
   push:
-    branches: [main]
+    branches: [main, "fix/vulnerability"]
     paths:
       - "axiom/**"
       - "src/**"
@@ -30,9 +30,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
-          ref: main
+          ref: ${{ github.ref }}
           fetch-depth: 1
       - name: Initialize CodeQL for all supported languages
         uses: github/codeql-action/init@v3
@@ -47,7 +47,7 @@ jobs:
           upload: false
           output: ${{ runner.temp }}/axiom-codeql-sarif
       - name: Upload SARIF reports for exact finding inspection
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: axiom-codeql-sarif-reports
           path: ${{ runner.temp }}/axiom-codeql-sarif/
