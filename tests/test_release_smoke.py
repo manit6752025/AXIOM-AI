@@ -46,11 +46,11 @@ def test_roadmap_audit_accepts_registry_publication_pending_status() -> None:
 
 
 def test_roadmap_audit_accepts_implemented_sdk_with_publication_gated() -> None:
-    markdown = "\\n".join(
+    markdown = "\n".join(
         f"- [R{i:03d} · {'Planned' if i % 2 else 'Implemented; tests passing'}] Requirement {i}."
         for i in range(1, 140)
     )
-    markdown += "\\n- [R140 · Implemented; publication gated] SDK code and CI are complete; owner-controlled registry release remains."
+    markdown += "\n- [R140 · Implemented; publication gated] SDK code and CI are complete; owner-controlled registry release remains."
     assert release_smoke.roadmap_issues(markdown) == []
 
 
