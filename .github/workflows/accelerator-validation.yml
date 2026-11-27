@@ -69,7 +69,6 @@ jobs:
               "hip": getattr(torch.version, "hip", None),
               "device_name": (
                   torch.cuda.get_device_name(0) if device in {"cuda", "rocm"}
-                  else "MPS"
                   else "MPS" if device == "mps"
                   else torch.xpu.get_device_name(0)
               ),

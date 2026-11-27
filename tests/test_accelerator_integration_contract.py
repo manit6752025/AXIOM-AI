@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import ast
+import re
+import textwrap
 from pathlib import Path
 
 import yaml
@@ -44,3 +47,25 @@ def test_accelerator_workflow_requires_manual_dispatch_and_real_device_probes():
     assert "Metal/MPS" in docs
     assert "paravirtual" in docs
     assert "self-hosted" in docs
+
+
+
+def test_accelerator_validation_preflight_python_is_syntactically_valid():
+    root = Path(__file__).resolve().parents[1]
+    workflow = yaml.load(
+        (root / ".github/workflows/accelerator-validation.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    steps = workflow["jobs"]["execute-real-adapter"]["steps"]
+    report_step = next(
+        step for step in steps
+        if "Verify physical device and accelerator-enabled PyTorch" in step.get("name", "")
+    )
+    match = re.search(r"python - <<'PY'\n(.*?)\nPY", report_step["run"], re.DOTALL)
+    assert match is not None
+    report_script = textwrap.dedent(match.group(1))
+    ast.parse(report_script)
+
+    assert 'torch.cuda.get_device_name(0) if device in {"cuda", "rocm"}' in report_script
+    assert 'else "MPS" if device == "mps"' in report_script
+    assert "torch.xpu.get_device_name(0)" in report_script

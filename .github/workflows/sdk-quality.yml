@@ -75,6 +75,22 @@ jobs:
         run: npm test --prefix sdk/typescript
       - name: Verify publishable npm archive
         run: npm pack --prefix sdk/typescript --dry-run
+      - name: Install packed SDK in a clean project
+        shell: bash
+        run: |
+          package_dir="$RUNNER_TEMP/axiom-sdk-npm-check"
+          mkdir -p "$package_dir"
+          npm pack --prefix sdk/typescript --pack-destination "$RUNNER_TEMP"
+          npm install --prefix "$package_dir" --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP/axiom-ai-sdk-1.0.0.tgz"
+          cd "$package_dir"
+          node --input-type=module -e '
+            import assert from "node:assert/strict";
+            import { AxiomClient, API_CONTRACT_VERSION } from "@axiom-ai/sdk";
+            assert.equal(API_CONTRACT_VERSION, 1);
+            const client = new AxiomClient();
+            client.close();
+            console.log("Packed TypeScript SDK installed and imported from a clean project.");
+          '
 
   contract:
     name: Shared SDK API contract
