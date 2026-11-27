@@ -241,7 +241,15 @@ def _selected_entry(directory: int | Path, requested_name: str) -> tuple[str, st
             selected = next((entry for entry in entries if entry.name == requested_name), None)
             if selected is None:
                 raise FileNotFoundError("Workspace path component was not found.")
-            metadata = selected.stat(follow_symlinks=False)
+            # Windows DirEntry metadata can omit a stable file index.
+            # Re-stat the OS-selected entry path so its identity is comparable
+            # with fstat() on the resulting handle. POSIX descriptor scans stay
+            # anchored to their pinned parent descriptor.
+            metadata = (
+                selected.stat(follow_symlinks=False)
+                if isinstance(directory, int)
+                else os.stat(selected.path, follow_symlinks=False)
+            )
             reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
             is_link_like = (
                 selected.is_symlink()

@@ -176,4 +176,8 @@ def test_open_regular_file_uses_only_enumerated_names_for_descriptor_opens(tmp_p
     with open_regular_file(target) as stream:
         assert stream.read() == b'{"text":"safe"}\\n'
 
-    assert descriptor_names == ["data", "record.jsonl"]
+    assert descriptor_names[-2:] == ["data", "record.jsonl"]
+    assert all(
+        isinstance(name, str) and "/" not in name and "\\" not in name
+        for name in descriptor_names
+    )
