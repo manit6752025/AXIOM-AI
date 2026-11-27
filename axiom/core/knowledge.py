@@ -251,13 +251,9 @@ class KnowledgeBaseStore:
                         raise KnowledgeStoreError(
                             "Stored knowledge document could not be inspected safely."
                         ) from None
-                    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-                    is_reparse_point = bool(
-                        reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag
-                    )
-                    if not stat.S_ISREG(metadata.st_mode) or is_reparse_point:
+                    if not stat.S_ISREG(metadata.st_mode):
                         raise KnowledgeStoreError(
-                            "Stored knowledge document must be a regular file, not a symbolic link, reparse point or special file."
+                            "Stored knowledge document must be a regular file, not a symbolic link or special file."
                         )
                     if getattr(metadata, "st_nlink", 1) != 1:
                         raise KnowledgeStoreError("Stored knowledge document must not be hard-linked.")
