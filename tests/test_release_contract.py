@@ -120,7 +120,7 @@ def test_pypi_workflow_publishes_validated_distributions_on_version_tags():
     assert "python -m twine check dist/*" not in workflow
     assert "axiom/webui/index.html" in workflow
     assert "axiom version" in workflow
-    assert "pypa/gh-action-pypi-publish@release/v1" in workflow
+    assert "pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086" in workflow
     assert "environment:\n      name: pypi" in workflow
     assert "secrets.PYPI_API_TOKEN" in workflow
 
