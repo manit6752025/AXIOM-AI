@@ -116,7 +116,8 @@ def resolve_workspace_output_path(
     root: Path,
     *,
     allow_existing_output: bool = False,
-) -> Path:
+    return_availability: bool = False,
+) -> Path | tuple[Path, bool]:
     """Resolve a portable workspace output from inspected directory entries.
 
     Only an absent final leaf may be constructed. Existing components are
@@ -183,7 +184,8 @@ def resolve_workspace_output_path(
         final_component = index == len(parts) - 1
         try:
             with os.scandir(current) as entries:
-                selected = next((entry for entry in entries if entry.name == part), None)
+                entries_by_name = {entry.name: entry for entry in entries}
+                selected = entries_by_name.get(part)
         except OSError:
             raise SafePathError("A workspace parent directory could not be inspected safely.") from None
 
@@ -197,7 +199,7 @@ def resolve_workspace_output_path(
                 raise SafePathError("The workspace output parent changed during validation.") from None
             if not within_workspace(resolved_parent) or not within_workspace(candidate):
                 raise SafePathError("The workspace output must stay inside the workspace.")
-            return candidate
+            return (candidate, True) if return_availability else candidate
 
         try:
             metadata = selected.stat(follow_symlinks=False)
@@ -221,6 +223,8 @@ def resolve_workspace_output_path(
         elif not stat.S_ISDIR(metadata.st_mode):
             raise SafePathError("Workspace parent directories must already exist.")
         current = candidate
+        if final_component and return_availability:
+            return current, False
 
     if current == workspace or not within_workspace(current):
         raise SafePathError("The path must stay inside the workspace.")
