@@ -230,11 +230,12 @@ def resolve_workspace_output_path(
             resolved_candidate = Path(os.path.realpath(candidate, strict=True))
         except (OSError, RuntimeError, ValueError):
             raise SafePathError("The selected workspace entry could not be canonicalized safely.") from None
-        if not resolved_candidate.is_relative_to(workspace):
+        if resolved_candidate.is_relative_to(workspace):
+            if resolved_candidate == workspace:
+                raise SafePathError("The workspace root itself is not a file entry.")
+            current = resolved_candidate
+        else:
             raise SafePathError("The selected workspace entry escaped the trusted root.")
-        if resolved_candidate == workspace:
-            raise SafePathError("The workspace root itself is not a file entry.")
-        current = resolved_candidate
         if final_component and return_availability:
             return current, False
 

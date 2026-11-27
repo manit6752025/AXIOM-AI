@@ -21,4 +21,7 @@ extensions:
       pack: codeql/python-all
       extensible: barrierGuardModel
     data:
+      - ["pathlib.PurePath", "Member[is_relative_to].Argument[this]", "true", "path-injection"]
       - ["pathlib.Path", "Member[is_relative_to].Argument[this]", "true", "path-injection"]
+      - ["pathlib.PosixPath", "Member[is_relative_to].Argument[this]", "true", "path-injection"]
+      - ["pathlib.WindowsPath", "Member[is_relative_to].Argument[this]", "true", "path-injection"]

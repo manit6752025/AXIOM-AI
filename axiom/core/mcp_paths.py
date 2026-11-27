@@ -221,13 +221,13 @@ def open_mcp_workspace_file(raw: str, root: Path) -> tuple[Path, BinaryIO]:
     if not _descriptor_access_supported():
         workspace = _workspace_root(root)
         path = _fallback_workspace_path(raw, workspace)
-        try:
-            if not path.is_relative_to(workspace):
-                raise ValueError("The MCP path must stay inside the workspace.")
-            stream = path_safety.open_regular_file(path)
-        except (OSError, ValueError) as exc:
-            raise ValueError("The workspace file is missing or unsafe.") from exc
-        return path, stream
+        if path.is_relative_to(workspace):
+            try:
+                stream = path_safety.open_regular_file(path)
+            except (OSError, ValueError) as exc:
+                raise ValueError("The workspace file is missing or unsafe.") from exc
+            return path, stream
+        raise ValueError("The MCP path must stay inside the workspace.")
 
     path, parent_descriptor, name = _open_parent(root, parts)
     flags = (

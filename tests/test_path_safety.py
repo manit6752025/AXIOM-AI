@@ -217,7 +217,8 @@ def test_codeql_models_the_directory_entry_selector_as_a_path_barrier():
     fallback_start = mcp_source.index("def open_mcp_workspace_file(")
     fallback_end = mcp_source.index("def open_mcp_workspace_output_parent(", fallback_start)
     fallback = mcp_source[fallback_start:fallback_end]
-    assert fallback.index("path.is_relative_to(workspace)") < fallback.index("open_regular_file(path)")
+    assert "if path.is_relative_to(workspace):" in fallback
+    assert fallback.index("if path.is_relative_to(workspace):") < fallback.index("open_regular_file(path)")
     assert "Member[_find_directory_entry].ReturnValue" not in model
 
 
@@ -236,6 +237,7 @@ def test_codeql_sarif_workflow_uses_the_checked_in_local_model_pack():
     model = (root / ".github/codeql/extensions/axiom-model-paths/models/model-paths.yml").read_text(encoding="utf-8")
     assert "Member[_safe_selected_entry]" not in model
     assert "Member[is_relative_to].Argument[this]" in model
+    assert '["pathlib.PurePath", "Member[is_relative_to].Argument[this]", "true", "path-injection"]' in model
     assert "Member[resolve_workspace_output_path].ReturnValue" in model
     assert "Member[_selected_entry].ReturnValue" not in model
 
