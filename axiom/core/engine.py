@@ -749,8 +749,13 @@ def _is_link_or_reparse_point(path: str) -> bool:
         # An unreadable directory entry must not be silently trusted.
         return True
     reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-    return stat.S_ISLNK(metadata.st_mode) or bool(
-        reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag
+    candidate = Path(path)
+    is_junction = getattr(candidate, "is_junction", None)
+    return (
+        stat.S_ISLNK(metadata.st_mode)
+        or bool(reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag)
+        or candidate.is_symlink()
+        or bool(is_junction and is_junction())
     )
 
 
