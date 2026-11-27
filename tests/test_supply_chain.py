@@ -327,6 +327,8 @@ def test_vulnerability_scan_invokes_scanner_only_after_authorization_and_drops_s
     assert report["status"] == "complete"
     assert report["vulnerability_count"] == 1
     args, kwargs = calls[0]
+    assert "--local" in args
+    assert "--skip-editable" in args
     assert args[-4:] == ["--format", "json", "--progress-spinner", "off"]
     assert kwargs["stdin"] is subprocess.DEVNULL
     assert kwargs["stdout"] is subprocess.PIPE

@@ -1,0 +1,57 @@
+name: AXIOM hardware accelerator integration
+
+on:
+  push:
+    branches: [implement/roadmap]
+    paths:
+      - "axiom/core/native_engine.py"
+      - "axiom/core/native_gguf.py"
+      - "tests/test_native_engine.py"
+      - ".github/workflows/accelerator-integration.yml"
+  workflow_dispatch:
+    inputs:
+      device:
+        description: Accelerator to run on this workflow's provisioned hardware
+        type: choice
+        required: true
+        default: mps
+        options:
+          - mps
+
+permissions:
+  contents: read
+
+concurrency:
+  group: axiom-accelerator-integration-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apple-mps:
+    name: Real Apple MPS safetensors and LoRA forward execution
+    runs-on: macos-15-xlarge
+    timeout-minutes: 35
+    env:
+      AXIOM_ACCELERATOR_DEVICE: mps
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install AXIOM native inference and test dependencies
+        run: |
+          python -m pip install --upgrade pip "setuptools>=84.1.0"
+          python -m pip install -e ".[native-inference,test]"
+      - name: Verify the runner exposes Apple MPS hardware
+        run: |
+          python - <<'PY'
+          import platform
+          import torch
+
+          assert platform.machine() == "arm64", f"Expected Apple Silicon, got {platform.machine()}"
+          assert torch.backends.mps.is_built(), "Installed PyTorch does not include MPS"
+          assert torch.backends.mps.is_available(), "The hosted runner does not expose an available MPS device"
+          print(f"Apple MPS integration target: {platform.machine()}, PyTorch {torch.__version__}")
+          PY
+      - name: Execute AXIOM-native LoRA forward path on MPS
+        run: python -m pytest -q tests/test_native_engine.py::test_native_lora_adapter_executes_on_configured_accelerator
