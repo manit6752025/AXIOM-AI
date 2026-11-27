@@ -94,3 +94,23 @@ def test_accelerator_validation_preflight_python_is_syntactically_valid():
     assert "safetensors>=0.4" in install_step["run"]
     assert "native-inference" not in install_step["run"]
     assert "Python 3.11" in report_script
+
+
+
+def test_accelerator_integration_python_preflights_are_valid():
+    root = Path(__file__).resolve().parents[1]
+    workflow = yaml.load(
+        (root / ".github/workflows/accelerator-integration.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    for job_name, job in workflow["jobs"].items():
+        scripts = []
+        for step in job["steps"]:
+            script = step.get("run", "")
+            scripts.extend(re.findall(r"python - <<'PY'\\n(.*?)\\nPY", script, re.DOTALL))
+        assert scripts, f"{job_name} has no executable Python preflight"
+        for script in scripts:
+            ast.parse(textwrap.dedent(script))
+        combined = "\\n".join(scripts)
+        assert "Python 3.11" in combined
+        assert "import torch" in combined
