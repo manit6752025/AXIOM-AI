@@ -36,3 +36,109 @@ def test_sdk_contract_rejects_manifest_drift(monkeypatch, tmp_path):
     monkeypatch.setattr(verifier, "MANIFEST_PATH", temporary)
     with pytest.raises(SDKContractError, match="OpenAPI"):
         verifier.verify_sdk_contract()
+
+
+def test_sdk_release_pipeline_is_manual_oidc_verified_and_installs_built_artifacts():
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    workflow = yaml.load(
+        (root / ".github/workflows/sdk-release.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    package = json.loads((root / "sdk/typescript/package.json").read_text(encoding="utf-8"))
+
+    assert list(workflow["on"]) == ["workflow_dispatch"]
+    assert workflow["on"]["workflow_dispatch"]["inputs"]["package"]["options"] == [
+        "both", "python", "typescript", "validate-only",
+    ]
+    assert package["repository"] == {
+        "type": "git",
+        "url": "https://github.com/manit6752025/AXIOM-AI",
+    }
+
+    jobs = workflow["jobs"]
+    validate = jobs["validate-and-build"]
+    validate_runs = [step.get("run", "") for step in validate["steps"]]
+    joined_validate = "\\n".join(validate_runs)
+    assert "python -m build sdk/python" in joined_validate
+    typescript_build = next(
+        step for step in validate["steps"]
+        if step.get("name") == "Build and test TypeScript SDK"
+    )
+    assert typescript_build["working-directory"] == "sdk/typescript"
+    assert "npm test" in typescript_build["run"]
+    assert "npm pack --pack-destination ../../dist/typescript" in typescript_build["run"]
+    assert "axiom-sdk-wheel-check" in joined_validate
+    assert "axiom-sdk-tarball-check" in joined_validate
+    assert "npm install" in joined_validate
+    assert any(
+        step.get("uses") == "actions/upload-artifact@v7"
+        and step.get("with", {}).get("name") == "axiom-sdk-release-artifacts"
+        and step.get("with", {}).get("path") == "dist/"
+        for step in validate["steps"]
+    )
+    validation_steps = {
+        step.get("name"): step
+        for step in validate["steps"]
+        if step.get("name")
+    }
+    for name in (
+        "Build Python SDK",
+        "Build and test TypeScript SDK",
+        "Install Python wheel from the release artifact in a clean environment",
+        "Install TypeScript tarball from the release artifact in a clean project",
+    ):
+        assert "validate-only" in validation_steps[name]["if"]
+    assert "validate-only" not in jobs["publish-python"]["if"]
+    assert "validate-only" not in jobs["publish-typescript"]["if"]
+
+    python_publish = jobs["publish-python"]
+    assert python_publish["environment"]["name"] == "pypi"
+    assert python_publish["permissions"]["id-token"] == "write"
+    assert any("pypa/gh-action-pypi-publish" in step.get("uses", "") for step in python_publish["steps"])
+
+    npm_publish = jobs["publish-typescript"]
+    assert npm_publish["environment"]["name"] == "npm"
+    assert npm_publish["runs-on"] == "ubuntu-latest"
+    assert npm_publish["permissions"]["id-token"] == "write"
+    npm_runs = "\\n".join(step.get("run", "") for step in npm_publish["steps"])
+    npm_setup = next(step for step in npm_publish["steps"] if step.get("uses") == "actions/setup-node@v7")
+    assert npm_setup["with"]["node-version"] == "22"
+    assert npm_setup["with"]["registry-url"] == "https://registry.npmjs.org"
+    assert npm_setup["with"]["package-manager-cache"] == "false"
+    assert "npm@11.15.0" in npm_runs
+    assert "npm publish dist/typescript/*.tgz --provenance --access public" in npm_runs
+    assert "NPM_TOKEN" not in json.dumps(npm_publish)
+
+    python_verify = jobs["verify-python-install"]
+    assert python_verify["needs"] == "publish-python"
+    assert "axiom-ai-sdk==1.0.0" in "\\n".join(step.get("run", "") for step in python_verify["steps"])
+    npm_verify = jobs["verify-typescript-install"]
+    assert npm_verify["needs"] == "publish-typescript"
+    assert "@axiom-ai/sdk@1.0.0" in "\\n".join(step.get("run", "") for step in npm_verify["steps"])
+
+
+
+def test_sdk_quality_workflow_installs_packed_typescript_archive():
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    workflow = yaml.load(
+        (root / ".github/workflows/sdk-quality.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    typescript = workflow["jobs"]["typescript-sdk"]
+    install = next(
+        step for step in typescript["steps"]
+        if step.get("name") == "Install packed SDK in a clean project"
+    )
+    script = install["run"]
+    assert install["shell"] == "bash"
+    assert "cd sdk/typescript" in script
+    assert 'tarball="$(npm pack --pack-destination "$RUNNER_TEMP" --silent)"' in script
+    assert 'test -f "$RUNNER_TEMP/$tarball"' in script
+    assert "npm install --prefix" in script
+    assert "$RUNNER_TEMP/$tarball" in script
+    assert 'from "@axiom-ai/sdk"' in script
+    assert "API_CONTRACT_VERSION" in script

@@ -45,6 +45,15 @@ def test_roadmap_audit_accepts_registry_publication_pending_status() -> None:
     assert release_smoke.roadmap_issues(markdown) == []
 
 
+def test_roadmap_audit_accepts_implemented_sdk_with_publication_gated() -> None:
+    markdown = "\n".join(
+        f"- [R{i:03d} · {'Planned' if i % 2 else 'Implemented; tests passing'}] Requirement {i}."
+        for i in range(1, 140)
+    )
+    markdown += "\n- [R140 · Implemented; publication gated] SDK code and CI are complete; owner-controlled registry release remains."
+    assert release_smoke.roadmap_issues(markdown) == []
+
+
 def test_roadmap_audit_detects_duplicates_missing_ids_and_unknown_status() -> None:
     markdown = "- [R001 · Maybe] A\n- [R001 · Planned] Duplicate\n"
     issues = release_smoke.roadmap_issues(markdown)
@@ -807,3 +816,47 @@ def test_prediction_job_restart_resume_release_contract_covers_every_surface() -
     assert any("def resume_prediction_job(" in item for item in failures)
 
 
+
+
+
+def test_quality_gates_require_python_node_and_release_artifact_security_checks():
+    import yaml
+
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/quality-gates.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    full_steps = workflow["jobs"]["full-validation"]["steps"]
+    cross_platform_steps = workflow["jobs"]["cross-platform-smoke"]["steps"]
+    full_runs = "\\n".join(step.get("run", "") for step in full_steps)
+    cross_runs = "\\n".join(step.get("run", "") for step in cross_platform_steps)
+
+    assert any(
+        step.get("run") == "npm audit --audit-level=high"
+        for step in full_steps
+    )
+    assert "python -m pip_audit --no-deps --requirement" in full_runs
+    assert "pip freeze --exclude-editable" in full_runs
+    assert "scripts/verify_package_artifacts.py --dist dist --install-wheel --json" in cross_runs
+    assert "tests/test_package_artifact_verification.py" in cross_runs
+    assert "tests/test_artifact_security.py" in cross_runs
+    assert "npm ci" in full_runs
+
+
+
+def test_roadmap_audit_accepts_implemented_status_with_physical_hardware_validation_pending() -> None:
+    markdown = "\n".join(
+        f"- [R{i:03d} · {'Planned' if i % 2 else 'Implemented; tests passing'}] Requirement {i}."
+        for i in range(1, 140)
+    )
+    markdown += "\n- [R140 · Implemented; physical hardware validation pending] Real-device execution remains gated."
+    assert release_smoke.roadmap_issues(markdown) == []
+
+
+def test_roadmap_audit_accepts_implemented_status_with_codeql_disposition_pending() -> None:
+    markdown = "\n".join(
+        f"- [R{i:03d} · {'Planned' if i % 2 else 'Implemented; tests passing'}] Requirement {i}."
+        for i in range(1, 140)
+    )
+    markdown += "\n- [R140 · Implemented; CodeQL disposition pending] Security analyzer review remains open."
+    assert release_smoke.roadmap_issues(markdown) == []

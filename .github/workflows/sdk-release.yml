@@ -11,6 +11,7 @@ on:
           - both
           - python
           - typescript
+          - validate-only
         default: both
 
 permissions:
@@ -36,20 +37,52 @@ jobs:
         run: |
           python -m pip install --upgrade pip build
           python -m pip install -e ".[test]"
-          npm install --prefix sdk/typescript --no-audit --no-fund
+      - name: Install TypeScript SDK dependencies
+        working-directory: sdk/typescript
+        run: npm install --no-audit --no-fund
       - name: Verify API contract and Python SDK tests
         run: |
           python scripts/verify_sdk_contract.py --json
           python -m pytest -q tests/test_sdk_contract.py tests/test_sdk_python.py
       - name: Build Python SDK
-        if: inputs.package == 'both' || inputs.package == 'python'
+        if: inputs.package == 'both' || inputs.package == 'python' || inputs.package == 'validate-only'
         run: python -m build sdk/python --sdist --wheel --outdir dist/python
       - name: Build and test TypeScript SDK
-        if: inputs.package == 'both' || inputs.package == 'typescript'
+        if: inputs.package == 'both' || inputs.package == 'typescript' || inputs.package == 'validate-only'
+        working-directory: sdk/typescript
         run: |
-          npm test --prefix sdk/typescript
-          mkdir -p dist/typescript
-          npm pack --prefix sdk/typescript --pack-destination dist/typescript
+          npm test
+          mkdir -p ../../dist/typescript
+          npm pack --pack-destination ../../dist/typescript
+      - name: Install Python wheel from the release artifact in a clean environment
+        if: inputs.package == 'both' || inputs.package == 'python' || inputs.package == 'validate-only'
+        run: |
+          python -m venv "$RUNNER_TEMP/axiom-sdk-wheel-check"
+          "$RUNNER_TEMP/axiom-sdk-wheel-check/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/axiom-sdk-wheel-check/bin/python" -m pip install --no-deps dist/python/*.whl
+          "$RUNNER_TEMP/axiom-sdk-wheel-check/bin/python" - <<'PY'
+          from importlib.metadata import version
+          from axiom_sdk import AxiomClient, API_CONTRACT_VERSION
+
+          assert version("axiom-ai-sdk") == "1.0.0"
+          assert API_CONTRACT_VERSION == 1
+          assert callable(AxiomClient)
+          print("Built Python wheel installed and imported successfully.")
+          PY
+      - name: Install TypeScript tarball from the release artifact in a clean project
+        if: inputs.package == 'both' || inputs.package == 'typescript' || inputs.package == 'validate-only'
+        run: |
+          mkdir -p "$RUNNER_TEMP/axiom-sdk-tarball-check"
+          npm install --prefix "$RUNNER_TEMP/axiom-sdk-tarball-check" --ignore-scripts --no-audit --no-fund dist/typescript/*.tgz
+          cd "$RUNNER_TEMP/axiom-sdk-tarball-check"
+          node --input-type=module -e '
+            import assert from "node:assert/strict";
+            import { AxiomClient, API_CONTRACT_VERSION } from "@axiom-ai/sdk";
+            assert.equal(API_CONTRACT_VERSION, 1);
+            const client = new AxiomClient();
+            client.close();
+            console.log("Built TypeScript tarball installed and imported successfully.");
+          '
       - uses: actions/upload-artifact@v7
         with:
           name: axiom-sdk-release-artifacts
@@ -92,14 +125,15 @@ jobs:
         with:
           node-version: "22"
           registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Install an npm CLI with OIDC trusted-publishing support
+        run: npm install --global npm@11.15.0
       - uses: actions/download-artifact@v8
         with:
           name: axiom-sdk-release-artifacts
           path: dist
-      - name: Publish package with provenance
+      - name: Publish package with GitHub OIDC and provenance
         run: npm publish dist/typescript/*.tgz --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
 
   verify-python-install:

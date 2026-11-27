@@ -234,6 +234,7 @@ def resolve_workspace_output_path(
         if resolved_candidate == workspace:
             raise SafePathError("The workspace root itself is not a file entry.")
         current = resolved_candidate
+        current = candidate
         if final_component and return_availability:
             return current, False
 

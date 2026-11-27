@@ -228,6 +228,12 @@ def open_mcp_workspace_file(raw: str, root: Path) -> tuple[Path, BinaryIO]:
         except (OSError, RuntimeError, ValueError) as exc:
             raise ValueError("The workspace file is missing or unsafe.") from exc
         return resolved_path, stream
+        path = _fallback_workspace_path(raw, root)
+        try:
+            stream = path_safety.open_regular_file(path)
+        except (OSError, ValueError) as exc:
+            raise ValueError("The workspace file is missing or unsafe.") from exc
+        return path, stream
 
     path, parent_descriptor, name = _open_parent(root, parts)
     flags = (
