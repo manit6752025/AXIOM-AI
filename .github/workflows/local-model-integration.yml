@@ -6,6 +6,7 @@ on:
     paths:
       - "axiom/core/inference.py"
       - "axiom/core/local_speech.py"
+      - "axiom/core/supply_chain.py"
       - "tests/integration/**"
       - ".github/workflows/local-model-integration.yml"
   workflow_dispatch:
@@ -60,6 +61,25 @@ jobs:
           path: ${{ runner.temp }}/ollama.log
           if-no-files-found: ignore
           retention-days: 7
+
+  real-advisory-scan:
+    name: Real AXIOM pip-audit advisory scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install AXIOM and its security-audit extra
+        run: |
+          python -m pip install --upgrade pip "setuptools>=84.1.0"
+          python -m pip install ".[test,security-audit]"
+      - name: Run AXIOM's bounded, explicitly authorized advisory scanner
+        env:
+          AXIOM_RUN_REAL_SECURITY_SCAN: "1"
+        run: python -m pytest -q tests/integration/test_security_advisory_scan.py
 
   local-speech:
     name: Real Piper synthesis and whisper.cpp transcription (CPU)

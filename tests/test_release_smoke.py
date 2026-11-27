@@ -45,6 +45,15 @@ def test_roadmap_audit_accepts_registry_publication_pending_status() -> None:
     assert release_smoke.roadmap_issues(markdown) == []
 
 
+def test_roadmap_audit_accepts_implemented_sdk_with_publication_gated() -> None:
+    markdown = "\n".join(
+        f"- [R{i:03d} · {'Planned' if i % 2 else 'Implemented; tests passing'}] Requirement {i}."
+        for i in range(1, 140)
+    )
+    markdown += "\n- [R140 · Implemented; publication gated] SDK code and CI are complete; owner-controlled registry release remains."
+    assert release_smoke.roadmap_issues(markdown) == []
+
+
 def test_roadmap_audit_detects_duplicates_missing_ids_and_unknown_status() -> None:
     markdown = "- [R001 · Maybe] A\n- [R001 · Planned] Duplicate\n"
     issues = release_smoke.roadmap_issues(markdown)
@@ -322,6 +331,54 @@ def test_engine_smoke_detects_path_and_native_execution_regressions() -> None:
     broken_engine = engine_source.replace("trusted-root escapes are not allowed", "unrestricted symlink target", 1)
     issues = release_smoke.engine_security_and_lifecycle_issues(broken_engine, native_source, api_source, client_source, panel_source, e2e_source)
     assert any("trusted-root escapes are not allowed" in issue for issue in issues)
+
+
+def test_engine_smoke_requires_platform_normalized_trusted_root_containment() -> None:
+    engine_source = (ROOT / "axiom/core/engine.py").read_text(encoding="utf-8")
+    native_source = (ROOT / "axiom/core/native_engine.py").read_text(encoding="utf-8")
+    api_source = (ROOT / "axiom/api/engine.py").read_text(encoding="utf-8")
+    client_source = (ROOT / "src/api/client.ts").read_text(encoding="utf-8")
+    panel_source = (ROOT / "src/components/LocalAxiomEnginePanel.tsx").read_text(encoding="utf-8")
+    e2e_source = (ROOT / "e2e/axiom-engine.spec.ts").read_text(encoding="utf-8")
+    broken_engine = engine_source.replace(
+        "os.path.commonpath((normalized_path, normalized_root)) == normalized_root",
+        "normalized_path.startswith(normalized_root)",
+        1,
+    )
+    issues = release_smoke.engine_security_and_lifecycle_issues(
+        broken_engine, native_source, api_source, client_source, panel_source, e2e_source,
+    )
+    assert any("os.path.commonpath((normalized_path, normalized_root)) == normalized_root" in item for item in issues)
+
+    broken_reparse_guard = engine_source.replace(
+        "_entry_is_link_or_reparse_point(selected)",
+        "selected.is_symlink()",
+        1,
+    )
+    issues = release_smoke.engine_security_and_lifecycle_issues(
+        broken_reparse_guard, native_source, api_source, client_source, panel_source, e2e_source,
+    )
+    assert any("_entry_is_link_or_reparse_point(selected)" in item for item in issues)
+
+    broken_no_follow_metadata = engine_source.replace(
+        "entry.stat(follow_symlinks=False)",
+        "entry.stat()",
+        1,
+    )
+    issues = release_smoke.engine_security_and_lifecycle_issues(
+        broken_no_follow_metadata, native_source, api_source, client_source, panel_source, e2e_source,
+    )
+    assert any("entry.stat(follow_symlinks=False)" in item for item in issues)
+
+    broken_component_walk = engine_source.replace(
+        "with os.scandir(current) as entries:",
+        "with os.scandir(root) as entries:",
+        1,
+    )
+    issues = release_smoke.engine_security_and_lifecycle_issues(
+        broken_component_walk, native_source, api_source, client_source, panel_source, e2e_source,
+    )
+    assert any("with os.scandir(current) as entries:" in item for item in issues)
 
 
 def test_native_engine_smoke_rejects_missing_kv_cache_mechanics() -> None:

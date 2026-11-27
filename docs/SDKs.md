@@ -131,7 +131,12 @@ manual `Publish AXIOM SDK packages` workflow. It validates and builds both
 packages before the selected publish jobs run. PyPI must have a Trusted
 Publisher configured for this repository/workflow and the `pypi` environment;
 npm requires an `NPM_TOKEN` secret in the `npm` environment and publishes
-with provenance. Pushes and pull requests do not publish packages.
+with GitHub OIDC and npm provenance. The npm package must exist before its
+ trusted publisher can be registered; the initial package bootstrap is a
+ maintainer-controlled operation. After that, configure the npm trusted
+ publisher for repository `manit6752025/AXIOM-AI`, workflow
+ `sdk-release.yml`, and environment `npm`. Pushes and pull requests do not
+ publish packages.
 
 The 30-operation registry in
 [`sdk/openapi/axiom-v1-operations.json`](../sdk/openapi/axiom-v1-operations.json)

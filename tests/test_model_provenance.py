@@ -544,5 +544,8 @@ def test_model_provenance_hashes_a_valid_safetensors_artifact_at_the_full_16_gib
     tree_digest.update(bytes((0,)))
     tree_digest.update(str(total_size).encode("ascii"))
     tree_digest.update(bytes((0,)))
+    tree_digest.update(b"full-limit.safetensors\0")
+    tree_digest.update(str(total_size).encode("ascii"))
+    tree_digest.update(b"\0")
     tree_digest.update(bytes.fromhex(evidence["files"][0]["sha256"]))
     assert evidence["checkpoint_sha256"] == tree_digest.hexdigest()

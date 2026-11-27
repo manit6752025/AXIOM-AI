@@ -143,6 +143,42 @@ def test_output_parent_reports_create_only_state_and_rejects_symlinks(tmp_path, 
         mcp_paths.open_mcp_workspace_output_parent("exports/linked.jsonl", root)
 
 
+
+
+def test_descriptor_mode_uses_pinned_directory_scans_for_untrusted_components(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    _select_path_mode(monkeypatch, fallback=False)
+    (root / "exports").mkdir()
+
+    real_scandir = mcp_paths.os.scandir
+    scanned_descriptors: list[int] = []
+
+    def record_descriptor_scans(path="."):
+        if isinstance(path, int):
+            scanned_descriptors.append(path)
+        return real_scandir(path)
+
+    monkeypatch.setattr(mcp_paths.os, "scandir", record_descriptor_scans)
+
+    resolved, stream = mcp_paths.open_mcp_workspace_file("data/sample.jsonl", root)
+    with stream:
+        assert stream.read() == b'{"text":"safe"}' + bytes((10,))
+    assert resolved == root / "data" / "sample.jsonl"
+
+    _path, parent_fd, name, available = mcp_paths.open_mcp_workspace_output_parent(
+        "exports/report.jsonl", root,
+    )
+    try:
+        assert parent_fd is not None
+        assert name == "report.jsonl"
+        assert available is True
+    finally:
+        if parent_fd is not None:
+            os.close(parent_fd)
+
+    # Relative components are resolved from pinned directory listings.
+    assert len(scanned_descriptors) >= 3
+
 def test_pinned_output_parent_survives_directory_swap_without_writing_outside_workspace(tmp_path, monkeypatch):
     import stat
 

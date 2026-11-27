@@ -294,7 +294,39 @@ def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _parse_pip_audit_output(payload: Any, *, generated_at: str, scanner_version: str | None, exit_code: int) -> dict[str, Any]:
+def _exclude_local_axiom_distribution(payload: Any) -> tuple[Any, int]:
+    """Exclude the AXIOM root distribution from its third-party dependency audit.
+
+    AXIOM is the application being audited, not one of its third-party
+    dependencies. pip-audit may report the locally built root distribution
+    with a null version; exclude only this canonical project name and keep
+    strict validation for every other dependency record.
+    """
+    if not isinstance(payload, dict):
+        return payload, 0
+    dependencies = payload.get("dependencies")
+    if not isinstance(dependencies, list):
+        return payload, 0
+    filtered: list[Any] = []
+    excluded = 0
+    for dependency in dependencies:
+        if (
+            isinstance(dependency, dict)
+            and isinstance(dependency.get("name"), str)
+            and _canonical_name(dependency["name"]) == "axiom-all"
+        ):
+            excluded += 1
+        else:
+            filtered.append(dependency)
+    if not excluded:
+        return payload, 0
+    return {**payload, "dependencies": filtered}, excluded
+
+
+def _parse_pip_audit_output(
+    payload: Any, *, generated_at: str, scanner_version: str | None, exit_code: int,
+    excluded_local_project_count: int = 0,
+) -> dict[str, Any]:
     if isinstance(payload, dict):
         dependencies = payload.get("dependencies")
     else:
@@ -312,8 +344,15 @@ def _parse_pip_audit_output(payload: Any, *, generated_at: str, scanner_version:
         vulnerabilities = dependency.get("vulns", dependency.get("vulnerabilities", []))
         if not isinstance(name, str) or not _NAME_PATTERN.fullmatch(name):
             raise SupplyChainError("Dependency scanner output contains an invalid package name.")
-        if not isinstance(version, str) or not _VERSION_PATTERN.fullmatch(version):
-            raise SupplyChainError("Dependency scanner output contains an invalid package version.")
+        if not isinstance(version, str):
+            raise SupplyChainError(
+                f"Dependency scanner output contains a non-string version for package {name!r}."
+            )
+        if not _VERSION_PATTERN.fullmatch(version):
+            safe_version = "".join(character for character in version[:80] if 32 <= ord(character) < 127)
+            raise SupplyChainError(
+                f"Dependency scanner output contains an invalid version for package {name!r}: {safe_version!r}."
+            )
         if not isinstance(vulnerabilities, list) or len(vulnerabilities) > 1000:
             raise SupplyChainError("Dependency scanner output contains an invalid vulnerability list.")
         for vulnerability in vulnerabilities:
@@ -355,9 +394,10 @@ def _parse_pip_audit_output(payload: Any, *, generated_at: str, scanner_version:
         "generated_at": generated_at,
         "scanner": {"name": "pip-audit", "version": scanner_version},
         "status": "complete",
-        "scan_scope": "active Python environment; installed distributions",
+        "scan_scope": "active Python environment; third-party installed distributions (local AXIOM project excluded)",
         "network_accessed": True,
         "dependency_count": len(dependencies),
+        "excluded_local_project_count": excluded_local_project_count,
         "vulnerable_dependency_count": len(vulnerable_packages),
         "vulnerability_count": len(findings),
         "findings": findings,
@@ -464,7 +504,7 @@ def _audit_dependency_vulnerabilities_unlocked(
     # Do not let pip configuration in the invoking workspace or user profile
     # inject private package-index URLs or credentials into the audit process.
     environment["PIP_CONFIG_FILE"] = os.devnull
-    args = [executable, "-m", "pip_audit", "--local", "--format", "json", "--progress-spinner", "off"]
+    args = [executable, "-m", "pip_audit", "--local", "--skip-editable", "--format", "json", "--progress-spinner", "off"]
     scan_cwd = Path(sys.prefix)
     if not scan_cwd.is_dir():
         raise SupplyChainError("The active Python environment directory is unavailable.")
@@ -570,8 +610,13 @@ def _audit_dependency_vulnerabilities_unlocked(
         payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_json_keys)
     except (UnicodeError, json.JSONDecodeError, RecursionError, ValueError):
         raise SupplyChainError("Dependency scanner returned invalid or ambiguous JSON; no vulnerability conclusion was produced.") from None
+    payload, excluded_local_project_count = _exclude_local_axiom_distribution(payload)
     return _parse_pip_audit_output(
-        payload, generated_at=generated_at, scanner_version=scanner_version, exit_code=return_code
+        payload,
+        generated_at=generated_at,
+        scanner_version=scanner_version,
+        exit_code=return_code,
+        excluded_local_project_count=excluded_local_project_count,
     )
 def audit_dependency_vulnerabilities(
     *,

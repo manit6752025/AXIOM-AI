@@ -36,3 +36,54 @@ def test_sdk_contract_rejects_manifest_drift(monkeypatch, tmp_path):
     monkeypatch.setattr(verifier, "MANIFEST_PATH", temporary)
     with pytest.raises(SDKContractError, match="OpenAPI"):
         verifier.verify_sdk_contract()
+
+
+def test_sdk_release_pipeline_is_manual_oidc_verified_and_installs_built_artifacts():
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    workflow = yaml.load(
+        (root / ".github/workflows/sdk-release.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    package = json.loads((root / "sdk/typescript/package.json").read_text(encoding="utf-8"))
+
+    assert list(workflow["on"]) == ["workflow_dispatch"]
+    assert package["repository"] == {
+        "type": "git",
+        "url": "https://github.com/manit6752025/AXIOM-AI",
+    }
+
+    jobs = workflow["jobs"]
+    validate = jobs["validate-and-build"]
+    validate_runs = [step.get("run", "") for step in validate["steps"]]
+    joined_validate = "\\n".join(validate_runs)
+    assert "python -m build sdk/python" in joined_validate
+    assert "npm test --prefix sdk/typescript" in joined_validate
+    assert "npm pack --prefix sdk/typescript" in joined_validate
+    assert "axiom-sdk-wheel-check" in joined_validate
+    assert "axiom-sdk-tarball-check" in joined_validate
+    assert "npm install" in joined_validate
+
+    python_publish = jobs["publish-python"]
+    assert python_publish["environment"]["name"] == "pypi"
+    assert python_publish["permissions"]["id-token"] == "write"
+    assert any("pypa/gh-action-pypi-publish" in step.get("uses", "") for step in python_publish["steps"])
+
+    npm_publish = jobs["publish-typescript"]
+    assert npm_publish["environment"]["name"] == "npm"
+    assert npm_publish["runs-on"] == "ubuntu-latest"
+    assert npm_publish["permissions"]["id-token"] == "write"
+    npm_runs = "\\n".join(step.get("run", "") for step in npm_publish["steps"])
+    npm_setup = next(step for step in npm_publish["steps"] if step.get("uses") == "actions/setup-node@v4")
+    assert npm_setup["with"]["package-manager-cache"] == "false"
+    assert "npm@11.15.0" in npm_runs
+    assert "npm publish dist/typescript/*.tgz --provenance --access public" in npm_runs
+    assert "NPM_TOKEN" not in json.dumps(npm_publish)
+
+    python_verify = jobs["verify-python-install"]
+    assert python_verify["needs"] == "publish-python"
+    assert "axiom-ai-sdk==1.0.0" in "\\n".join(step.get("run", "") for step in python_verify["steps"])
+    npm_verify = jobs["verify-typescript-install"]
+    assert npm_verify["needs"] == "publish-typescript"
+    assert "@axiom-ai/sdk@1.0.0" in "\\n".join(step.get("run", "") for step in npm_verify["steps"])
