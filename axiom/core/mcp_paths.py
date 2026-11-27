@@ -84,34 +84,24 @@ def _fallback_workspace_path(
         allow_existing_output=allow_existing_output,
     )
 
-def _resolve_mcp_workspace_file(raw: str, root: Path) -> Path:
-    """Resolve one existing regular file inside the MCP workspace.
+def _open_mcp_workspace_file(raw: str, root: Path) -> tuple[Path, BinaryIO]:
+    """Resolve and open one regular file inside the MCP workspace.
 
     The request is compared with real directory entries by the shared safe
-    resolver. The resulting canonical path must remain inside the real
-    workspace root before it is handed to the no-follow file opener.
+    resolver. The canonical path is checked against the real workspace root
+    immediately before the no-follow file opener is called.
     """
     _parts(raw)
     workspace = _workspace_root(root)
     try:
         selected = path_safety.resolve_workspace_output_path(raw, workspace)
         resolved = Path(os.path.realpath(selected, strict=True))
-        resolved.relative_to(workspace)
-        metadata = resolved.lstat()
+        if resolved.is_relative_to(workspace):
+            stream = path_safety.open_regular_file(resolved)
+            return resolved, stream
+        raise ValueError("The MCP path must stay inside the workspace.")
     except (OSError, RuntimeError, ValueError) as exc:
         raise ValueError("The workspace file is missing or unsafe.") from exc
-
-    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-    is_junction = getattr(resolved, "is_junction", None)
-    if (
-        stat.S_ISLNK(metadata.st_mode)
-        or bool(getattr(metadata, "st_reparse_tag", 0))
-        or bool(reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag)
-        or bool(is_junction is not None and is_junction())
-        or not stat.S_ISREG(metadata.st_mode)
-    ):
-        raise ValueError("The workspace path must refer to a regular non-link file.")
-    return resolved
 
 
 def _path_is_within_root(path: Path, root: Path) -> bool:
@@ -249,12 +239,7 @@ def open_mcp_workspace_file(raw: str, root: Path) -> tuple[Path, BinaryIO]:
     """Open a regular workspace file while pinning every path component."""
     parts = _parts(raw)
     if not _descriptor_access_supported():
-        path = _resolve_mcp_workspace_file(raw, root)
-        try:
-            stream = path_safety.open_regular_file(path)
-        except (OSError, ValueError) as exc:
-            raise ValueError("The workspace file is missing or unsafe.") from exc
-        return path, stream
+        return _open_mcp_workspace_file(raw, root)
 
     path, parent_descriptor, name = _open_parent(root, parts)
     flags = (

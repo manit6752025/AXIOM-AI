@@ -10,7 +10,6 @@ extensions:
       - ["axiom.core.engine", "Member[resolve_local_model_directory].ReturnValue", "path-injection"]
       - ["axiom.core.mcp_paths", "Member[_parts].ReturnValue", "path-injection"]
       - ["axiom.core.mcp_paths", "Member[_fallback_workspace_path].ReturnValue", "path-injection"]
-      - ["axiom.core.mcp_paths", "Member[_resolve_mcp_workspace_file].ReturnValue", "path-injection"]
       - ["axiom.path_safety", "Member[resolve_workspace_output_path].ReturnValue", "path-injection"]
       - ["axiom.path_safety", "Member[find_existing_relative_path].ReturnValue", "path-injection"]
       - ["axiom.core.training_preflight", "Member[resolve_workspace_input].ReturnValue", "path-injection"]
