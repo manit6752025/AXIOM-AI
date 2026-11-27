@@ -731,9 +731,21 @@ def _allowed_model_roots() -> tuple[Path, ...]:
 
 
 def _path_is_within_root(path: Path, root: Path) -> bool:
+    """Compare canonical filesystem paths with Windows case/device-prefix handling."""
     try:
-        normalized_path = os.path.normcase(os.path.normpath(os.fspath(path)))
-        normalized_root = os.path.normcase(os.path.normpath(os.fspath(root)))
+        resolved_path = os.path.realpath(os.path.abspath(os.fspath(path)))
+        resolved_root = os.path.realpath(os.path.abspath(os.fspath(root)))
+        if os.name == "nt":
+            if resolved_path.startswith("\\\\?\\UNC\\"):
+                resolved_path = "\\\\" + resolved_path[8:]
+            elif resolved_path.startswith("\\\\?\\"):
+                resolved_path = resolved_path[4:]
+            if resolved_root.startswith("\\\\?\\UNC\\"):
+                resolved_root = "\\\\" + resolved_root[8:]
+            elif resolved_root.startswith("\\\\?\\"):
+                resolved_root = resolved_root[4:]
+        normalized_path = os.path.normcase(os.path.normpath(resolved_path))
+        normalized_root = os.path.normcase(os.path.normpath(resolved_root))
         return os.path.commonpath((normalized_path, normalized_root)) == normalized_root
     except (OSError, TypeError, ValueError):
         return False
