@@ -263,14 +263,46 @@ def _same_file_identity(expected: os.stat_result, opened: os.stat_result) -> boo
     return (expected.st_dev, expected.st_ino) == (opened.st_dev, opened.st_ino)
 
 
-def open_regular_file(path: Path) -> BinaryIO:
-    """Open a regular file by traversing pinned, enumerated directory entries.
+def _selected_entry(directory: int | Path, requested_name: str) -> tuple[str, str | os.PathLike[str], os.stat_result, bool]:
+    """Select an entry by comparing an untrusted name to a real directory listing.
 
-    POSIX uses descriptor-relative opens with O_NOFOLLOW and verifies every
-    opened descriptor against the metadata observed in the parent directory.
-    Other platforms enumerate each component and verify the opened handle's
-    identity before exposing a stream. Untrusted path components are compared
-    with entry names only; they are never passed directly to a filesystem open.
+    The request string is never used as a filesystem operand. Only the name
+    and path returned by the enumerated directory entry cross the open boundary.
+    """
+    try:
+        with os.scandir(directory) as entries:
+            selected = next((entry for entry in entries if entry.name == requested_name), None)
+            if selected is None:
+                raise FileNotFoundError("Workspace path component was not found.")
+            metadata = selected.stat(follow_symlinks=False)
+            reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            is_link_like = (
+                selected.is_symlink()
+                or stat.S_ISLNK(metadata.st_mode)
+                or bool(getattr(metadata, "st_reparse_tag", 0))
+                or bool(
+                    reparse_flag
+                    and getattr(metadata, "st_file_attributes", 0) & reparse_flag
+                )
+            )
+            return selected.name, selected.path, metadata, is_link_like
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise SafePathError("A workspace path component could not be inspected safely.") from exc
+
+
+def _same_file_identity(expected: os.stat_result, opened: os.stat_result) -> bool:
+    return (expected.st_dev, expected.st_ino) == (opened.st_dev, opened.st_ino)
+
+
+def open_regular_file(path: Path) -> BinaryIO:
+    """Open a regular file by walking enumerated directory entries.
+
+    POSIX uses descriptor-relative opens with O_NOFOLLOW and verifies each
+    opened descriptor against metadata from its pinned parent directory.
+    Platforms without descriptor-relative opens enumerate every component and
+    verify the opened handle identity before returning a stream.
     """
     target = Path(path)
     if ".." in target.parts:
@@ -305,11 +337,13 @@ def open_regular_file(path: Path) -> BinaryIO:
         try:
             for index, requested_name in enumerate(components):
                 final_component = index == len(components) - 1
-                selected, expected, is_link_like = _selected_entry(parent_fd, requested_name)
+                selected_name, _selected_path, expected, is_link_like = _selected_entry(
+                    parent_fd,
+                    requested_name,
+                )
                 if is_link_like:
                     raise SafePathError("path must not contain symbolic links or junctions")
 
-                selected_name = selected.name
                 if final_component:
                     if not stat.S_ISREG(expected.st_mode):
                         raise SafePathError("path must refer to a regular file")
@@ -345,21 +379,21 @@ def open_regular_file(path: Path) -> BinaryIO:
                 os.close(parent_fd)
         raise SafePathError("path must identify a regular file")
 
-    current = Path(absolute.anchor)
+    current: Path | int = Path(absolute.anchor)
     for index, requested_name in enumerate(components):
         final_component = index == len(components) - 1
-        selected, expected, is_link_like = _selected_entry(current, requested_name)
+        _selected_name, selected_path, expected, is_link_like = _selected_entry(
+            current,
+            requested_name,
+        )
         if is_link_like:
             raise SafePathError("path must not contain symbolic links or junctions")
-        selected_path = Path(selected.path)
+        selected = Path(selected_path)
 
         if final_component:
             if not stat.S_ISREG(expected.st_mode):
                 raise SafePathError("path must refer to a regular file")
-            file_fd = os.open(
-                selected_path,
-                flags | nofollow | getattr(os, "O_NONBLOCK", 0),
-            )
+            file_fd = os.open(selected, flags | nofollow | getattr(os, "O_NONBLOCK", 0))
             try:
                 opened = os.fstat(file_fd)
                 if not stat.S_ISREG(opened.st_mode) or not _same_file_identity(expected, opened):
@@ -373,6 +407,6 @@ def open_regular_file(path: Path) -> BinaryIO:
 
         if not stat.S_ISDIR(expected.st_mode):
             raise SafePathError("path parents must be regular directories")
-        current = selected_path
+        current = selected
 
     raise SafePathError("path must identify a regular file")
