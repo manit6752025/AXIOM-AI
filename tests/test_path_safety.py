@@ -210,6 +210,7 @@ def test_codeql_models_the_directory_entry_selector_as_a_path_barrier():
         "Member[resolve_workspace_output_path].ReturnValue",
     ):
         assert f'["axiom.path_safety", "{access_path}", "path-injection"]' in model
+    assert '["axiom.core.mcp_paths", "Member[_find_directory_entry].ReturnValue.TupleElement[0]", "path-injection"]' in model
 
 
 def test_codeql_sarif_workflow_uses_the_checked_in_local_model_pack():
