@@ -816,3 +816,28 @@ def test_prediction_job_restart_resume_release_contract_covers_every_surface() -
     assert any("def resume_prediction_job(" in item for item in failures)
 
 
+
+
+
+def test_quality_gates_require_python_node_and_release_artifact_security_checks():
+    import yaml
+
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/quality-gates.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    full_steps = workflow["jobs"]["full-validation"]["steps"]
+    cross_platform_steps = workflow["jobs"]["cross-platform-smoke"]["steps"]
+    full_runs = "\\n".join(step.get("run", "") for step in full_steps)
+    cross_runs = "\\n".join(step.get("run", "") for step in cross_platform_steps)
+
+    assert any(
+        step.get("run") == "npm audit --audit-level=high"
+        for step in full_steps
+    )
+    assert "python -m pip_audit --no-deps --requirement" in full_runs
+    assert "pip freeze --exclude-editable" in full_runs
+    assert "scripts/verify_package_artifacts.py --dist dist --install-wheel --json" in cross_runs
+    assert "tests/test_package_artifact_verification.py" in cross_runs
+    assert "tests/test_artifact_security.py" in cross_runs
+    assert "npm ci" in full_runs
