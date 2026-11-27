@@ -896,6 +896,24 @@ def _resolve_model_directory(value: str, label: str) -> Path:
             "or set AXIOM_MODEL_ROOTS to trusted local directories."
         )
 
+    # Keep the original lexical names of explicitly configured roots as
+    # aliases for their independently canonicalized directories. Windows
+    # temporary and user-profile directories may be addressed through a
+    # junction/extended-path alias; compare the request to that configured
+    # alias, then walk the canonical trusted directory entry by entry.
+    root_aliases: dict[str, Path] = {}
+    configured_roots = os.environ.get(_MODEL_ROOT_ENV, "").strip()
+    for configured_root in configured_roots.split(os.pathsep):
+        if not configured_root.strip():
+            continue
+        lexical_root = Path(configured_root).expanduser()
+        try:
+            canonical_root = lexical_root.resolve(strict=True)
+        except (OSError, RuntimeError):
+            continue
+        canonical_key = _normalise_lexical_model_path(canonical_root)
+        root_aliases.setdefault(canonical_key, lexical_root.absolute())
+
     # Treat request text as lexical input only. All filesystem operations below
     # are anchored at an independently canonicalized trusted root and each path
     # component is selected by matching a real directory entry.
@@ -915,15 +933,22 @@ def _resolve_model_directory(value: str, label: str) -> Path:
         candidate_key = _normalise_lexical_model_path(candidate_text)
         for root in roots:
             root_text = os.fspath(root)
-            root_key = _normalise_lexical_model_path(root_text)
-            try:
-                # Compare the lexical paths after stripping Windows extended
-                # path prefixes. Do not realpath the candidate here: the
-                # component walker below must still see and reject symlinks.
-                if os.path.commonpath((candidate_key, root_key)) != root_key:
+            canonical_key = _normalise_lexical_model_path(root_text)
+            lexical_alias = root_aliases.get(canonical_key)
+            root_inputs = (root, lexical_alias) if lexical_alias is not None else (root,)
+            relative: str | None = None
+            for root_input in root_inputs:
+                root_key = _normalise_lexical_model_path(root_input)
+                try:
+                    # Do not realpath the candidate. The component walker
+                    # must still see and reject links beneath the trusted root.
+                    if os.path.commonpath((candidate_key, root_key)) != root_key:
+                        continue
+                    relative = os.path.relpath(candidate_key, root_key)
+                    break
+                except (OSError, TypeError, ValueError):
                     continue
-                relative = os.path.relpath(candidate_key, root_key)
-            except (OSError, TypeError, ValueError):
+            if relative is None:
                 continue
             parts = tuple(relative.replace("\\", "/").split("/"))
             if (
