@@ -84,6 +84,12 @@ function readSavedProfiles(): SavedLLMProfile[] {
   }
 }
 
+function createBrowserProfileId(): string {
+  const bytes = window.crypto.getRandomValues(new Uint8Array(16));
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  return `browser-profile-${hex}`;
+}
+
 function writeSavedProfiles(profiles: SavedLLMProfile[]): boolean {
   try {
     const safeProfiles = profiles.slice(0, MAX_SAVED_PROFILES).map(({ id, name, provider, model, base_url, api_key_env, updated_at }) => ({
@@ -274,7 +280,7 @@ export default function LLMClientPanel() {
     } catch (cause) {
       // Keep a clearly-labelled browser-only fallback for disconnected/offline API use.
       const profile: SavedLLMProfile = {
-        id: `browser-profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+        id: createBrowserProfileId(),
         name,
         provider,
         model: model.trim(),
