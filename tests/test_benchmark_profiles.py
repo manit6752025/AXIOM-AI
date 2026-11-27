@@ -94,7 +94,7 @@ def _patch_environment(monkeypatch: pytest.MonkeyPatch, gpu_name="Test GPU"):
 
 
 def test_profile_store_records_reproducible_provenance_without_prompt_or_model_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch)
+    _patch_environment(monkeypatch, tmp_path)
     model = tmp_path / "model"
     model.mkdir()
     (model / "config.json").write_text('{"model_type":"qwen3"}', encoding="utf-8")
@@ -130,10 +130,29 @@ def test_profile_store_records_reproducible_provenance_without_prompt_or_model_p
 
 
 def test_profiles_compare_metrics_only_when_hardware_software_model_and_workload_match(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch)
+    _patch_environment(monkeypatch, tmp_path)
     model = tmp_path / "model"
     model.mkdir()
     (model / "config.json").write_text('{"model_type":"qwen3"}', encoding="utf-8")
+    from axiom.core import engine
+
+    roots = engine._allowed_model_roots()
+    matching_roots = [
+        str(root) for root in roots if engine._path_is_within_root(model, root)
+    ]
+    try:
+        resolved_model = engine.resolve_local_model_directory(str(model), "Base model")
+    except ValueError as exc:
+        raise AssertionError(
+            f"Windows model resolution failed: model={str(model)!r}; "
+            f"roots={tuple(map(str, roots))!r}; matching_roots={matching_roots!r}; "
+            f"normalised_model={engine._normalise_lexical_model_path(model)!r}; "
+            f"error={exc}"
+        ) from exc
+    assert resolved_model, (
+        f"model resolver returned no directory: model={str(model)!r}; "
+        f"roots={tuple(map(str, roots))!r}; matching_roots={matching_roots!r}"
+    )
     store = BenchmarkProfileStore(tmp_path / ".axiom")
     first = store.create("Baseline A", _report(100), "same prompt", model)
     second = store.create("Baseline B", _report(90), "same prompt", model)
@@ -143,7 +162,7 @@ def test_profiles_compare_metrics_only_when_hardware_software_model_and_workload
     assert all(same["match"].values())
     assert same["metrics"]["median_elapsed_ms"] == {"left": 100.0, "right": 90.0, "delta": -10.0}
 
-    _patch_environment(monkeypatch, gpu_name="Different GPU")
+    _patch_environment(monkeypatch, tmp_path, gpu_name="Different GPU")
     third = store.create("Different hardware", _report(80), "same prompt", model)
     different = store.compare(first["id"], third["id"])
     assert different["comparable"] is False
@@ -152,7 +171,7 @@ def test_profiles_compare_metrics_only_when_hardware_software_model_and_workload
 
 
 def test_profile_store_rejects_duplicate_names_and_invalid_profile_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch)
+    _patch_environment(monkeypatch, tmp_path)
     store = BenchmarkProfileStore(tmp_path / ".axiom")
     store.create("First", _report(), "prompt", tmp_path)
     with pytest.raises(BenchmarkProfileError, match="already exists"):
@@ -168,7 +187,7 @@ def test_profile_store_rejects_duplicate_names_and_invalid_profile_inputs(tmp_pa
 
 
 def test_profile_store_rejects_tampering_unknown_fields_and_future_schema(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch)
+    _patch_environment(monkeypatch, tmp_path)
     store = BenchmarkProfileStore(tmp_path / ".axiom")
     record = store.create("Trusted", _report(), "prompt", tmp_path)
     path = tmp_path / ".axiom" / "benchmark-profiles.json"
@@ -194,7 +213,7 @@ def test_profile_store_rejects_symlinked_store_paths(tmp_path: Path):
 
 
 def test_profile_comparison_requires_two_distinct_existing_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch)
+    _patch_environment(monkeypatch, tmp_path)
     store = BenchmarkProfileStore(tmp_path / ".axiom")
     first = store.create("One", _report(), "prompt", tmp_path)
     with pytest.raises(BenchmarkProfileError, match="Two distinct"):
@@ -204,7 +223,7 @@ def test_profile_comparison_requires_two_distinct_existing_ids(tmp_path: Path, m
 
 
 def test_profile_store_rejects_invalid_sampling_and_untrusted_model_directory_symlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch)
+    _patch_environment(monkeypatch, tmp_path)
     store = BenchmarkProfileStore(tmp_path / ".axiom")
     bad = _report()
     bad["sampling"]["top_p"] = 1.5
@@ -218,12 +237,26 @@ def test_profile_store_rejects_invalid_sampling_and_untrusted_model_directory_sy
         link.symlink_to(model, target_is_directory=True)
     except (OSError, NotImplementedError):
         pytest.skip("Symlink creation is not permitted in this test environment.")
+    from axiom.core import engine
+
+    with os.scandir(tmp_path) as entries:
+        link_entry = next(entry for entry in entries if entry.name == link.name)
+    metadata = link_entry.stat(follow_symlinks=False)
+    diagnostic = (
+        f"mode={oct(metadata.st_mode)} "
+        f"attributes={getattr(metadata, 'st_file_attributes', None)!r} "
+        f"reparse_tag={getattr(metadata, 'st_reparse_tag', None)!r} "
+        f"islink={link_entry.is_symlink()!r}"
+    )
+    assert engine._entry_is_link_or_reparse_point(link_entry), diagnostic
+    with pytest.raises(ValueError, match="symlinked path component"):
+        engine.resolve_local_model_directory(str(link), "Base model")
     with pytest.raises(BenchmarkProfileError, match="symbolic link"):
         store.create("Symlinked model", _report(), "prompt", link)
 
 
 def test_missing_model_configuration_fingerprint_prevents_controlled_comparison(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch)
+    _patch_environment(monkeypatch, tmp_path)
     store = BenchmarkProfileStore(tmp_path / ".axiom")
     model = tmp_path / "model"
     model.mkdir()

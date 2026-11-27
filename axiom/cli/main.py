@@ -25,7 +25,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from axiom.cli.interactive import confirm as safe_confirm
-from axiom.cli.errors import emit_error, json_errors_enabled
+from axiom.cli.errors import emit_error, json_errors_enabled, set_runtime_options
 from axiom.cli.progress import cancellable_scan_progress, report_cancelled
 from axiom.cli.ai_features import ai_app
 from axiom.cli.optimizer import optimizer_app
@@ -169,6 +169,7 @@ def cli_callback(
     ctx.obj.update(runtime)
     _RUNTIME_OPTIONS.clear()
     _RUNTIME_OPTIONS.update(runtime)
+    set_runtime_options(runtime)
     console.quiet = quiet
     logging.getLogger("axiom").setLevel(logging.DEBUG if verbose else logging.WARNING)
 

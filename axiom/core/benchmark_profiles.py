@@ -83,6 +83,26 @@ def _model_config_fingerprint(model_path: str | Path) -> str | None:
     root = _trusted_model_directory(model_path)
     if root is None:
         return None
+
+
+def _model_config_fingerprint(model_path: str | Path) -> str | None:
+    """Hash fixed-name model configuration metadata without following file links."""
+    root = _trusted_model_directory(model_path)
+    if root is None:
+        return None
+    # The directory itself is returned by AXIOM's bounded trusted-root walk.
+    # Verify that the directory identity does not change while its fixed-name
+    # metadata entries are being opened.
+    try:
+        root_before = root.lstat()
+    except OSError:
+        raise BenchmarkProfileError("The selected model directory could not be inspected safely.") from None
+    if not stat.S_ISDIR(root_before.st_mode):
+        raise BenchmarkProfileError("The selected model directory must be a regular directory.")
+    root_reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    if root_reparse and getattr(root_before, "st_file_attributes", 0) & root_reparse:
+        raise BenchmarkProfileError("The selected model directory must not be a reparse point.")
+
     parts: list[tuple[str, str]] = []
     total = 0
     for name in _MODEL_CONFIG_FILES:

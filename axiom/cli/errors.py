@@ -13,15 +13,23 @@ EXIT_CODE_SUCCESS = 0
 EXIT_CODE_FAILURE = 1
 EXIT_CODE_USAGE = 2
 EXIT_CODE_CANCELLED = 130
+_RUNTIME_OPTIONS: dict[str, object] = {}
+
+
+def set_runtime_options(options: Mapping[str, object]) -> None:
+    """Publish the active root output policy for errors raised outside Click callbacks."""
+    _RUNTIME_OPTIONS.clear()
+    _RUNTIME_OPTIONS.update(options)
 
 
 def runtime_options() -> dict[str, object]:
-    """Read the root command's output policy from the active Click context."""
+    """Read the root command's output policy, with a callback-managed fallback."""
     context = click.get_current_context(silent=True)
-    if context is None:
-        return {}
-    root = context.find_root()
-    return root.obj if isinstance(root.obj, dict) else {}
+    if context is not None:
+        root = context.find_root()
+        if isinstance(root.obj, dict) and root.obj:
+            return dict(root.obj)
+    return dict(_RUNTIME_OPTIONS)
 
 
 def json_errors_enabled(options: Mapping[str, object] | None = None) -> bool:
