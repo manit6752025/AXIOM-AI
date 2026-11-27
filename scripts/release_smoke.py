@@ -23,6 +23,8 @@ VALID_STATUSES = {
     "In progress; validation and registry publication pending",
     "In progress; registry publication pending",
     "Implemented; tests passing; code-scan review pending",
+    "Implemented; physical hardware validation pending",
+    "Implemented; CodeQL disposition pending",
 }
 
 
