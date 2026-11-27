@@ -266,12 +266,6 @@ def test_mcp_file_opener_validates_workspace_before_opening_regular_file(tmp_pat
     assert resolved == (root / "data" / "sample.jsonl").resolve()
     assert str(resolved).startswith(str(root.resolve()).rstrip(os.sep) + os.sep)
 
-    sibling = tmp_path / "workspace-evil"
-    sibling.mkdir()
-    (sibling / "outside.jsonl").write_text("private sibling", encoding="utf-8")
-    with pytest.raises(ValueError):
-        mcp_paths._open_mcp_workspace_file("outside.jsonl", sibling)
-
     outside = tmp_path / "outside.jsonl"
     outside.write_text("private", encoding="utf-8")
     escape_dir = root / "escape-dir"
@@ -292,4 +286,17 @@ def test_mcp_file_opener_validates_workspace_before_opening_regular_file(tmp_pat
 
     with pytest.raises(ValueError):
         mcp_paths._open_mcp_workspace_file("data", root)
+
+    # A sibling prefix is not a child of the workspace: the separator in
+    # the containment prefix prevents /workspace-evil from matching /workspace.
+    sibling = tmp_path / "workspace-evil"
+    sibling.mkdir()
+    (sibling / "outside.jsonl").write_text("private sibling", encoding="utf-8")
+    monkeypatch.setattr(
+        mcp_paths.path_safety,
+        "resolve_workspace_output_path",
+        lambda _raw, _workspace: sibling / "outside.jsonl",
+    )
+    with pytest.raises(ValueError):
+        mcp_paths._open_mcp_workspace_file("data/outside.jsonl", root)
 
