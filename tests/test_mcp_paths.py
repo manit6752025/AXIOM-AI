@@ -162,7 +162,7 @@ def test_descriptor_mode_uses_pinned_directory_scans_for_untrusted_components(tm
 
     resolved, stream = mcp_paths.open_mcp_workspace_file("data/sample.jsonl", root)
     with stream:
-        assert stream.read() == b'{"text":"safe"}\\n'
+        assert stream.read() == b'{"text":"safe"}' + bytes((10,))
     assert resolved == root / "data" / "sample.jsonl"
 
     _path, parent_fd, name, available = mcp_paths.open_mcp_workspace_output_parent(
