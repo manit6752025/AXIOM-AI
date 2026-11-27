@@ -29,11 +29,15 @@ The current repository is under a personal owner, so this hosted larger-runner
 route requires moving it to an eligible organization; no access or hardware
 is assumed by this workflow.
 
-Each runner must have the vendor driver/runtime and a PyTorch build compatible
-with that device preinstalled or installable by the configured environment.
-The workflow verifies actual runtime availability before running the
-safetensors/LoRA forward test; a missing device or incompatible build fails,
-rather than converting the result to a successful skip.
+Each runner must expose Python 3.11 and the vendor-specific PyTorch build
+(CUDA, ROCm, MPS or XPU) in the same `python` interpreter used by GitHub
+Actions, plus the vendor driver/runtime. The workflows deliberately do not run
+`setup-python` or install AXIOM's `native-inference` extra: that extra would
+allow pip to replace the runner's device-specific PyTorch with a generic
+wheel. They install AXIOM's test dependencies and the non-torch native
+packages only, then verify that the pre-provisioned runtime reports the
+requested physical device before running the safetensors/LoRA forward test.
+A missing or incompatible device fails rather than becoming a successful skip.
 
 Run from a maintainer account after registering the matching hardware runner:
 

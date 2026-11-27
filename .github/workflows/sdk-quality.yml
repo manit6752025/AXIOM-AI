@@ -70,18 +70,24 @@ jobs:
         with:
           node-version: "22"
       - name: Install SDK development dependencies
-        run: npm install --prefix sdk/typescript --no-audit --no-fund
+        working-directory: sdk/typescript
+        run: npm install --no-audit --no-fund
       - name: Compile declarations and run SDK contract tests
-        run: npm test --prefix sdk/typescript
+        working-directory: sdk/typescript
+        run: npm test
       - name: Verify publishable npm archive
-        run: npm pack --prefix sdk/typescript --dry-run
+        working-directory: sdk/typescript
+        run: npm pack --dry-run
       - name: Install packed SDK in a clean project
         shell: bash
         run: |
           package_dir="$RUNNER_TEMP/axiom-sdk-npm-check"
           mkdir -p "$package_dir"
-          npm pack --prefix sdk/typescript --pack-destination "$RUNNER_TEMP"
-          npm install --prefix "$package_dir" --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP/axiom-ai-sdk-1.0.0.tgz"
+          cd sdk/typescript
+          tarball="$(npm pack --pack-destination "$RUNNER_TEMP" --silent)"
+          test -n "$tarball"
+          test -f "$RUNNER_TEMP/$tarball"
+          npm install --prefix "$package_dir" --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP/$tarball"
           cd "$package_dir"
           node --input-type=module -e '
             import assert from "node:assert/strict";

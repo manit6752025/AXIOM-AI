@@ -28,6 +28,20 @@ def test_accelerator_workflow_requires_manual_dispatch_and_real_device_probes():
         "xpu": ("xpu", ["self-hosted", "Linux", "X64", "axiom-xpu"], "torch.xpu", "torch.xpu.is_available()"),
     }
     jobs = workflow["jobs"]
+    for job in jobs.values():
+        assert not any(
+            step.get("uses", "").startswith("actions/setup-python@")
+            for step in job["steps"]
+        )
+        installers = "\\n".join(
+            step.get("run", "")
+            for step in job["steps"]
+            if "pip install -e" in step.get("run", "")
+        )
+        assert '".[test]"' in installers
+        assert "safetensors>=0.4" in installers
+        assert "native-inference" not in installers
+        assert "Python 3.11" in "\\n".join(step.get("run", "") for step in job["steps"])
     for device, (backend, runner, runtime_probe, availability_probe) in expected.items():
         job = jobs[device]
         assert job["if"] == f"inputs.device == '{device}'"
@@ -69,3 +83,34 @@ def test_accelerator_validation_preflight_python_is_syntactically_valid():
     assert 'torch.cuda.get_device_name(0) if device in {"cuda", "rocm"}' in report_script
     assert 'else "MPS" if device == "mps"' in report_script
     assert "torch.xpu.get_device_name(0)" in report_script
+    assert not any(
+        step.get("uses", "").startswith("actions/setup-python@")
+        for step in steps
+    )
+    install_step = next(
+        step for step in steps if "Install AXIOM test dependencies" in step.get("name", "")
+    )
+    assert '".[test]"' in install_step["run"]
+    assert "safetensors>=0.4" in install_step["run"]
+    assert "native-inference" not in install_step["run"]
+    assert "Python 3.11" in report_script
+
+
+
+def test_accelerator_integration_python_preflights_are_valid():
+    root = Path(__file__).resolve().parents[1]
+    workflow = yaml.load(
+        (root / ".github/workflows/accelerator-integration.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    for job_name, job in workflow["jobs"].items():
+        scripts = []
+        for step in job["steps"]:
+            script = step.get("run", "")
+            scripts.extend(re.findall(r"python - <<'PY'\n(.*?)\nPY", script, re.DOTALL))
+        assert scripts, f"{job_name} has no executable Python preflight"
+        for script in scripts:
+            ast.parse(textwrap.dedent(script))
+        combined = "\\n".join(scripts)
+        assert "Python 3.11" in combined
+        assert "import torch" in combined

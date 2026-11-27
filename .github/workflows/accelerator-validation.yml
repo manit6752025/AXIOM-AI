@@ -38,19 +38,18 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: implement/roadmap
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.11"
       - name: Install AXIOM test dependencies without replacing the hardware PyTorch build
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[test]" "safetensors>=0.4"
+          python -m pip install -e ".[test]" "safetensors>=0.4" "tokenizers>=0.19" "gguf>=0.10.0" "jinja2>=3.1"
       - name: Verify physical device and accelerator-enabled PyTorch
         run: |
           python - <<'PY'
           import os
+          import sys
           import torch
 
+          assert sys.version_info[:2] == (3, 11), "Runner must use its pre-provisioned Python 3.11 environment."
           device = os.environ["AXIOM_ACCELERATOR_DEVICE"]
           if device == "cuda":
               assert torch.version.cuda is not None and torch.cuda.is_available()
