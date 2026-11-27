@@ -181,3 +181,20 @@ def test_open_regular_file_uses_only_enumerated_names_for_descriptor_opens(tmp_p
         isinstance(name, str) and "/" not in name and "\\" not in name
         for name in descriptor_names
     )
+
+
+
+def test_codeql_models_the_directory_entry_selector_as_a_path_barrier():
+    from pathlib import Path
+
+    model_file = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "codeql"
+        / "extensions"
+        / "axiom-model-paths"
+        / "models"
+        / "model-paths.yml"
+    )
+    model = model_file.read_text(encoding="utf-8")
+    assert '["axiom.path_safety", "Member[_selected_entry].ReturnValue", "path-injection"]' in model
