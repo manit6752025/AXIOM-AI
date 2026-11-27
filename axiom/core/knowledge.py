@@ -21,6 +21,7 @@ MAX_DOCUMENTS_PER_BASE = 1_000
 MAX_INDEX_BYTES = 4 * 1024 * 1024
 MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
 MAX_TOTAL_DOCUMENT_BYTES = 1024 * 1024 * 1024
+MAX_STORED_DOCUMENT_DIRECTORY_ENTRIES = MAX_KNOWLEDGE_BASES * MAX_DOCUMENTS_PER_BASE + 1536
 _ALLOWED_SUFFIXES = frozenset({".txt", ".md", ".markdown", ".rst", ".csv", ".json", ".jsonl"})
 _BASE_ID = re.compile(r"^[0-9a-f]{32}$")
 _DOCUMENT_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -37,13 +38,6 @@ class KnowledgeStoreCapacityError(KnowledgeStoreError):
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
-
-
-def _document_file_path(documents_root: Path, document_id: str) -> Path:
-    safe_id = os.path.basename(document_id)
-    if safe_id != document_id or not _DOCUMENT_ID.fullmatch(safe_id):
-        raise KnowledgeStoreError("Document ID is invalid.")
-    return documents_root / (safe_id + ".txt")
 
 
 def _validate_name(value: Any, *, maximum: int, label: str) -> str:
@@ -91,10 +85,23 @@ class KnowledgeBaseStore:
         self.index_path = self.root / "index.json"
         self.lock_path = self.root / ".knowledge.lock"
 
+    @staticmethod
+    def _is_link_or_reparse_point(path: Path) -> bool:
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return True
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        return stat.S_ISLNK(metadata.st_mode) or bool(
+            reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag
+        )
+
     def _ensure_layout(self, *, create: bool) -> None:
         for path in (self.metadata_root, self.root, self.documents_root, self.index_path, self.lock_path):
-            if path.is_symlink():
-                raise KnowledgeStoreError("Knowledge storage paths must not be symbolic links.")
+            if self._is_link_or_reparse_point(path):
+                raise KnowledgeStoreError("Knowledge storage paths must not be symbolic links or reparse points.")
         if create:
             self.metadata_root.mkdir(parents=True, exist_ok=True, mode=0o700)
             self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -207,6 +214,62 @@ class KnowledgeBaseStore:
             raise KnowledgeStoreCapacityError("Knowledge metadata exceeds the 4 MiB workspace index limit.")
         atomic_write_text(self.index_path, serialized)
 
+    def _document_storage_paths(
+        self,
+        document_ids: set[str],
+        *,
+        required: bool = True,
+    ) -> dict[str, Path]:
+        """Find stored files from one bounded scan of the fixed private directory.
+
+        Caller-provided identifiers are used only as equality keys. Returned
+        paths originate from directory entries and are checked without
+        following symlinks, junctions, or hard links.
+        """
+        if any(not isinstance(item, str) or not _DOCUMENT_ID.fullmatch(item) for item in document_ids):
+            raise KnowledgeStoreError("Document ID is invalid.")
+        if not document_ids:
+            return {}
+        self._ensure_layout(create=False)
+        found: dict[str, Path] = {}
+        try:
+            with os.scandir(self.documents_root) as entries:
+                for count, entry in enumerate(entries, 1):
+                    if count > MAX_STORED_DOCUMENT_DIRECTORY_ENTRIES:
+                        raise KnowledgeStoreCapacityError(
+                            "Private knowledge document directory exceeds its bounded inventory limit."
+                        )
+                    name = entry.name
+                    if not name.endswith(".txt"):
+                        continue
+                    document_id = name[:-4]
+                    if document_id not in document_ids:
+                        continue
+                    try:
+                        metadata = entry.stat(follow_symlinks=False)
+                    except OSError:
+                        raise KnowledgeStoreError(
+                            "Stored knowledge document could not be inspected safely."
+                        ) from None
+                    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+                    is_reparse_point = bool(
+                        reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag
+                    )
+                    if not stat.S_ISREG(metadata.st_mode) or is_reparse_point:
+                        raise KnowledgeStoreError(
+                            "Stored knowledge document must be a regular file, not a symbolic link, reparse point or special file."
+                        )
+                    if getattr(metadata, "st_nlink", 1) != 1:
+                        raise KnowledgeStoreError("Stored knowledge document must not be hard-linked.")
+                    found[document_id] = Path(entry.path)
+        except KnowledgeStoreError:
+            raise
+        except OSError:
+            raise KnowledgeStoreError("Stored knowledge directory could not be inspected safely.") from None
+        if required and found.keys() != document_ids:
+            raise KnowledgeStoreError("Stored knowledge document is unavailable.")
+        return found
+
     @staticmethod
     def _public_base(base: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -299,7 +362,7 @@ class KnowledgeBaseStore:
             "size_bytes": len(raw), "character_count": len(text), "ingested_at": _now(),
         }
         self._ensure_layout(create=True)
-        destination = _document_file_path(self.documents_root, document["id"])
+        destination = self.documents_root / f"{document['id']}.txt"
         with file_lock(self.lock_path):
             records = self._read_index()
             base = next((item for item in records if item["id"] == base_id), None)
@@ -335,9 +398,7 @@ class KnowledgeBaseStore:
             document = next((item for item in base["documents"] if item["id"] == document_id), None)
             if document is None:
                 raise KeyError("Knowledge document not found.")
-            path = _document_file_path(self.documents_root, document_id)
-            if path.is_symlink() or not path.is_file():
-                raise KnowledgeStoreError("Stored knowledge document is unavailable.")
+            path = self._document_storage_paths({document["id"]})[document["id"]]
             try:
                 with open_regular_file(path) as handle:
                     raw = handle.read(MAX_DOCUMENT_BYTES + 1)
@@ -364,13 +425,11 @@ class KnowledgeBaseStore:
             document = next((item for item in base["documents"] if item["id"] == document_id), None)
             if document is None:
                 return None
-            path = _document_file_path(self.documents_root, document_id)
-            if path.is_symlink():
-                raise KnowledgeStoreError("Stored knowledge document is a symbolic link.")
+            path = self._document_storage_paths({document["id"]}, required=False).get(document["id"])
             base["documents"] = [item for item in base["documents"] if item["id"] != document_id]
             base["updated_at"] = _now()
             self._write_index(records)
-            if path.exists():
+            if path is not None:
                 path.unlink()
             return dict(document)
 
@@ -383,12 +442,8 @@ class KnowledgeBaseStore:
             base = next((item for item in records if item["id"] == base_id), None)
             if base is None:
                 return None
-            paths = []
-            for document in base["documents"]:
-                path = _document_file_path(self.documents_root, document["id"])
-                if path.is_symlink():
-                    raise KnowledgeStoreError("Stored knowledge document is a symbolic link.")
-                paths.append(path)
+            document_ids = {document["id"] for document in base["documents"]}
+            paths = list(self._document_storage_paths(document_ids, required=False).values())
             records = [item for item in records if item["id"] != base_id]
             self._write_index(records)
             for path in paths:

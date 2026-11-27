@@ -20,11 +20,9 @@ def _parts(raw: str) -> tuple[str, ...]:
     ):
         raise ValueError("Use a workspace-relative file path.")
 
-    raw_parts = tuple(raw.split("/"))
-    parts = tuple(os.path.basename(part) for part in raw_parts)
+    parts = tuple(raw.split("/"))
     if (
-        any(safe != original for safe, original in zip(parts, raw_parts))
-        or any(part in {"", ".", ".."} for part in parts)
+        any(part in {"", ".", ".."} for part in parts)
         or (len(parts[0]) >= 2 and parts[0][1] == ":")
     ):
         raise ValueError("Use a safe workspace-relative file path.")
@@ -45,7 +43,12 @@ def _is_link_like(path: Path) -> bool:
         metadata = path.lstat()
     except FileNotFoundError:
         return False
-    if stat.S_ISLNK(metadata.st_mode) or getattr(metadata, "st_reparse_tag", 0):
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or getattr(metadata, "st_reparse_tag", 0)
+        or (reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag)
+    ):
         return True
     is_junction = getattr(path, "is_junction", None)
     return bool(is_junction and is_junction())
@@ -71,23 +74,75 @@ def _fallback_workspace_path(
     *,
     allow_existing_output: bool = False,
 ) -> Path:
+    """Resolve portable paths by matching actual directory entries, not joins.
+
+    The fallback is used on platforms without descriptor-relative no-follow
+    APIs. Existing components are selected from parent directory entries and
+    inspected without following links. Only an absent final output leaf is
+    joined to the already-validated parent.
+    """
     parts = _parts(raw)
     workspace = _workspace_root(root)
-    candidate = workspace
+    current = workspace
     for index, part in enumerate(parts):
-        candidate = candidate / part
-        if _is_link_like(candidate):
-            raise ValueError("Symbolic links are not supported in MCP file paths.")
         is_final = index == len(parts) - 1
-        if is_final and not allow_existing_output and not candidate.is_file():
-            raise ValueError("The workspace file was not found or is not a regular file.")
-        if not is_final and not candidate.is_dir():
-            raise ValueError("Workspace parent directories must already exist.")
+        try:
+            with os.scandir(current) as entries:
+                selected = next((entry for entry in entries if entry.name == part), None)
+        except OSError:
+            raise ValueError("A workspace parent directory could not be inspected safely.") from None
 
-    resolved = candidate.resolve(strict=not allow_existing_output or candidate.exists())
-    if resolved == workspace or not resolved.is_relative_to(workspace):
+        if selected is None:
+            if not (is_final and allow_existing_output):
+                raise ValueError("The workspace file was not found or is not a regular file.")
+            # part has already passed _parts(): one non-empty component with
+            # separators, dot segments and drive prefixes rejected.
+            parent = current
+            candidate = parent / part
+            try:
+                resolved_parent = parent.resolve(strict=True)
+            except (OSError, RuntimeError):
+                raise ValueError("The workspace output parent changed while being inspected.") from None
+            if not _path_is_within_root(resolved_parent, workspace):
+                raise ValueError("The path must stay inside the MCP workspace.")
+            if not _path_is_within_root(candidate, workspace):
+                raise ValueError("The workspace output must stay inside the MCP workspace.")
+            return candidate
+
+        try:
+            metadata = selected.stat(follow_symlinks=False)
+        except OSError:
+            raise ValueError("A workspace path component changed while being inspected.") from None
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        is_reparse_point = bool(
+            reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag
+        )
+        candidate = Path(selected.path)
+        if stat.S_ISLNK(metadata.st_mode) or is_reparse_point or _is_link_like(candidate):
+            raise ValueError("Symbolic links and junctions are not supported in MCP file paths.")
+
+        if is_final:
+            if allow_existing_output:
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise ValueError("The workspace output must be a regular file path.")
+            elif not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("The workspace file was not found or is not a regular file.")
+        elif not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError("Workspace parent directories must already exist.")
+        current = candidate
+
+    if not _path_is_within_root(current, workspace) or current == workspace:
         raise ValueError("The path must stay inside the MCP workspace.")
-    return resolved
+    return current
+
+
+def _path_is_within_root(path: Path, root: Path) -> bool:
+    try:
+        normalized_path = os.path.normcase(os.path.normpath(os.fspath(path)))
+        normalized_root = os.path.normcase(os.path.normpath(os.fspath(root)))
+        return os.path.commonpath((normalized_path, normalized_root)) == normalized_root
+    except (OSError, TypeError, ValueError):
+        return False
 
 
 def _open_parent(root: Path, parts: tuple[str, ...]) -> tuple[Path, int, str]:
@@ -176,11 +231,21 @@ def open_mcp_workspace_output_parent(
         os.link not in os.supports_dir_fd or os.unlink not in os.supports_dir_fd
     ):
         path = _fallback_workspace_path(raw, root, allow_existing_output=True)
-        if path.exists():
-            if not path.is_file() or path.is_symlink():
-                raise ValueError("The workspace output must be a regular file path.")
-            return path, None, path.name, False
-        return path, None, path.name, True
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            return path, None, path.name, True
+        except OSError:
+            raise ValueError("The workspace output path could not be inspected safely.") from None
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        is_reparse_point = bool(
+            reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag
+        )
+        if stat.S_ISLNK(metadata.st_mode) or is_reparse_point:
+            raise ValueError("Symbolic links and junctions are not supported for MCP output paths.")
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("The workspace output must be a regular file path.")
+        return path, None, path.name, False
 
     parts = _parts(raw)
     path, parent_descriptor, name = _open_parent(root, parts)
