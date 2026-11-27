@@ -380,7 +380,7 @@ def request_admission_issues(
 def benchmark_profile_issues(profile_core: str, api_source: str, cli_source: str, client_source: str, panel_source: str, core_tests: str, api_tests: str, cli_tests: str, e2e_source: str, docs_source: str) -> list[str]:
     """Require saved benchmark provenance to be connected to tests and UX."""
     checks = (
-        ("Profile store", profile_core, ("class BenchmarkProfileStore", "def create(", "def list(", "def compare(", "prompt_sha256", "model_config_sha256", "_hardware_record(", "_software_record(", "MAX_PROFILES = 100", "MAX_STORE_BYTES", "file_lock(", "atomic_write_text(", "stat.S_ISREG", "adapter_used")),
+        ("Profile store", profile_core, ("class BenchmarkProfileStore", "def create(", "def list(", "def compare(", "prompt_sha256", "model_config_sha256", "_hardware_record(", "_software_record(", "MAX_PROFILES = 100", "MAX_STORE_BYTES", "file_lock(", "atomic_write_text(", "stat.S_ISREG", "adapter_used", "_path_is_within_root(resolved, root)")),
         ("Benchmark API", api_source, ('profile_name: str | None', 'BenchmarkProfileStore().create(', '@router.get("/benchmark-profiles")', '@router.get("/benchmark-profiles/compare")')),
         ("Benchmark CLI", cli_source, ('"--profile-name"', '@engine_app.command("benchmark-profiles")', '@engine_app.command("benchmark-compare")', 'BenchmarkProfileStore().create(')),
         ("Typed API client", client_source, ("AxiomEngineBenchmarkProfile", "AxiomEngineBenchmarkProfileComparison", "axiomEngineBenchmarkProfiles:", "compareAxiomEngineBenchmarkProfiles:", "profile_name?: string")),
@@ -593,6 +593,7 @@ def engine_security_and_lifecycle_issues(engine_source: str, native_source: str,
         "def _allowed_model_roots(",
         "def _path_is_within_root(",
         "def _is_link_or_reparse_point(",
+        "with os.scandir(current) as entries:",
         "_is_link_or_reparse_point(child)",
         "os.path.commonpath((normalized_path, normalized_root)) == normalized_root",
         "trusted-root escapes are not allowed",
