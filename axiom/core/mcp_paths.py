@@ -222,6 +222,8 @@ def open_mcp_workspace_file(raw: str, root: Path) -> tuple[Path, BinaryIO]:
         workspace = _workspace_root(root)
         path = _fallback_workspace_path(raw, workspace)
         try:
+            if not path.is_relative_to(workspace):
+                raise ValueError("The MCP path must stay inside the workspace.")
             stream = path_safety.open_regular_file(path)
         except (OSError, ValueError) as exc:
             raise ValueError("The workspace file is missing or unsafe.") from exc
