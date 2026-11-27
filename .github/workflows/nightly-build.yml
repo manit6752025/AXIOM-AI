@@ -52,8 +52,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@://github.com"
+          git config user.name "Manit Arora"
+          git config user.email "manit6752025@gmail.com"
           git switch -C nightly-integration origin/latest/nightly
           git merge --no-edit origin/main
           git merge --no-edit origin/latest/development
