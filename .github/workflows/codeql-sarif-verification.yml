@@ -38,7 +38,6 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: actions, javascript-typescript, python
-          config-file: ./.github/codeql/codeql-config.yml
           queries: security-and-quality
       - name: Build compiled languages where applicable
         uses: github/codeql-action/autobuild@v3
