@@ -159,20 +159,25 @@ def test_open_regular_file_uses_only_enumerated_names_for_descriptor_opens(tmp_p
     target = nested / "record.jsonl"
     target.write_text('{"text":"safe"}\\n', encoding="utf-8")
 
-    real_open = os.open
+    import axiom.path_safety as path_safety
+    from types import SimpleNamespace
+
     descriptor_names = []
 
     def record_open(path, flags, *args, **kwargs):
         if kwargs.get("dir_fd") is not None:
             descriptor_names.append(path)
-        return real_open(path, flags, *args, **kwargs)
+        return os.open(path, flags, *args, **kwargs)
 
-    monkeypatch.setattr(os, "open", record_open)
-    monkeypatch.setattr(
-        os,
-        "supports_dir_fd",
-        frozenset((*os.supports_dir_fd, record_open)),
-    )
+    # Isolate this spy from pytest/pathlib and other process-wide os.open calls.
+    os_proxy = SimpleNamespace(**{
+        name: getattr(os, name)
+        for name in dir(os)
+        if not name.startswith("__")
+    })
+    os_proxy.open = record_open
+    os_proxy.supports_dir_fd = frozenset((*os.supports_dir_fd, record_open))
+    monkeypatch.setattr(path_safety, "os", os_proxy)
     with open_regular_file(target) as stream:
         assert stream.read() == b'{"text":"safe"}\\n'
 
@@ -197,8 +202,14 @@ def test_codeql_models_the_directory_entry_selector_as_a_path_barrier():
         / "model-paths.yml"
     )
     model = model_file.read_text(encoding="utf-8")
-    assert '["axiom.path_safety", "Member[_selected_entry].ReturnValue", "path-injection"]' in model
-    assert '["axiom.path_safety", "Member[find_existing_relative_path].ReturnValue", "path-injection"]' in model
+    for access_path in (
+        "Member[_selected_entry].ReturnValue",
+        "Member[_selected_entry].ReturnValue[0]",
+        "Member[_selected_entry].ReturnValue[1]",
+        "Member[find_existing_relative_path].ReturnValue",
+        "Member[resolve_workspace_output_path].ReturnValue",
+    ):
+        assert f'["axiom.path_safety", "{access_path}", "path-injection"]' in model
 
 
 def test_codeql_sarif_workflow_uses_the_checked_in_local_model_pack():

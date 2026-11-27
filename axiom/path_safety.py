@@ -234,7 +234,6 @@ def resolve_workspace_output_path(
         if resolved_candidate == workspace:
             raise SafePathError("The workspace root itself is not a file entry.")
         current = resolved_candidate
-        current = candidate
         if final_component and return_availability:
             return current, False
 
@@ -280,6 +279,11 @@ def _selected_entry(directory: int | Path, requested_name: str) -> tuple[str, st
 
 
 def _same_file_identity(expected: os.stat_result, opened: os.stat_result) -> bool:
+    if os.name == "nt":
+        # The Windows file index identifies the entry within its volume. The
+        # drive/device field can differ between path stat and CRT fstat even
+        # when both refer to the same open file handle.
+        return bool(expected.st_ino and opened.st_ino and expected.st_ino == opened.st_ino)
     return (expected.st_dev, expected.st_ino) == (opened.st_dev, opened.st_ino)
 
 
