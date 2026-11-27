@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -928,7 +929,7 @@ def get_job(job_id: str) -> dict[str, Any] | None:
 
 def cancel_job(job_id: str) -> dict[str, Any] | None:
     """Request cooperative cancellation of an active Model Studio job."""
-    _job_path(job_id)
+    _validate_job_id(job_id)
     with _ACTIVE_LOCK:
         job = _read_job(job_id)
         if job is None:

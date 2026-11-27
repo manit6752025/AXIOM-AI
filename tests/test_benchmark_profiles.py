@@ -138,6 +138,25 @@ def test_profiles_compare_metrics_only_when_hardware_software_model_and_workload
     model = tmp_path / "model"
     model.mkdir()
     (model / "config.json").write_text('{"model_type":"qwen3"}', encoding="utf-8")
+    from axiom.core import engine
+
+    roots = engine._allowed_model_roots()
+    matching_roots = [
+        str(root) for root in roots if engine._path_is_within_root(model, root)
+    ]
+    try:
+        resolved_model = engine.resolve_local_model_directory(str(model), "Base model")
+    except ValueError as exc:
+        raise AssertionError(
+            f"Windows model resolution failed: model={str(model)!r}; "
+            f"roots={tuple(map(str, roots))!r}; matching_roots={matching_roots!r}; "
+            f"normalised_model={engine._normalise_lexical_model_path(model)!r}; "
+            f"error={exc}"
+        ) from exc
+    assert resolved_model, (
+        f"model resolver returned no directory: model={str(model)!r}; "
+        f"roots={tuple(map(str, roots))!r}; matching_roots={matching_roots!r}"
+    )
     store = BenchmarkProfileStore(tmp_path / ".axiom")
     first = store.create("Baseline A", _report(100), "same prompt", model)
     second = store.create("Baseline B", _report(90), "same prompt", model)
@@ -147,7 +166,7 @@ def test_profiles_compare_metrics_only_when_hardware_software_model_and_workload
     assert all(same["match"].values())
     assert same["metrics"]["median_elapsed_ms"] == {"left": 100.0, "right": 90.0, "delta": -10.0}
 
-    _patch_environment(monkeypatch, gpu_name="Different GPU")
+    _patch_environment(monkeypatch, tmp_path, gpu_name="Different GPU")
     third = store.create("Different hardware", _report(80), "same prompt", model)
     different = store.compare(first["id"], third["id"])
     assert different["comparable"] is False
@@ -222,6 +241,20 @@ def test_profile_store_rejects_invalid_sampling_and_untrusted_model_directory_sy
         link.symlink_to(model, target_is_directory=True)
     except (OSError, NotImplementedError):
         pytest.skip("Symlink creation is not permitted in this test environment.")
+    from axiom.core import engine
+
+    with os.scandir(tmp_path) as entries:
+        link_entry = next(entry for entry in entries if entry.name == link.name)
+    metadata = link_entry.stat(follow_symlinks=False)
+    diagnostic = (
+        f"mode={oct(metadata.st_mode)} "
+        f"attributes={getattr(metadata, 'st_file_attributes', None)!r} "
+        f"reparse_tag={getattr(metadata, 'st_reparse_tag', None)!r} "
+        f"islink={link_entry.is_symlink()!r}"
+    )
+    assert engine._entry_is_link_or_reparse_point(link_entry), diagnostic
+    with pytest.raises(ValueError, match="symlinked path component"):
+        engine.resolve_local_model_directory(str(link), "Base model")
     with pytest.raises(BenchmarkProfileError, match="symbolic link"):
         store.create("Symlinked model", _report(), "prompt", link)
 

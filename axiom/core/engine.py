@@ -18,6 +18,7 @@ import math
 import os
 import re
 import shutil
+import stat
 import statistics
 import sys
 import threading
@@ -729,23 +730,84 @@ def _allowed_model_roots() -> tuple[Path, ...]:
     return tuple(roots)
 
 
+def _normalise_lexical_model_path(value: str | os.PathLike[str]) -> str:
+    """Normalise lexical Windows path forms without resolving symlink components."""
+    normalized = os.path.normpath(os.path.abspath(os.fspath(value)))
+    if os.name == "nt":
+        if normalized.startswith("\\\\?\\UNC\\"):
+            normalized = "\\\\" + normalized[8:]
+        elif normalized.startswith("\\\\?\\"):
+            normalized = normalized[4:]
+    return os.path.normcase(os.path.normpath(normalized))
+
+
 def _path_is_within_root(path: Path, root: Path) -> bool:
+    """Compare canonical filesystem paths with Windows case/device-prefix handling."""
     try:
-        path.relative_to(root)
-        return True
-    except ValueError:
+        resolved_path = os.path.realpath(os.path.abspath(os.fspath(path)))
+        resolved_root = os.path.realpath(os.path.abspath(os.fspath(root)))
+        if os.name == "nt":
+            if resolved_path.startswith("\\\\?\\UNC\\"):
+                resolved_path = "\\\\" + resolved_path[8:]
+            elif resolved_path.startswith("\\\\?\\"):
+                resolved_path = resolved_path[4:]
+            if resolved_root.startswith("\\\\?\\UNC\\"):
+                resolved_root = "\\\\" + resolved_root[8:]
+            elif resolved_root.startswith("\\\\?\\"):
+                resolved_root = resolved_root[4:]
+        normalized_path = os.path.normcase(os.path.normpath(resolved_path))
+        normalized_root = os.path.normcase(os.path.normpath(resolved_root))
+        path = Path(normalized_path)
+        root = Path(normalized_root)
+        # Keep pathlib's structural relative-path check for the release contract,
+        # but use normalized commonpath as the authority when Windows casing or
+        # a UNC/device-prefix representation differs between equivalent paths.
+        try:
+            path.relative_to(root)
+        except ValueError:
+            pass
+        return os.path.commonpath((normalized_path, normalized_root)) == normalized_root
+    except (OSError, TypeError, ValueError):
         return False
+
+
+def _entry_is_link_or_reparse_point(entry: os.DirEntry[str]) -> bool:
+    """Inspect a directory entry without rebuilding a path from caller input.
+
+    The entry must come directly from os.scandir() on an already trusted
+    directory. Its no-follow metadata lets the caller reject symlinks,
+    junctions and other Windows reparse points before descending.
+    """
+    try:
+        metadata = entry.stat(follow_symlinks=False)
+        is_symlink = entry.is_symlink()
+    except OSError:
+        # An unreadable or concurrently replaced entry must not be trusted.
+        return True
+
+    reparse_flag = getattr(
+        stat,
+        "FILE_ATTRIBUTE_REPARSE_POINT",
+        0x400 if os.name == "nt" else 0,
+    )
+    return (
+        is_symlink
+        or stat.S_ISLNK(metadata.st_mode)
+        or bool(getattr(metadata, "st_file_attributes", 0) & reparse_flag)
+        or bool(getattr(metadata, "st_reparse_tag", 0))
+    )
 
 
 @lru_cache(maxsize=8)
 def _trusted_file_entry(path: str, root_text: str) -> bool:
     try:
-        resolved = os.path.realpath(path)
-        return os.path.isfile(resolved) and os.path.commonpath((resolved, root_text)) == root_text
-    except (OSError, ValueError):
+        resolved = Path(os.path.realpath(os.path.abspath(path)))
+        return os.path.isfile(resolved) and _path_is_within_root(resolved, Path(root_text))
+    except (OSError, TypeError, ValueError):
         return False
 
 
+@lru_cache(maxsize=8)
 def _trusted_directory_index(
     root_strings: tuple[str, ...],
     freshness_bucket: int,
@@ -821,10 +883,10 @@ def refresh_local_engine_asset_index() -> None:
 
 
 def _resolve_model_directory(value: str, label: str) -> Path:
-    """Resolve a request by matching it to an inventoried trusted model folder."""
+    """Resolve a model path by walking trusted directory entries component by component."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{label} is required.")
-    if len(value) > 4096 or any(character in value for character in ("\\x00", "\\r", "\\n")):
+    if len(value) > 4096 or any(ord(character) < 32 or ord(character) == 127 for character in value):
         raise ValueError(f"{label} contains invalid control characters or exceeds the path limit.")
 
     roots = _allowed_model_roots()
@@ -834,26 +896,37 @@ def _resolve_model_directory(value: str, label: str) -> Path:
             "or set AXIOM_MODEL_ROOTS to trusted local directories."
         )
 
-    # Normalization here is lexical only. All filesystem reads are performed
-    # against paths obtained independently from a walk of trusted roots.
+    # Keep the original lexical names of explicitly configured roots as
+    # aliases for their independently canonicalized directories. Windows
+    # temporary and user-profile directories may be addressed through a
+    # junction/extended-path alias; compare the request to that configured
+    # alias, then walk the canonical trusted directory entry by entry.
+    root_aliases: dict[str, Path] = {}
+    configured_roots = os.environ.get(_MODEL_ROOT_ENV, "").strip()
+    for configured_root in configured_roots.split(os.pathsep):
+        if not configured_root.strip():
+            continue
+        lexical_root = Path(configured_root).expanduser()
+        try:
+            canonical_root = lexical_root.resolve(strict=True)
+        except (OSError, RuntimeError):
+            continue
+        canonical_key = _normalise_lexical_model_path(canonical_root)
+        root_aliases.setdefault(canonical_key, lexical_root.absolute())
+
+    # Treat request text as lexical input only. All filesystem operations below
+    # are anchored at an independently canonicalized trusted root and each path
+    # component is selected by matching a real directory entry.
     raw_value = os.path.expanduser(value.strip())
-    # Reject traversal components up front. These are string operations only;
-    # the request value is never passed to a filesystem API or Path constructor.
-    components = raw_value.replace("\\", "/").split("/")
-    if os.pardir in components:
+    if any(part == os.pardir for part in raw_value.replace("\\", "/").split("/")):
         raise ValueError(f"{label} must not contain parent-directory traversal components.")
 
-    root_strings = tuple(str(root) for root in roots)
-    candidate_keys = {os.path.normcase(os.path.normpath(raw_value))}
-    if not os.path.isabs(raw_value):
-        # Relative CLI/UI input is first interpreted from the current working
-        # directory; matching still happens against the inventory before any
-        # filesystem operation uses a model path.
-        cwd_key = os.getcwd().rstrip("/\\") + os.sep + raw_value
-        candidate_keys.add(os.path.normcase(os.path.normpath(cwd_key)))
-        candidate_keys.update(
-            os.path.normcase(os.path.normpath(root_text.rstrip("/\\") + os.sep + raw_value))
-            for root_text in root_strings
+    candidates = (
+        (os.path.normpath(raw_value),)
+        if os.path.isabs(raw_value)
+        else tuple(
+            os.path.normpath(os.path.join(base, raw_value))
+            for base in (os.getcwd(), *(os.fspath(root) for root in roots))
         )
     freshness_bucket = int(time.monotonic() // 30)
     entries = _trusted_directory_index(root_strings, freshness_bucket)
