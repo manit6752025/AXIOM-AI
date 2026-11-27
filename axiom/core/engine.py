@@ -730,7 +730,19 @@ def _allowed_model_roots() -> tuple[Path, ...]:
     return tuple(roots)
 
 
+def _normalise_lexical_model_path(value: str | os.PathLike[str]) -> str:
+    """Normalise lexical Windows path forms without resolving symlink components."""
+    normalized = os.path.normpath(os.path.abspath(os.fspath(value)))
+    if os.name == "nt":
+        if normalized.startswith("\\\\?\\UNC\\"):
+            normalized = "\\\\" + normalized[8:]
+        elif normalized.startswith("\\\\?\\"):
+            normalized = normalized[4:]
+    return os.path.normcase(os.path.normpath(normalized))
+
+
 def _path_is_within_root(path: Path, root: Path) -> bool:
+    """Compare canonical filesystem paths with Windows case/device-prefix handling."""
     try:
         normalized_path = os.path.normcase(os.path.normpath(os.fspath(path)))
         normalized_root = os.path.normcase(os.path.normpath(os.fspath(root)))
@@ -855,7 +867,7 @@ def _resolve_model_directory(value: str, label: str) -> Path:
     """Resolve a model path by walking trusted directory entries component by component."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{label} is required.")
-    if len(value) > 4096 or any(character in value for character in ("\\x00", "\\r", "\\n")):
+    if len(value) > 4096 or any(ord(character) < 32 or ord(character) == 127 for character in value):
         raise ValueError(f"{label} contains invalid control characters or exceeds the path limit.")
 
     roots = _allowed_model_roots()

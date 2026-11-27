@@ -25,10 +25,10 @@ jobs:
       AXIOM_RUN_BACKUP_PRODUCTION_STRESS: "1"
       PYTHONUNBUFFERED: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: implement/roadmap
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install AXIOM test dependencies

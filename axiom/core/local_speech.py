@@ -296,10 +296,11 @@ def _workspace_audio(image_path: str, workspace_root: Path) -> tuple[Path, bytes
         or image_path != image_path.strip()
     ):
         raise ValueError("Audio path must be workspace-relative under data/.")
-    suffix = Path(image_path).suffix.lower()
-    if suffix not in {".wav", ".mp3", ".flac", ".ogg"}:
-        raise ValueError("Audio input must be a WAV, MP3, FLAC, or OGG file.")
     path, stream = open_mcp_workspace_file(image_path, workspace_root)
+    suffix = os.path.splitext(os.path.basename(os.fspath(path)))[1].lower()
+    if suffix not in {".wav", ".mp3", ".flac", ".ogg"}:
+        stream.close()
+        raise ValueError("Audio input must be a WAV, MP3, FLAC, or OGG file.")
     try:
         before = os.fstat(stream.fileno())
         if before.st_size <= 0 or before.st_size > MAX_SPEECH_INPUT_BYTES:
@@ -353,7 +354,10 @@ def transcribe_local_audio(
         raise LocalSpeechError("whisper-cli was not found. Install whisper.cpp locally; AXIOM will not download it.")
     with tempfile.TemporaryDirectory(prefix="axiom-whisper-") as temporary:
         temporary_root = Path(temporary)
-        source = temporary_root / ("input" + Path(audio_path).suffix.lower())
+        audio_extension = {".wav": "wav", ".mp3": "mp3", ".flac": "flac", ".ogg": "ogg"}.get(_audio_file.suffix.lower())
+        if audio_extension is None:
+            raise LocalSpeechError("Audio input has an unsupported file format.")
+        source = temporary_root / ("input." + audio_extension)
         source.write_bytes(audio_data)
         prefix = temporary_root / "transcript"
         args = [
@@ -383,7 +387,7 @@ def transcribe_local_audio(
         "engine": "whisper.cpp",
         "model": model.name,
         "transcript": transcript,
-        "audio": {"format": Path(audio_path).suffix.lower().lstrip("."), "size_bytes": len(audio_data)},
+        "audio": {"format": audio_extension, "size_bytes": len(audio_data)},
         "execution": {"device": "auto" if use_accelerator else "cpu", "threads": threads, "language": language},
         "privacy": {
             "local_process_only": True,
