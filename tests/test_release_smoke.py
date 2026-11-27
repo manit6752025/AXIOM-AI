@@ -862,9 +862,9 @@ def test_roadmap_audit_accepts_implemented_status_with_codeql_disposition_pendin
     assert release_smoke.roadmap_issues(markdown) == []
 
 def test_roadmap_audit_accepts_implemented_status_with_current_head_scanner_validation_pending() -> None:
-    markdown = "\\n".join(
+    markdown = "\n".join(
         f"- [R{i:03d} · {'Planned' if i % 2 else 'Implemented; tests passing'}] Requirement {i}."
         for i in range(1, 140)
     )
-    markdown += "\\n- [R140 · Implemented; current-head and controlled scanner validation pending] SBOM verification remains gated."
+    markdown += "\n- [R140 · Implemented; current-head and controlled scanner validation pending] SBOM verification remains gated."
     assert release_smoke.roadmap_issues(markdown) == []
