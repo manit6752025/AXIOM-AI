@@ -30,7 +30,7 @@ jobs:
 
     steps:
       - name: Check out the nightly integration branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: latest/nightly
           fetch-depth: 0
