@@ -122,7 +122,6 @@ jobs:
         with:
           node-version: "22"
           registry-url: https://registry.npmjs.org
-      - uses: actions/download-artifact@v8
           package-manager-cache: false
       - name: Install an npm CLI with OIDC trusted-publishing support
         run: npm install --global npm@11.15.0

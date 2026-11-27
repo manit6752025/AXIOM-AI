@@ -75,7 +75,9 @@ def test_sdk_release_pipeline_is_manual_oidc_verified_and_installs_built_artifac
     assert npm_publish["runs-on"] == "ubuntu-latest"
     assert npm_publish["permissions"]["id-token"] == "write"
     npm_runs = "\\n".join(step.get("run", "") for step in npm_publish["steps"])
-    npm_setup = next(step for step in npm_publish["steps"] if step.get("uses") == "actions/setup-node@v4")
+    npm_setup = next(step for step in npm_publish["steps"] if step.get("uses") == "actions/setup-node@v7")
+    assert npm_setup["with"]["node-version"] == "22"
+    assert npm_setup["with"]["registry-url"] == "https://registry.npmjs.org"
     assert npm_setup["with"]["package-manager-cache"] == "false"
     assert "npm@11.15.0" in npm_runs
     assert "npm publish dist/typescript/*.tgz --provenance --access public" in npm_runs
