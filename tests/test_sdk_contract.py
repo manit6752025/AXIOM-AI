@@ -112,3 +112,26 @@ def test_sdk_release_pipeline_is_manual_oidc_verified_and_installs_built_artifac
     npm_verify = jobs["verify-typescript-install"]
     assert npm_verify["needs"] == "publish-typescript"
     assert "@axiom-ai/sdk@1.0.0" in "\\n".join(step.get("run", "") for step in npm_verify["steps"])
+
+
+
+def test_sdk_quality_workflow_installs_packed_typescript_archive():
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    workflow = yaml.load(
+        (root / ".github/workflows/sdk-quality.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    typescript = workflow["jobs"]["typescript-sdk"]
+    install = next(
+        step for step in typescript["steps"]
+        if step.get("name") == "Install packed SDK in a clean project"
+    )
+    script = install["run"]
+    assert install["shell"] == "bash"
+    assert "npm pack --prefix sdk/typescript" in script
+    assert "npm install --prefix" in script
+    assert "axiom-ai-sdk-1.0.0.tgz" in script
+    assert 'from "@axiom-ai/sdk"' in script
+    assert "API_CONTRACT_VERSION" in script
