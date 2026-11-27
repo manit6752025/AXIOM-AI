@@ -2,7 +2,7 @@ name: AXIOM CodeQL SARIF verification
 
 on:
   push:
-    branches: [main]
+    branches: [main, "fix/vulnerability"]
     paths:
       - "axiom/**"
       - "src/**"
@@ -32,7 +32,7 @@ jobs:
       - name: Checkout main
         uses: actions/checkout@v7
         with:
-          ref: main
+          ref: ${{ github.ref }}
           fetch-depth: 1
       - name: Initialize CodeQL for all supported languages
         uses: github/codeql-action/init@v3

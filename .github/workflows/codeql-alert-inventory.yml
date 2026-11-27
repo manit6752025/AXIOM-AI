@@ -2,7 +2,7 @@ name: AXIOM CodeQL alert inventory
 
 on:
   push:
-    branches: [main, implement/roadmap]
+    branches: [main, implement/roadmap, "fix/vulnerability"]
     paths:
       - ".github/workflows/codeql-alert-inventory.yml"
       - ".github/codeql/**"
