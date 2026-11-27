@@ -69,17 +69,32 @@ def _trusted_model_directory(model_path: str | Path) -> Path | None:
     it is not used to construct or probe a filesystem path before validation.
     """
     try:
-        from axiom.core.engine import _allowed_model_roots, resolve_local_model_directory
+        from axiom.core.engine import (
+            _allowed_model_roots,
+            _path_is_within_root,
+            resolve_local_model_directory,
+        )
 
-        resolved_text = resolve_local_model_directory(os.fspath(model_path), "Base model")
-        resolved = Path(resolved_text)
+        resolved = Path(resolve_local_model_directory(os.fspath(model_path), "Base model")).resolve(strict=True)
         trusted_roots = tuple(Path(root).resolve(strict=True) for root in _allowed_model_roots())
-        if not resolved.is_absolute() or not any(resolved.is_relative_to(root) for root in trusted_roots):
+        if not resolved.is_absolute() or not any(
+            _path_is_within_root(resolved, root) for root in trusted_roots
+        ):
             return None
         return resolved
     except BenchmarkProfileError:
         raise
-    except (OSError, RuntimeError, TypeError, ValueError):
+    except ValueError as exc:
+        # Keep the model inventory's explicit symlink rejection visible to
+        # callers. Treating this particular trust-boundary violation as an
+        # absent fingerprint would let a benchmark profile accept a path that
+        # the engine deliberately rejects.
+        if "symlinked path component" in str(exc):
+            raise BenchmarkProfileError(
+                "The selected model directory must not use symbolic links or junctions."
+            ) from None
+        return None
+    except (OSError, RuntimeError, TypeError):
         return None
 
 
