@@ -51,7 +51,7 @@ def test_sdk_release_pipeline_is_manual_oidc_verified_and_installs_built_artifac
     assert list(workflow["on"]) == ["workflow_dispatch"]
     assert package["repository"] == {
         "type": "git",
-        "url": "https://github.com/manit6752025/AXIOM-AI.git",
+        "url": "https://github.com/manit6752025/AXIOM-AI",
     }
 
     jobs = workflow["jobs"]

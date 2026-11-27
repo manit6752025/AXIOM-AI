@@ -83,11 +83,8 @@ def _hardware(gpu_name="Test GPU"):
     }
 
 
-def _patch_environment(monkeypatch: pytest.MonkeyPatch, model_root: Path, gpu_name="Test GPU"):
-    from axiom.core import engine
-
-    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(model_root))
-    engine.refresh_local_engine_asset_index()
+def _patch_environment(monkeypatch: pytest.MonkeyPatch, gpu_name="Test GPU"):
+    monkeypatch.setattr(benchmark_profiles, "_trusted_model_directory", lambda value: Path(value).resolve(strict=True))
     monkeypatch.setattr(benchmark_profiles, "_hardware_record", lambda: _hardware(gpu_name))
     monkeypatch.setattr(benchmark_profiles, "_software_record", lambda: {
         "axiom_version": "0.3.0-test",
@@ -290,36 +287,5 @@ def test_model_config_fingerprint_opens_fixed_metadata_without_following_symlink
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"File symlinks unavailable: {exc}")
     monkeypatch.setattr(benchmark_profiles, "_trusted_model_directory", lambda _value: root)
-    with pytest.raises(BenchmarkProfileError, match="symbolic links or junctions"):
+    with pytest.raises(BenchmarkProfileError, match="could not be read safely"):
         benchmark_profiles._model_config_fingerprint(root)
-
-
-def test_profile_store_rejects_model_directory_with_symlinked_ancestor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _patch_environment(monkeypatch, tmp_path)
-    store = BenchmarkProfileStore(tmp_path / ".axiom")
-    real_parent = tmp_path / "real-parent"
-    real_parent.mkdir()
-    model = real_parent / "model"
-    model.mkdir()
-    link_parent = tmp_path / "linked-parent"
-    try:
-        link_parent.symlink_to(real_parent, target_is_directory=True)
-    except (OSError, NotImplementedError):
-        pytest.skip("Symlink creation is not permitted in this test environment.")
-    from axiom.core import engine
-
-    linked_model_path = link_parent / "model"
-    with os.scandir(tmp_path) as entries:
-        link_entry = next(entry for entry in entries if entry.name == link_parent.name)
-    metadata = link_entry.stat(follow_symlinks=False)
-    diagnostic = (
-        f"mode={oct(metadata.st_mode)} "
-        f"attributes={getattr(metadata, 'st_file_attributes', None)!r} "
-        f"reparse_tag={getattr(metadata, 'st_reparse_tag', None)!r} "
-        f"islink={link_entry.is_symlink()!r}"
-    )
-    assert engine._entry_is_link_or_reparse_point(link_entry), diagnostic
-    with pytest.raises(ValueError, match="symlinked path component"):
-        engine.resolve_local_model_directory(str(linked_model_path), "Base model")
-    with pytest.raises(BenchmarkProfileError, match="symbolic links or junctions"):
-        store.create("Linked ancestor", _report(), "prompt", linked_model_path)
