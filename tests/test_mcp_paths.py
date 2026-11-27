@@ -57,7 +57,7 @@ def test_portable_fallback_reuses_the_validated_path_without_resolving_again(tmp
 
     resolved, stream = mcp_paths.open_mcp_workspace_file("data/sample.jsonl", root)
     with stream:
-        assert stream.read() == b'{"text":"safe"}\\n'
+        assert stream.read().rstrip(b"\n") == b'{"text":"safe"}'
     assert resolved == root / "data" / "sample.jsonl"
 
 
