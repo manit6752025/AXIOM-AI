@@ -49,6 +49,9 @@ def test_sdk_release_pipeline_is_manual_oidc_verified_and_installs_built_artifac
     package = json.loads((root / "sdk/typescript/package.json").read_text(encoding="utf-8"))
 
     assert list(workflow["on"]) == ["workflow_dispatch"]
+    assert workflow["on"]["workflow_dispatch"]["inputs"]["package"]["options"] == [
+        "both", "python", "typescript", "validate-only",
+    ]
     assert package["repository"] == {
         "type": "git",
         "url": "https://github.com/manit6752025/AXIOM-AI",
@@ -64,6 +67,14 @@ def test_sdk_release_pipeline_is_manual_oidc_verified_and_installs_built_artifac
     assert "axiom-sdk-wheel-check" in joined_validate
     assert "axiom-sdk-tarball-check" in joined_validate
     assert "npm install" in joined_validate
+    assert any(
+        step.get("uses") == "actions/upload-artifact@v7"
+        and step.get("with", {}).get("name") == "axiom-sdk-release-artifacts"
+        and step.get("with", {}).get("path") == "dist/"
+        for step in validate["steps"]
+    )
+    assert "validate-only" in jobs["validate-and-build"]["steps"][5].get("if", "")
+    assert any("validate-only" in step.get("if", "") for step in validate["steps"])
 
     python_publish = jobs["publish-python"]
     assert python_publish["environment"]["name"] == "pypi"
