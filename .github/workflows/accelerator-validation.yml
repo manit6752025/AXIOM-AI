@@ -35,7 +35,7 @@ jobs:
       AXIOM_ACCELERATOR_DEVICE: ${{ inputs.device }}
       PYTHONUNBUFFERED: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: implement/roadmap
       - uses: actions/setup-python@v5
