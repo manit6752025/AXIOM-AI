@@ -262,7 +262,7 @@ def test_mcp_file_opener_validates_workspace_before_opening_regular_file(tmp_pat
 
     resolved, stream = mcp_paths._open_mcp_workspace_file("data/sample.jsonl", root)
     with stream:
-        assert stream.read() == b'{"text":"safe"}\\n'
+        assert stream.read() == b'{"text":"safe"}' + bytes((10,))
     assert resolved == (root / "data" / "sample.jsonl").resolve()
     assert resolved.is_relative_to(root.resolve())
 
