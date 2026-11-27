@@ -190,6 +190,9 @@ def test_open_regular_file_uses_only_enumerated_names_for_descriptor_opens(tmp_p
 
 
 def test_safe_selected_entry_returns_only_checked_regular_files_and_directories(tmp_path):
+    import stat
+    from pathlib import Path
+
     import axiom.path_safety as path_safety
 
     root = tmp_path / "workspace"
