@@ -52,7 +52,7 @@ jobs:
           mkdir -p dist/typescript
           npm pack --prefix sdk/typescript --pack-destination dist/typescript
       - name: Install Python wheel from the release artifact in a clean environment
-        if: inputs.package == 'both' || inputs.package == 'python'
+        if: inputs.package == 'both' || inputs.package == 'python' || inputs.package == 'validate-only'
         run: |
           python -m venv "$RUNNER_TEMP/axiom-sdk-wheel-check"
           "$RUNNER_TEMP/axiom-sdk-wheel-check/bin/python" -m pip install --upgrade pip
@@ -67,7 +67,7 @@ jobs:
           print("Built Python wheel installed and imported successfully.")
           PY
       - name: Install TypeScript tarball from the release artifact in a clean project
-        if: inputs.package == 'both' || inputs.package == 'typescript'
+        if: inputs.package == 'both' || inputs.package == 'typescript' || inputs.package == 'validate-only'
         run: |
           mkdir -p "$RUNNER_TEMP/axiom-sdk-tarball-check"
           npm install --prefix "$RUNNER_TEMP/axiom-sdk-tarball-check" --ignore-scripts --no-audit --no-fund dist/typescript/*.tgz

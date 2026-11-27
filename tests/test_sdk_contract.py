@@ -73,8 +73,20 @@ def test_sdk_release_pipeline_is_manual_oidc_verified_and_installs_built_artifac
         and step.get("with", {}).get("path") == "dist/"
         for step in validate["steps"]
     )
-    assert "validate-only" in jobs["validate-and-build"]["steps"][5].get("if", "")
-    assert any("validate-only" in step.get("if", "") for step in validate["steps"])
+    validation_steps = {
+        step.get("name"): step
+        for step in validate["steps"]
+        if step.get("name")
+    }
+    for name in (
+        "Build Python SDK",
+        "Build and test TypeScript SDK",
+        "Install Python wheel from the release artifact in a clean environment",
+        "Install TypeScript tarball from the release artifact in a clean project",
+    ):
+        assert "validate-only" in validation_steps[name]["if"]
+    assert "validate-only" not in jobs["publish-python"]["if"]
+    assert "validate-only" not in jobs["publish-typescript"]["if"]
 
     python_publish = jobs["publish-python"]
     assert python_publish["environment"]["name"] == "pypi"
