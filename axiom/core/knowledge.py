@@ -85,10 +85,23 @@ class KnowledgeBaseStore:
         self.index_path = self.root / "index.json"
         self.lock_path = self.root / ".knowledge.lock"
 
+    @staticmethod
+    def _is_link_or_reparse_point(path: Path) -> bool:
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return True
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        return stat.S_ISLNK(metadata.st_mode) or bool(
+            reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag
+        )
+
     def _ensure_layout(self, *, create: bool) -> None:
         for path in (self.metadata_root, self.root, self.documents_root, self.index_path, self.lock_path):
-            if path.is_symlink():
-                raise KnowledgeStoreError("Knowledge storage paths must not be symbolic links.")
+            if self._is_link_or_reparse_point(path):
+                raise KnowledgeStoreError("Knowledge storage paths must not be symbolic links or reparse points.")
         if create:
             self.metadata_root.mkdir(parents=True, exist_ok=True, mode=0o700)
             self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
