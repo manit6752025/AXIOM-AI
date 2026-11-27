@@ -77,12 +77,67 @@ def _fallback_workspace_path(
     *,
     allow_existing_output: bool = False,
 ) -> Path:
-    """Delegate portable MCP path resolution to the shared safe-path boundary."""
-    return path_safety.resolve_workspace_output_path(
-        raw,
-        root,
-        allow_existing_output=allow_existing_output,
-    )
+    """Resolve portable paths by matching actual directory entries, not joins.
+
+    The fallback is used on platforms without descriptor-relative no-follow
+    APIs. Existing components are selected from parent directory entries and
+    inspected without following links. Only an absent final output leaf is
+    joined to the already-validated parent.
+    """
+    parts = _parts(raw)
+    workspace = _workspace_root(root)
+    current = workspace
+    for index, part in enumerate(parts):
+        is_final = index == len(parts) - 1
+        try:
+            with os.scandir(current) as entries:
+                selected = next((entry for entry in entries if entry.name == part), None)
+        except OSError:
+            raise ValueError("A workspace parent directory could not be inspected safely.") from None
+
+        if selected is None:
+            if not (is_final and allow_existing_output):
+                raise ValueError("The workspace file was not found or is not a regular file.")
+            # part has already passed _parts(): one non-empty component with
+            # separators, dot segments and drive prefixes rejected.
+            parent = current
+            candidate = parent / part
+            try:
+                resolved_parent = parent.resolve(strict=True)
+            except (OSError, RuntimeError):
+                raise ValueError("The workspace output parent changed while being inspected.") from None
+            if not _path_is_within_root(resolved_parent, workspace):
+                raise ValueError("The path must stay inside the MCP workspace.")
+            if not _path_is_within_root(candidate, workspace):
+                raise ValueError("The workspace output must stay inside the MCP workspace.")
+            return candidate
+
+        try:
+            metadata = selected.stat(follow_symlinks=False)
+        except OSError:
+            raise ValueError("A workspace path component changed while being inspected.") from None
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        is_reparse_point = bool(
+            reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag
+        )
+        candidate = Path(selected.path)
+        if stat.S_ISLNK(metadata.st_mode) or is_reparse_point or _is_link_like(candidate):
+            raise ValueError("Symbolic links and junctions are not supported in MCP file paths.")
+
+        if is_final:
+            if allow_existing_output:
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise ValueError("The workspace output must be a regular file path.")
+            elif not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("The workspace file was not found or is not a regular file.")
+        elif not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError("Workspace parent directories must already exist.")
+        current = candidate
+
+    if not _path_is_within_root(current, workspace) or current == workspace:
+        raise ValueError("The path must stay inside the MCP workspace.")
+    return current
+
 
 def _path_is_within_root(path: Path, root: Path) -> bool:
     try:
@@ -91,91 +146,6 @@ def _path_is_within_root(path: Path, root: Path) -> bool:
         return os.path.commonpath((normalized_path, normalized_root)) == normalized_root
     except (OSError, TypeError, ValueError):
         return False
-
-
-def _find_directory_entry(
-    directory_descriptor: int,
-    requested_name: str,
-) -> tuple[str, os.stat_result, bool] | None:
-    """Return a matching entry name sourced from a pinned directory listing.
-
-    The requested name is only compared with directory entries. It is never
-    passed to a filesystem path API, so user-controlled text cannot become a
-    path operand after this boundary.
-    """
-    try:
-        with os.scandir(directory_descriptor) as entries:
-            selected = next((entry for entry in entries if entry.name == requested_name), None)
-            if selected is None:
-                return None
-            metadata = selected.stat(follow_symlinks=False)
-            is_link_like = (
-                selected.is_symlink()
-                or stat.S_ISLNK(metadata.st_mode)
-                or bool(
-                    getattr(metadata, "st_reparse_tag", 0)
-                    or (
-                        getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-                        and getattr(metadata, "st_file_attributes", 0)
-                        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-                    )
-                )
-            )
-            return selected.name, metadata, is_link_like
-    except OSError as exc:
-        raise ValueError("A workspace directory could not be inspected safely.") from exc
-
-
-def _open_directory_entry(
-    directory_descriptor: int,
-    requested_name: str,
-    directory_flags: int,
-) -> int:
-    selected = _find_directory_entry(directory_descriptor, requested_name)
-    if selected is None:
-        raise ValueError("A workspace parent directory is missing or unsafe.")
-    name, expected, is_link_like = selected
-    if is_link_like or not stat.S_ISDIR(expected.st_mode):
-        raise ValueError("Workspace parent directories must be real directories.")
-
-    descriptor = os.open(name, directory_flags, dir_fd=directory_descriptor)
-    try:
-        opened = os.fstat(descriptor)
-        if (
-            not stat.S_ISDIR(opened.st_mode)
-            or (expected.st_dev, expected.st_ino) != (opened.st_dev, opened.st_ino)
-        ):
-            raise ValueError("A workspace directory changed while it was being opened.")
-        return descriptor
-    except BaseException:
-        os.close(descriptor)
-        raise
-
-
-def _open_regular_file_entry(
-    directory_descriptor: int,
-    requested_name: str,
-    flags: int,
-) -> tuple[str, int]:
-    selected = _find_directory_entry(directory_descriptor, requested_name)
-    if selected is None:
-        raise ValueError("The workspace file is missing or unsafe.")
-    name, expected, is_link_like = selected
-    if is_link_like or not stat.S_ISREG(expected.st_mode):
-        raise ValueError("The workspace path must refer to a regular file.")
-
-    descriptor = os.open(name, flags, dir_fd=directory_descriptor)
-    try:
-        opened = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(opened.st_mode)
-            or (expected.st_dev, expected.st_ino) != (opened.st_dev, opened.st_ino)
-        ):
-            raise ValueError("The workspace file changed while it was being opened.")
-        return name, descriptor
-    except BaseException:
-        os.close(descriptor)
-        raise
 
 
 def _open_parent(root: Path, parts: tuple[str, ...]) -> tuple[Path, int, str]:

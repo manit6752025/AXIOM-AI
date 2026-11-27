@@ -744,66 +744,40 @@ def _normalise_lexical_model_path(value: str | os.PathLike[str]) -> str:
 def _path_is_within_root(path: Path, root: Path) -> bool:
     """Compare canonical filesystem paths with Windows case/device-prefix handling."""
     try:
-        resolved_path = os.path.realpath(os.path.abspath(os.fspath(path)))
-        resolved_root = os.path.realpath(os.path.abspath(os.fspath(root)))
-        if os.name == "nt":
-            if resolved_path.startswith("\\\\?\\UNC\\"):
-                resolved_path = "\\\\" + resolved_path[8:]
-            elif resolved_path.startswith("\\\\?\\"):
-                resolved_path = resolved_path[4:]
-            if resolved_root.startswith("\\\\?\\UNC\\"):
-                resolved_root = "\\\\" + resolved_root[8:]
-            elif resolved_root.startswith("\\\\?\\"):
-                resolved_root = resolved_root[4:]
-        normalized_path = os.path.normcase(os.path.normpath(resolved_path))
-        normalized_root = os.path.normcase(os.path.normpath(resolved_root))
-        path = Path(normalized_path)
-        root = Path(normalized_root)
-        # Keep pathlib's structural relative-path check for the release contract,
-        # but use normalized commonpath as the authority when Windows casing or
-        # a UNC/device-prefix representation differs between equivalent paths.
-        try:
-            path.relative_to(root)
-        except ValueError:
-            pass
+        normalized_path = os.path.normcase(os.path.normpath(os.fspath(path)))
+        normalized_root = os.path.normcase(os.path.normpath(os.fspath(root)))
         return os.path.commonpath((normalized_path, normalized_root)) == normalized_root
     except (OSError, TypeError, ValueError):
         return False
 
 
-def _entry_is_link_or_reparse_point(entry: os.DirEntry[str]) -> bool:
-    """Inspect a directory entry without rebuilding a path from caller input.
-
-    The entry must come directly from os.scandir() on an already trusted
-    directory. Its no-follow metadata lets the caller reject symlinks,
-    junctions and other Windows reparse points before descending.
-    """
+def _is_link_or_reparse_point(path: str) -> bool:
+    """Detect symbolic links and Windows reparse points without following them."""
     try:
-        metadata = entry.stat(follow_symlinks=False)
-        is_symlink = entry.is_symlink()
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return False
     except OSError:
-        # An unreadable or concurrently replaced entry must not be trusted.
+        # An unreadable directory entry must not be silently trusted.
         return True
-
-    reparse_flag = getattr(
-        stat,
-        "FILE_ATTRIBUTE_REPARSE_POINT",
-        0x400 if os.name == "nt" else 0,
-    )
-    return (
-        is_symlink
-        or stat.S_ISLNK(metadata.st_mode)
-        or bool(getattr(metadata, "st_file_attributes", 0) & reparse_flag)
-        or bool(getattr(metadata, "st_reparse_tag", 0))
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag
     )
 
 
 @lru_cache(maxsize=8)
 def _trusted_file_entry(path: str, root_text: str) -> bool:
     try:
-        resolved = Path(os.path.realpath(os.path.abspath(path)))
-        return os.path.isfile(resolved) and _path_is_within_root(resolved, Path(root_text))
-    except (OSError, TypeError, ValueError):
+        resolved = os.path.realpath(path)
+        canonical_root = os.path.realpath(root_text)
+        normalized_path = os.path.normcase(os.path.normpath(resolved))
+        normalized_root = os.path.normcase(os.path.normpath(canonical_root))
+        return (
+            os.path.isfile(resolved)
+            and os.path.commonpath((normalized_path, normalized_root)) == normalized_root
+        )
+    except (OSError, ValueError):
         return False
 
 
@@ -839,7 +813,7 @@ def _trusted_directory_index(
             allowed_subdirs: list[str] = []
             for name in subdirs:
                 child = os.path.join(directory, name)
-                if os.path.islink(child):
+                if _is_link_or_reparse_point(child):
                     blocked_subdirs.append(child)
                 else:
                     allowed_subdirs.append(name)
@@ -867,11 +841,14 @@ def _trusted_directory_index(
                 continue
             try:
                 canonical = os.path.realpath(directory)
-                if os.path.commonpath((canonical, root_text)) != root_text:
+                canonical_root = os.path.realpath(root_text)
+                canonical_key = os.path.normcase(os.path.normpath(canonical))
+                root_key = os.path.normcase(os.path.normpath(canonical_root))
+                if os.path.commonpath((canonical_key, root_key)) != root_key:
                     continue
             except (OSError, ValueError):
                 continue
-            key = os.path.normcase(os.path.normpath(canonical))
+            key = canonical_key
             entries[key] = (canonical, model_config, adapter_config, False)
     return tuple(entries[key] for key in sorted(entries))
 

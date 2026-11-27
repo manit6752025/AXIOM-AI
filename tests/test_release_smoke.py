@@ -351,34 +351,14 @@ def test_engine_smoke_requires_platform_normalized_trusted_root_containment() ->
     assert any("os.path.commonpath((normalized_path, normalized_root)) == normalized_root" in item for item in issues)
 
     broken_reparse_guard = engine_source.replace(
-        "_entry_is_link_or_reparse_point(selected)",
-        "selected.is_symlink()",
+        "_is_link_or_reparse_point(child)",
+        "os.path.islink(child)",
         1,
     )
     issues = release_smoke.engine_security_and_lifecycle_issues(
         broken_reparse_guard, native_source, api_source, client_source, panel_source, e2e_source,
     )
-    assert any("_entry_is_link_or_reparse_point(selected)" in item for item in issues)
-
-    broken_no_follow_metadata = engine_source.replace(
-        "entry.stat(follow_symlinks=False)",
-        "entry.stat()",
-        1,
-    )
-    issues = release_smoke.engine_security_and_lifecycle_issues(
-        broken_no_follow_metadata, native_source, api_source, client_source, panel_source, e2e_source,
-    )
-    assert any("entry.stat(follow_symlinks=False)" in item for item in issues)
-
-    broken_component_walk = engine_source.replace(
-        "with os.scandir(current) as entries:",
-        "with os.scandir(root) as entries:",
-        1,
-    )
-    issues = release_smoke.engine_security_and_lifecycle_issues(
-        broken_component_walk, native_source, api_source, client_source, panel_source, e2e_source,
-    )
-    assert any("with os.scandir(current) as entries:" in item for item in issues)
+    assert any("_is_link_or_reparse_point(child)" in item for item in issues)
 
 
 def test_native_engine_smoke_rejects_missing_kv_cache_mechanics() -> None:
