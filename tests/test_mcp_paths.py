@@ -34,6 +34,33 @@ def test_open_workspace_file_reads_regular_file_in_both_path_modes(tmp_path, mon
     assert resolved == root / "data" / "sample.jsonl"
 
 
+def test_portable_fallback_reuses_the_validated_path_without_resolving_again(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    _select_path_mode(monkeypatch, fallback=True)
+
+    validate_path = mcp_paths._fallback_workspace_path
+
+    def validate_then_disable_resolve(raw, workspace, *, allow_existing_output=False):
+        path = validate_path(
+            raw,
+            workspace,
+            allow_existing_output=allow_existing_output,
+        )
+
+        def unexpected_resolve(_path, *args, **kwargs):
+            raise AssertionError("The validated MCP path must not be resolved a second time")
+
+        monkeypatch.setattr(Path, "resolve", unexpected_resolve)
+        return path
+
+    monkeypatch.setattr(mcp_paths, "_fallback_workspace_path", validate_then_disable_resolve)
+
+    resolved, stream = mcp_paths.open_mcp_workspace_file("data/sample.jsonl", root)
+    with stream:
+        assert stream.read().rstrip(b"\n") == b'{"text":"safe"}'
+    assert resolved == root / "data" / "sample.jsonl"
+
+
 @pytest.mark.parametrize(
     "raw",
     [

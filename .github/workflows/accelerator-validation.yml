@@ -36,11 +36,6 @@ jobs:
       PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: implement/roadmap
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.11"
       - name: Install AXIOM test dependencies without replacing the hardware PyTorch build
         run: |
           python -m pip install --upgrade pip

@@ -236,6 +236,10 @@ def resolve_workspace_output_path(
             current = resolved_candidate
         else:
             raise SafePathError("The selected workspace entry escaped the trusted root.")
+            raise SafePathError("The selected workspace entry escaped the trusted root.") from None
+        if resolved_candidate == workspace:
+            raise SafePathError("The workspace root itself is not a file entry.")
+        current = resolved_candidate
         if final_component and return_availability:
             return current, False
 
@@ -325,7 +329,9 @@ def open_regular_file(path: Path) -> BinaryIO:
             | nofollow
             | getattr(os, "O_CLOEXEC", 0)
         )
-        parent_fd: int | None = os.open(absolute.anchor, directory_flags)
+        # The descriptor walk always starts at the POSIX filesystem root;
+        # never derive this filesystem operand from the caller's path string.
+        parent_fd: int | None = os.open(os.sep, directory_flags)
         file_fd: int | None = None
         try:
             for index, requested_name in enumerate(components):
@@ -372,7 +378,10 @@ def open_regular_file(path: Path) -> BinaryIO:
                 os.close(parent_fd)
         raise SafePathError("path must identify a regular file")
 
-    current: Path | int = Path(absolute.anchor)
+    # POSIX roots have a fixed separator. The path anchor is derived from
+    # caller input and must not become the first filesystem operand.
+    root_anchor = os.sep if os.name == "posix" else absolute.anchor
+    current: Path | int = Path(root_anchor)
     for index, requested_name in enumerate(components):
         final_component = index == len(components) - 1
         _selected_name, selected_path, expected, is_link_like = _selected_entry(
