@@ -877,8 +877,7 @@ def _trusted_directory_index(
 
 
 def refresh_local_engine_asset_index() -> None:
-    """Drop metadata caches so newly written local models/adapters are discoverable."""
-    _trusted_directory_index.cache_clear()
+    """Invalidate cached file checks; the bounded directory index is rebuilt per request."""
     _trusted_file_entry.cache_clear()
 
 

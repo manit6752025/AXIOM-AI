@@ -16,6 +16,7 @@ from typing import Any
 ROADMAP_PATTERN = re.compile(r"^- \[(R\d{3}) · ([^\]]+)\]", re.MULTILINE)
 VALID_STATUSES = {
     "Implemented; tests passing",
+    "Implemented; publication gated",
     "Planned",
     "In progress",
     "In progress; validation pending",

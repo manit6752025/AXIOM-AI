@@ -2,9 +2,14 @@ name: AXIOM CodeQL alert inventory
 
 on:
   push:
-    branches: [implement/roadmap]
+    branches: [main, implement/roadmap]
     paths:
       - ".github/workflows/codeql-alert-inventory.yml"
+      - ".github/codeql/**"
+      - "axiom/core/**"
+      - "axiom/path_safety.py"
+  schedule:
+    - cron: "17 2 * * *"
   workflow_dispatch:
 
 permissions:

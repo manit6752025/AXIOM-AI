@@ -87,8 +87,7 @@ def _patch_environment(monkeypatch: pytest.MonkeyPatch, model_root: Path, gpu_na
     from axiom.core import engine
 
     monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(model_root))
-    engine._trusted_directory_index.cache_clear()
-    engine._trusted_file_entry.cache_clear()
+    engine.refresh_local_engine_asset_index()
     monkeypatch.setattr(benchmark_profiles, "_hardware_record", lambda: _hardware(gpu_name))
     monkeypatch.setattr(benchmark_profiles, "_software_record", lambda: {
         "axiom_version": "0.3.0-test",
@@ -291,7 +290,7 @@ def test_model_config_fingerprint_opens_fixed_metadata_without_following_symlink
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"File symlinks unavailable: {exc}")
     monkeypatch.setattr(benchmark_profiles, "_trusted_model_directory", lambda _value: root)
-    with pytest.raises(BenchmarkProfileError, match="could not be read safely"):
+    with pytest.raises(BenchmarkProfileError, match="symbolic links or junctions"):
         benchmark_profiles._model_config_fingerprint(root)
 
 

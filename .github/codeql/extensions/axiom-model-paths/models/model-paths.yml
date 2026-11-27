@@ -7,6 +7,7 @@ extensions:
       - ["axiom.api.model_paths", "Member[validate_output_path].Argument[0].ReturnValue", "path-injection"]
       - ["axiom.api.model_paths", "Member[validate_child_path].Argument[0].ReturnValue", "path-injection"]
       - ["axiom.api.model_paths", "Member[validate_child_path].Argument[1].ReturnValue", "path-injection"]
+      - ["axiom.core.engine", "Member[resolve_local_model_directory].ReturnValue", "path-injection"]
       - ["axiom.core.mcp_paths", "Member[_parts].ReturnValue", "path-injection"]
       - ["axiom.core.training_preflight", "Member[resolve_workspace_input].ReturnValue", "path-injection"]
       - ["axiom.core.training_preflight", "Member[resolve_workspace_output].ReturnValue", "path-injection"]
