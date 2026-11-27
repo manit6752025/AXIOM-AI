@@ -7,6 +7,8 @@ import stat
 from pathlib import Path
 from typing import BinaryIO
 
+import axiom.path_safety as path_safety
+
 
 def _parts(raw: str) -> tuple[str, ...]:
     if (
@@ -20,11 +22,9 @@ def _parts(raw: str) -> tuple[str, ...]:
     ):
         raise ValueError("Use a workspace-relative file path.")
 
-    raw_parts = tuple(raw.split("/"))
-    parts = tuple(os.path.basename(part) for part in raw_parts)
+    parts = tuple(raw.split("/"))
     if (
-        any(safe != original for safe, original in zip(parts, raw_parts))
-        or any(part in {"", ".", ".."} for part in parts)
+        any(part in {"", ".", ".."} for part in parts)
         or (len(parts[0]) >= 2 and parts[0][1] == ":")
     ):
         raise ValueError("Use a safe workspace-relative file path.")
@@ -45,7 +45,12 @@ def _is_link_like(path: Path) -> bool:
         metadata = path.lstat()
     except FileNotFoundError:
         return False
-    if stat.S_ISLNK(metadata.st_mode) or getattr(metadata, "st_reparse_tag", 0):
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or getattr(metadata, "st_reparse_tag", 0)
+        or (reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag)
+    ):
         return True
     is_junction = getattr(path, "is_junction", None)
     return bool(is_junction and is_junction())
@@ -71,23 +76,20 @@ def _fallback_workspace_path(
     *,
     allow_existing_output: bool = False,
 ) -> Path:
-    parts = _parts(raw)
-    workspace = _workspace_root(root)
-    candidate = workspace
-    for index, part in enumerate(parts):
-        candidate = candidate / part
-        if _is_link_like(candidate):
-            raise ValueError("Symbolic links are not supported in MCP file paths.")
-        is_final = index == len(parts) - 1
-        if is_final and not allow_existing_output and not candidate.is_file():
-            raise ValueError("The workspace file was not found or is not a regular file.")
-        if not is_final and not candidate.is_dir():
-            raise ValueError("Workspace parent directories must already exist.")
+    """Delegate portable MCP path resolution to the shared safe-path boundary."""
+    return path_safety.resolve_workspace_output_path(
+        raw,
+        root,
+        allow_existing_output=allow_existing_output,
+    )
 
-    resolved = candidate.resolve(strict=not allow_existing_output or candidate.exists())
-    if resolved == workspace or not resolved.is_relative_to(workspace):
-        raise ValueError("The path must stay inside the MCP workspace.")
-    return resolved
+def _path_is_within_root(path: Path, root: Path) -> bool:
+    try:
+        normalized_path = os.path.normcase(os.path.normpath(os.fspath(path)))
+        normalized_root = os.path.normcase(os.path.normpath(os.fspath(root)))
+        return os.path.commonpath((normalized_path, normalized_root)) == normalized_root
+    except (OSError, TypeError, ValueError):
+        return False
 
 
 def _open_parent(root: Path, parts: tuple[str, ...]) -> tuple[Path, int, str]:
@@ -175,12 +177,13 @@ def open_mcp_workspace_output_parent(
     if not _descriptor_access_supported() or (
         os.link not in os.supports_dir_fd or os.unlink not in os.supports_dir_fd
     ):
-        path = _fallback_workspace_path(raw, root, allow_existing_output=True)
-        if path.exists():
-            if not path.is_file() or path.is_symlink():
-                raise ValueError("The workspace output must be a regular file path.")
-            return path, None, path.name, False
-        return path, None, path.name, True
+        path, available = path_safety.resolve_workspace_output_path(
+            raw,
+            root,
+            allow_existing_output=True,
+            return_availability=True,
+        )
+        return path, None, path.name, available
 
     parts = _parts(raw)
     path, parent_descriptor, name = _open_parent(root, parts)

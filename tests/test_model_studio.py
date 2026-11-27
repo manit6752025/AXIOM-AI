@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import pytest
 from axiom.core import model_studio as studio
 
@@ -396,17 +397,70 @@ def test_model_studio_unquantized_conversion_removes_partial_output_on_cancellat
     assert not output.exists()
 
 
-def test_model_studio_job_path_rejects_untrusted_id_components(tmp_path, monkeypatch):
-    monkeypatch.setattr(studio, "jobs_directory", lambda: tmp_path)
-    safe_id = "b" * 32
-    assert studio._job_path(safe_id) == tmp_path / f"{safe_id}.json"
+def test_model_studio_job_reader_rejects_symlinked_job_file(tmp_path, monkeypatch):
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    job_id = "d" * 32
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps({"id": job_id, "status": "completed", "secret": "must-not-be-read"}))
+    link = jobs_dir / f"{job_id}.json"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"File symlinks unavailable: {exc}")
+    monkeypatch.setattr(studio, "jobs_directory", lambda: jobs_dir)
 
-    for unsafe_id in (
-        f"../{safe_id}",
-        f"nested/{safe_id}",
-        f"{safe_id}/../../outside",
-        f"{safe_id}\\\\outside",
-        "b" * 31,
-    ):
+    with pytest.raises(studio.ModelStudioError, match="could not be read safely"):
+        studio.get_job(job_id)
+
+
+def test_model_studio_job_reader_rejects_mismatched_embedded_identity(tmp_path, monkeypatch):
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    requested_id = "1" * 32
+    other_id = "2" * 32
+    (jobs_dir / f"{requested_id}.json").write_text(
+        json.dumps({"id": other_id, "status": "completed"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(studio, "jobs_directory", lambda: jobs_dir)
+
+    with pytest.raises(studio.ModelStudioError, match="does not match its directory entry"):
+        studio.get_job(requested_id)
+
+
+def test_model_studio_job_reader_rejects_hard_linked_job_state(tmp_path, monkeypatch):
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    job_id = "3" * 32
+    job_file = jobs_dir / f"{job_id}.json"
+    job_file.write_text(json.dumps({"id": job_id, "status": "completed"}), encoding="utf-8")
+    alias = tmp_path / "external-job-alias.json"
+    try:
+        os.link(job_file, alias)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Hard links unavailable: {exc}")
+    monkeypatch.setattr(studio, "jobs_directory", lambda: jobs_dir)
+
+    with pytest.raises(studio.ModelStudioError, match="must not be hard-linked"):
+        studio.get_job(job_id)
+
+
+def test_model_studio_job_reader_rejects_oversized_job_state(tmp_path, monkeypatch):
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    job_id = "e" * 32
+    (jobs_dir / f"{job_id}.json").write_bytes(
+        b" " * (studio._MAX_MODEL_STUDIO_JOB_STATE_BYTES + 1)
+    )
+    monkeypatch.setattr(studio, "jobs_directory", lambda: jobs_dir)
+
+    with pytest.raises(studio.ModelStudioError, match="2 MiB limit"):
+        studio.get_job(job_id)
+
+
+def test_model_studio_job_path_rejects_separator_and_noncanonical_ids(tmp_path, monkeypatch):
+    monkeypatch.setattr(studio, "jobs_directory", lambda: tmp_path / "jobs")
+    for value in ("../" + "a" * 32, "a" * 32 + "/../escape", "A" * 32):
         with pytest.raises(ValueError, match="Invalid Model Studio job ID"):
-            studio._job_path(unsafe_id)
+            studio._job_path(value)

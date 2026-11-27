@@ -10,7 +10,6 @@ import stat
 from pathlib import Path
 from typing import Any
 
-from axiom.api.safe_paths import safe_child
 from axiom.core.fine_tuning import (
     TRAINING_MAX_DATASET_BYTES,
     TRAINING_MAX_LINE_BYTES,
@@ -130,15 +129,12 @@ def resolve_workspace_input(raw: str, root: Path, label: str) -> Path:
     ):
         raise ValueError(f"{label} must be a workspace-relative path.")
 
-    raw_parts = raw.split("/")
-    parts = [os.path.basename(part) for part in raw_parts]
+    parts = raw.split("/")
     if (
-        any(safe != original for safe, original in zip(parts, raw_parts))
-        or any(part in {"", ".", ".."} for part in parts)
+        any(part in {"", ".", ".."} for part in parts)
         or (len(parts[0]) >= 2 and parts[0][1] == ":")
     ):
         raise ValueError(f"{label} must be a safe workspace-relative path.")
-    safe_raw = "/".join(parts)
 
     try:
         workspace = Path(root).resolve(strict=True)
@@ -147,20 +143,45 @@ def resolve_workspace_input(raw: str, root: Path, label: str) -> Path:
     if workspace != Path(root) or not workspace.is_dir():
         raise ValueError("The workspace root changed or is not a directory.")
 
+    # Walk the workspace from its trusted root and select each child from
+    # directory entries. The untrusted path components are compared against
+    # names returned by the filesystem; they are never joined into a Path.
     current = workspace
-    for part in parts:
-        current = current / part
-        is_junction = getattr(current, "is_junction", lambda: False)
-        if current.is_symlink() or is_junction():
-            raise ValueError(f"{label} cannot contain symbolic links.")
+    for index, part in enumerate(parts):
+        try:
+            with os.scandir(current) as entries:
+                selected = next((entry for entry in entries if entry.name == part), None)
+        except OSError:
+            raise ValueError(f"{label} could not be inspected safely.") from None
+        if selected is None:
+            raise ValueError(f"{label} was not found inside the workspace.")
+        try:
+            metadata = selected.stat(follow_symlinks=False)
+        except OSError:
+            raise ValueError(f"{label} changed while it was being inspected.") from None
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        is_reparse_point = bool(
+            reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag
+        )
+        candidate = Path(selected.path)
+        is_junction = getattr(candidate, "is_junction", lambda: False)
+        if stat.S_ISLNK(metadata.st_mode) or is_reparse_point or is_junction():
+            raise ValueError(f"{label} cannot contain symbolic links or junctions.")
+        if index < len(parts) - 1 and not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError(f"{label} parent components must be directories.")
+        if index == len(parts) - 1 and not (
+            stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode)
+        ):
+            raise ValueError(f"{label} must refer to a regular file or directory.")
+        current = candidate
 
     try:
-        target = safe_child(workspace, safe_raw, must_exist=True)
-    except (FileNotFoundError, OSError, RuntimeError, ValueError):
-        raise ValueError(f"{label} was not found inside the workspace.") from None
-    if not target.is_relative_to(workspace):
-        raise ValueError(f"{label} must stay inside the workspace.")
-    return target
+        resolved = current.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise ValueError(f"{label} changed while it was being inspected.") from None
+    if resolved != current or not resolved.is_relative_to(workspace):
+        raise ValueError(f"{label} must stay inside the workspace without symbolic links.")
+    return current
 
 
 def resolve_workspace_output(
@@ -181,11 +202,9 @@ def resolve_workspace_output(
     ):
         raise ValueError("Adapter output must be a workspace-relative path under outputs/.")
 
-    raw_parts = raw.split("/")
-    parts = [os.path.basename(part) for part in raw_parts]
+    parts = raw.split("/")
     if (
-        any(safe != original for safe, original in zip(parts, raw_parts))
-        or len(parts) < 2
+        len(parts) < 2
         or parts[0] != "outputs"
         or any(part in {"", ".", ".."} for part in parts)
         or (len(parts[0]) >= 2 and parts[0][1] == ":")

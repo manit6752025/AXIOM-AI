@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -20,6 +21,8 @@ from contextvars import copy_context
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+
+from axiom.path_safety import SafePathError, open_regular_file
 
 from axiom.core.resource_ids import new_resource_id
 from axiom.core.workspace_context import active_workspace_id, active_workspace_root, workspace_metadata_dir
@@ -42,6 +45,7 @@ _SLUG = re.compile(r"[^a-z0-9._-]+")
 _ACTIVE_LOCK = threading.RLock()
 _ACTIVE_CANCEL_EVENTS: dict[str, threading.Event] = {}
 _MODEL_STUDIO_JOB_TIMEOUT_SECONDS = 4 * 60 * 60
+_MAX_MODEL_STUDIO_JOB_STATE_BYTES = 2 * 1024 * 1024
 
 
 def _check_cancel(cancel_event: threading.Event | None, deadline: float | None = None) -> None:
@@ -853,11 +857,62 @@ def convert_local_model_to_gguf(source_dir: str, llama_cpp_dir: str, output_path
     return {"operation": "convert_gguf", "source_dir": str(source), "output_path": str(output), "outtype": "f16", "quantization": quantization, "summary": summary}
 
 
-def _job_path(job_id: str) -> Path:
-    safe_id = os.path.basename(job_id)
-    if safe_id != job_id or not re.fullmatch(r"[0-9a-f]{32}", safe_id):
+def _validate_job_id(job_id: str) -> str:
+    if not isinstance(job_id, str) or not re.fullmatch(r"[0-9a-f]{32}", job_id):
         raise ValueError("Invalid Model Studio job ID.")
-    return jobs_directory() / (safe_id + ".json")
+    return job_id
+
+
+def _job_path(job_id: str) -> Path:
+    """Build a path for writing a job with an internally generated/validated ID."""
+    safe_id = _validate_job_id(job_id)
+    return jobs_directory() / f"{safe_id}.json"
+
+
+def _existing_job_file(job_id: str) -> Path | None:
+    """Find a saved job by directory enumeration, never by joining caller input."""
+    safe_id = _validate_job_id(job_id)
+    folder = jobs_directory()
+    try:
+        folder_info = folder.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        raise ModelStudioError("Model Studio job directory could not be inspected safely.") from None
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    folder_is_reparse = bool(
+        reparse_flag and getattr(folder_info, "st_file_attributes", 0) & reparse_flag
+    )
+    if stat.S_ISLNK(folder_info.st_mode) or folder_is_reparse:
+        raise ModelStudioError("Model Studio job directory must not be a symbolic link or reparse point.")
+    if not stat.S_ISDIR(folder_info.st_mode):
+        raise ModelStudioError("Model Studio job storage is not a directory.")
+    expected_name = f"{safe_id}.json"
+    try:
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                if entry.name != expected_name:
+                    continue
+                try:
+                    metadata = entry.stat(follow_symlinks=False)
+                except OSError:
+                    raise ModelStudioError("Saved Model Studio job state could not be inspected safely.") from None
+                reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+                is_reparse_point = bool(
+                    reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag
+                )
+                if not stat.S_ISREG(metadata.st_mode) or is_reparse_point:
+                    raise ModelStudioError(
+                        "Saved Model Studio job state could not be read safely; it must be a regular file, not a symbolic link or reparse point."
+                    )
+                if getattr(metadata, "st_nlink", 1) != 1:
+                    raise ModelStudioError("Saved Model Studio job state must not be hard-linked.")
+                return Path(entry.path)
+    except ModelStudioError:
+        raise
+    except OSError:
+        raise ModelStudioError("Model Studio job directory could not be inspected safely.") from None
+    return None
 
 
 def _write_job(job: dict[str, Any]) -> None:
@@ -870,14 +925,30 @@ def _write_job(job: dict[str, Any]) -> None:
 
 
 def _read_job(job_id: str) -> dict[str, Any] | None:
-    path = _job_path(job_id)
-    if not path.is_file():
+    """Read bounded job metadata without following a file or parent symlink."""
+    path = _existing_job_file(job_id)
+    if path is None:
         return None
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        raise ModelStudioError("Saved Model Studio job state could not be read.") from None
-    return value if isinstance(value, dict) else None
+        with open_regular_file(path) as stream:
+            metadata = os.fstat(stream.fileno())
+            if metadata.st_size < 0 or metadata.st_size > _MAX_MODEL_STUDIO_JOB_STATE_BYTES:
+                raise ModelStudioError("Saved Model Studio job state exceeds its 2 MiB limit.")
+            raw = stream.read(_MAX_MODEL_STUDIO_JOB_STATE_BYTES + 1)
+            if len(raw) > _MAX_MODEL_STUDIO_JOB_STATE_BYTES:
+                raise ModelStudioError("Saved Model Studio job state exceeds its 2 MiB limit.")
+        value = json.loads(raw.decode("utf-8"))
+    except FileNotFoundError:
+        return None
+    except ModelStudioError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError, SafePathError):
+        raise ModelStudioError("Saved Model Studio job state could not be read safely.") from None
+    if not isinstance(value, dict):
+        return None
+    if value.get("id") != job_id:
+        raise ModelStudioError("Saved Model Studio job ID does not match its directory entry.")
+    return value
 
 
 def _pid_alive(pid: Any) -> bool:
@@ -915,7 +986,7 @@ def get_job(job_id: str) -> dict[str, Any] | None:
 
 def cancel_job(job_id: str) -> dict[str, Any] | None:
     """Request cooperative cancellation of an active Model Studio job."""
-    _job_path(job_id)
+    _validate_job_id(job_id)
     with _ACTIVE_LOCK:
         job = _read_job(job_id)
         if job is None:
