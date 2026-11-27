@@ -159,13 +159,26 @@ def test_open_regular_file_uses_only_enumerated_names_for_descriptor_opens(tmp_p
     target = nested / "record.jsonl"
     target.write_text('{"text":"safe"}\\n', encoding="utf-8")
 
-    real_open = os.open
+    import axiom.path_safety as path_safety
+    from types import SimpleNamespace
+
     descriptor_names = []
     root_open_arguments = []
 
     def record_open(path, flags, *args, **kwargs):
         if kwargs.get("dir_fd") is not None:
             descriptor_names.append(path)
+        return os.open(path, flags, *args, **kwargs)
+
+    # Isolate this spy from pytest/pathlib and other process-wide os.open calls.
+    os_proxy = SimpleNamespace(**{
+        name: getattr(os, name)
+        for name in dir(os)
+        if not name.startswith("__")
+    })
+    os_proxy.open = record_open
+    os_proxy.supports_dir_fd = frozenset((*os.supports_dir_fd, record_open))
+    monkeypatch.setattr(path_safety, "os", os_proxy)
         else:
             root_open_arguments.append(path)
         return real_open(path, flags, *args, **kwargs)
@@ -228,8 +241,33 @@ def test_codeql_models_the_directory_entry_selector_as_a_path_barrier():
         / "model-paths.yml"
     )
     model = model_file.read_text(encoding="utf-8")
-    assert '["axiom.path_safety", "Member[_selected_entry].ReturnValue", "path-injection"]' in model
     assert '["axiom.path_safety", "Member[find_existing_relative_path].ReturnValue", "path-injection"]' in model
+    assert '["axiom.path_safety", "Member[resolve_workspace_output_path].ReturnValue", "path-injection"]' in model
+    assert (
+        '["pathlib.Path", "Member[is_relative_to].Argument[this]", "true", "path-injection"]'
+        in model
+    )
+    assert "Member[_safe_selected_entry]" not in model
+    assert "Member[_selected_entry].ReturnValue" not in model
+
+    mcp_source = (
+        Path(__file__).resolve().parents[1] / "axiom" / "core" / "mcp_paths.py"
+    ).read_text(encoding="utf-8")
+    fallback_start = mcp_source.index("def open_mcp_workspace_file(")
+    fallback_end = mcp_source.index("def open_mcp_workspace_output_parent(", fallback_start)
+    fallback = mcp_source[fallback_start:fallback_end]
+    helper_start = mcp_source.index("def _open_mcp_workspace_file(")
+    helper_end = mcp_source.index("def _path_is_within_root(", helper_start)
+    resolver = mcp_source[helper_start:helper_end]
+    assert "_workspace_root(root)" in resolver
+    assert "resolve_workspace_output_path(raw, workspace)" in resolver
+    assert "workspace_real = os.path.realpath(workspace, strict=True)" in resolver
+    assert "workspace_prefix = workspace_real.rstrip(os.sep) + os.sep" in resolver
+    assert "resolved = os.path.realpath(selected, strict=True)" in resolver
+    assert "if resolved.startswith(workspace_prefix):" in resolver
+    assert resolver.index("if resolved.startswith(workspace_prefix):") < resolver.index("open_regular_file(Path(resolved))")
+    assert "_open_mcp_workspace_file(raw, root)" in fallback
+    assert "Member[_find_directory_entry].ReturnValue" not in model
 
 
 def test_codeql_sarif_workflow_uses_the_checked_in_local_model_pack():
@@ -245,8 +283,10 @@ def test_codeql_sarif_workflow_uses_the_checked_in_local_model_pack():
     assert pack["extensionTargets"]["codeql/python-all"] == "*"
 
     model = (root / ".github/codeql/extensions/axiom-model-paths/models/model-paths.yml").read_text(encoding="utf-8")
-    assert "Member[_selected_entry].ReturnValue" in model
+    assert "Member[_safe_selected_entry]" not in model
+    assert "Member[_resolve_mcp_workspace_file]" not in model
     assert "Member[resolve_workspace_output_path].ReturnValue" in model
+    assert "Member[_selected_entry].ReturnValue" not in model
 
     workflow = yaml.load(
         (root / ".github/workflows/codeql-sarif-verification.yml").read_text(encoding="utf-8"),
@@ -297,3 +337,28 @@ def test_workspace_output_resolver_rejects_outside_directory_before_scanning_it(
         resolve_workspace_output_path("escaped/secret.txt", workspace)
 
     assert scanned == [workspace.resolve()]
+
+
+
+def test_release_workflows_pin_external_actions_to_full_commit_shas():
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    workflows = (
+        ".github/workflows/publish-ghcr.yml",
+        ".github/workflows/publish-pypi.yml",
+        ".github/workflows/sdk-release.yml",
+        ".github/workflows/release-assets.yml",
+    )
+    for workflow in workflows:
+        text = (root / workflow).read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if "uses:" not in line:
+                continue
+            action = line.split("uses:", 1)[1].strip().split("#", 1)[0].strip()
+            if action.startswith(("docker/", "pypa/", "softprops/")):
+                reference = action.rsplit("@", 1)[-1]
+                assert re.fullmatch(r"[0-9a-f]{40}", reference), (
+                    f"{workflow} contains an unpinned third-party action: {action}"
+                )

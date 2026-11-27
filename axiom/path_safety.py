@@ -227,9 +227,15 @@ def resolve_workspace_output_path(
         # as the next iteration's directory operand. The check must precede
         # the next os.scandir call, not run only after the walk has completed.
         try:
-            resolved_candidate = candidate.resolve(strict=True)
-            resolved_candidate.relative_to(workspace)
+            resolved_candidate = Path(os.path.realpath(candidate, strict=True))
         except (OSError, RuntimeError, ValueError):
+            raise SafePathError("The selected workspace entry could not be canonicalized safely.") from None
+        if resolved_candidate.is_relative_to(workspace):
+            if resolved_candidate == workspace:
+                raise SafePathError("The workspace root itself is not a file entry.")
+            current = resolved_candidate
+        else:
+            raise SafePathError("The selected workspace entry escaped the trusted root.")
             raise SafePathError("The selected workspace entry escaped the trusted root.") from None
         if resolved_candidate == workspace:
             raise SafePathError("The workspace root itself is not a file entry.")
@@ -279,6 +285,11 @@ def _selected_entry(directory: int | Path, requested_name: str) -> tuple[str, st
 
 
 def _same_file_identity(expected: os.stat_result, opened: os.stat_result) -> bool:
+    if os.name == "nt":
+        # The Windows file index identifies the entry within its volume. The
+        # drive/device field can differ between path stat and CRT fstat even
+        # when both refer to the same open file handle.
+        return bool(expected.st_ino and opened.st_ino and expected.st_ino == opened.st_ino)
     return (expected.st_dev, expected.st_ino) == (opened.st_dev, opened.st_ino)
 
 

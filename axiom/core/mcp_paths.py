@@ -84,6 +84,28 @@ def _fallback_workspace_path(
         allow_existing_output=allow_existing_output,
     )
 
+def _open_mcp_workspace_file(raw: str, root: Path) -> tuple[Path, BinaryIO]:
+    """Resolve and open one regular file inside the MCP workspace.
+
+    The request is compared with real directory entries by the shared safe
+    resolver. The canonical path is checked against the real workspace root
+    immediately before the no-follow file opener is called.
+    """
+    _parts(raw)
+    workspace = _workspace_root(root)
+    try:
+        selected = path_safety.resolve_workspace_output_path(raw, workspace)
+        workspace_real = os.path.realpath(workspace, strict=True)
+        workspace_prefix = workspace_real.rstrip(os.sep) + os.sep
+        resolved = os.path.realpath(selected, strict=True)
+        if resolved.startswith(workspace_prefix):
+            stream = path_safety.open_regular_file(Path(resolved))
+            return Path(resolved), stream
+        raise ValueError("The MCP path must stay inside the workspace.")
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ValueError("The workspace file is missing or unsafe.") from exc
+
+
 def _path_is_within_root(path: Path, root: Path) -> bool:
     try:
         normalized_path = os.path.normcase(os.path.normpath(os.fspath(path)))
@@ -219,6 +241,7 @@ def open_mcp_workspace_file(raw: str, root: Path) -> tuple[Path, BinaryIO]:
     """Open a regular workspace file while pinning every path component."""
     parts = _parts(raw)
     if not _descriptor_access_supported():
+        return _open_mcp_workspace_file(raw, root)
         workspace = _workspace_root(root)
         path = _fallback_workspace_path(raw, workspace)
         # The shared resolver has already inspected every component and
