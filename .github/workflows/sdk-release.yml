@@ -37,7 +37,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip build
           python -m pip install -e ".[test]"
-          npm install --prefix sdk/typescript --no-audit --no-fund
+      - name: Install TypeScript SDK dependencies
+        working-directory: sdk/typescript
+        run: npm install --no-audit --no-fund
       - name: Verify API contract and Python SDK tests
         run: |
           python scripts/verify_sdk_contract.py --json
@@ -47,10 +49,11 @@ jobs:
         run: python -m build sdk/python --sdist --wheel --outdir dist/python
       - name: Build and test TypeScript SDK
         if: inputs.package == 'both' || inputs.package == 'typescript' || inputs.package == 'validate-only'
+        working-directory: sdk/typescript
         run: |
-          npm test --prefix sdk/typescript
-          mkdir -p dist/typescript
-          npm pack --prefix sdk/typescript --pack-destination dist/typescript
+          npm test
+          mkdir -p ../../dist/typescript
+          npm pack --pack-destination ../../dist/typescript
       - name: Install Python wheel from the release artifact in a clean environment
         if: inputs.package == 'both' || inputs.package == 'python' || inputs.package == 'validate-only'
         run: |

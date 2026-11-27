@@ -62,8 +62,13 @@ def test_sdk_release_pipeline_is_manual_oidc_verified_and_installs_built_artifac
     validate_runs = [step.get("run", "") for step in validate["steps"]]
     joined_validate = "\\n".join(validate_runs)
     assert "python -m build sdk/python" in joined_validate
-    assert "npm test --prefix sdk/typescript" in joined_validate
-    assert "npm pack --prefix sdk/typescript" in joined_validate
+    typescript_build = next(
+        step for step in validate["steps"]
+        if step.get("name") == "Build and test TypeScript SDK"
+    )
+    assert typescript_build["working-directory"] == "sdk/typescript"
+    assert "npm test" in typescript_build["run"]
+    assert "npm pack --pack-destination ../../dist/typescript" in typescript_build["run"]
     assert "axiom-sdk-wheel-check" in joined_validate
     assert "axiom-sdk-tarball-check" in joined_validate
     assert "npm install" in joined_validate
@@ -130,8 +135,10 @@ def test_sdk_quality_workflow_installs_packed_typescript_archive():
     )
     script = install["run"]
     assert install["shell"] == "bash"
-    assert "npm pack --prefix sdk/typescript" in script
+    assert "cd sdk/typescript" in script
+    assert 'tarball="$(npm pack --pack-destination "$RUNNER_TEMP" --silent)"' in script
+    assert 'test -f "$RUNNER_TEMP/$tarball"' in script
     assert "npm install --prefix" in script
-    assert "axiom-ai-sdk-1.0.0.tgz" in script
+    assert "$RUNNER_TEMP/$tarball" in script
     assert 'from "@axiom-ai/sdk"' in script
     assert "API_CONTRACT_VERSION" in script
