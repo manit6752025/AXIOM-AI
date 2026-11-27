@@ -137,7 +137,25 @@ def test_profiles_compare_metrics_only_when_hardware_software_model_and_workload
     model = tmp_path / "model"
     model.mkdir()
     (model / "config.json").write_text('{"model_type":"qwen3"}', encoding="utf-8")
-    store = BenchmarkProfileStore(tmp_path / ".axiom")
+    from axiom.core import engine
+
+    roots = engine._allowed_model_roots()
+    matching_roots = [
+        str(root) for root in roots if engine._path_is_within_root(model, root)
+    ]
+    try:
+        resolved_model = engine.resolve_local_model_directory(str(model), "Base model")
+    except ValueError as exc:
+        raise AssertionError(
+            f"Windows model resolution failed: model={str(model)!r}; "
+            f"roots={tuple(map(str, roots))!r}; matching_roots={matching_roots!r}; "
+            f"normalised_model={engine._normalise_lexical_model_path(model)!r}; "
+            f"error={exc}"
+        ) from exc
+    assert resolved_model, (
+        f"model resolver returned no directory: model={str(model)!r}; "
+        f"roots={tuple(map(str, roots))!r}; matching_roots={matching_roots!r}"
+    )
     first = store.create("Baseline A", _report(100), "same prompt", model)
     second = store.create("Baseline B", _report(90), "same prompt", model)
 
@@ -233,6 +251,8 @@ def test_profile_store_rejects_invalid_sampling_and_untrusted_model_directory_sy
         f"islink={link_entry.is_symlink()!r}"
     )
     assert engine._entry_is_link_or_reparse_point(link_entry), diagnostic
+    with pytest.raises(ValueError, match="symlinked path component"):
+        engine.resolve_local_model_directory(str(link), "Base model")
     with pytest.raises(BenchmarkProfileError, match="symbolic link"):
         store.create("Symlinked model", _report(), "prompt", link)
 
@@ -298,5 +318,7 @@ def test_profile_store_rejects_model_directory_with_symlinked_ancestor(tmp_path:
         f"islink={link_entry.is_symlink()!r}"
     )
     assert engine._entry_is_link_or_reparse_point(link_entry), diagnostic
+    with pytest.raises(ValueError, match="symlinked path component"):
+        engine.resolve_local_model_directory(str(linked_model_path), "Base model")
     with pytest.raises(BenchmarkProfileError, match="symbolic links or junctions"):
         store.create("Linked ancestor", _report(), "prompt", linked_model_path)
