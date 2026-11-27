@@ -198,3 +198,4 @@ def test_codeql_models_the_directory_entry_selector_as_a_path_barrier():
     )
     model = model_file.read_text(encoding="utf-8")
     assert '["axiom.path_safety", "Member[_selected_entry].ReturnValue", "path-injection"]' in model
+    assert '["axiom.path_safety", "Member[find_existing_relative_path].ReturnValue", "path-injection"]' in model
