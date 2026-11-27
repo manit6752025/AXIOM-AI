@@ -204,8 +204,8 @@ def test_codeql_models_the_directory_entry_selector_as_a_path_barrier():
     model = model_file.read_text(encoding="utf-8")
     for access_path in (
         "Member[_selected_entry].ReturnValue",
-        "Member[_selected_entry].ReturnValue[0]",
-        "Member[_selected_entry].ReturnValue[1]",
+        "Member[_selected_entry].ReturnValue.TupleElement[0]",
+        "Member[_selected_entry].ReturnValue.TupleElement[1]",
         "Member[find_existing_relative_path].ReturnValue",
         "Member[resolve_workspace_output_path].ReturnValue",
     ):
