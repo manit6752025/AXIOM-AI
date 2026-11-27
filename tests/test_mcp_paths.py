@@ -254,3 +254,34 @@ def test_descriptor_mode_uses_pinned_directory_scans_for_untrusted_components(tm
     # Relative components are resolved from pinned directory listings.
     assert len(scanned_descriptors) >= 3
 
+
+
+@pytest.mark.parametrize("fallback", [True], ids=["portable-fallback"])
+def test_mcp_file_resolver_returns_only_canonical_workspace_regular_files(tmp_path, monkeypatch, fallback):
+    _select_path_mode(monkeypatch, fallback=fallback)
+    root = _workspace(tmp_path, monkeypatch)
+    resolved = mcp_paths._resolve_mcp_workspace_file("data/sample.jsonl", root)
+    assert resolved == (root / "data" / "sample.jsonl").resolve()
+    assert resolved.is_file()
+    assert resolved.is_relative_to(root.resolve())
+
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text("private", encoding="utf-8")
+    escape_dir = root / "escape-dir"
+    try:
+        escape_dir.symlink_to(outside.parent, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Directory symlinks are unavailable: {exc}")
+    with pytest.raises(ValueError):
+        mcp_paths._resolve_mcp_workspace_file("escape-dir/outside.jsonl", root)
+
+    link = root / "data" / "linked.jsonl"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"File symlinks are unavailable: {exc}")
+    with pytest.raises(ValueError):
+        mcp_paths._resolve_mcp_workspace_file("data/linked.jsonl", root)
+
+    with pytest.raises(ValueError):
+        mcp_paths._resolve_mcp_workspace_file("data", root)
