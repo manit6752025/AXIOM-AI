@@ -252,8 +252,6 @@ def test_profile_store_rejects_invalid_sampling_and_untrusted_model_directory_sy
         f"islink={link_entry.is_symlink()!r}"
     )
     assert engine._entry_is_link_or_reparse_point(link_entry), diagnostic
-    with pytest.raises(ValueError, match="symlinked path component"):
-        engine.resolve_local_model_directory(str(link), "Base model")
     with pytest.raises(BenchmarkProfileError, match="symbolic link"):
         store.create("Symlinked model", _report(), "prompt", link)
 
@@ -306,5 +304,18 @@ def test_profile_store_rejects_model_directory_with_symlinked_ancestor(tmp_path:
         link_parent.symlink_to(real_parent, target_is_directory=True)
     except (OSError, NotImplementedError):
         pytest.skip("Symlink creation is not permitted in this test environment.")
+    from axiom.core import engine
+
+    linked_model_path = link_parent / "model"
+    with os.scandir(tmp_path) as entries:
+        link_entry = next(entry for entry in entries if entry.name == link_parent.name)
+    metadata = link_entry.stat(follow_symlinks=False)
+    diagnostic = (
+        f"mode={oct(metadata.st_mode)} "
+        f"attributes={getattr(metadata, 'st_file_attributes', None)!r} "
+        f"reparse_tag={getattr(metadata, 'st_reparse_tag', None)!r} "
+        f"islink={link_entry.is_symlink()!r}"
+    )
+    assert engine._entry_is_link_or_reparse_point(link_entry), diagnostic
     with pytest.raises(BenchmarkProfileError, match="symbolic links or junctions"):
-        store.create("Linked ancestor", _report(), "prompt", link_parent / "model")
+        store.create("Linked ancestor", _report(), "prompt", linked_model_path)

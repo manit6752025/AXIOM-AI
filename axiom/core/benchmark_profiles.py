@@ -69,15 +69,21 @@ def _trusted_model_directory(model_path: str | Path) -> Path | None:
     it is not used to construct or probe a filesystem path before validation.
     """
     try:
-        from axiom.core.engine import resolve_local_model_directory
+        from axiom.core.engine import (
+            _allowed_model_roots,
+            _is_link_or_reparse_point,
+            _path_is_within_root,
+            resolve_local_model_directory,
+        )
 
-        # resolve_local_model_directory returns only a canonical directory
-        # selected beneath an independently validated trusted root. Repeating
-        # the containment test here is redundant and can reject valid Windows
-        # paths when the filesystem returns different drive-letter casing.
-        resolved = Path(resolve_local_model_directory(os.fspath(model_path), "Base model"))
-        if not resolved.is_absolute():
-            raise BenchmarkProfileError("The selected model directory is not an absolute trusted path.")
+        # Resolve only through the engine's trusted-root directory-entry walk.
+        # That walk checks each entry without probing the caller's raw path.
+        resolved = Path(resolve_local_model_directory(os.fspath(model_path), "Base model")).resolve(strict=True)
+        trusted_roots = tuple(Path(root).resolve(strict=True) for root in _allowed_model_roots())
+        if not resolved.is_absolute() or not any(
+            _path_is_within_root(resolved, root) for root in trusted_roots
+        ):
+            return None
         return resolved
     except BenchmarkProfileError:
         raise
