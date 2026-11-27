@@ -88,7 +88,7 @@ def test_open_regular_file_rejects_final_symlink(tmp_path):
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"File symlinks are not available: {exc}")
 
-    with pytest.raises(OSError):
+    with pytest.raises((OSError, SafePathError)):
         open_regular_file(link)
 
 
@@ -109,7 +109,7 @@ def test_open_regular_file_rejects_symlinked_parent_directory(tmp_path):
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"Directory symlinks are not available: {exc}")
 
-    with pytest.raises(OSError):
+    with pytest.raises((OSError, SafePathError)):
         open_regular_file(alias / "secret.txt")
 
 
@@ -143,5 +143,32 @@ def test_rejects_parent_symlink_swapped_after_path_selection(tmp_path):
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"Directory symlinks are not available: {exc}")
 
-    with pytest.raises(OSError):
+    with pytest.raises((OSError, SafePathError)):
         open_regular_file(selected)
+
+
+
+def test_open_regular_file_uses_only_enumerated_names_for_descriptor_opens(tmp_path, monkeypatch):
+    import os
+
+    if os.name != "posix" or not getattr(os, "O_DIRECTORY", 0) or not getattr(os, "O_NOFOLLOW", 0):
+        pytest.skip("POSIX descriptor-relative open is unavailable")
+    root = tmp_path / "workspace"
+    nested = root / "data"
+    nested.mkdir(parents=True)
+    target = nested / "record.jsonl"
+    target.write_text('{"text":"safe"}\\n', encoding="utf-8")
+
+    real_open = os.open
+    descriptor_names = []
+
+    def record_open(path, flags, *args, **kwargs):
+        if kwargs.get("dir_fd") is not None:
+            descriptor_names.append(path)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", record_open)
+    with open_regular_file(target) as stream:
+        assert stream.read() == b'{"text":"safe"}\\n'
+
+    assert descriptor_names == ["data", "record.jsonl"]
