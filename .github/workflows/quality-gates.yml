@@ -4,11 +4,11 @@ name: AXIOM quality gates
 # run but must not terminate a running Python/build/Playwright validation job.
 concurrency:
   group: axiom-quality-gates-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 on:
   push:
-    branches: [main, "latest/development", "latest/nightly", "implement/roadmap"]
+    branches: [main, "latest/development", "latest/nightly", "implement/roadmap", "fix/vulnerability"]
   pull_request:
   workflow_dispatch:
 
@@ -24,8 +24,8 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Validate release contract and GUI/API wiring
@@ -71,8 +71,8 @@ jobs:
     name: Python, lint, production build and browser E2E
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
