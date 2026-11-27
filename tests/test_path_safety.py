@@ -165,10 +165,14 @@ def test_open_regular_file_uses_only_enumerated_names_for_descriptor_opens(tmp_p
     descriptor_names = []
     root_open_arguments = []
 
+    real_open = os.open
+
     def record_open(path, flags, *args, **kwargs):
         if kwargs.get("dir_fd") is not None:
             descriptor_names.append(path)
-        return os.open(path, flags, *args, **kwargs)
+        else:
+            root_open_arguments.append(path)
+        return real_open(path, flags, *args, **kwargs)
 
     # Isolate this spy from pytest/pathlib and other process-wide os.open calls.
     os_proxy = SimpleNamespace(**{
@@ -179,16 +183,6 @@ def test_open_regular_file_uses_only_enumerated_names_for_descriptor_opens(tmp_p
     os_proxy.open = record_open
     os_proxy.supports_dir_fd = frozenset((*os.supports_dir_fd, record_open))
     monkeypatch.setattr(path_safety, "os", os_proxy)
-        else:
-            root_open_arguments.append(path)
-        return real_open(path, flags, *args, **kwargs)
-
-    monkeypatch.setattr(os, "open", record_open)
-    monkeypatch.setattr(
-        os,
-        "supports_dir_fd",
-        frozenset((*os.supports_dir_fd, record_open)),
-    )
     with open_regular_file(target) as stream:
         assert stream.read() == b'{"text":"safe"}\\n'
 
