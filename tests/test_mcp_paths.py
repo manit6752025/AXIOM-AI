@@ -264,7 +264,13 @@ def test_mcp_file_opener_validates_workspace_before_opening_regular_file(tmp_pat
     with stream:
         assert stream.read() == b'{"text":"safe"}' + bytes((10,))
     assert resolved == (root / "data" / "sample.jsonl").resolve()
-    assert resolved.is_relative_to(root.resolve())
+    assert str(resolved).startswith(str(root.resolve()).rstrip(os.sep) + os.sep)
+
+    sibling = tmp_path / "workspace-evil"
+    sibling.mkdir()
+    (sibling / "outside.jsonl").write_text("private sibling", encoding="utf-8")
+    with pytest.raises(ValueError):
+        mcp_paths._open_mcp_workspace_file("outside.jsonl", sibling)
 
     outside = tmp_path / "outside.jsonl"
     outside.write_text("private", encoding="utf-8")
