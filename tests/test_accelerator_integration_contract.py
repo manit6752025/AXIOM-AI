@@ -28,6 +28,19 @@ def test_accelerator_workflow_requires_manual_dispatch_and_real_device_probes():
         "xpu": ("xpu", ["self-hosted", "Linux", "X64", "axiom-xpu"], "torch.xpu", "torch.xpu.is_available()"),
     }
     jobs = workflow["jobs"]
+    for job in jobs.values():
+        assert not any(
+            step.get("uses", "").startswith("actions/setup-python@")
+            for step in job["steps"]
+        )
+        installers = "\\n".join(
+            step.get("run", "")
+            for step in job["steps"]
+            if "pip install -e" in step.get("run", "")
+        )
+        assert '".[test]"' in installers
+        assert "safetensors>=0.4" in installers
+        assert "native-inference" not in installers
     for device, (backend, runner, runtime_probe, availability_probe) in expected.items():
         job = jobs[device]
         assert job["if"] == f"inputs.device == '{device}'"
@@ -69,3 +82,13 @@ def test_accelerator_validation_preflight_python_is_syntactically_valid():
     assert 'torch.cuda.get_device_name(0) if device in {"cuda", "rocm"}' in report_script
     assert 'else "MPS" if device == "mps"' in report_script
     assert "torch.xpu.get_device_name(0)" in report_script
+    assert not any(
+        step.get("uses", "").startswith("actions/setup-python@")
+        for step in steps
+    )
+    install_step = next(
+        step for step in steps if "Install AXIOM test dependencies" in step.get("name", "")
+    )
+    assert '".[test]"' in install_step["run"]
+    assert "safetensors>=0.4" in install_step["run"]
+    assert "native-inference" not in install_step["run"]

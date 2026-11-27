@@ -35,16 +35,13 @@ jobs:
       AXIOM_ACCELERATOR_DEVICE: ${{ inputs.device }}
       PYTHONUNBUFFERED: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: implement/roadmap
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
       - name: Install AXIOM test dependencies without replacing the hardware PyTorch build
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[test]" "safetensors>=0.4"
+          python -m pip install -e ".[test]" "safetensors>=0.4" "tokenizers>=0.19" "gguf>=0.10.0" "jinja2>=3.1"
       - name: Verify physical device and accelerator-enabled PyTorch
         run: |
           python - <<'PY'
