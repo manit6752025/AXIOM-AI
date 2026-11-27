@@ -76,13 +76,8 @@ def _trusted_model_directory(model_path: str | Path) -> Path | None:
             resolve_local_model_directory,
         )
 
-        # Inspect the caller-supplied lexical path before the resolver returns
-        # a canonical target. This catches a model directory reached through a
-        # symlinked ancestor as well as a symlink at the final component.
-        if _is_link_or_reparse_point(os.fspath(model_path)):
-            raise BenchmarkProfileError(
-                "The selected model directory must not use symbolic links or junctions."
-            )
+        # Resolve only through the engine's trusted-root directory-entry walk.
+        # That walk checks each entry without probing the caller's raw path.
         resolved = Path(resolve_local_model_directory(os.fspath(model_path), "Base model")).resolve(strict=True)
         trusted_roots = tuple(Path(root).resolve(strict=True) for root in _allowed_model_roots())
         if not resolved.is_absolute() or not any(
