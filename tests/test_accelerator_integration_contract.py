@@ -41,6 +41,7 @@ def test_accelerator_workflow_requires_manual_dispatch_and_real_device_probes():
         assert '".[test]"' in installers
         assert "safetensors>=0.4" in installers
         assert "native-inference" not in installers
+        assert "Python 3.11" in "\\n".join(step.get("run", "") for step in job["steps"])
     for device, (backend, runner, runtime_probe, availability_probe) in expected.items():
         job = jobs[device]
         assert job["if"] == f"inputs.device == '{device}'"
@@ -92,3 +93,4 @@ def test_accelerator_validation_preflight_python_is_syntactically_valid():
     assert '".[test]"' in install_step["run"]
     assert "safetensors>=0.4" in install_step["run"]
     assert "native-inference" not in install_step["run"]
+    assert "Python 3.11" in report_script

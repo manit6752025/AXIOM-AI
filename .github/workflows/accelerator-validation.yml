@@ -46,8 +46,10 @@ jobs:
         run: |
           python - <<'PY'
           import os
+          import sys
           import torch
 
+          assert sys.version_info[:2] == (3, 11), "Runner must use its pre-provisioned Python 3.11 environment."
           device = os.environ["AXIOM_ACCELERATOR_DEVICE"]
           if device == "cuda":
               assert torch.version.cuda is not None and torch.cuda.is_available()
