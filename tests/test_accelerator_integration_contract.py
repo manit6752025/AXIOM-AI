@@ -107,7 +107,7 @@ def test_accelerator_integration_python_preflights_are_valid():
         scripts = []
         for step in job["steps"]:
             script = step.get("run", "")
-            scripts.extend(re.findall(r"python - <<'PY'\\n(.*?)\\nPY", script, re.DOTALL))
+            scripts.extend(re.findall(r"python - <<'PY'\n(.*?)\nPY", script, re.DOTALL))
         assert scripts, f"{job_name} has no executable Python preflight"
         for script in scripts:
             ast.parse(textwrap.dedent(script))
