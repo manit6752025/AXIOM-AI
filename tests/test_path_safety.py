@@ -1,6 +1,6 @@
 import pytest
 
-from axiom.path_safety import SafePathError, find_existing_relative_path, open_regular_file
+from axiom.path_safety import SafePathError, find_existing_relative_path, open_regular_file, resolve_workspace_output_path
 
 
 def test_resolves_existing_relative_file(tmp_path):
@@ -228,3 +228,40 @@ def test_codeql_sarif_workflow_uses_the_checked_in_local_model_pack():
     assert "config-file" not in init.get("with", {})
     assert "packs" not in init.get("with", {})
     assert "implement/roadmap" in workflow["on"]["push"]["branches"]
+
+
+def test_workspace_output_resolver_rejects_outside_directory_before_scanning_it(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "workspace-sibling"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("outside", encoding="utf-8")
+    scanned = []
+
+    class OutsideEntry:
+        name = "escaped"
+        path = str(outside)
+
+        def stat(self, *, follow_symlinks=True):
+            return outside.stat() if follow_symlinks else outside.lstat()
+
+        def is_symlink(self):
+            return False
+
+    @contextmanager
+    def fake_scandir(path):
+        selected_dir = Path(path)
+        scanned.append(selected_dir)
+        if selected_dir == workspace.resolve():
+            yield iter((OutsideEntry(),))
+        else:
+            raise AssertionError("The resolver scanned outside the trusted workspace.")
+
+    monkeypatch.setattr("axiom.path_safety.os.scandir", fake_scandir)
+
+    with pytest.raises(SafePathError, match="escaped the trusted root"):
+        resolve_workspace_output_path("escaped/secret.txt", workspace)
+
+    assert scanned == [workspace.resolve()]

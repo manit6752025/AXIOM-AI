@@ -222,7 +222,18 @@ def resolve_workspace_output_path(
                 raise SafePathError("The workspace output must be a regular file path.")
         elif not stat.S_ISDIR(metadata.st_mode):
             raise SafePathError("Workspace parent directories must already exist.")
-        current = candidate
+
+        # Canonicalize and prove root containment before reusing this entry
+        # as the next iteration's directory operand. The check must precede
+        # the next os.scandir call, not run only after the walk has completed.
+        try:
+            resolved_candidate = candidate.resolve(strict=True)
+            resolved_candidate.relative_to(workspace)
+        except (OSError, RuntimeError, ValueError):
+            raise SafePathError("The selected workspace entry escaped the trusted root.") from None
+        if resolved_candidate == workspace:
+            raise SafePathError("The workspace root itself is not a file entry.")
+        current = resolved_candidate
         if final_component and return_availability:
             return current, False
 

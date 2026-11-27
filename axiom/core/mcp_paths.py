@@ -219,12 +219,15 @@ def open_mcp_workspace_file(raw: str, root: Path) -> tuple[Path, BinaryIO]:
     """Open a regular workspace file while pinning every path component."""
     parts = _parts(raw)
     if not _descriptor_access_supported():
-        path = _fallback_workspace_path(raw, root)
+        workspace = _workspace_root(root)
+        path = _fallback_workspace_path(raw, workspace)
         try:
-            stream = path_safety.open_regular_file(path)
-        except (OSError, ValueError) as exc:
+            resolved_path = path.resolve(strict=True)
+            resolved_path.relative_to(workspace)
+            stream = path_safety.open_regular_file(resolved_path)
+        except (OSError, RuntimeError, ValueError) as exc:
             raise ValueError("The workspace file is missing or unsafe.") from exc
-        return path, stream
+        return resolved_path, stream
 
     path, parent_descriptor, name = _open_parent(root, parts)
     flags = (
