@@ -4,7 +4,7 @@ name: AXIOM quality gates
 # run but must not terminate a running Python/build/Playwright validation job.
 concurrency:
   group: axiom-quality-gates-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 on:
   push:
