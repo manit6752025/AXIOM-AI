@@ -227,10 +227,11 @@ def resolve_workspace_output_path(
         # as the next iteration's directory operand. The check must precede
         # the next os.scandir call, not run only after the walk has completed.
         try:
-            resolved_candidate = candidate.resolve(strict=True)
-            resolved_candidate.relative_to(workspace)
+            resolved_candidate = Path(os.path.realpath(candidate, strict=True))
         except (OSError, RuntimeError, ValueError):
-            raise SafePathError("The selected workspace entry escaped the trusted root.") from None
+            raise SafePathError("The selected workspace entry could not be canonicalized safely.") from None
+        if not resolved_candidate.is_relative_to(workspace):
+            raise SafePathError("The selected workspace entry escaped the trusted root.")
         if resolved_candidate == workspace:
             raise SafePathError("The workspace root itself is not a file entry.")
         current = resolved_candidate
@@ -276,6 +277,26 @@ def _selected_entry(directory: int | Path, requested_name: str) -> tuple[str, st
         raise
     except OSError as exc:
         raise SafePathError("A workspace path component could not be inspected safely.") from exc
+
+
+def _safe_selected_entry(
+    directory: int | Path,
+    requested_name: str,
+    *,
+    expect_directory: bool,
+) -> tuple[str | os.PathLike[str], os.stat_result]:
+    """Return an OS-selected path only after its link and file-kind checks pass."""
+    _name, selected_path, metadata, is_link_like = _selected_entry(
+        directory,
+        requested_name,
+    )
+    if is_link_like:
+        raise SafePathError("path must not contain symbolic links or junctions")
+    expected_mode = stat.S_ISDIR if expect_directory else stat.S_ISREG
+    if not expected_mode(metadata.st_mode):
+        kind = "directory" if expect_directory else "regular file"
+        raise SafePathError(f"path must refer to a {kind}")
+    return selected_path, metadata
 
 
 def _same_file_identity(expected: os.stat_result, opened: os.stat_result) -> bool:
@@ -373,17 +394,14 @@ def open_regular_file(path: Path) -> BinaryIO:
     current: Path | int = Path(absolute.anchor)
     for index, requested_name in enumerate(components):
         final_component = index == len(components) - 1
-        _selected_name, selected_path, expected, is_link_like = _selected_entry(
+        selected_path, expected = _safe_selected_entry(
             current,
             requested_name,
+            expect_directory=not final_component,
         )
-        if is_link_like:
-            raise SafePathError("path must not contain symbolic links or junctions")
         selected = Path(selected_path)
 
         if final_component:
-            if not stat.S_ISREG(expected.st_mode):
-                raise SafePathError("path must refer to a regular file")
             file_fd = os.open(selected, flags | nofollow | getattr(os, "O_NONBLOCK", 0))
             try:
                 opened = os.fstat(file_fd)
@@ -396,8 +414,6 @@ def open_regular_file(path: Path) -> BinaryIO:
                 if file_fd >= 0:
                     os.close(file_fd)
 
-        if not stat.S_ISDIR(expected.st_mode):
-            raise SafePathError("path parents must be regular directories")
         current = selected
 
     raise SafePathError("path must identify a regular file")

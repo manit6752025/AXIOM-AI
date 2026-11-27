@@ -189,6 +189,48 @@ def test_open_regular_file_uses_only_enumerated_names_for_descriptor_opens(tmp_p
 
 
 
+def test_safe_selected_entry_returns_only_checked_regular_files_and_directories(tmp_path):
+    import axiom.path_safety as path_safety
+
+    root = tmp_path / "workspace"
+    root.mkdir()
+    file_path = root / "record.jsonl"
+    file_path.write_text('{"text":"safe"}\\n', encoding="utf-8")
+    directory = root / "nested"
+    directory.mkdir()
+
+    selected_file, file_metadata = path_safety._safe_selected_entry(
+        root,
+        "record.jsonl",
+        expect_directory=False,
+    )
+    assert Path(selected_file) == file_path
+    assert stat.S_ISREG(file_metadata.st_mode)
+
+    selected_directory, directory_metadata = path_safety._safe_selected_entry(
+        root,
+        "nested",
+        expect_directory=True,
+    )
+    assert Path(selected_directory) == directory
+    assert stat.S_ISDIR(directory_metadata.st_mode)
+
+    with pytest.raises(SafePathError, match="regular file"):
+        path_safety._safe_selected_entry(root, "nested", expect_directory=False)
+    with pytest.raises(SafePathError, match="directory"):
+        path_safety._safe_selected_entry(root, "record.jsonl", expect_directory=True)
+
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside", encoding="utf-8")
+    link = root / "linked.txt"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"File symlinks are unavailable: {exc}")
+    with pytest.raises(SafePathError, match="symbolic links or junctions"):
+        path_safety._safe_selected_entry(root, "linked.txt", expect_directory=False)
+
+
 def test_codeql_models_the_directory_entry_selector_as_a_path_barrier():
     from pathlib import Path
 
@@ -202,15 +244,18 @@ def test_codeql_models_the_directory_entry_selector_as_a_path_barrier():
         / "model-paths.yml"
     )
     model = model_file.read_text(encoding="utf-8")
-    for access_path in (
-        "Member[_selected_entry].ReturnValue",
-        "Member[_selected_entry].ReturnValue.TupleElement[0]",
-        "Member[_selected_entry].ReturnValue.TupleElement[1]",
-        "Member[find_existing_relative_path].ReturnValue",
-        "Member[resolve_workspace_output_path].ReturnValue",
-    ):
-        assert f'["axiom.path_safety", "{access_path}", "path-injection"]' in model
-    assert '["axiom.core.mcp_paths", "Member[_find_directory_entry].ReturnValue.TupleElement[0]", "path-injection"]' in model
+    assert (
+        '["axiom.path_safety", "Member[_safe_selected_entry].ReturnValue.TupleElement[0]", "path-injection"]'
+        in model
+    )
+    assert '["axiom.path_safety", "Member[find_existing_relative_path].ReturnValue", "path-injection"]' in model
+    assert '["axiom.path_safety", "Member[resolve_workspace_output_path].ReturnValue", "path-injection"]' in model
+    assert (
+        '["pathlib.Path", "Member[is_relative_to].Argument[this]", "true", "path-injection"]'
+        in model
+    )
+    assert "Member[_selected_entry].ReturnValue" not in model
+    assert "Member[_find_directory_entry].ReturnValue" not in model
 
 
 def test_codeql_sarif_workflow_uses_the_checked_in_local_model_pack():
