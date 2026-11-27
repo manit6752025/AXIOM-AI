@@ -277,3 +277,28 @@ def test_workspace_output_resolver_rejects_outside_directory_before_scanning_it(
         resolve_workspace_output_path("escaped/secret.txt", workspace)
 
     assert scanned == [workspace.resolve()]
+
+
+
+def test_release_workflows_pin_external_actions_to_full_commit_shas():
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    workflows = (
+        ".github/workflows/publish-ghcr.yml",
+        ".github/workflows/publish-pypi.yml",
+        ".github/workflows/sdk-release.yml",
+        ".github/workflows/release-assets.yml",
+    )
+    for workflow in workflows:
+        text = (root / workflow).read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if "uses:" not in line:
+                continue
+            action = line.split("uses:", 1)[1].strip().split("#", 1)[0].strip()
+            if action.startswith(("docker/", "pypa/", "softprops/")):
+                reference = action.rsplit("@", 1)[-1]
+                assert re.fullmatch(r"[0-9a-f]{40}", reference), (
+                    f"{workflow} contains an unpinned third-party action: {action}"
+                )
