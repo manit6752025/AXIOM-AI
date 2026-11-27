@@ -8,6 +8,7 @@ import io
 import json
 import zipfile
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -91,7 +92,7 @@ def test_download_and_install_verifies_wheel_and_uses_current_python(monkeypatch
 
     def fake_urlopen(request, timeout=20):
         url = request.full_url
-        if "pypi.org" in url:
+        if urlsplit(url).hostname == "pypi.org":
             return io.BytesIO(json.dumps(pypi).encode("utf-8"))
         return io.BytesIO(wheel)
 
@@ -130,7 +131,7 @@ def test_download_rejects_bad_hash_before_invoking_pip(monkeypatch):
     }
 
     def fake_urlopen(request, timeout=20):
-        if "pypi.org" in request.full_url:
+        if urlsplit(request.full_url).hostname == "pypi.org":
             return io.BytesIO(json.dumps(pypi).encode("utf-8"))
         return io.BytesIO(wheel)
 
@@ -163,7 +164,7 @@ def test_download_rejects_wheel_record_tampering_before_invoking_pip(monkeypatch
     }
 
     def fake_urlopen(request, timeout=20):
-        if "pypi.org" in request.full_url:
+        if urlsplit(request.full_url).hostname == "pypi.org":
             return io.BytesIO(json.dumps(pypi).encode("utf-8"))
         return io.BytesIO(wheel)
 
@@ -188,7 +189,7 @@ def test_download_rejects_wheel_archive_traversal_before_invoking_pip(monkeypatc
     }
 
     def fake_urlopen(request, timeout=20):
-        if "pypi.org" in request.full_url:
+        if urlsplit(request.full_url).hostname == "pypi.org":
             return io.BytesIO(json.dumps(pypi).encode("utf-8"))
         return io.BytesIO(wheel)
 
@@ -219,7 +220,7 @@ def test_download_rejects_non_pypi_wheel_host_before_fetching(monkeypatch):
     monkeypatch.setattr(updater.subprocess, "run", lambda *args, **kwargs: pytest.fail("pip must not run"))
     with pytest.raises(updater.UpdateError, match="trusted HTTPS package-file host"):
         updater.download_and_install("9.9.9")
-    assert len(calls) == 1 and "pypi.org" in calls[0]
+    assert len(calls) == 1 and urlsplit(calls[0]).hostname == "pypi.org"
 
 
 def test_release_tags_normalize_to_canonical_pypi_prerelease_versions():
@@ -249,8 +250,10 @@ def test_download_uses_pep440_version_for_pypi_and_wheel_metadata(monkeypatch):
 
     def fake_urlopen(request, timeout=20):
         requests.append(request.full_url)
-        if "pypi.org" in request.full_url:
-            assert request.full_url.endswith(f"/{normalized}/json")
+        if urlsplit(request.full_url).hostname == "pypi.org":
+            parsed_request_url = urlsplit(request.full_url)
+            assert parsed_request_url.hostname == "pypi.org"
+            assert parsed_request_url.path == f"/pypi/axiom-all/{normalized}/json"
             return io.BytesIO(json.dumps(pypi).encode("utf-8"))
         return io.BytesIO(wheel)
 
@@ -264,7 +267,7 @@ def test_download_uses_pep440_version_for_pypi_and_wheel_metadata(monkeypatch):
     result = updater.download_and_install(version)
     assert result["installed_version"] == version
     assert result["verified_sha256"] == digest
-    assert requests[0].endswith(f"/{normalized}/json")
+    assert urlsplit(requests[0]).hostname == "pypi.org" and urlsplit(requests[0]).path.endswith(f"/{normalized}/json")
     assert installed and installed[0][-1].endswith(f"axiom_all-{normalized}-py3-none-any.whl")
 
 
