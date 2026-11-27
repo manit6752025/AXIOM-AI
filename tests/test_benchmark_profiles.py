@@ -223,16 +223,16 @@ def test_profile_store_rejects_invalid_sampling_and_untrusted_model_directory_sy
         pytest.skip("Symlink creation is not permitted in this test environment.")
     from axiom.core import engine
 
-    metadata = link.lstat()
+    with os.scandir(tmp_path) as entries:
+        link_entry = next(entry for entry in entries if entry.name == link.name)
+    metadata = link_entry.stat(follow_symlinks=False)
     diagnostic = (
         f"mode={oct(metadata.st_mode)} "
         f"attributes={getattr(metadata, 'st_file_attributes', None)!r} "
         f"reparse_tag={getattr(metadata, 'st_reparse_tag', None)!r} "
-        f"islink={os.path.islink(link)!r} "
-        f"realpath={os.path.realpath(link)!r} "
-        f"absolute={os.path.abspath(link)!r}"
+        f"islink={link_entry.is_symlink()!r}"
     )
-    assert engine._is_link_or_reparse_point(os.fspath(link)), diagnostic
+    assert engine._entry_is_link_or_reparse_point(link_entry), diagnostic
     with pytest.raises(BenchmarkProfileError, match="symbolic link"):
         store.create("Symlinked model", _report(), "prompt", link)
 
@@ -288,15 +288,15 @@ def test_profile_store_rejects_model_directory_with_symlinked_ancestor(tmp_path:
     from axiom.core import engine
 
     linked_model_path = link_parent / "model"
-    metadata = link_parent.lstat()
+    with os.scandir(tmp_path) as entries:
+        link_entry = next(entry for entry in entries if entry.name == link_parent.name)
+    metadata = link_entry.stat(follow_symlinks=False)
     diagnostic = (
         f"mode={oct(metadata.st_mode)} "
         f"attributes={getattr(metadata, 'st_file_attributes', None)!r} "
         f"reparse_tag={getattr(metadata, 'st_reparse_tag', None)!r} "
-        f"islink={os.path.islink(link_parent)!r} "
-        f"realpath={os.path.realpath(link_parent)!r} "
-        f"absolute={os.path.abspath(link_parent)!r}"
+        f"islink={link_entry.is_symlink()!r}"
     )
-    assert engine._is_link_or_reparse_point(os.fspath(linked_model_path)), diagnostic
+    assert engine._entry_is_link_or_reparse_point(link_entry), diagnostic
     with pytest.raises(BenchmarkProfileError, match="symbolic links or junctions"):
         store.create("Linked ancestor", _report(), "prompt", linked_model_path)

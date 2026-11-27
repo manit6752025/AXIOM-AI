@@ -771,14 +771,18 @@ def _path_is_within_root(path: Path, root: Path) -> bool:
         return False
 
 
-def _is_link_or_reparse_point(path: str) -> bool:
-    """Detect symlinks, junctions and Windows reparse points without trusting target mode bits."""
+def _entry_is_link_or_reparse_point(entry: os.DirEntry[str]) -> bool:
+    """Inspect a directory entry without rebuilding a path from caller input.
+
+    The entry must come directly from os.scandir() on an already trusted
+    directory. Its no-follow metadata lets the caller reject symlinks,
+    junctions and other Windows reparse points before descending.
+    """
     try:
-        metadata = os.lstat(path)
-    except FileNotFoundError:
-        return False
+        metadata = entry.stat(follow_symlinks=False)
+        is_symlink = entry.is_symlink()
     except OSError:
-        # An unreadable directory entry must not be silently trusted.
+        # An unreadable or concurrently replaced entry must not be trusted.
         return True
 
     reparse_flag = getattr(
@@ -786,26 +790,11 @@ def _is_link_or_reparse_point(path: str) -> bool:
         "FILE_ATTRIBUTE_REPARSE_POINT",
         0x400 if os.name == "nt" else 0,
     )
-    candidate = Path(path)
-    is_junction = getattr(candidate, "is_junction", None)
-    path_is_junction = getattr(os.path, "isjunction", None)
-
-    try:
-        lexical_path = os.path.normcase(os.path.normpath(os.path.abspath(os.fspath(candidate))))
-        canonical_path = os.path.normcase(
-            os.path.normpath(os.path.realpath(os.path.abspath(os.fspath(candidate))))
-        )
-    except (OSError, TypeError, ValueError):
-        return True
-
     return (
-        stat.S_ISLNK(metadata.st_mode)
+        is_symlink
+        or stat.S_ISLNK(metadata.st_mode)
         or bool(getattr(metadata, "st_file_attributes", 0) & reparse_flag)
         or bool(getattr(metadata, "st_reparse_tag", 0))
-        or candidate.is_symlink()
-        or bool(is_junction and is_junction())
-        or bool(path_is_junction and path_is_junction(os.fspath(candidate)))
-        or canonical_path != lexical_path
     )
 
 
@@ -960,11 +949,7 @@ def _resolve_model_directory(value: str, label: str) -> Path:
                     metadata = selected.stat(follow_symlinks=False)
                 except OSError:
                     raise ValueError(f"{label} changed while its trusted path was being inspected.") from None
-                # DirEntry.is_symlink() uses the platform's native
-                # directory-entry metadata and is more reliable than checking
-                # only pathlib mode bits on Windows Python 3.11.
-                is_symlink = selected.is_symlink()
-                if is_symlink or _is_link_or_reparse_point(selected.path):
+                if _entry_is_link_or_reparse_point(selected):
                     raise ValueError(
                         f"{label} cannot use a symlinked path component; trusted-root escapes are not allowed."
                     )
