@@ -25,6 +25,7 @@ VALID_STATUSES = {
     "Implemented; tests passing; code-scan review pending",
     "Implemented; physical hardware validation pending",
     "Implemented; CodeQL disposition pending",
+    "Implemented; current-head and controlled scanner validation pending",
 }
 
 
