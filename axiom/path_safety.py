@@ -222,6 +222,18 @@ def resolve_workspace_output_path(
                 raise SafePathError("The workspace output must be a regular file path.")
         elif not stat.S_ISDIR(metadata.st_mode):
             raise SafePathError("Workspace parent directories must already exist.")
+
+        # Canonicalize and prove root containment before reusing this entry
+        # as the next iteration's directory operand. The check must precede
+        # the next os.scandir call, not run only after the walk has completed.
+        try:
+            resolved_candidate = candidate.resolve(strict=True)
+            resolved_candidate.relative_to(workspace)
+        except (OSError, RuntimeError, ValueError):
+            raise SafePathError("The selected workspace entry escaped the trusted root.") from None
+        if resolved_candidate == workspace:
+            raise SafePathError("The workspace root itself is not a file entry.")
+        current = resolved_candidate
         current = candidate
         if final_component and return_availability:
             return current, False
@@ -230,80 +242,158 @@ def resolve_workspace_output_path(
         raise SafePathError("The path must stay inside the workspace.")
     return current
 
-def open_regular_file(path: Path) -> BinaryIO:
-    """Open a regular file without following its final or parent symlinks.
+def _selected_entry(directory: int | Path, requested_name: str) -> tuple[str, str | os.PathLike[str], os.stat_result, bool]:
+    """Select an entry by comparing an untrusted name to a real directory listing.
 
-    On POSIX, each path component is opened relative to an already-open
-    directory descriptor with O_NOFOLLOW. This closes the parent-directory
-    swap window left by validating a Path and then calling open(path).
+    The request string is never used as a filesystem operand. Only the name
+    and path returned by the enumerated directory entry cross the open boundary.
+    """
+    try:
+        with os.scandir(directory) as entries:
+            selected = next((entry for entry in entries if entry.name == requested_name), None)
+            if selected is None:
+                raise FileNotFoundError("Workspace path component was not found.")
+            # Windows DirEntry metadata can omit a stable file index.
+            # Re-stat the OS-selected entry path so its identity is comparable
+            # with fstat() on the resulting handle. POSIX descriptor scans stay
+            # anchored to their pinned parent descriptor.
+            metadata = (
+                selected.stat(follow_symlinks=False)
+                if isinstance(directory, int)
+                else os.stat(selected.path, follow_symlinks=False)
+            )
+            reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            is_link_like = (
+                selected.is_symlink()
+                or stat.S_ISLNK(metadata.st_mode)
+                or bool(getattr(metadata, "st_reparse_tag", 0))
+                or bool(
+                    reparse_flag
+                    and getattr(metadata, "st_file_attributes", 0) & reparse_flag
+                )
+            )
+            return selected.name, selected.path, metadata, is_link_like
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise SafePathError("A workspace path component could not be inspected safely.") from exc
+
+
+def _same_file_identity(expected: os.stat_result, opened: os.stat_result) -> bool:
+    return (expected.st_dev, expected.st_ino) == (opened.st_dev, opened.st_ino)
+
+
+def open_regular_file(path: Path) -> BinaryIO:
+    """Open a regular file by walking enumerated directory entries.
+
+    POSIX uses descriptor-relative opens with O_NOFOLLOW and verifies each
+    opened descriptor against metadata from its pinned parent directory.
+    Platforms without descriptor-relative opens enumerate every component and
+    verify the opened handle identity before returning a stream.
     """
     target = Path(path)
     if ".." in target.parts:
         raise SafePathError("path must not contain parent-directory components")
 
+    absolute = target if target.is_absolute() else Path.cwd() / target
+    if not absolute.anchor:
+        raise SafePathError("path must identify a regular file")
+    components = absolute.parts[1:]
+    if not components:
+        raise SafePathError("path must identify a regular file")
+
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     nofollow = getattr(os, "O_NOFOLLOW", 0)
-    if (
+    descriptor_relative = (
         os.name == "posix"
-        and nofollow
-        and getattr(os, "O_DIRECTORY", 0)
+        and bool(nofollow)
+        and bool(getattr(os, "O_DIRECTORY", 0))
         and os.open in getattr(os, "supports_dir_fd", set())
-    ):
-        absolute = target if target.is_absolute() else Path.cwd() / target
-        parts = absolute.parts
-        if len(parts) < 2 or parts[0] != absolute.anchor:
-            raise SafePathError("path must identify a regular file")
+        and os.scandir in getattr(os, "supports_fd", set())
+    )
+
+    if descriptor_relative:
         directory_flags = (
             os.O_RDONLY
             | getattr(os, "O_DIRECTORY")
             | nofollow
             | getattr(os, "O_CLOEXEC", 0)
         )
-        directory_fd = os.open(absolute.anchor, directory_flags)
+        parent_fd: int | None = os.open(absolute.anchor, directory_flags)
+        file_fd: int | None = None
         try:
-            for component in parts[1:-1]:
-                next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
-                os.close(directory_fd)
-                directory_fd = next_fd
-            descriptor = os.open(
-                parts[-1],
-                flags | nofollow | getattr(os, "O_CLOEXEC", 0),
-                dir_fd=directory_fd,
-            )
-        finally:
-            os.close(directory_fd)
-    else:
-        # Windows does not expose openat/O_NOFOLLOW consistently. Inspect every
-        # path component without following reparse points before opening; also
-        # reject junctions and non-directory parents. POSIX keeps the stronger
-        # descriptor-relative path above.
-        absolute = target if target.is_absolute() else Path.cwd() / target
-        current = Path(absolute.anchor)
-        components = absolute.parts[1:]
-        for index, component in enumerate(components):
-            current = current / component
-            try:
-                metadata = current.lstat()
-            except OSError as exc:
-                raise SafePathError("path contains a missing or inaccessible component") from exc
-            reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-            is_junction = getattr(current, "is_junction", None)
-            if (
-                stat.S_ISLNK(metadata.st_mode)
-                or (reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag)
-                or (is_junction is not None and is_junction())
-            ):
-                raise SafePathError("path must not contain symbolic links or junctions")
-            if index < len(components) - 1 and not stat.S_ISDIR(metadata.st_mode):
-                raise SafePathError("path parents must be regular directories")
-        if not components:
-            raise SafePathError("path must identify a regular file")
-        descriptor = os.open(absolute, flags | nofollow)
+            for index, requested_name in enumerate(components):
+                final_component = index == len(components) - 1
+                selected_name, _selected_path, expected, is_link_like = _selected_entry(
+                    parent_fd,
+                    requested_name,
+                )
+                if is_link_like:
+                    raise SafePathError("path must not contain symbolic links or junctions")
 
-    try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise SafePathError("path must refer to a regular file")
-        return os.fdopen(descriptor, "rb")
-    except BaseException:
-        os.close(descriptor)
-        raise
+                if final_component:
+                    if not stat.S_ISREG(expected.st_mode):
+                        raise SafePathError("path must refer to a regular file")
+                    file_fd = os.open(
+                        selected_name,
+                        flags | nofollow | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0),
+                        dir_fd=parent_fd,
+                    )
+                    opened = os.fstat(file_fd)
+                    if not stat.S_ISREG(opened.st_mode) or not _same_file_identity(expected, opened):
+                        raise SafePathError("path changed while the regular file was being opened")
+                    stream = os.fdopen(file_fd, "rb")
+                    file_fd = None
+                    return stream
+
+                if not stat.S_ISDIR(expected.st_mode):
+                    raise SafePathError("path parents must be regular directories")
+                next_fd = os.open(selected_name, directory_flags, dir_fd=parent_fd)
+                try:
+                    opened = os.fstat(next_fd)
+                    if not stat.S_ISDIR(opened.st_mode) or not _same_file_identity(expected, opened):
+                        raise SafePathError("path parent changed while it was being opened")
+                except BaseException:
+                    os.close(next_fd)
+                    raise
+                previous_fd = parent_fd
+                parent_fd = next_fd
+                os.close(previous_fd)
+        finally:
+            if file_fd is not None:
+                os.close(file_fd)
+            if parent_fd is not None:
+                os.close(parent_fd)
+        raise SafePathError("path must identify a regular file")
+
+    current: Path | int = Path(absolute.anchor)
+    for index, requested_name in enumerate(components):
+        final_component = index == len(components) - 1
+        _selected_name, selected_path, expected, is_link_like = _selected_entry(
+            current,
+            requested_name,
+        )
+        if is_link_like:
+            raise SafePathError("path must not contain symbolic links or junctions")
+        selected = Path(selected_path)
+
+        if final_component:
+            if not stat.S_ISREG(expected.st_mode):
+                raise SafePathError("path must refer to a regular file")
+            file_fd = os.open(selected, flags | nofollow | getattr(os, "O_NONBLOCK", 0))
+            try:
+                opened = os.fstat(file_fd)
+                if not stat.S_ISREG(opened.st_mode) or not _same_file_identity(expected, opened):
+                    raise SafePathError("path changed while the regular file was being opened")
+                stream = os.fdopen(file_fd, "rb")
+                file_fd = -1
+                return stream
+            finally:
+                if file_fd >= 0:
+                    os.close(file_fd)
+
+        if not stat.S_ISDIR(expected.st_mode):
+            raise SafePathError("path parents must be regular directories")
+        current = selected
+
+    raise SafePathError("path must identify a regular file")

@@ -2,7 +2,7 @@ name: AXIOM CodeQL SARIF verification
 
 on:
   push:
-    branches: [main, "fix/vulnerability"]
+    branches: [main, "implement/roadmap", "fix/vulnerability"]
     paths:
       - "axiom/**"
       - "src/**"

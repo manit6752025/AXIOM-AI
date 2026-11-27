@@ -1,6 +1,6 @@
 import pytest
 
-from axiom.path_safety import SafePathError, find_existing_relative_path, open_regular_file
+from axiom.path_safety import SafePathError, find_existing_relative_path, open_regular_file, resolve_workspace_output_path
 
 
 def test_resolves_existing_relative_file(tmp_path):
@@ -88,7 +88,7 @@ def test_open_regular_file_rejects_final_symlink(tmp_path):
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"File symlinks are not available: {exc}")
 
-    with pytest.raises(OSError):
+    with pytest.raises((OSError, SafePathError)):
         open_regular_file(link)
 
 
@@ -109,7 +109,7 @@ def test_open_regular_file_rejects_symlinked_parent_directory(tmp_path):
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"Directory symlinks are not available: {exc}")
 
-    with pytest.raises(OSError):
+    with pytest.raises((OSError, SafePathError)):
         open_regular_file(alias / "secret.txt")
 
 
@@ -143,5 +143,126 @@ def test_rejects_parent_symlink_swapped_after_path_selection(tmp_path):
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"Directory symlinks are not available: {exc}")
 
-    with pytest.raises(OSError):
+    with pytest.raises((OSError, SafePathError)):
         open_regular_file(selected)
+
+
+
+def test_open_regular_file_uses_only_enumerated_names_for_descriptor_opens(tmp_path, monkeypatch):
+    import os
+
+    if os.name != "posix" or not getattr(os, "O_DIRECTORY", 0) or not getattr(os, "O_NOFOLLOW", 0):
+        pytest.skip("POSIX descriptor-relative open is unavailable")
+    root = tmp_path / "workspace"
+    nested = root / "data"
+    nested.mkdir(parents=True)
+    target = nested / "record.jsonl"
+    target.write_text('{"text":"safe"}\\n', encoding="utf-8")
+
+    real_open = os.open
+    descriptor_names = []
+
+    def record_open(path, flags, *args, **kwargs):
+        if kwargs.get("dir_fd") is not None:
+            descriptor_names.append(path)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", record_open)
+    monkeypatch.setattr(
+        os,
+        "supports_dir_fd",
+        frozenset((*os.supports_dir_fd, record_open)),
+    )
+    with open_regular_file(target) as stream:
+        assert stream.read() == b'{"text":"safe"}\\n'
+
+    assert descriptor_names[-2:] == ["data", "record.jsonl"]
+    assert all(
+        isinstance(name, str) and "/" not in name and "\\" not in name
+        for name in descriptor_names
+    )
+
+
+
+def test_codeql_models_the_directory_entry_selector_as_a_path_barrier():
+    from pathlib import Path
+
+    model_file = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "codeql"
+        / "extensions"
+        / "axiom-model-paths"
+        / "models"
+        / "model-paths.yml"
+    )
+    model = model_file.read_text(encoding="utf-8")
+    assert '["axiom.path_safety", "Member[_selected_entry].ReturnValue", "path-injection"]' in model
+    assert '["axiom.path_safety", "Member[find_existing_relative_path].ReturnValue", "path-injection"]' in model
+
+
+def test_codeql_sarif_workflow_uses_the_checked_in_local_model_pack():
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    pack = yaml.safe_load(
+        (root / ".github/codeql/extensions/axiom-model-paths/codeql-pack.yml").read_text(encoding="utf-8")
+    )
+    assert pack["name"] == "axiom/axiom-model-paths"
+    assert pack["extensionTargets"]["codeql/python-all"] == "*"
+
+    model = (root / ".github/codeql/extensions/axiom-model-paths/models/model-paths.yml").read_text(encoding="utf-8")
+    assert "Member[_selected_entry].ReturnValue" in model
+    assert "Member[resolve_workspace_output_path].ReturnValue" in model
+
+    workflow = yaml.load(
+        (root / ".github/workflows/codeql-sarif-verification.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    init = next(
+        step for step in workflow["jobs"]["sarif"]["steps"]
+        if step.get("name") == "Initialize CodeQL for all supported languages"
+    )
+    assert "config-file" not in init.get("with", {})
+    assert "packs" not in init.get("with", {})
+    assert "implement/roadmap" in workflow["on"]["push"]["branches"]
+
+
+def test_workspace_output_resolver_rejects_outside_directory_before_scanning_it(tmp_path, monkeypatch):
+    from pathlib import Path
+    from contextlib import contextmanager
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "workspace-sibling"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("outside", encoding="utf-8")
+    scanned = []
+
+    class OutsideEntry:
+        name = "escaped"
+        path = str(outside)
+
+        def stat(self, *, follow_symlinks=True):
+            return outside.stat() if follow_symlinks else outside.lstat()
+
+        def is_symlink(self):
+            return False
+
+    @contextmanager
+    def fake_scandir(path):
+        selected_dir = Path(path)
+        scanned.append(selected_dir)
+        if selected_dir == workspace.resolve():
+            yield iter((OutsideEntry(),))
+        else:
+            raise AssertionError("The resolver scanned outside the trusted workspace.")
+
+    monkeypatch.setattr("axiom.path_safety.os.scandir", fake_scandir)
+
+    with pytest.raises(SafePathError, match="escaped the trusted root"):
+        resolve_workspace_output_path("escaped/secret.txt", workspace)
+
+    assert scanned == [workspace.resolve()]

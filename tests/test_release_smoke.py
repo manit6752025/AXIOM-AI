@@ -845,18 +845,18 @@ def test_quality_gates_require_python_node_and_release_artifact_security_checks(
 
 
 def test_roadmap_audit_accepts_implemented_status_with_physical_hardware_validation_pending() -> None:
-    markdown = "\\n".join(
+    markdown = "\n".join(
         f"- [R{i:03d} · {'Planned' if i % 2 else 'Implemented; tests passing'}] Requirement {i}."
         for i in range(1, 140)
     )
-    markdown += "\\n- [R140 · Implemented; physical hardware validation pending] Real-device execution remains gated."
+    markdown += "\n- [R140 · Implemented; physical hardware validation pending] Real-device execution remains gated."
     assert release_smoke.roadmap_issues(markdown) == []
 
 
 def test_roadmap_audit_accepts_implemented_status_with_codeql_disposition_pending() -> None:
-    markdown = "\\n".join(
+    markdown = "\n".join(
         f"- [R{i:03d} · {'Planned' if i % 2 else 'Implemented; tests passing'}] Requirement {i}."
         for i in range(1, 140)
     )
-    markdown += "\\n- [R140 · Implemented; CodeQL disposition pending] Security analyzer review remains open."
+    markdown += "\n- [R140 · Implemented; CodeQL disposition pending] Security analyzer review remains open."
     assert release_smoke.roadmap_issues(markdown) == []
