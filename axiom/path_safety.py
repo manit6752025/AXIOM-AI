@@ -230,39 +230,6 @@ def resolve_workspace_output_path(
         raise SafePathError("The path must stay inside the workspace.")
     return current
 
-def _selected_entry(directory: int | Path, requested_name: str):
-    """Select an existing component by comparing it to an OS directory entry.
-
-    The request string is never used as a filesystem operand. Only the name
-    returned by the enumerated directory entry crosses into an open call.
-    """
-    try:
-        with os.scandir(directory) as entries:
-            selected = next((entry for entry in entries if entry.name == requested_name), None)
-            if selected is None:
-                raise FileNotFoundError("Workspace path component was not found.")
-            metadata = selected.stat(follow_symlinks=False)
-    except FileNotFoundError:
-        raise
-    except OSError as exc:
-        raise SafePathError("A workspace path component could not be inspected safely.") from exc
-
-    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-    is_junction = getattr(selected, "is_junction", None)
-    is_link_like = (
-        selected.is_symlink()
-        or stat.S_ISLNK(metadata.st_mode)
-        or bool(getattr(metadata, "st_reparse_tag", 0))
-        or bool(reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag)
-        or bool(is_junction is not None and is_junction())
-    )
-    return selected, metadata, is_link_like
-
-
-def _same_file_identity(expected: os.stat_result, opened: os.stat_result) -> bool:
-    return (expected.st_dev, expected.st_ino) == (opened.st_dev, opened.st_ino)
-
-
 def _selected_entry(directory: int | Path, requested_name: str) -> tuple[str, str | os.PathLike[str], os.stat_result, bool]:
     """Select an entry by comparing an untrusted name to a real directory listing.
 
