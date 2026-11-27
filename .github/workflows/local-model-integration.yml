@@ -28,7 +28,7 @@ jobs:
       AXIOM_INTEGRATION_TEXT_MODEL: qwen2.5:0.5b
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -69,7 +69,7 @@ jobs:
       AXIOM_RUN_REAL_LOCAL_MODEL_TESTS: "1"
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
