@@ -746,6 +746,7 @@ def _trusted_file_entry(path: str, root_text: str) -> bool:
         return False
 
 
+@lru_cache(maxsize=8)
 def _trusted_directory_index(
     root_strings: tuple[str, ...],
     freshness_bucket: int,
