@@ -201,16 +201,21 @@ def test_codeql_models_the_directory_entry_selector_as_a_path_barrier():
     assert '["axiom.path_safety", "Member[find_existing_relative_path].ReturnValue", "path-injection"]' in model
 
 
-def test_codeql_sarif_workflow_loads_the_python_model_pack():
+def test_codeql_sarif_workflow_uses_the_checked_in_local_model_pack():
     from pathlib import Path
 
     import yaml
 
     root = Path(__file__).resolve().parents[1]
-    config = yaml.safe_load(
-        (root / ".github/codeql/codeql-config.yml").read_text(encoding="utf-8")
+    pack = yaml.safe_load(
+        (root / ".github/codeql/extensions/axiom-model-paths/codeql-pack.yml").read_text(encoding="utf-8")
     )
-    assert config["packs"]["python"] == ["axiom/axiom-model-paths"]
+    assert pack["name"] == "axiom/axiom-model-paths"
+    assert pack["extensionTargets"]["codeql/python-all"] == "*"
+
+    model = (root / ".github/codeql/extensions/axiom-model-paths/models/model-paths.yml").read_text(encoding="utf-8")
+    assert "Member[_selected_entry].ReturnValue" in model
+    assert "Member[resolve_workspace_output_path].ReturnValue" in model
 
     workflow = yaml.load(
         (root / ".github/workflows/codeql-sarif-verification.yml").read_text(encoding="utf-8"),
@@ -220,5 +225,6 @@ def test_codeql_sarif_workflow_loads_the_python_model_pack():
         step for step in workflow["jobs"]["sarif"]["steps"]
         if step.get("name") == "Initialize CodeQL for all supported languages"
     )
-    assert init["with"]["config-file"] == "./.github/codeql/codeql-config.yml"
+    assert "config-file" not in init.get("with", {})
+    assert "packs" not in init.get("with", {})
     assert "implement/roadmap" in workflow["on"]["push"]["branches"]
