@@ -8,7 +8,7 @@ concurrency:
 
 on:
   push:
-    branches: [main, "latest/development", "latest/nightly", "implement/roadmap"]
+    branches: [main, "latest/development", "latest/nightly", "implement/roadmap", "fix/vulnerability"]
   pull_request:
   workflow_dispatch:
 
