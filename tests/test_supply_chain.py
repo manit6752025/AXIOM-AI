@@ -281,6 +281,26 @@ def test_pip_audit_parser_sanitizes_findings_and_deduplicates_records():
     assert result["network_accessed"] is True
 
 
+def test_axiom_root_distribution_is_excluded_but_other_null_versions_remain():
+    payload = {
+        "dependencies": [
+            {"name": "axiom-all", "version": None, "vulns": []},
+            {"name": "click", "version": None, "vulns": []},
+        ]
+    }
+    filtered, excluded = supply_chain._exclude_local_axiom_distribution(payload)
+    assert excluded == 1
+    assert filtered["dependencies"] == [{"name": "click", "version": None, "vulns": []}]
+
+    # The third-party record remains intact so the parser will fail closed
+    # when it validates the missing package version.
+    with pytest.raises(SupplyChainError, match="non-string version"):
+        supply_chain._parse_pip_audit_output(
+            filtered, generated_at="2026-11-23T00:00:00Z",
+            scanner_version="2.10.1", exit_code=0,
+        )
+
+
 def test_pip_audit_parser_accepts_a_successful_scan_with_no_findings():
     result = supply_chain._parse_pip_audit_output(
         [{"name": "example-package", "version": "1.2.3", "vulns": []}],
