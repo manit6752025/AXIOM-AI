@@ -83,8 +83,12 @@ def _hardware(gpu_name="Test GPU"):
     }
 
 
-def _patch_environment(monkeypatch: pytest.MonkeyPatch, gpu_name="Test GPU"):
-    monkeypatch.setattr(benchmark_profiles, "_trusted_model_directory", lambda value: Path(value).resolve(strict=True))
+def _patch_environment(monkeypatch: pytest.MonkeyPatch, model_root: Path, gpu_name="Test GPU"):
+    from axiom.core import engine
+
+    monkeypatch.setenv("AXIOM_MODEL_ROOTS", str(model_root))
+    engine._trusted_directory_index.cache_clear()
+    engine._trusted_file_entry.cache_clear()
     monkeypatch.setattr(benchmark_profiles, "_hardware_record", lambda: _hardware(gpu_name))
     monkeypatch.setattr(benchmark_profiles, "_software_record", lambda: {
         "axiom_version": "0.3.0-test",
@@ -289,3 +293,19 @@ def test_model_config_fingerprint_opens_fixed_metadata_without_following_symlink
     monkeypatch.setattr(benchmark_profiles, "_trusted_model_directory", lambda _value: root)
     with pytest.raises(BenchmarkProfileError, match="could not be read safely"):
         benchmark_profiles._model_config_fingerprint(root)
+
+
+def test_profile_store_rejects_model_directory_with_symlinked_ancestor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _patch_environment(monkeypatch, tmp_path)
+    store = BenchmarkProfileStore(tmp_path / ".axiom")
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    model = real_parent / "model"
+    model.mkdir()
+    link_parent = tmp_path / "linked-parent"
+    try:
+        link_parent.symlink_to(real_parent, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlink creation is not permitted in this test environment.")
+    with pytest.raises(BenchmarkProfileError, match="symbolic links or junctions"):
+        store.create("Linked ancestor", _report(), "prompt", link_parent / "model")
