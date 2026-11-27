@@ -745,6 +745,12 @@ def _path_is_within_root(path: Path, root: Path) -> bool:
                 resolved_root = resolved_root[4:]
         normalized_path = os.path.normcase(os.path.normpath(resolved_path))
         normalized_root = os.path.normcase(os.path.normpath(resolved_root))
+        path = Path(normalized_path)
+        root = Path(normalized_root)
+        try:
+            path.relative_to(root)
+        except ValueError:
+            return False
         return os.path.commonpath((normalized_path, normalized_root)) == normalized_root
     except (OSError, TypeError, ValueError):
         return False
