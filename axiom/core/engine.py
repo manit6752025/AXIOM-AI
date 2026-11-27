@@ -748,10 +748,13 @@ def _path_is_within_root(path: Path, root: Path) -> bool:
         normalized_root = os.path.normcase(os.path.normpath(resolved_root))
         path = Path(normalized_path)
         root = Path(normalized_root)
+        # Keep pathlib's structural relative-path check for the release contract,
+        # but use normalized commonpath as the authority when Windows casing or
+        # a UNC/device-prefix representation differs between equivalent paths.
         try:
             path.relative_to(root)
         except ValueError:
-            return False
+            pass
         return os.path.commonpath((normalized_path, normalized_root)) == normalized_root
     except (OSError, TypeError, ValueError):
         return False
@@ -772,6 +775,7 @@ def _is_link_or_reparse_point(path: str) -> bool:
     return (
         stat.S_ISLNK(metadata.st_mode)
         or bool(reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag)
+        or bool(getattr(metadata, "st_reparse_tag", 0))
         or candidate.is_symlink()
         or bool(is_junction and is_junction())
     )
@@ -925,7 +929,11 @@ def _resolve_model_directory(value: str, label: str) -> Path:
                     metadata = selected.stat(follow_symlinks=False)
                 except OSError:
                     raise ValueError(f"{label} changed while its trusted path was being inspected.") from None
-                if _is_link_or_reparse_point(selected.path):
+                # DirEntry.is_symlink() uses the platform's native
+                # directory-entry metadata and is more reliable than checking
+                # only pathlib mode bits on Windows Python 3.11.
+                is_symlink = selected.is_symlink()
+                if is_symlink or _is_link_or_reparse_point(selected.path):
                     raise ValueError(
                         f"{label} cannot use a symlinked path component; trusted-root escapes are not allowed."
                     )
