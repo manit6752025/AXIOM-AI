@@ -221,14 +221,10 @@ def open_mcp_workspace_file(raw: str, root: Path) -> tuple[Path, BinaryIO]:
     if not _descriptor_access_supported():
         workspace = _workspace_root(root)
         path = _fallback_workspace_path(raw, workspace)
-        try:
-            resolved_path = path.resolve(strict=True)
-            resolved_path.relative_to(workspace)
-            stream = path_safety.open_regular_file(resolved_path)
-        except (OSError, RuntimeError, ValueError) as exc:
-            raise ValueError("The workspace file is missing or unsafe.") from exc
-        return resolved_path, stream
-        path = _fallback_workspace_path(raw, root)
+        # The shared resolver has already inspected every component and
+        # proved that the selected entry remains inside the workspace. Avoid
+        # resolving the path a second time, which would reintroduce a
+        # caller-controlled path expression and a check/use race.
         try:
             stream = path_safety.open_regular_file(path)
         except (OSError, ValueError) as exc:
