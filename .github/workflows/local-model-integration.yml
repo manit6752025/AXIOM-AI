@@ -28,8 +28,8 @@ jobs:
       AXIOM_INTEGRATION_VISION_MODEL: moondream:1.8b
       AXIOM_INTEGRATION_TEXT_MODEL: qwen2.5:0.5b
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -88,8 +88,8 @@ jobs:
     env:
       AXIOM_RUN_REAL_LOCAL_MODEL_TESTS: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
