@@ -2,7 +2,7 @@ name: AXIOM CodeQL alert inventory
 
 on:
   push:
-    branches: [main, implement/roadmap, "fix/vulnerability"]
+    branches: [main, implement/roadmap]
     paths:
       - ".github/workflows/codeql-alert-inventory.yml"
       - ".github/codeql/**"
@@ -94,7 +94,7 @@ jobs:
               )
           PY
       - name: Upload alert inventory and CodeQL SARIF data-flow report
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: axiom-codeql-alert-details
           path: |
