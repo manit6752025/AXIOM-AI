@@ -29,7 +29,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Install build and test dependencies
@@ -50,6 +50,7 @@ jobs:
           npm test --prefix sdk/typescript
           mkdir -p dist/typescript
           npm pack --prefix sdk/typescript --pack-destination dist/typescript
+      - uses: actions/upload-artifact@v7
       - name: Install Python wheel from the release artifact in a clean environment
         if: inputs.package == 'both' || inputs.package == 'python'
         run: |
@@ -97,7 +98,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: axiom-sdk-release-artifacts
           path: dist
@@ -117,10 +118,11 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v8
           package-manager-cache: false
       - name: Install an npm CLI with OIDC trusted-publishing support
         run: npm install --global npm@11.15.0
@@ -163,7 +165,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Install the published package into a clean project

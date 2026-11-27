@@ -522,6 +522,11 @@ def test_model_provenance_hashes_a_valid_safetensors_artifact_at_the_full_16_gib
     assert parsed["weight"]["shape"] == [payload_size]
     assert parsed["weight"]["data_offsets"] == [0, payload_size]
 
+    # Do not call safe_open on this 16 GiB sparse fixture: its public API
+    # memory-maps the complete tensor and exceeds ordinary CI runner limits.
+    # The header is decoded above, and the provenance scanner must stream-hash
+    # the entire file without loading model weights into memory.
+
     assert sparse_weight.stat().st_size == total_size
     report = inspect_model_provenance(model)
     evidence = report["hash_evidence"]
@@ -535,6 +540,10 @@ def test_model_provenance_hashes_a_valid_safetensors_artifact_at_the_full_16_gib
     # The checkpoint digest is a deterministic tree digest over path, size,
     # and the independently computed per-file digest (not the raw file digest).
     tree_digest = hashlib.sha256()
+    tree_digest.update(b"full-limit.safetensors")
+    tree_digest.update(bytes((0,)))
+    tree_digest.update(str(total_size).encode("ascii"))
+    tree_digest.update(bytes((0,)))
     tree_digest.update(b"full-limit.safetensors\0")
     tree_digest.update(str(total_size).encode("ascii"))
     tree_digest.update(b"\0")

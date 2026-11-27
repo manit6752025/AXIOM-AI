@@ -34,7 +34,7 @@ jobs:
         run: python -m compileall -q axiom scripts
       - name: Check cross-platform runtime compatibility
         run: python scripts/check_compatibility.py --json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Install frontend dependencies for distributable assets
@@ -76,7 +76,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm

@@ -1,0 +1,55 @@
+name: AXIOM CodeQL SARIF verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "axiom/**"
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
+      - "docs/**"
+      - ".github/codeql/**"
+      - ".github/workflows/codeql-sarif-verification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: axiom-codeql-sarif-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sarif:
+    name: Export CodeQL security-and-quality SARIF
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+      - name: Initialize CodeQL for all supported languages
+        uses: github/codeql-action/init@v3
+        with:
+          languages: actions, javascript-typescript, python
+          queries: security-and-quality
+      - name: Build compiled languages where applicable
+        uses: github/codeql-action/autobuild@v3
+      - name: Analyze and export SARIF without uploading duplicate findings
+        uses: github/codeql-action/analyze@v3
+        with:
+          upload: false
+          output: ${{ runner.temp }}/axiom-codeql-sarif
+      - name: Upload SARIF reports for exact finding inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiom-codeql-sarif-reports
+          path: ${{ runner.temp }}/axiom-codeql-sarif/
+          if-no-files-found: error
+          retention-days: 7
