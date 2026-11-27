@@ -222,8 +222,11 @@ def test_codeql_models_the_directory_entry_selector_as_a_path_barrier():
     resolver = mcp_source[helper_start:helper_end]
     assert "_workspace_root(root)" in resolver
     assert "resolve_workspace_output_path(raw, workspace)" in resolver
-    assert "if resolved.is_relative_to(workspace):" in resolver
-    assert resolver.index("if resolved.is_relative_to(workspace):") < resolver.index("open_regular_file(resolved)")
+    assert "workspace_real = os.path.realpath(workspace, strict=True)" in resolver
+    assert "workspace_prefix = workspace_real.rstrip(os.sep) + os.sep" in resolver
+    assert "resolved = os.path.realpath(selected, strict=True)" in resolver
+    assert "if resolved.startswith(workspace_prefix):" in resolver
+    assert resolver.index("if resolved.startswith(workspace_prefix):") < resolver.index("open_regular_file(Path(resolved))")
     assert "_open_mcp_workspace_file(raw, root)" in fallback
     assert "Member[_find_directory_entry].ReturnValue" not in model
 
@@ -243,8 +246,6 @@ def test_codeql_sarif_workflow_uses_the_checked_in_local_model_pack():
     model = (root / ".github/codeql/extensions/axiom-model-paths/models/model-paths.yml").read_text(encoding="utf-8")
     assert "Member[_safe_selected_entry]" not in model
     assert "Member[_resolve_mcp_workspace_file]" not in model
-    assert "Member[is_relative_to].Argument[this]" in model
-    assert '["pathlib.PurePath", "Member[is_relative_to].Argument[this]", "true", "path-injection"]' in model
     assert "Member[resolve_workspace_output_path].ReturnValue" in model
     assert "Member[_selected_entry].ReturnValue" not in model
 
