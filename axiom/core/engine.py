@@ -730,6 +730,17 @@ def _allowed_model_roots() -> tuple[Path, ...]:
     return tuple(roots)
 
 
+def _normalise_lexical_model_path(value: str | os.PathLike[str]) -> str:
+    """Normalise lexical Windows path forms without resolving symlink components."""
+    normalized = os.path.normpath(os.path.abspath(os.fspath(value)))
+    if os.name == "nt":
+        if normalized.startswith("\\\\?\\UNC\\"):
+            normalized = "\\\\" + normalized[8:]
+        elif normalized.startswith("\\\\?\\"):
+            normalized = normalized[4:]
+    return os.path.normcase(os.path.normpath(normalized))
+
+
 def _path_is_within_root(path: Path, root: Path) -> bool:
     """Compare canonical filesystem paths with Windows case/device-prefix handling."""
     try:
@@ -912,15 +923,18 @@ def _resolve_model_directory(value: str, label: str) -> Path:
         )
     )
     for candidate_text in candidates:
-        candidate_key = os.path.normcase(os.path.normpath(candidate_text))
+        candidate_key = _normalise_lexical_model_path(candidate_text)
         for root in roots:
             root_text = os.fspath(root)
-            root_key = os.path.normcase(os.path.normpath(root_text))
+            root_key = _normalise_lexical_model_path(root_text)
             try:
+                # Compare the lexical paths after stripping Windows extended
+                # path prefixes. Do not realpath the candidate here: the
+                # component walker below must still see and reject symlinks.
                 if os.path.commonpath((candidate_key, root_key)) != root_key:
                     continue
-                relative = os.path.relpath(candidate_text, root_text)
-            except (OSError, ValueError):
+                relative = os.path.relpath(candidate_key, root_key)
+            except (OSError, TypeError, ValueError):
                 continue
             parts = tuple(relative.replace("\\", "/").split("/"))
             if (
