@@ -231,6 +231,7 @@ def test_codeql_sarif_workflow_uses_the_checked_in_local_model_pack():
 
 
 def test_workspace_output_resolver_rejects_outside_directory_before_scanning_it(tmp_path, monkeypatch):
+    from pathlib import Path
     from contextlib import contextmanager
 
     workspace = tmp_path / "workspace"
