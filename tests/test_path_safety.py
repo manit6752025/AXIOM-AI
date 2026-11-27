@@ -161,10 +161,13 @@ def test_open_regular_file_uses_only_enumerated_names_for_descriptor_opens(tmp_p
 
     real_open = os.open
     descriptor_names = []
+    root_open_arguments = []
 
     def record_open(path, flags, *args, **kwargs):
         if kwargs.get("dir_fd") is not None:
             descriptor_names.append(path)
+        else:
+            root_open_arguments.append(path)
         return real_open(path, flags, *args, **kwargs)
 
     monkeypatch.setattr(os, "open", record_open)
@@ -176,12 +179,40 @@ def test_open_regular_file_uses_only_enumerated_names_for_descriptor_opens(tmp_p
     with open_regular_file(target) as stream:
         assert stream.read() == b'{"text":"safe"}\\n'
 
+    assert root_open_arguments == [os.sep]
     assert descriptor_names[-2:] == ["data", "record.jsonl"]
     assert all(
         isinstance(name, str) and "/" not in name and "\\" not in name
         for name in descriptor_names
     )
 
+
+
+def test_open_regular_file_portable_walk_starts_at_fixed_posix_root(tmp_path, monkeypatch):
+    import os
+    from pathlib import Path
+
+    if os.name != "posix":
+        pytest.skip("The fixed POSIX root assertion is platform-specific")
+
+    target = tmp_path / "workspace" / "data" / "record.jsonl"
+    target.parent.mkdir(parents=True)
+    target.write_text("safe", encoding="utf-8")
+
+    real_scandir = os.scandir
+    scanned_directories = []
+
+    def record_scandir(directory):
+        scanned_directories.append(directory)
+        return real_scandir(directory)
+
+    monkeypatch.setattr(os, "supports_dir_fd", frozenset())
+    monkeypatch.setattr(os, "scandir", record_scandir)
+
+    with open_regular_file(target) as stream:
+        assert stream.read() == b"safe"
+
+    assert Path(scanned_directories[0]) == Path(os.sep)
 
 
 def test_codeql_models_the_directory_entry_selector_as_a_path_barrier():
