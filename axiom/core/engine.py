@@ -886,7 +886,7 @@ def _resolve_model_directory(value: str, label: str) -> Path:
     """Resolve a model path by walking trusted directory entries component by component."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{label} is required.")
-    if len(value) > 4096 or any(character in value for character in ("\\x00", "\\r", "\\n")):
+    if len(value) > 4096 or any(ord(character) < 32 or ord(character) == 127 for character in value):
         raise ValueError(f"{label} contains invalid control characters or exceeds the path limit.")
 
     roots = _allowed_model_roots()
