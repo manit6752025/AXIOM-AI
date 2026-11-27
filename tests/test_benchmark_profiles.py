@@ -156,6 +156,7 @@ def test_profiles_compare_metrics_only_when_hardware_software_model_and_workload
         f"model resolver returned no directory: model={str(model)!r}; "
         f"roots={tuple(map(str, roots))!r}; matching_roots={matching_roots!r}"
     )
+    store = BenchmarkProfileStore(tmp_path / ".axiom")
     first = store.create("Baseline A", _report(100), "same prompt", model)
     second = store.create("Baseline B", _report(90), "same prompt", model)
 
