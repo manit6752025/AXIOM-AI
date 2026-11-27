@@ -76,7 +76,7 @@ jobs:
           ref: ${{ env.SOURCE_REF }}
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -136,7 +136,7 @@ jobs:
           ref: ${{ env.SOURCE_REF }}
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -251,7 +251,7 @@ jobs:
           ref: ${{ env.SOURCE_REF }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
