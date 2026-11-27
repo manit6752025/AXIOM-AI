@@ -3,11 +3,31 @@
 <!-- AXIOM-ROADMAP-UPDATE:START -->
 ## Product roadmap — 140 scoped deliverables
 
-This backlog expands the ten original priorities into concrete, reviewable
-deliverables. Preserve the existing Control Center navigation, visual language,
-responsive layout, and keyboard behavior while extending its workflows. Items
-are planned unless explicitly marked otherwise; scope is not a claim that the
-feature exists or a delivery-date promise.
+This backlog expands the ten original priorities into 140 concrete,
+reviewable deliverables. Preserve the existing Control Center navigation,
+visual language, responsive layout, and keyboard behavior while extending its
+workflows.
+
+**Implementation inventory: 140/140 deliverables implemented.** This records
+feature implementation in the source tree; it does not imply that physical
+hardware certification, security disposition, current-head acceptance, or
+third-party publication has passed.
+
+**Outstanding acceptance and release gates (not marked complete):**
+- **R095:** execute the adapter forward-pass workflow on real CUDA, ROCm,
+  Apple Metal/MPS, and Intel XPU hardware; only CPU execution is currently
+  evidenced.
+- **R107 and R116:** finish fresh CodeQL alert disposition and repository-owner
+  review. The workspace path fixes are committed to `main`, but a clean
+  current-head CodeQL result and owner review are not yet verified.
+- **R136:** finish current-head CI/schema validation and controlled
+  `pip-audit --local` advisory, no-findings, and unavailable-path verification.
+- **R140:** complete PyPI Trusted Publisher/npm provenance setup, owner
+  authorization, publication, and clean installation from both public
+  registries. Neither SDK is currently published.
+- **Release:** `v0.3.0-beta.8` has release-note documentation but no published
+  tag or GitHub release. The latest published prerelease is `v0.3.0-beta.7`.
+
 
 ### 01 · Platform foundation
 
@@ -176,7 +196,7 @@ feature exists or a delivery-date promise.
 - [R133 · Implemented; tests passing] Implemented bounded native prediction jobs with per-row fsynced JSONL checkpoints and schema-v3 job-state integrity. The workspace store safely migrates v1/v2 records; resume verifies dataset SHA-256/row count, base-model and optional adapter fingerprints, generation-settings/field-mapping fingerprint, checkpoint regular-file identity, committed byte count, SHA-256 and complete-row count. Uncommitted tail bytes are truncated only to the last committed row; only remaining prompts are generated. REST, CLI, Runtime GUI and default-deny MCP resume are available; REST/MCP and both official SDKs expose explicit verified flags for dataset, model/adapter, generation configuration and checkpoint. Runtime/CLI status surfaces show restart-resume provenance. Core/API/CLI/MCP/SDK and browser regressions cover real process death, changed settings/assets, corrupt bytes, symlink and same-inode mutation, and continuation without duplicate inference. Full gates passed on `80895413009c4423203c962146ea14cf983b7814`: 1,557 Python tests, 85 Playwright tests, ESLint, TypeScript/production build, static acceptance and Ubuntu/Windows/macOS release contracts ([#45130739411](https://github.com/manit6752025/AXIOM-AI/actions/runs/45130739411)).
 - [R134 · Implemented; tests passing] Added process-wide FIFO admission around the single native worker, global waiter ceilings, bounded per-profile queue depth, queue timeouts, HTTP 429/Retry-After backpressure, disconnect cancellation, cooperative generation cancellation, and queue-position/wait metadata. API/CLI/Runtime GUI integrations, unit/API/CLI/Playwright regressions, and docs cover the queue and its process-local boundary. Full Python (1,521 passed), ESLint, production build, browser E2E (83 passed), and Ubuntu/Windows/macOS release-contract gates passed on `6789c8d` in [quality gates #45115800592](https://github.com/manit6752025/AXIOM-AI/actions/runs/45115800592).
 - [R135 · Implemented; tests passing] Added a bounded, read-only local model provenance scanner and workspace API/CLI/Models GUI integration. Weight-file SHA-256 evidence uses a deterministic checkpoint tree digest (512-file/16 GiB cap); supported safetensors/GGUF and pickle-capable PyTorch formats are reported without loading weights. Symlink components in selected roots/paths are rejected; symlink entries are skipped. Local LICENSE/COPYING/NOTICE evidence has aggregate limits (64 candidate files, 16 MiB total, 1 MiB/file) and returns no partial digest set when the aggregate bound is exceeded. Registry/source/license claims remain explicitly identified as user-supplied and unverified. Added core/API/CLI/Playwright tests, static release-smoke coverage and docs. Full verification on `77449e55259747fb4370860473411b39580d237d`: 1,570 Python tests passed, ESLint and TypeScript production build passed, 85 Playwright browser tests passed, and Ubuntu/Windows/macOS release-contract jobs passed ([quality gates #45159996341](https://github.com/manit6752025/AXIOM-AI/actions/runs/45159996341)). The tests hashed a standards-valid sparse safetensors artifact across the full 16 GiB cap, exercised all 512 weight-file slots and exact 64-file/16 MiB license-evidence boundaries.
-- [R136 · Implemented; tests passing] Added SPDX-2.3 SBOM generation with bounded installed-distribution and aggregate requirement enumeration (4,096 packages / 50,000 requirement records), normalized PURLs, deterministic package/relationship fingerprinting, and no package-code execution. AXIOM-specific fingerprint/scope data is carried in a standard SPDX annotation rather than a non-standard root property; vendored the official SPDX 2.3.1 maintenance JSON schema and added offline Draft 2019-09 validation tests. Added create-only private CLI export, Diagnostics download, and an explicitly confirmed, single-flight `pip-audit --local` online scanner with strict API authorization, isolated/sanitized subprocess environment, pip config disabled, 90-second default timeout (bounded to 1–300 seconds), 8 MiB stdout / 1 MiB stderr caps, 20,000-finding cap, duplicate JSON-key rejection, scanner exit/findings consistency checks, and unavailable/error states. Added unit/API/CLI/Playwright coverage and supply-chain docs. Current-head CI/schema validation and controlled real-scanner advisory/no-findings/unavailable verification remain pending.
+- [R136 · Implemented; current-head and controlled scanner validation pending] Added SPDX-2.3 SBOM generation with bounded installed-distribution and aggregate requirement enumeration (4,096 packages / 50,000 requirement records), normalized PURLs, deterministic package/relationship fingerprinting, and no package-code execution. AXIOM-specific fingerprint/scope data is carried in a standard SPDX annotation rather than a non-standard root property; vendored the official SPDX 2.3.1 maintenance JSON schema and added offline Draft 2019-09 validation tests. Added create-only private CLI export, Diagnostics download, and an explicitly confirmed, single-flight `pip-audit --local` online scanner with strict API authorization, isolated/sanitized subprocess environment, pip config disabled, 90-second default timeout (bounded to 1–300 seconds), 8 MiB stdout / 1 MiB stderr caps, 20,000-finding cap, duplicate JSON-key rejection, scanner exit/findings consistency checks, and unavailable/error states. Added unit/API/CLI/Playwright coverage and supply-chain docs. Current-head CI/schema validation and controlled real-scanner advisory/no-findings/unavailable verification remain pending.
 - [R137 · Implemented; tests passing] Added strict schema-v1 declarative plugin manifests, SemVer updates, bounded tool/scope declarations, canonical SHA-256 fingerprints, default-deny registration, exact-hash grants, stale-grant invalidation and revocation. API/CLI/MCP Control Center UI, no-follow registry persistence, security-event audit, published JSON Schema/example/docs, and unit/API/CLI/Playwright coverage are present. `tests/test_plugin_manifests.py` validates both the published schema and example with the standard Draft 2020-12 JSON Schema validator. Full Python (1,521 passed), ESLint, production build, browser E2E (83 passed), and Ubuntu/Windows/macOS release-contract gates passed on `6789c8d` in [quality gates #45115800592](https://github.com/manit6752025/AXIOM-AI/actions/runs/45115800592). This is a declarative policy registry, not an executable plugin runtime.
 - [R138 · Implemented; tests passing] Added full-workspace ZIP64 backup/restore with versioned per-file manifest, SHA-256 re-hashing, bounded inventory, strict safe path/ZIP entry validation, private staging and new-workspace registration without overwriting the active workspace. API, CLI, Diagnostics GUI, workspace-switcher refresh, schema/example/docs and unit/API/CLI/Playwright tests are implemented. Stress tests now exercise 50,000 files, a real 1 GiB sparse model, and the full production uncompressed data cap: two 50 GiB files (100 GiB aggregate) were inventoried, hashed, ZIP64-compressed, restored and verified in the dedicated storage workflow; test passed 1/1 in 13m46s ([#45160158846](https://github.com/manit6752025/AXIOM-AI/actions/runs/45160158846)). The 105 GiB compressed-archive input guard now has a dedicated virtual seekable-source test proving rejection occurs before `ZipFile` parsing; compressed archive bytes are not claimed to have physically occupied 105 GiB on the hosted runner. Backups remain unencrypted snapshots and may contain secrets.
 - [R139 · Implemented; tests passing] Added workspace-persistent opt-in telemetry with bounded history, allowlisted CPU/RAM/process/device metrics, SHA-256 fingerprints, no-follow/atomic persistence, explicit sample/age retention, clear, and privacy-selectable JSON/CSV export. Process IDs, model identifiers/paths, prompts, generated output, environment values, credentials, disk paths and network identifiers are excluded. CLI watch remains separately explicit and bounded. Core/API concurrency, tamper, symlink, privacy and retention tests plus Playwright acceptance and docs are present. Full Python (1,521 passed), ESLint, production build, browser E2E (83 passed), and Ubuntu/Windows/macOS release-contract checks passed on `6789c8d` in [quality gates #45115800592](https://github.com/manit6752025/AXIOM-AI/actions/runs/45115800592).
@@ -185,9 +205,12 @@ feature exists or a delivery-date promise.
 
 ### Delivery gates
 
-An item is shipped only when its backend validation and security boundaries,
-GUI states, CLI surface where appropriate, tests, and user documentation are
-verified. Items marked in progress are not complete until those gates pass.
+An implementation item is complete when its backend behaviour and security
+boundaries, GUI states, CLI surface where appropriate, tests, and user
+documentation are present and verified. Separate hardware, CodeQL-owner-review,
+current-head scanner, and third-party publication gates are called out above
+and in the relevant item; do not describe those gated items as shipped or
+published until their external acceptance evidence exists.
 <!-- AXIOM-ROADMAP-UPDATE:END -->
 
 ## Beta.5 — released
