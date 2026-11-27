@@ -761,7 +761,7 @@ def _path_is_within_root(path: Path, root: Path) -> bool:
 
 
 def _is_link_or_reparse_point(path: str) -> bool:
-    """Detect symbolic links and Windows reparse points without following them."""
+    """Detect symlinks, junctions and Windows reparse points without trusting target mode bits."""
     try:
         metadata = os.lstat(path)
     except FileNotFoundError:
@@ -769,30 +769,41 @@ def _is_link_or_reparse_point(path: str) -> bool:
     except OSError:
         # An unreadable directory entry must not be silently trusted.
         return True
-    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+
+    reparse_flag = getattr(
+        stat,
+        "FILE_ATTRIBUTE_REPARSE_POINT",
+        0x400 if os.name == "nt" else 0,
+    )
     candidate = Path(path)
     is_junction = getattr(candidate, "is_junction", None)
+    path_is_junction = getattr(os.path, "isjunction", None)
+
+    try:
+        lexical_path = os.path.normcase(os.path.normpath(os.path.abspath(os.fspath(candidate))))
+        canonical_path = os.path.normcase(
+            os.path.normpath(os.path.realpath(os.path.abspath(os.fspath(candidate))))
+        )
+    except (OSError, TypeError, ValueError):
+        return True
+
     return (
         stat.S_ISLNK(metadata.st_mode)
-        or bool(reparse_flag and getattr(metadata, "st_file_attributes", 0) & reparse_flag)
+        or bool(getattr(metadata, "st_file_attributes", 0) & reparse_flag)
         or bool(getattr(metadata, "st_reparse_tag", 0))
         or candidate.is_symlink()
         or bool(is_junction and is_junction())
+        or bool(path_is_junction and path_is_junction(os.fspath(candidate)))
+        or canonical_path != lexical_path
     )
 
 
 @lru_cache(maxsize=8)
 def _trusted_file_entry(path: str, root_text: str) -> bool:
     try:
-        resolved = os.path.realpath(path)
-        canonical_root = os.path.realpath(root_text)
-        normalized_path = os.path.normcase(os.path.normpath(resolved))
-        normalized_root = os.path.normcase(os.path.normpath(canonical_root))
-        return (
-            os.path.isfile(resolved)
-            and os.path.commonpath((normalized_path, normalized_root)) == normalized_root
-        )
-    except (OSError, ValueError):
+        resolved = Path(os.path.realpath(os.path.abspath(path)))
+        return os.path.isfile(resolved) and _path_is_within_root(resolved, Path(root_text))
+    except (OSError, TypeError, ValueError):
         return False
 
 
@@ -828,7 +839,7 @@ def _trusted_directory_index(
             allowed_subdirs: list[str] = []
             for name in subdirs:
                 child = os.path.join(directory, name)
-                if _is_link_or_reparse_point(child):
+                if os.path.islink(child):
                     blocked_subdirs.append(child)
                 else:
                     allowed_subdirs.append(name)
@@ -856,20 +867,18 @@ def _trusted_directory_index(
                 continue
             try:
                 canonical = os.path.realpath(directory)
-                canonical_root = os.path.realpath(root_text)
-                canonical_key = os.path.normcase(os.path.normpath(canonical))
-                root_key = os.path.normcase(os.path.normpath(canonical_root))
-                if os.path.commonpath((canonical_key, root_key)) != root_key:
+                if os.path.commonpath((canonical, root_text)) != root_text:
                     continue
             except (OSError, ValueError):
                 continue
-            key = canonical_key
+            key = os.path.normcase(os.path.normpath(canonical))
             entries[key] = (canonical, model_config, adapter_config, False)
     return tuple(entries[key] for key in sorted(entries))
 
 
 def refresh_local_engine_asset_index() -> None:
-    """Invalidate cached file checks; the bounded directory index is rebuilt per request."""
+    """Drop metadata caches so newly written local models/adapters are discoverable."""
+    _trusted_directory_index.cache_clear()
     _trusted_file_entry.cache_clear()
 
 
