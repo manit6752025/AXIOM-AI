@@ -242,7 +242,7 @@ def test_codeql_sarif_workflow_uses_the_checked_in_local_model_pack():
 
     model = (root / ".github/codeql/extensions/axiom-model-paths/models/model-paths.yml").read_text(encoding="utf-8")
     assert "Member[_safe_selected_entry]" not in model
-    assert '["axiom.core.mcp_paths", "Member[_resolve_mcp_workspace_file].ReturnValue", "path-injection"]' in model
+    assert "Member[_resolve_mcp_workspace_file]" not in model
     assert "Member[is_relative_to].Argument[this]" in model
     assert '["pathlib.PurePath", "Member[is_relative_to].Argument[this]", "true", "path-injection"]' in model
     assert "Member[resolve_workspace_output_path].ReturnValue" in model
