@@ -274,8 +274,10 @@ def test_codeql_sarif_workflow_uses_the_checked_in_local_model_pack():
     assert pack["extensionTargets"]["codeql/python-all"] == "*"
 
     model = (root / ".github/codeql/extensions/axiom-model-paths/models/model-paths.yml").read_text(encoding="utf-8")
-    assert "Member[_selected_entry].ReturnValue" in model
+    assert "Member[_safe_selected_entry].ReturnValue.TupleElement[0]" in model
+    assert "Member[is_relative_to].Argument[this]" in model
     assert "Member[resolve_workspace_output_path].ReturnValue" in model
+    assert "Member[_selected_entry].ReturnValue" not in model
 
     workflow = yaml.load(
         (root / ".github/workflows/codeql-sarif-verification.yml").read_text(encoding="utf-8"),
